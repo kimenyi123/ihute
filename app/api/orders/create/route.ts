@@ -8,10 +8,10 @@ export const revalidate = 0
 const CANDIDATES = [
   process.env.JAVA_ORDERS_URL,
   process.env.JAVA_SERVLET_URL,
-  "http://localhost:8080/Trading/OrdersServlet",
-  "http://localhost:8080/Trading/Kaos/OrdersServlet",
+  "https://ihute.rw/Trading/OrdersServlet",
+  "https://ihute.rw/Trading/Kaos/OrdersServlet",
   // last-ditch fallback to your JSON servlet (different payload format)
-  "http://localhost:8080/Trading/api/delivery/create",
+  "https://ihute.rw/Trading/api/delivery/create",
 ].filter(Boolean) as string[]
 
 type LineIn = {

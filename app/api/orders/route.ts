@@ -3,7 +3,7 @@ import { NextResponse } from "next/server"
 
 const SERVLET =
   (process.env.JAVA_SERVLET_URL && process.env.JAVA_SERVLET_URL.replace(/\/+$/, "")) ||
-  ((process.env.JAVA_BACKEND_BASE || "http://localhost:8080/Trading").replace(/\/+$/, "") + "/Kaos/fetchSuggestions")
+  ((process.env.JAVA_BACKEND_BASE || "https://ihute.rw/Trading").replace(/\/+$/, "") + "/Kaos/fetchSuggestions")
 
 export async function POST(req: Request) {
   const controller = new AbortController()
