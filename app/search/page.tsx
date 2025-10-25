@@ -1,0 +1,731 @@
+// app/search/page.tsx
+"use client"
+
+import { useEffect, useMemo, useState, KeyboardEvent } from "react"
+import { Header } from "@/components/header"
+import { Footer } from "@/components/footer"
+import { useRouter, useSearchParams } from "next/navigation"
+import { useCartStore } from "@/lib/cart-store"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+
+type Shop = {
+  supplier_account: string
+  supplier_name: string
+  supplier_location?: string | null
+  type: string
+  match_type?: string
+  product_count?: number
+}
+
+type Product = {
+  item_code: string
+  item_commercial_name: string
+  item_packet?: string
+  item_emballage?: string
+  item_key_words?: string
+  supplier_account?: string
+  supplier_name?: string
+  supplier_location?: string
+  momo?: string
+  type: string
+  image?: string
+}
+
+type SearchResult = {
+  suppliersByName: Shop[]
+  suppliersByProduct: Shop[]
+  products: Product[]
+  query: string
+  timestamp?: number
+  error?: string
+}
+
+type SectorSeller = {
+  seller_account: string
+  seller_name: string
+  seller_location?: string
+  seller_momo?: string
+  products: Product[]
+}
+
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || ""
+const SECTOR_OPTIONS = [
+  "pharmacy",
+  "supermarket",
+  "boutique",
+  "bar-resto",
+  "coffee-shop",
+  "liquor-store",
+  "beauty",
+  "general",
+]
+const QUICK_LOCATIONS = ["Kigali", "Musanze", "Rubavu", "Huye", "Muhanga", "Rusizi"]
+
+// -------- helpers --------
+function extractNumericPrice(value: any): number {
+  if (typeof value === "number") return value
+  const n = String(value ?? "").replace(/[^\d.,-]/g, "").replace(",", ".")
+  const parsed = parseFloat(n)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+export default function SearchPage() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+
+  // URL params (all optional)
+  const initialQ = searchParams.get("q") || ""
+  const supplierParam = searchParams.get("supplier")
+  const supplierNameParam = searchParams.get("supplierName")
+  const locationParam = searchParams.get("location") || ""
+  const sectorParam = searchParams.get("sector") || ""
+
+  const [q, setQ] = useState(initialQ)
+  const [debouncedQ, setDebouncedQ] = useState("")
+  const [loading, setLoading] = useState(false)
+  const [searchResult, setSearchResult] = useState<SearchResult | null>(null)
+  const [selectedShop, setSelectedShop] = useState<Shop | null>(null)
+  const [shopProducts, setShopProducts] = useState<Product[]>([])
+  const [loadingProducts, setLoadingProducts] = useState(false)
+
+  // Compact filter bar (draft inputs)
+  const [locationDraft, setLocationDraft] = useState(locationParam)
+  const [sectorDraft, setSectorDraft] = useState(sectorParam)
+
+  // Sector spotlight data
+  const [sectorSellers, setSectorSellers] = useState<SectorSeller[]>([])
+  const [loadingSector, setLoadingSector] = useState(false)
+
+  // Keep drafts in sync with URL changes
+  useEffect(() => setLocationDraft(locationParam), [locationParam])
+  useEffect(() => setSectorDraft(sectorParam), [sectorParam])
+
+  const addToCartFn = useCartStore((s: any) => s.addOrInc ?? s.add)
+
+  const addProductAndGoToCart = (p: Product) => {
+    if (!addToCartFn) {
+      console.warn("Cart store is missing addOrInc/add")
+      return
+    }
+    const id = p.item_code || `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`
+    const unit = p.item_packet || ""
+    const price = extractNumericPrice(p.item_emballage)
+    addToCartFn({
+      id,
+      name: p.item_commercial_name,
+      price,
+      unit,
+      selectedUnit: unit,
+      qty: 1,
+      supplierId: p.supplier_account,
+      supplierName: p.supplier_name || p.supplier_account || "Supplier",
+      supplierLocation: p.supplier_location,
+      image: p.image || "/placeholder.svg?height=300&width=300",
+      momo: p.momo || (p as any)?.seller_momo || "",
+    })
+    router.push("/cart")
+  }
+
+  const onTileKey = (e: KeyboardEvent<HTMLDivElement>, p: Product) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault()
+      addProductAndGoToCart(p)
+    }
+  }
+
+ // Small helper to push URL with preserved params (and real clearing support)
+const pushWith = (updates: Record<string, string | undefined>) => {
+  const params = new URLSearchParams()
+
+  if (debouncedQ) params.set("q", debouncedQ)
+  if (supplierParam) params.set("supplier", supplierParam)
+  if (supplierNameParam) params.set("supplierName", supplierNameParam)
+
+  // location: if explicitly provided in updates, use it (empty string => remove)
+  const locProvided = Object.prototype.hasOwnProperty.call(updates, "location")
+  const locValue = locProvided ? updates.location : locationParam
+  if (locProvided) {
+    if (locValue) params.set("location", locValue)
+  } else if (locationParam) {
+    params.set("location", locationParam)
+  }
+
+  // sector: same idea
+  const secProvided = Object.prototype.hasOwnProperty.call(updates, "sector")
+  const secValue = secProvided ? updates.sector : sectorParam
+  if (secProvided) {
+    if (secValue) params.set("sector", secValue)
+  } else if (sectorParam) {
+    params.set("sector", sectorParam)
+  }
+
+  router.push(`/search?${params.toString()}`)
+}
+
+  // Sync search input with URL query param on mount and changes
+  useEffect(() => {
+    const urlQ = searchParams.get("q") || ""
+    if (urlQ && urlQ !== q) setQ(urlQ)
+  }, [searchParams])
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(q.trim()), 300)
+    return () => clearTimeout(t)
+  }, [q])
+
+  // Sync selected shop from URL params
+  useEffect(() => {
+    if (supplierParam) {
+      setSelectedShop({
+        supplier_account: supplierParam,
+        supplier_name: supplierNameParam || supplierParam,
+        type: "supplier",
+        supplier_location: null,
+      })
+    } else {
+      setSelectedShop(null)
+    }
+  }, [supplierParam, supplierNameParam])
+
+  // Unified global search (LEFT)
+  useEffect(() => {
+    let cancelled = false
+    async function run() {
+      if (!debouncedQ || debouncedQ.length < 2) {
+        setSearchResult(null)
+        return
+      }
+      setLoading(true)
+      try {
+        const url = new URL(`${API_BASE}/api/fetchSuggestions`)
+        url.searchParams.set("globalSearch", debouncedQ)
+        url.searchParams.set("Currency", "RWF")
+        if (selectedShop?.supplier_account) {
+          url.searchParams.set("supplier", selectedShop.supplier_account) // server-side supplier filter
+        }
+        if (locationParam) {
+          url.searchParams.set("location", locationParam) // server-side location LIKE filter
+        }
+
+        const res = await fetch(url.toString(), { cache: "no-store" })
+        const data: SearchResult = res.ok
+          ? await res.json()
+          : { suppliersByName: [], suppliersByProduct: [], products: [], query: debouncedQ }
+
+        if (!cancelled) setSearchResult(data)
+      } catch (error) {
+        console.error("Search error:", error)
+        if (!cancelled) {
+          setSearchResult({
+            suppliersByName: [],
+            suppliersByProduct: [],
+            products: [],
+            query: debouncedQ,
+            error: "Search failed",
+          })
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    run()
+    // re-run when keyword, selected supplier, or location changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedQ, selectedShop?.supplier_account, locationParam])
+
+  // Seller catalogue (RIGHT)
+  useEffect(() => {
+    let cancelled = false
+    async function run() {
+      if (!selectedShop) {
+        setShopProducts([])
+        return
+      }
+      setLoadingProducts(true)
+      try {
+        const url = `${API_BASE}/api/fetchSuggestions?supplierProducts=${encodeURIComponent(
+          selectedShop.supplier_account,
+        )}&limit=24&Currency=RWF`
+        const res = await fetch(url, { cache: "no-store" })
+        const data: Product[] = res.ok ? await res.json() : []
+        if (!cancelled) setShopProducts(Array.isArray(data) ? data : [])
+      } catch {
+        if (!cancelled) setShopProducts([])
+      } finally {
+        if (!cancelled) setLoadingProducts(false)
+      }
+    }
+    run()
+    return () => {
+      cancelled = true
+    }
+  }, [selectedShop])
+
+  // Merge suppliers from both buckets (no dupes)
+  const allSuppliers = useMemo(() => {
+    if (!searchResult) return []
+    const supplierMap = new Map<string, Shop>()
+    searchResult.suppliersByName.forEach((s) => supplierMap.set(s.supplier_account, s))
+    searchResult.suppliersByProduct.forEach((s) => supplierMap.set(s.supplier_account, s))
+    return Array.from(supplierMap.values())
+  }, [searchResult])
+
+  // Upgrade selected shop info if a richer copy arrives
+  useEffect(() => {
+    if (!selectedShop || allSuppliers.length === 0) return
+    const full = allSuppliers.find((s) => s.supplier_account === selectedShop.supplier_account)
+    if (!full) return
+    const needsUpgrade =
+      (selectedShop.product_count ?? -1) !== (full.product_count ?? -1) ||
+      (selectedShop.supplier_location ?? "") !== (full.supplier_location ?? "")
+    if (needsUpgrade) setSelectedShop(full)
+  }, [allSuppliers, selectedShop])
+
+  const handleSelectShop = (shop: Shop) => {
+    setSelectedShop(shop)
+    const params = new URLSearchParams({
+      q: debouncedQ,
+      supplier: shop.supplier_account,
+      supplierName: shop.supplier_name,
+    })
+    if (locationParam) params.set("location", locationParam)
+    if (sectorParam) params.set("sector", sectorParam)
+    router.push(`/search?${params.toString()}`)
+  }
+
+  const handleClearShop = () => {
+    setSelectedShop(null)
+    const params = new URLSearchParams({ q: debouncedQ })
+    if (locationParam) params.set("location", locationParam)
+    if (sectorParam) params.set("sector", sectorParam)
+    router.push(`/search?${params.toString()}`)
+  }
+
+  // Sector Spotlight: fetch sellers with a few products when sector is set
+  useEffect(() => {
+    let cancelled = false
+    async function run() {
+      if (!sectorParam) {
+        setSectorSellers([])
+        return
+      }
+      setLoadingSector(true)
+      try {
+        const url = `${API_BASE}/api/fetchSuggestions?listSuppliersWithProducts=${encodeURIComponent(
+          sectorParam,
+        )}&Currency=RWF`
+        const res = await fetch(url, { cache: "no-store" })
+        const arr: any[] = res.ok ? await res.json() : []
+        const sellers: SectorSeller[] = (Array.isArray(arr) ? arr : []).map((x) => ({
+          seller_account: x.seller_account || x.ACC,
+          seller_name: x.seller_name || x.OWNER,
+          seller_location: x.seller_location || x.LOCATION,
+          seller_momo: x.seller_momo || x.MOMO,
+          products: Array.isArray(x.products) ? x.products : [],
+        }))
+        if (!cancelled) setSectorSellers(sellers)
+      } catch (e) {
+        if (!cancelled) setSectorSellers([])
+      } finally {
+        if (!cancelled) setLoadingSector(false)
+      }
+    }
+    run()
+    return () => {
+      cancelled = true
+    }
+  }, [sectorParam])
+
+ // Location
+const applyLocation = () => pushWith({ location: locationDraft }) // '' clears
+const clearLocation = () => {
+  setLocationDraft("")
+  pushWith({ location: "" }) // explicit remove
+}
+
+// Sector
+const applySector = (val?: string) => pushWith({ sector: val ?? sectorDraft }) // '' clears
+const clearSector = () => {
+  setSectorDraft("")
+  pushWith({ sector: "" }) // explicit remove
+}
+
+  return (
+    <div className="min-h-screen flex flex-col">
+      <Header />
+      <main className="container mx-auto flex-1 px-4 py-8">
+        <h1 className="text-2xl font-semibold mb-4">Global Search</h1>
+
+        {/* Search Row */}
+        <div className="flex gap-2 items-center mb-3">
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search for products or suppliers... (e.g., 'FANTA' or 'Shop Name')"
+            className="w-full rounded-xl border px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          {loading && <span className="text-sm opacity-60 animate-pulse">Searching...</span>}
+        </div>
+
+        {/* Compact Filter Bar */}
+        <div className="mb-6 flex flex-col gap-3 rounded-xl border p-3 bg-white">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Location input (compact) */}
+            <div className="flex items-center gap-2 bg-gray-50 rounded-full px-3 py-1.5 border">
+              <span className="text-sm">📍</span>
+              <input
+                className="bg-transparent outline-none text-sm w-44"
+                placeholder="Location (e.g., Kigali)"
+                value={locationDraft}
+                onChange={(e) => setLocationDraft(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && applyLocation()}
+              />
+              {locationParam && (
+                <button
+                  className="text-xs text-gray-500 hover:text-gray-800"
+                  onClick={clearLocation}
+                  title="Clear location"
+                >
+                  ✕
+                </button>
+              )}
+              <Button size="sm" variant="secondary" className="h-7" onClick={applyLocation}>
+                Apply
+              </Button>
+            </div>
+
+            {/* Sector picker (compact) */}
+            <div className="flex items-center gap-2 bg-gray-50 rounded-full px-3 py-1.5 border">
+              <span className="text-sm">🗂️</span>
+              <select
+                className="bg-transparent outline-none text-sm w-48"
+                value={sectorDraft}
+                onChange={(e) => {
+                const val = e.target.value
+                setSectorDraft(val)
+                applySector(val) // '' clears via pushWith()
+              }}
+
+
+              >
+                <option value="">Select sector…</option>
+                {SECTOR_OPTIONS.map((s) => (
+                  <option key={s} value={s}>
+                    {s.replace("-", " ")}
+                  </option>
+                ))}
+              </select>
+              {sectorParam && (
+                <button
+                  className="text-xs text-gray-500 hover:text-gray-800"
+                  onClick={clearSector}
+                  title="Clear sector"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            {/* Quick location chips */}
+            <div className="flex items-center gap-1 flex-wrap">
+              {QUICK_LOCATIONS.map((city) => (
+                <button
+                  key={city}
+                  className={`text-xs px-3 py-1 rounded-full border ${
+                    locationParam === city ? "bg-blue-600 text-white border-blue-600" : "hover:bg-gray-100"
+                  }`}
+                  onClick={() => {
+                    setLocationDraft(city)
+                    pushWith({ location: city })
+                  }}
+                  title={`Filter by ${city}`}
+                >
+                  {city}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Active context / filters (badges) */}
+          <div className="flex flex-wrap items-center gap-2">
+            {locationParam && (
+              <Badge variant="secondary" title="Filtering by location">
+                📍 Location: {locationParam}
+              </Badge>
+            )}
+            {sectorParam && (
+              <Badge variant="secondary" title="Sector context">
+                🗂️ Sector: {sectorParam}
+              </Badge>
+            )}
+            {selectedShop && (
+              <Badge
+                variant="outline"
+                className="gap-2 cursor-pointer"
+                onClick={handleClearShop}
+                title="Clear supplier filter"
+              >
+                🔒 Supplier: {selectedShop.supplier_name} <span className="opacity-60">✕</span>
+              </Badge>
+            )}
+          </div>
+        </div>
+
+        {searchResult?.error && (
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700">
+            {searchResult.error}
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left Column (scrollable) */}
+          <div
+            className="lg:col-span-2 space-y-6 lg:sticky lg:top-4 lg:pr-2"
+            style={{
+              maxHeight: "calc(100vh - 7rem)",
+              overflowY: "auto",
+              WebkitOverflowScrolling: "touch",
+            }}
+          >
+            {/* Sector Spotlight */}
+            {sectorParam && (
+              <section className="bg-white rounded-xl border p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="font-semibold text-lg">
+                    Sector spotlight — <span className="text-blue-700">{sectorParam}</span>
+                  </h2>
+                  <div className="flex items-center gap-2">
+                    {loadingSector && <span className="text-sm opacity-60 animate-pulse">Loading…</span>}
+                    <Button size="sm" variant="outline" onClick={clearSector} title="Clear sector filter">
+                      Clear
+                    </Button>
+                  </div>
+                </div>
+
+                {sectorSellers.length === 0 && !loadingSector && (
+                  <div className="text-sm text-gray-500">No featured sellers found for this sector.</div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {sectorSellers.map((s) => (
+                    <div key={s.seller_account} className="rounded-lg border p-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="font-medium">{s.seller_name}</div>
+                          <div className="text-xs text-gray-600">
+                            {s.seller_location || "Location not specified"}
+                          </div>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() =>
+                            handleSelectShop({
+                              supplier_account: s.seller_account,
+                              supplier_name: s.seller_name,
+                              supplier_location: s.seller_location,
+                              type: "supplier",
+                            })
+                          }
+                        >
+                          View
+                        </Button>
+                      </div>
+                      {Array.isArray(s.products) && s.products.length > 0 && (
+                        <div className="mt-3 space-y-2">
+                          {s.products.slice(0, 3).map((p) => (
+                            <div
+                              key={p.item_code + (p.supplier_account || s.seller_account)}
+                              className="p-2 rounded border hover:border-blue-300 cursor-pointer"
+                              onClick={() =>
+                                addProductAndGoToCart({
+                                  ...p,
+                                  supplier_account: p.supplier_account || s.seller_account,
+                                  supplier_name: p.supplier_name || s.seller_name,
+                                  supplier_location: p.supplier_location || s.seller_location,
+                                  momo: p.momo || s.seller_momo || "",
+                                })
+                              }
+                            >
+                              <div className="text-sm font-medium">{p.item_commercial_name}</div>
+                              <div className="text-xs text-gray-600">{p.item_packet || ""}</div>
+                              <div className="text-sm font-semibold text-green-700">
+                                {p.item_emballage || ""}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Products */}
+            {searchResult && searchResult.products.length > 0 && (
+              <section className="bg-white rounded-xl border p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="font-semibold text-lg">
+                    Products matching "<span className="text-blue-700">{debouncedQ}</span>"
+                  </h2>
+                  <div className="flex items-center gap-2">
+                    {selectedShop && <Badge variant="outline">🔍 Supplier only</Badge>}
+                    {locationParam && <Badge variant="secondary">📍 {locationParam}</Badge>}
+                    <span className="text-sm font-normal text-gray-500">
+                      {searchResult.products.length} found
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {searchResult.products.map((product) => (
+                    <div
+                      key={product.item_code + (product.supplier_account || "")}
+                      className="rounded-lg border p-3 hover:border-blue-300 transition-colors cursor-pointer group"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => addProductAndGoToCart(product)}
+                      onKeyDown={(e) => onTileKey(e, product)}
+                      title="Click to add to cart"
+                    >
+                      <div className="font-medium text-gray-900 group-hover:text-blue-700">
+                        {product.item_commercial_name}
+                      </div>
+                      <div className="text-sm text-gray-600 mt-1">{product.item_packet || "No description"}</div>
+                      <div className="mt-2 text-base font-semibold text-green-600">
+                        {product.item_emballage || "Price not available"}
+                      </div>
+                      {product.supplier_name && (
+                        <div className="mt-2 text-xs text-gray-500">
+                          Sold by: {product.supplier_name}
+                          {product.supplier_location && ` • ${product.supplier_location}`}
+                        </div>
+                      )}
+                      <div className="mt-3 text-xs text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                        Click to add & go to cart →
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Suppliers */}
+            {allSuppliers.length > 0 && (
+              <section className="bg-white rounded-xl border p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="font-semibold text-lg">Suppliers</h2>
+                  <div className="flex items-center gap-2">
+                    {locationParam && <Badge variant="secondary">📍 {locationParam}</Badge>}
+                    <span className="text-sm font-normal text-gray-500">{allSuppliers.length} found</span>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  {allSuppliers.map((supplier) => (
+                    <div
+                      key={supplier.supplier_account}
+                      className={`p-3 rounded-lg border cursor-pointer transition-all ${
+                        selectedShop?.supplier_account === supplier.supplier_account
+                          ? "border-blue-500 bg-blue-50"
+                          : "border-gray-200 hover:border-blue-300 hover:bg-gray-50"
+                      }`}
+                      onClick={() => handleSelectShop(supplier)}
+                      title="Click to preview this supplier's products"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="font-medium text-gray-900">{supplier.supplier_name}</div>
+                          <div className="text-sm text-gray-600 mt-1">
+                            {supplier.supplier_location || "Location not specified"}
+                          </div>
+                          {supplier.product_count && (
+                            <div className="text-xs text-blue-600 mt-1">
+                              {supplier.product_count} matching products
+                            </div>
+                          )}
+                        </div>
+                        <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* No Results */}
+            {searchResult && allSuppliers.length === 0 && searchResult.products.length === 0 && (
+              <div className="text-center py-8 text-gray-500">No results found for "{debouncedQ}"</div>
+            )}
+          </div>
+
+          {/* Right Column - Selected Shop Products */}
+          <div className="lg:col-span-1">
+            <div className="bg-white rounded-xl border p-4 sticky top-4">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-semibold text-lg">
+                  {selectedShop ? (
+                    <>
+                      Products from <span className="text-blue-600">{selectedShop.supplier_name}</span>
+                    </>
+                  ) : (
+                    "Select a supplier to view products"
+                  )}
+                </h2>
+                {loadingProducts && <span className="text-sm opacity-60 animate-pulse">Loading...</span>}
+              </div>
+
+              {!!debouncedQ && !selectedShop && (
+                <div className="text-sm text-gray-600 bg-blue-50 p-3 rounded-lg border border-blue-200">
+                  💡 Select a supplier from the list to see their available products
+                </div>
+              )}
+
+              {selectedShop && (
+                <div
+                  className="space-y-3 pr-1"
+                  style={{ maxHeight: "70vh", overflowY: "auto", WebkitOverflowScrolling: "touch" }}
+                >
+                  {shopProducts.length > 0 ? (
+                    shopProducts.map((product) => (
+                      <div
+                        key={product.item_code}
+                        className="rounded-lg border p-3 hover:border-blue-300 transition-colors cursor-pointer group"
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => addProductAndGoToCart(product)}
+                        onKeyDown={(e) => onTileKey(e, product)}
+                        title="Click to add to cart"
+                      >
+                        <div className="font-medium text-gray-900 group-hover:text-blue-700">
+                          {product.item_commercial_name}
+                        </div>
+                        <div className="text-sm text-gray-600 mt-1">{product.item_packet || ""}</div>
+                        <div className="mt-2 text-base font-semibold text-green-600">
+                          {product.item_emballage || "Price not available"}
+                        </div>
+                        {product.momo && <div className="mt-2 text-xs text-gray-500">Seller MoMo: {product.momo}</div>}
+                        <div className="mt-3 text-xs text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                          Click to add & go to cart →
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    !loadingProducts && (
+                      <div className="text-center py-4 text-gray-500">No products available from this supplier</div>
+                    )
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </main>
+      <Footer />
+    </div>
+  )
+}

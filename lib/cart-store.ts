@@ -1,0 +1,157 @@
+"use client"
+
+import { create } from "zustand"
+
+export type CartItem = {
+  id: string
+  name: string
+  price: number
+  unit?: string
+  image?: string
+
+  // seller info
+  supplierId: string
+  supplierName: string
+  supplierLocation?: string
+  momo?: string              // seller MoMo (for USSD)
+  sellerPhone?: string       // WhatsApp phone from account_signup.TEL
+
+  // variant key
+  selectedUnit?: string
+
+  qty: number
+}
+
+export type SellerGroup = {
+  supplierId: string
+  supplierName: string
+  supplierLocation?: string
+  momo?: string
+  phone?: string
+  items: CartItem[]
+  subtotal: number
+}
+
+type PayState = "unpaid" | "pending" | "paid" | "failed"
+
+type CartState = {
+  items: CartItem[]
+  payment: Record<string, PayState>
+
+  // CRUD
+  addItem: (item: Omit<CartItem, "qty">, qty?: number) => void
+  add: (item: Omit<CartItem, "qty">, qty?: number) => void            // alias
+  addOrInc: (item: Omit<CartItem, "qty">, qty?: number) => void       // NEW
+  inc: (id: string, selectedUnit?: string) => void
+  dec: (id: string, selectedUnit?: string) => void
+  remove: (id: string, selectedUnit?: string) => void
+  clear: () => void
+  removeGroupBySeller: (supplierId: string) => void
+
+  // Helpers
+  getTotalItems: () => number
+  getGrandTotal: () => number
+  getGroupsBySeller: () => SellerGroup[]
+
+  // Payments
+  getPaymentStatus: (supplierId: string) => PayState
+  setPaymentStatus: (supplierId: string, status: PayState) => void
+}
+
+export const useCartStore = create<CartState>()((set, get) => ({
+  items: [],
+  payment: {},
+
+  addItem: (item, qty = 1) =>
+    set((state) => {
+      const selectedUnit = item.selectedUnit ?? item.unit
+      const keyMatch = (x: CartItem) => x.id === item.id && x.selectedUnit === selectedUnit
+      const existing = state.items.find(keyMatch)
+      if (existing) {
+        return {
+          items: state.items.map((x) => (keyMatch(x) ? { ...x, qty: x.qty + qty } : x)),
+        }
+      }
+      return { items: [...state.items, { ...item, selectedUnit, qty }] }
+    }),
+
+  // alias for compatibility with older calls (s.add)
+  add: (item, qty = 1) => get().addItem(item, qty),
+
+  // NEW: add or increment if same (id, selectedUnit)
+  addOrInc: (item, qty = 1) =>
+    set((state) => {
+      const selectedUnit = item.selectedUnit ?? item.unit
+      const keyMatch = (x: CartItem) => x.id === item.id && x.selectedUnit === selectedUnit
+      const idx = state.items.findIndex(keyMatch)
+      if (idx >= 0) {
+        const next = [...state.items]
+        next[idx] = { ...next[idx], qty: next[idx].qty + qty }
+        return { items: next }
+      }
+      return { items: [...state.items, { ...item, selectedUnit, qty }] }
+    }),
+
+  inc: (id, selectedUnit) =>
+    set((s) => ({
+      items: s.items.map((x) => (x.id === id && x.selectedUnit === selectedUnit ? { ...x, qty: x.qty + 1 } : x)),
+    })),
+
+  dec: (id, selectedUnit) =>
+    set((s) => ({
+      items: s.items.map((x) => {
+        if (x.id === id && x.selectedUnit === selectedUnit) {
+          return { ...x, qty: Math.max(1, x.qty - 1) } // clamp at 1; use remove() to drop
+        }
+        return x
+      }),
+    })),
+
+  remove: (id, selectedUnit) =>
+    set((s) => ({
+      items: s.items.filter((x) => !(x.id === id && x.selectedUnit === selectedUnit)),
+    })),
+
+  clear: () => set({ items: [], payment: {} }),
+
+  removeGroupBySeller: (supplierId) =>
+    set((s) => ({
+      items: s.items.filter((x) => x.supplierId !== supplierId),
+      payment: { ...s.payment, [supplierId]: "paid" },
+    })),
+
+  getTotalItems: () => get().items.reduce((acc, it) => acc + it.qty, 0),
+
+  getGrandTotal: () => get().items.reduce((acc, it) => acc + it.price * it.qty, 0),
+
+  getGroupsBySeller: () => {
+    const groups = new Map<string, SellerGroup>()
+    for (const it of get().items) {
+      if (!it.supplierId) continue
+      const g =
+        groups.get(it.supplierId) ??
+        {
+          supplierId: it.supplierId,
+          supplierName: it.supplierName,
+          supplierLocation: it.supplierLocation,
+          momo: it.momo,
+          phone: it.sellerPhone,
+          items: [],
+          subtotal: 0,
+        }
+      g.items.push(it)
+      g.subtotal += it.price * it.qty
+      if (!g.momo && it.momo) g.momo = it.momo
+      if (!g.phone && it.sellerPhone) g.phone = it.sellerPhone
+      groups.set(it.supplierId, g)
+    }
+    return Array.from(groups.values()).map((g) => ({
+      ...g,
+      subtotal: Math.max(0, Math.round(g.subtotal)), // USSD-friendly
+    }))
+  },
+
+  getPaymentStatus: (supplierId) => get().payment[supplierId] ?? "unpaid",
+  setPaymentStatus: (supplierId, status) =>
+    set((s) => ({ payment: { ...s.payment, [supplierId]: status } })),
+}))

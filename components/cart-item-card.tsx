@@ -1,0 +1,69 @@
+"use client"
+
+import Image from "next/image"
+import { Button } from "@/components/ui/button"
+import { useCartStore, CartItem } from "@/lib/cart-store"
+import { Minus, Plus, Trash2 } from "lucide-react"
+
+export function CartItemCard({ item }: { item: CartItem }) {
+  const inc = useCartStore((s) => s.inc)
+  const dec = useCartStore((s) => s.dec)
+  const remove = useCartStore((s) => s.remove)
+
+  return (
+    <div className="flex items-center gap-4 rounded-lg border p-3">
+      <div className="relative h-16 w-16 rounded bg-muted overflow-hidden">
+        <Image
+          fill
+          src={item.image || "/placeholder.svg?height=64&width=64"}
+          alt={item.name}
+          className="object-cover"
+        />
+      </div>
+
+      <div className="flex-1">
+        <div className="font-medium">{item.name}</div>
+        <div className="text-xs text-muted-foreground">
+          {item.supplierName}
+          {item.supplierLocation ? ` · ${item.supplierLocation}` : ""}
+        </div>
+        <div className="text-sm mt-1">
+          {item.price.toLocaleString()} {item.unit ? ` / ${item.unit}` : ""}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <Button
+          size="icon"
+          variant="outline"
+          onClick={() => dec(item.id, item.selectedUnit)}
+          aria-label="Decrease"
+        >
+          <Minus className="h-4 w-4" />
+        </Button>
+        <span className="w-8 text-center">{item.qty}</span>
+        <Button
+          size="icon"
+          variant="outline"
+          onClick={() => inc(item.id, item.selectedUnit)}
+          aria-label="Increase"
+        >
+          <Plus className="h-4 w-4" />
+        </Button>
+      </div>
+
+      <div className="w-24 text-right font-semibold">
+        {(item.price * item.qty).toLocaleString()}
+      </div>
+
+      <Button
+        size="icon"
+        variant="ghost"
+        onClick={() => remove(item.id, item.selectedUnit)}
+        aria-label="Remove"
+      >
+        <Trash2 className="h-4 w-4" />
+      </Button>
+    </div>
+  )
+}
