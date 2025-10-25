@@ -4,9 +4,9 @@ import { NextResponse } from "next/server"
 const ORDERS_ENDPOINT =
   (process.env.JAVA_ORDERS_URL ||
     process.env.JAVA_SERVLET_URL ||
-    "http://localhost:8080/Trading/OrdersServlet").replace(/\/+$/, "")
+    "https://ihute.rw/Trading/OrdersServlet").replace(/\/+$/, "")
 
-const BACKEND_BASE = (process.env.JAVA_BACKEND_BASE || "http://localhost:8080/Trading").replace(/\/+$/, "")
+const BACKEND_BASE = (process.env.JAVA_BACKEND_BASE || "https://ihute.rw/Trading").replace(/\/+$/, "")
 
 type Jsonish = Record<string, any> | null
 

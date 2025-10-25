@@ -2,11 +2,11 @@
 import { NextResponse } from "next/server"
 
 const PRIMARY_URL =
-  process.env.JAVA_ORDERS_URL || "http://localhost:8080/Trading/OrdersServlet"
+  process.env.JAVA_ORDERS_URL || "https://ihute.rw/Trading/OrdersServlet"
 
 const FALLBACK_URLS = [
   process.env.JAVA_ORDERS_ALT_URL,
-  "http://localhost:8080/Trading/Kaos/OrdersServlet",
+  "https://ihute.rw/Trading/Kaos/OrdersServlet",
 ].filter(Boolean) as string[]
 
 function safeParse(raw: string) {

@@ -10,7 +10,7 @@ const JAVA_URL =
   (process.env.JAVA_ORDERS_URL ||
    process.env.JAVA_SERVLET_URL ||
    // try Kaos/OrdersServlet first since many apps map Kaos servlets that way:
-   "http://localhost:8080/Trading/Kaos/OrdersServlet")
+   "https://ihute.rw/Trading/Kaos/OrdersServlet")
 
 // Simple GET probe: visit http://localhost:3000/api/orders/create to confirm not-404
 export async function GET() {

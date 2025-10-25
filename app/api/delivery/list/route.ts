@@ -1,6 +1,6 @@
 // app/api/delivery/list/route.ts
 import { NextResponse } from "next/server"
-const JAVA_DELIVERY_URL = process.env.JAVA_DELIVERY_URL || "http://localhost:8080/Trading/DeliveryServlet" // e.g. https://your-java-host/Kaos/delivery
+const JAVA_DELIVERY_URL = process.env.JAVA_DELIVERY_URL || "https://ihute.rw/Trading/DeliveryServlet" // e.g. https://your-java-host/Kaos/delivery
 
 export async function POST(req: Request) {
   try {
