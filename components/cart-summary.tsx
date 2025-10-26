@@ -11,10 +11,12 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Label } from "@/components/ui/label"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog"
-import { Copy, PhoneCall, CheckCircle2, RotateCcw, MessageCircle, Truck } from "lucide-react"
+import { Copy, PhoneCall, CheckCircle2, RotateCcw, MessageCircle, Truck, CreditCard, Wallet } from "lucide-react"
 
 const QRCode = dynamic(() => import("react-qr-code"), { ssr: false })
 const CUR = "RWF"
@@ -91,7 +93,16 @@ export function CartSummary() {
 
   const [busy, setBusy] = useState<string | null>(null)
   const [orderIds, setOrderIds] = useState<Record<string, string>>({})
-  const [orderPhones, setOrderPhones] = useState<Record<string, string>>({}) // ✅ server-provided WhatsApp number
+  const [orderPhones, setOrderPhones] = useState<Record<string, string>>({})
+
+  // Payment method selection dialog
+  const [paymentMethodOpen, setPaymentMethodOpen] = useState(false)
+  const [selectedSeller, setSelectedSeller] = useState<string | null>(null)
+  const [paymentMethod, setPaymentMethod] = useState<"momo" | "cod">("momo")
+
+  // MoMo payment dialog
+  const [momoOpen, setMomoOpen] = useState(false)
+  const [momoForSeller, setMomoForSeller] = useState<string | null>(null)
 
   // COD dialog
   const [codOpen, setCodOpen] = useState(false)
@@ -108,7 +119,7 @@ export function CartSummary() {
     return true
   }
 
-  // ✅ MoMo payment auto-poll (up to ~60s)
+  // MoMo payment auto-poll
   async function pollPayment(orderId: string, supplierId: string) {
     const deadline = Date.now() + 60_000
     while (Date.now() < deadline) {
@@ -130,7 +141,6 @@ export function CartSummary() {
   // WhatsApp prefill per seller
   const sellerWhatsData = useMemo(() => {
     return groups.map((g) => {
-      // ✅ prefer server-provided phone; fall back to seller phone or momo
       const chosenPhone = orderPhones[g.supplierId] || (g as any).phone || g.momo || ""
       const phone = normalizePhone(chosenPhone)
       const items: WhatsItem[] = g.items.map((it) => {
@@ -149,7 +159,6 @@ export function CartSummary() {
         items,
         total: g.subtotal,
         discount: 0,
-        // COD => unpaid, MoMo paid only when marked paid
         paid: isPaid ? g.subtotal : 0,
         paidAt: isPaid ? "MTN MoMo" : (hasUssdTarget ? "Pending (MoMo)" : "Pay on delivery"),
         reference: orderId ? `ORDER ${orderId}` : undefined,
@@ -206,11 +215,9 @@ export function CartSummary() {
       const json = await res.json()
 
       if (res.ok && json?.ok) {
-        // keep "pending" by default; MoMo poll will flip to paid
         if (json.orderId) setOrderIds(m => ({ ...m, [g.supplierId]: String(json.orderId) }))
         if (json.sellerTel) setOrderPhones(m => ({ ...m, [g.supplierId]: String(json.sellerTel) }))
         if (opts.paymentName === "PAID_MTN_MOMO" && json.orderId) {
-          // async poll (don't block UX)
           pollPayment(String(json.orderId), g.supplierId)
         }
         clear()
@@ -218,9 +225,12 @@ export function CartSummary() {
         router.refresh()
       } else {
         setPaymentStatus(g.supplierId, "failed")
+        alert(`Failed to create order: ${json?.error || "Unknown error"}`)
       }
-    } catch {
+    } catch (error) {
+      console.error("Order creation error:", error)
       setPaymentStatus(g.supplierId, "failed")
+      alert("Failed to create order. Please try again.")
     } finally {
       setBusy(null)
     }
@@ -229,13 +239,37 @@ export function CartSummary() {
   const confirmPayment = (g: ReturnType<typeof getGroupsBySeller>[number]) =>
     placeOrder(g, { paymentName: "PAID_MTN_MOMO", reference: `PAID_MTN_${Date.now()}` })
 
-  // COD (hold order; pay on delivery)
-  const openCOD = (supplierId: string) => {
+  // Open payment method selection
+  const openPaymentMethod = (supplierId: string) => {
     if (!requireLogin()) return
-    setCodForSeller(supplierId)
-    setDeliveryLocation(user?.location || "")
-    setContactPhone(user?.phone || "")
-    setCodOpen(true)
+    const g = groups.find(x => x.supplierId === supplierId)
+    if (!g) return
+    
+    const hasUssdTarget = Boolean(((g as any).momo ?? "").trim())
+    setSelectedSeller(supplierId)
+    // Default to momo if available, otherwise cod
+    setPaymentMethod(hasUssdTarget ? "momo" : "cod")
+    setPaymentMethodOpen(true)
+  }
+
+  // Handle payment method selection
+  const proceedWithPayment = async () => {
+    if (!selectedSeller) return
+    
+    if (paymentMethod === "cod") {
+      setPaymentMethodOpen(false)
+      setCodForSeller(selectedSeller)
+      setDeliveryLocation(user?.location || "")
+      setContactPhone(user?.phone || "")
+      setCodOpen(true)
+      setSelectedSeller(null)
+    } else {
+      // MoMo - show QR code dialog
+      setPaymentMethodOpen(false)
+      setMomoForSeller(selectedSeller)
+      setMomoOpen(true)
+      setSelectedSeller(null)
+    }
   }
 
   const submitCOD = async () => {
@@ -249,6 +283,16 @@ export function CartSummary() {
       reference: `PAY_ON_DELIVERY_${Date.now()}`
     })
     setCodOpen(false)
+    setCodForSeller(null)
+  }
+
+  const confirmMoMoPayment = async () => {
+    if (!momoForSeller) return
+    const g = groups.find(x => x.supplierId === momoForSeller)
+    if (!g) { setMomoOpen(false); return }
+    await confirmPayment(g)
+    setMomoOpen(false)
+    setMomoForSeller(null)
   }
 
   return (
@@ -258,11 +302,8 @@ export function CartSummary() {
           const status = getPaymentStatus(g.supplierId)
           const wa = sellerWhatsData.find(x => x.supplierId === g.supplierId)
 
-          // ✅ read MoMo target from the cart group (fallback-safe)
           const momoTarget = ((g as any).momo ?? "").trim()
           const hasUssdTarget = momoTarget.length > 0
-          const payload = `*182*8*1*${momoTarget}*${g.subtotal}#`
-          const telHref = `tel:${encodeURIComponent(payload)}`
           const unmark = () => setPaymentStatus(g.supplierId, "unpaid")
 
           return (
@@ -295,116 +336,48 @@ export function CartSummary() {
                 </div>
                 <Separator />
 
-                {/* Payment section */}
-                {hasUssdTarget ? (
-                  // ===== MTN MoMo flow =====
-                  <div className="grid grid-cols-1 gap-3">
-                    <div className="flex items-center justify-center">
-                      <div className="bg-white p-3 rounded">
-                        <QRCode value={`*182*8*1*${momoTarget}*${g.subtotal}#`} size={140} />
-                      </div>
-                    </div>
+                {/* Primary checkout button */}
+                <Button
+                  className="w-full"
+                  size="lg"
+                  onClick={() => openPaymentMethod(g.supplierId)}
+                  disabled={busy === g.supplierId || status === "paid"}
+                >
+                  <CreditCard className="h-4 w-4 mr-2" />
+                  {status === "paid" ? "Order Placed" : "Proceed to Checkout"}
+                </Button>
 
-                    <div className="space-y-1 text-xs">
-                      <div className="text-muted-foreground">MTN MoMo USSD</div>
-                      <div className="font-mono break-all text-sm">{payload}</div>
-                    </div>
-
-                    <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        className="flex-1"
-                        onClick={async () => { await navigator.clipboard.writeText(payload) }}
-                        disabled={status === "paid"}
-                      >
-                        <Copy className="h-4 w-4 mr-2" /> Copy code
-                      </Button>
-                      <Button
-                        className="flex-1"
-                        asChild
-                        disabled={status === "paid"}
-                        onClick={() => { if (!requireLogin()) return }}
-                      >
-                        <a href={isAuthenticated ? telHref : "#"}>
-                          <PhoneCall className="h-4 w-4 mr-2" /> Pay
-                        </a>
-                      </Button>
-                    </div>
-
-                    <div className="flex gap-2">
-                      {status !== "paid" ? (
-                        <Button className="flex-1" onClick={() => confirmPayment(g)} disabled={busy === g.supplierId}>
-                          {busy === g.supplierId ? "Confirming…" : "Mark as paid"}
-                        </Button>
-                      ) : (
-                        <Button variant="outline" className="flex-1" onClick={unmark}>
-                          <RotateCcw className="h-4 w-4 mr-2" /> Unmark paid
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  // ===== COD-first flow when no MoMo =====
-                  <div className="grid grid-cols-1 gap-3">
-                    <div className="rounded-lg border p-3 bg-amber-50">
-                      <div className="text-sm mb-2">
-                        This seller doesn’t have a MoMo code. You can <b>pay on delivery</b>.
-                      </div>
-                      <div className="flex gap-2">
-                        <Button
-                          onClick={() => openCOD(g.supplierId)}
-                          disabled={busy === g.supplierId}
-                          className="flex-1"
-                          title="Place order and pay on delivery"
-                        >
-                          <Truck className="h-4 w-4 mr-2" /> Place order (COD)
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
+                {status === "paid" && (
+                  <Button variant="outline" className="w-full" onClick={unmark}>
+                    <RotateCcw className="h-4 w-4 mr-2" /> Unmark paid
+                  </Button>
                 )}
 
-                {/* Always-visible actions */}
-                <div className="mt-3 grid grid-cols-1 gap-2">
-                  {/* show this extra COD button only when MoMo exists to avoid duplicates */}
-                  {hasUssdTarget && (
-                    <Button
-                      variant="outline"
-                      className="w-full"
-                      onClick={() => openCOD(g.supplierId)}
-                      disabled={busy === g.supplierId}
-                      title="Place order and pay on delivery"
-                    >
-                      <Truck className="h-4 w-4 mr-2" /> Pay on delivery
-                    </Button>
-                  )}
-
-                  <div className="flex gap-2">
-                    <Button
-                      className="flex-1 bg-[#25D366] hover:bg-[#20b05a]"
-                      asChild
-                      disabled={!wa?.phone || !isAuthenticated}
-                      title={
-                        !isAuthenticated
-                          ? "Sign in to contact seller"
-                          : (wa?.phone ? `Send order via WhatsApp to ${wa.phone}` : "No seller WhatsApp number")
-                      }
-                    >
-                      <a href={isAuthenticated ? (wa?.href || "#") : "#"} target="_blank" rel="noopener noreferrer">
-                        <MessageCircle className="h-4 w-4 mr-2" /> Send WhatsApp
-                      </a>
-                    </Button>
-                    <Button
-                      variant="outline"
-                      className="flex-1"
-                      onClick={async () => { try { await navigator.clipboard.writeText(wa?.message || "") } catch {} }}
-                      disabled={!isAuthenticated}
-                      title={isAuthenticated ? "Copy WhatsApp message" : "Sign in to copy"
-                      }
-                    >
-                      <MessageCircle className="h-4 w-4 mr-2" /> Copy message
-                    </Button>
-                  </div>
+                {/* WhatsApp actions */}
+                <div className="flex gap-2 pt-2">
+                  <Button
+                    className="flex-1 bg-[#25D366] hover:bg-[#20b05a]"
+                    asChild
+                    disabled={!wa?.phone || !isAuthenticated}
+                    title={
+                      !isAuthenticated
+                        ? "Sign in to contact seller"
+                        : (wa?.phone ? `Send order via WhatsApp to ${wa.phone}` : "No seller WhatsApp number")
+                    }
+                  >
+                    <a href={isAuthenticated ? (wa?.href || "#") : "#"} target="_blank" rel="noopener noreferrer">
+                      <MessageCircle className="h-4 w-4 mr-2" /> Send WhatsApp
+                    </a>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    onClick={async () => { try { await navigator.clipboard.writeText(wa?.message || "") } catch {} }}
+                    disabled={!isAuthenticated}
+                    title={isAuthenticated ? "Copy WhatsApp message" : "Sign in to copy"}
+                  >
+                    <MessageCircle className="h-4 w-4 mr-2" /> Copy message
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -422,12 +395,67 @@ export function CartSummary() {
         </Card>
       </div>
 
+      {/* Payment method selection dialog */}
+      <Dialog open={paymentMethodOpen} onOpenChange={setPaymentMethodOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Choose Payment Method</DialogTitle>
+            <DialogDescription>Select how you'd like to pay for this order</DialogDescription>
+          </DialogHeader>
+          
+          <RadioGroup value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as "momo" | "cod")}>
+            <div className="space-y-3">
+              {selectedSeller && (() => {
+                const g = groups.find(x => x.supplierId === selectedSeller)
+                const hasUssdTarget = g ? Boolean(((g as any).momo ?? "").trim()) : false
+                
+                return (
+                  <>
+                    <div 
+                      className={`flex items-center space-x-3 border rounded-lg p-4 cursor-pointer hover:bg-accent ${!hasUssdTarget ? 'opacity-50' : ''}`}
+                      onClick={() => hasUssdTarget && setPaymentMethod("momo")}
+                    >
+                      <RadioGroupItem value="momo" id="momo" disabled={!hasUssdTarget} />
+                      <Label htmlFor="momo" className={`flex items-center gap-2 flex-1 ${hasUssdTarget ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                        <Wallet className="h-5 w-5 text-yellow-600" />
+                        <div>
+                          <div className="font-medium">MTN Mobile Money</div>
+                          <div className="text-sm text-muted-foreground">
+                            {hasUssdTarget ? 'Pay instantly with MTN MoMo' : 'Not available for this seller'}
+                          </div>
+                        </div>
+                      </Label>
+                    </div>
+
+                    <div className="flex items-center space-x-3 border rounded-lg p-4 cursor-pointer hover:bg-accent" onClick={() => setPaymentMethod("cod")}>
+                      <RadioGroupItem value="cod" id="cod" />
+                      <Label htmlFor="cod" className="flex items-center gap-2 cursor-pointer flex-1">
+                        <Truck className="h-5 w-5 text-blue-600" />
+                        <div>
+                          <div className="font-medium">Cash on Delivery</div>
+                          <div className="text-sm text-muted-foreground">Pay when you receive your order</div>
+                        </div>
+                      </Label>
+                    </div>
+                  </>
+                )
+              })()}
+            </div>
+          </RadioGroup>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setPaymentMethodOpen(false)}>Cancel</Button>
+            <Button onClick={proceedWithPayment}>Continue</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* COD dialog */}
       <Dialog open={codOpen} onOpenChange={setCodOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Delivery details</DialogTitle>
-            <DialogDescription>We’ll hold the order and you can pay on delivery.</DialogDescription>
+            <DialogDescription>We'll hold the order and you can pay on delivery.</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1">
@@ -441,7 +469,111 @@ export function CartSummary() {
           </div>
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setCodOpen(false)}>Cancel</Button>
-            <Button onClick={submitCOD}>Place order (COD)</Button>
+            <Button onClick={submitCOD} disabled={!deliveryLocation || !contactPhone}>
+              <Truck className="h-4 w-4 mr-2" />
+              Place order (COD)
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MoMo payment dialog */}
+      <Dialog open={momoOpen} onOpenChange={setMomoOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Pay with MTN Mobile Money</DialogTitle>
+            <DialogDescription>Complete payment to confirm your order</DialogDescription>
+          </DialogHeader>
+          
+          {momoForSeller && (() => {
+            const g = groups.find(x => x.supplierId === momoForSeller)
+            if (!g) return null
+            
+            const momoTarget = ((g as any).momo ?? "").trim()
+            const hasUssdTarget = momoTarget.length > 0
+            const payload = `*182*8*1*${momoTarget}*${g.subtotal}#`
+            const telHref = `tel:${encodeURIComponent(payload)}`
+            
+            return (
+              <div className="space-y-4">
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 space-y-2">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Amount to pay:</span>
+                    <span className="font-bold text-lg">{g.subtotal.toLocaleString()} RWF</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Seller:</span>
+                    <span className="font-medium">{g.supplierName}</span>
+                  </div>
+                </div>
+
+                {hasUssdTarget && (
+                  <>
+                    <div className="text-center space-y-2">
+                      <p className="text-sm font-medium">Scan QR code with your phone camera</p>
+                      <div className="bg-white p-4 rounded-lg inline-block border-2">
+                        <QRCode value={payload} size={200} />
+                      </div>
+                      <p className="text-xs text-muted-foreground">Or dial manually: {payload}</p>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        className="flex-1"
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(momoTarget)
+                            alert(`Copied: ${momoTarget}`)
+                          } catch {}
+                        }}
+                      >
+                        <Copy className="h-4 w-4 mr-2" />
+                        Copy number
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="flex-1"
+                        asChild
+                      >
+                        <a href={telHref}>
+                          <PhoneCall className="h-4 w-4 mr-2" />
+                          Dial now
+                        </a>
+                      </Button>
+                    </div>
+                  </>
+                )}
+
+                {!hasUssdTarget && (
+                  <div className="text-center p-6 bg-muted rounded-lg">
+                    <p className="text-sm text-muted-foreground">
+                      No MoMo code available for this seller. Please contact them directly.
+                    </p>
+                  </div>
+                )}
+
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <p className="text-xs text-blue-900">
+                    <strong>Note:</strong> After completing the MoMo payment, click "I've Paid" below to confirm your order.
+                  </p>
+                </div>
+              </div>
+            )
+          })()}
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => { setMomoOpen(false); setMomoForSeller(null) }}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={confirmMoMoPayment}
+              disabled={busy === momoForSeller}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              <CheckCircle2 className="h-4 w-4 mr-2" />
+              {busy === momoForSeller ? "Processing..." : "I've Paid"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
