@@ -34,7 +34,7 @@ export function BusinessList({
       setError(null)
       try {
         const base = getApiBase()
-        const url = `${base}/api/fetchSuggestions?listSuppliersBySector=${encodeURIComponent(categoryId)}`
+        const url = `${base}/Trading/Kaos/fetchSuggestions?listSuppliersBySector=${encodeURIComponent(categoryId)}`
         const res = await fetch(url, { cache: "no-store" })
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const data = (await res.json()) as Array<any>

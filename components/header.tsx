@@ -4,10 +4,32 @@ import Link from "next/link"
 import Image from "next/image"
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { ShoppingCart, User, MapPin, LogOut, Heart, Truck, PackageSearch } from "lucide-react"
+import {
+  ShoppingCart,
+  User,
+  MapPin,
+  Heart,
+  Truck,
+  PackageSearch,
+} from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuLabel,
+} from "@/components/ui/dropdown-menu"
+
 import { LanguageSelector } from "@/components/language-selector"
 import { GlobalSearch } from "@/components/global-search"
 
@@ -17,7 +39,7 @@ import { useAuthStore } from "@/lib/auth-store"
 import { usePrefsStore } from "@/lib/prefs-store"
 import { useOrdersStore } from "@/lib/orders-store"
 import { useTranslation } from "@/hooks/use-translation"
-import { RWANDA_DISTRICTS } from "@/lib/constants" // ✅ centralized import
+import { RWANDA_DISTRICTS } from "@/lib/constants"
 
 export function Header() {
   const router = useRouter()
@@ -27,8 +49,13 @@ export function Header() {
   const totalItems = getTotalItems()
   const favoritesCount = useFavoritesStore((s) => s.favorites.length)
 
-  const { user, isAuthenticated, logout } = useAuthStore()
-  const [selectedLocation, setSelectedLocation] = useState(user?.location || t("allLocations"))
+  const user = useAuthStore((s) => s.user)
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+  const logout = useAuthStore((s) => s.logout)
+
+  const [selectedLocation, setSelectedLocation] = useState(
+    user?.location || t("allLocations")
+  )
   const setLoc = usePrefsStore((s) => s.setLocation)
 
   const pendingCount = useOrdersStore((s) => s.getPendingCount())
@@ -49,7 +76,7 @@ export function Header() {
         if (!ignore && res.ok && json?.ok) {
           const orders: any[] = json.orders || []
           const cnt = orders.filter(
-            (o) => String(o.ORDER_STATUS || "").toUpperCase() !== "DELIVERED",
+            (o) => String(o.ORDER_STATUS || "").toUpperCase() !== "DELIVERED"
           ).length
           setSellerCount(cnt)
         }
@@ -65,7 +92,8 @@ export function Header() {
 
   const handleLogout = () => {
     logout()
-    router.push("/")
+    router.replace("/")
+    router.refresh()
   }
 
   const handleLocation = (val: string) => {
@@ -96,7 +124,9 @@ export function Header() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={t("allLocations")}>{t("allLocations")}</SelectItem>
+                <SelectItem value={t("allLocations")}>
+                  {t("allLocations")}
+                </SelectItem>
                 {RWANDA_DISTRICTS.map((dist) => (
                   <SelectItem key={dist} value={dist}>
                     {dist}
@@ -117,18 +147,35 @@ export function Header() {
 
             {isAuthenticated ? (
               <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() =>
-                    router.push(user?.role === "supplier" ? "/supplier/dashboard" : "/orders")
-                  }
-                  className="hidden md:flex h-9"
-                >
-                  <User className="h-4 w-4 mr-2" />
-                  {user?.name}
-                </Button>
+                {/* User Dropdown */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="sm" className="hidden md:flex h-9">
+                      <User className="h-4 w-4 mr-2" />
+                      {user?.name}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-48">
+                    <DropdownMenuLabel>{user?.email}</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() =>
+                        router.push(
+                          user?.role === "supplier"
+                            ? "/supplier/dashboard"
+                            : "/orders"
+                        )
+                      }
+                    >
+                      {t("myAccount")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={handleLogout} className="text-red-600">
+                      {t("logout")}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
 
+                {/* Supplier Orders */}
                 {user?.role === "supplier" && (
                   <Link href="/supplier/orders">
                     <Button
@@ -147,6 +194,7 @@ export function Header() {
                   </Link>
                 )}
 
+                {/* Customer Orders */}
                 {user?.role !== "supplier" && (
                   <Link href="/orders">
                     <Button
@@ -164,10 +212,6 @@ export function Header() {
                     </Button>
                   </Link>
                 )}
-
-                <Button variant="ghost" size="icon" onClick={handleLogout} className="h-9 w-9">
-                  <LogOut className="h-4 w-4" />
-                </Button>
               </>
             ) : (
               <Link href="/login">
@@ -216,7 +260,9 @@ export function Header() {
                 <SelectValue placeholder="Select your district" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={t("allLocations")}>{t("allLocations")}</SelectItem>
+                <SelectItem value={t("allLocations")}>
+                  {t("allLocations")}
+                </SelectItem>
                 {RWANDA_DISTRICTS.map((dist) => (
                   <SelectItem key={dist} value={dist}>
                     {dist}

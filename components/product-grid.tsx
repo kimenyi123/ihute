@@ -121,7 +121,8 @@ export function ProductGrid({
         if (selectedSupplier === "all") {
           // show random products from sellers in this category
           const res = await fetch(
-            `${base}/api/fetchSuggestions?listSuppliersWithProducts=${encodeURIComponent(categoryId)}&Currency=RWF`,
+            // `${base}/api/fetchSuggestions?listSuppliersWithProducts=${encodeURIComponent(categoryId)}&Currency=RWF`,
+             `${base}/Trading/Kaos/fetchSuggestions?listSuppliersWithProducts=${encodeURIComponent(categoryId)}&Currency=RWF`,
             { cache: "no-store" }
           );
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -144,7 +145,8 @@ export function ProductGrid({
         } else {
           // ONLY the selected supplier’s items
           const res = await fetch(
-            `${base}/api/fetchSuggestions?supplierProducts=${encodeURIComponent(selectedSupplier)}&limit=50&Currency=RWF`,
+            // `${base}/api/fetchSuggestions?supplierProducts=${encodeURIComponent(selectedSupplier)}&limit=50&Currency=RWF`,
+            `${base}/Trading/Kaos/fetchSuggestions?supplierProducts=${encodeURIComponent(selectedSupplier)}&limit=50&Currency=RWF`,
             { cache: "no-store" }
           );
           if (!res.ok) throw new Error(`HTTP ${res.status}`);

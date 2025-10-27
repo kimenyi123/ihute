@@ -109,7 +109,8 @@ export default function OrderDetailsPage() {
       } catch (e: any) {
         // Graceful fallback: try the generic servlet forwarder if available
         try {
-          const res2 = await fetch("/api/fetchSuggestions", {
+          // const res2 = await fetch("/api/fetchSuggestions", {
+             const res2 = await fetch("/Trading/Kaos/fetchSuggestions", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ transactionId: orderId }),
