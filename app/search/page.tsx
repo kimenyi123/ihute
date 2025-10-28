@@ -208,7 +208,8 @@ const pushWith = (updates: Record<string, string | undefined>) => {
       }
       setLoading(true)
       try {
-        const url = new URL(`${API_BASE}/api/fetchSuggestions`)
+        const url = new URL(`${API_BASE}/Trading/Kaos/fetchSuggestions`)
+        // const url = new URL(`Trading/Kaos/fetchSuggestions`)
         url.searchParams.set("globalSearch", debouncedQ)
         url.searchParams.set("Currency", "RWF")
         if (selectedShop?.supplier_account) {
@@ -254,7 +255,8 @@ const pushWith = (updates: Record<string, string | undefined>) => {
       }
       setLoadingProducts(true)
       try {
-        const url = `${API_BASE}/api/fetchSuggestions?supplierProducts=${encodeURIComponent(
+        // const url = `${API_BASE}/api/fetchSuggestions?supplierProducts=${encodeURIComponent(
+        const url = `${API_BASE}/Trading/Kaos/fetchSuggestions?supplierProducts=${encodeURIComponent(
           selectedShop.supplier_account,
         )}&limit=100&Currency=RWF` // Increased limit for client-side search
         const res = await fetch(url, { cache: "no-store" })
@@ -338,7 +340,8 @@ const pushWith = (updates: Record<string, string | undefined>) => {
       }
       setLoadingSector(true)
       try {
-        const url = `${API_BASE}/api/fetchSuggestions?listSuppliersWithProducts=${encodeURIComponent(
+        // const url = `${API_BASE}/api/fetchSuggestions?listSuppliersWithProducts=${encodeURIComponent(
+          const url = `${API_BASE}/Trading/Kaos/fetchSuggestions?listSuppliersWithProducts=${encodeURIComponent(
           sectorParam,
         )}&Currency=RWF`
         const res = await fetch(url, { cache: "no-store" })
