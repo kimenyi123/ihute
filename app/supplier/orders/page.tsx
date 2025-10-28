@@ -18,6 +18,7 @@ type RawTxn = {
   SELLER_ISHYIGA_ACCOUNT?: string
   AMOUNT?: number
   PAYMENT_NAME?: string
+  PAYMENT_STATUS?: string // Add this line
   BUYER_ISHYIGA_ACCOUNT?: string
   BUYER_OWNER?: string
   momo?: string
@@ -25,13 +26,21 @@ type RawTxn = {
 }
 
 // Map payment string to order status
-function mapPaymentToStatus(name?: string): Order["status"] {
+function mapPaymentToStatus(name?: string, paymentStatus?: string): Order["status"] {
   const s = (name || "").toLowerCase().replace(/[\s_]+/g, " ")
+  const ps = (paymentStatus || "").toLowerCase()
+  
+  // Check if payment is marked as PAID
+  if (ps === 'paid') return "processing"
+  
+  // Check payment method
+  if (/(momo|mtn|mobile money)/.test(s)) return "processing"
   if (/(pay on delivery|pay-on-delivery|pay_on_delivery|cod)/.test(s)) return "pending"
   if (s.includes("delivered") || s.includes("completed")) return "delivered"
   if (s.includes("transit") || s.includes("shipped") || s.includes("out")) return "in-transit"
   if (s.includes("pending")) return "pending"
-  if (s.includes("paid") || s.includes("success") || s.includes("processing") || s.includes("mtn momo")) return "processing"
+  if (s.includes("paid") || s.includes("success") || s.includes("processing")) return "processing"
+  
   return "processing"
 }
 
@@ -107,25 +116,26 @@ export default function SupplierOrdersPage() {
       ? json.orders
       : []
 
-    const mapped: Order[] = txns.map((t) => {
-      const paymentName = t.PAYMENT_NAME || ""
-      const isCOD = /(pay[_\s-]*on[_\s-]*delivery|cod)/i.test(paymentName)
-      return {
-        id: String(t.ID_ORDER ?? ""),
-        sellerId: String(t.SELLER_ISHYIGA_ACCOUNT ?? ""),
-        sellerName: t.SELLER_NAMES || t.SELLER_OWNER || t.SELLER_ISHYIGA_ACCOUNT || "Supplier",
-        sellerLocation: undefined,
-        momo: t.momo ?? undefined,
-        items: [],
-        subtotal: Number(t.AMOUNT ?? 0),
-        status: mapPaymentToStatus(paymentName),
-        paymentStatus: isCOD ? "unpaid" : "paid",
-        createdAt: t.CREATED_AT || new Date().toISOString(),
-        buyerId: t.BUYER_ISHYIGA_ACCOUNT ?? undefined,
-        buyerName: t.BUYER_OWNER ?? t.BUYER_ISHYIGA_ACCOUNT ?? "Customer",
-      }
-    })
-
+   const mapped: Order[] = txns.map((t) => {
+  const paymentName = t.PAYMENT_NAME || ""
+  const paymentStatus = t.PAYMENT_STATUS || ""
+  const isCOD = /(pay[_\s-]*on[_\s-]*delivery|cod)/i.test(paymentName)
+  
+  return {
+    id: String(t.ID_ORDER ?? ""),
+    sellerId: String(t.SELLER_ISHYIGA_ACCOUNT ?? ""),
+    sellerName: t.SELLER_NAMES || t.SELLER_OWNER || t.SELLER_ISHYIGA_ACCOUNT || "Supplier",
+    sellerLocation: undefined,
+    momo: t.momo ?? undefined,
+    items: [],
+    subtotal: Number(t.AMOUNT ?? 0),
+    status: mapPaymentToStatus(paymentName, paymentStatus), // Pass payment status
+    paymentStatus: isCOD ? "unpaid" : "paid",
+    createdAt: t.CREATED_AT || new Date().toISOString(),
+    buyerId: t.BUYER_ISHYIGA_ACCOUNT ?? undefined,
+    buyerName: t.BUYER_OWNER ?? t.BUYER_ISHYIGA_ACCOUNT ?? "Customer",
+  }
+})
     setOrders(mapped)
     setTotal(Number.isFinite(json?.total) ? Number(json.total) : null)
   } catch (e: any) {
@@ -188,7 +198,7 @@ export default function SupplierOrdersPage() {
         ) : err ? (
           <Card>
             <CardHeader>
-              <CardTitle>Couldn’t load orders</CardTitle>
+              <CardTitle>Couldn't load orders</CardTitle>
               <CardDescription className="text-destructive">{err}</CardDescription>
             </CardHeader>
           </Card>

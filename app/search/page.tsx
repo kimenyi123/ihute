@@ -97,6 +97,10 @@ export default function SearchPage() {
   const [sectorSellers, setSectorSellers] = useState<SectorSeller[]>([])
   const [loadingSector, setLoadingSector] = useState(false)
 
+  // Supplier product search
+  const [supplierSearch, setSupplierSearch] = useState("")
+  const [debouncedSupplierSearch, setDebouncedSupplierSearch] = useState("")
+
   // Keep drafts in sync with URL changes
   useEffect(() => setLocationDraft(locationParam), [locationParam])
   useEffect(() => setSectorDraft(sectorParam), [sectorParam])
@@ -188,6 +192,12 @@ const pushWith = (updates: Record<string, string | undefined>) => {
     }
   }, [supplierParam, supplierNameParam])
 
+  // Supplier search debounce
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSupplierSearch(supplierSearch.trim()), 300)
+    return () => clearTimeout(t)
+  }, [supplierSearch])
+
   // Unified global search (LEFT)
   useEffect(() => {
     let cancelled = false
@@ -246,7 +256,7 @@ const pushWith = (updates: Record<string, string | undefined>) => {
       try {
         const url = `${API_BASE}/api/fetchSuggestions?supplierProducts=${encodeURIComponent(
           selectedShop.supplier_account,
-        )}&limit=24&Currency=RWF`
+        )}&limit=100&Currency=RWF` // Increased limit for client-side search
         const res = await fetch(url, { cache: "no-store" })
         const data: Product[] = res.ok ? await res.json() : []
         if (!cancelled) setShopProducts(Array.isArray(data) ? data : [])
@@ -261,6 +271,18 @@ const pushWith = (updates: Record<string, string | undefined>) => {
       cancelled = true
     }
   }, [selectedShop])
+
+  // Filter shop products based on supplier search
+  const filteredShopProducts = useMemo(() => {
+    if (!debouncedSupplierSearch) return shopProducts
+    
+    const searchTerm = debouncedSupplierSearch.toLowerCase()
+    return shopProducts.filter(product => 
+      product.item_commercial_name?.toLowerCase().includes(searchTerm) ||
+      product.item_packet?.toLowerCase().includes(searchTerm) ||
+      product.item_key_words?.toLowerCase().includes(searchTerm)
+    )
+  }, [shopProducts, debouncedSupplierSearch])
 
   // Merge suppliers from both buckets (no dupes)
   const allSuppliers = useMemo(() => {
@@ -283,9 +305,12 @@ const pushWith = (updates: Record<string, string | undefined>) => {
   }, [allSuppliers, selectedShop])
 
   const handleSelectShop = (shop: Shop) => {
+    // Clear global search when selecting a new seller
+    setQ("")
+    setDebouncedQ("")
+    setSupplierSearch("") // Also clear supplier search
     setSelectedShop(shop)
     const params = new URLSearchParams({
-      q: debouncedQ,
       supplier: shop.supplier_account,
       supplierName: shop.supplier_name,
     })
@@ -296,7 +321,8 @@ const pushWith = (updates: Record<string, string | undefined>) => {
 
   const handleClearShop = () => {
     setSelectedShop(null)
-    const params = new URLSearchParams({ q: debouncedQ })
+    setSupplierSearch("") // Clear supplier search when clearing shop
+    const params = new URLSearchParams()
     if (locationParam) params.set("location", locationParam)
     if (sectorParam) params.set("sector", sectorParam)
     router.push(`/search?${params.toString()}`)
@@ -679,46 +705,68 @@ const clearSector = () => {
                 {loadingProducts && <span className="text-sm opacity-60 animate-pulse">Loading...</span>}
               </div>
 
-              {!!debouncedQ && !selectedShop && (
-                <div className="text-sm text-gray-600 bg-blue-50 p-3 rounded-lg border border-blue-200">
-                  💡 Select a supplier from the list to see their available products
-                </div>
+              {selectedShop && (
+                <>
+                  {/* Supplier Product Search */}
+                  <div className="mb-4">
+                    <input
+                      value={supplierSearch}
+                      onChange={(e) => setSupplierSearch(e.target.value)}
+                      placeholder={`Search in ${selectedShop.supplier_name}...`}
+                      className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    {debouncedSupplierSearch && (
+                      <div className="mt-1 text-xs text-gray-500">
+                        Found {filteredShopProducts.length} product{filteredShopProducts.length !== 1 ? 's' : ''}
+                      </div>
+                    )}
+                  </div>
+
+                  <div
+                    className="space-y-3 pr-1"
+                    style={{ maxHeight: "70vh", overflowY: "auto", WebkitOverflowScrolling: "touch" }}
+                  >
+                    {filteredShopProducts.length > 0 ? (
+                      filteredShopProducts.map((product) => (
+                        <div
+                          key={product.item_code}
+                          className="rounded-lg border p-3 hover:border-blue-300 transition-colors cursor-pointer group"
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => addProductAndGoToCart(product)}
+                          onKeyDown={(e) => onTileKey(e, product)}
+                          title="Click to add to cart"
+                        >
+                          <div className="font-medium text-gray-900 group-hover:text-blue-700">
+                            {product.item_commercial_name}
+                          </div>
+                          <div className="text-sm text-gray-600 mt-1">{product.item_packet || ""}</div>
+                          <div className="mt-2 text-base font-semibold text-green-600">
+                            {product.item_emballage || "Price not available"}
+                          </div>
+                          {product.momo && <div className="mt-2 text-xs text-gray-500">Seller MoMo: {product.momo}</div>}
+                          <div className="mt-3 text-xs text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                            Click to add & go to cart →
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      !loadingProducts && (
+                        <div className="text-center py-4 text-gray-500">
+                          {debouncedSupplierSearch 
+                            ? `No products found matching "${debouncedSupplierSearch}"`
+                            : "No products available from this supplier"
+                          }
+                        </div>
+                      )
+                    )}
+                  </div>
+                </>
               )}
 
-              {selectedShop && (
-                <div
-                  className="space-y-3 pr-1"
-                  style={{ maxHeight: "70vh", overflowY: "auto", WebkitOverflowScrolling: "touch" }}
-                >
-                  {shopProducts.length > 0 ? (
-                    shopProducts.map((product) => (
-                      <div
-                        key={product.item_code}
-                        className="rounded-lg border p-3 hover:border-blue-300 transition-colors cursor-pointer group"
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => addProductAndGoToCart(product)}
-                        onKeyDown={(e) => onTileKey(e, product)}
-                        title="Click to add to cart"
-                      >
-                        <div className="font-medium text-gray-900 group-hover:text-blue-700">
-                          {product.item_commercial_name}
-                        </div>
-                        <div className="text-sm text-gray-600 mt-1">{product.item_packet || ""}</div>
-                        <div className="mt-2 text-base font-semibold text-green-600">
-                          {product.item_emballage || "Price not available"}
-                        </div>
-                        {product.momo && <div className="mt-2 text-xs text-gray-500">Seller MoMo: {product.momo}</div>}
-                        <div className="mt-3 text-xs text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
-                          Click to add & go to cart →
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    !loadingProducts && (
-                      <div className="text-center py-4 text-gray-500">No products available from this supplier</div>
-                    )
-                  )}
+              {!selectedShop && !!debouncedQ && (
+                <div className="text-sm text-gray-600 bg-blue-50 p-3 rounded-lg border border-blue-200">
+                  💡 Select a supplier from the list to see their available products
                 </div>
               )}
             </div>

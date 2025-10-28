@@ -22,12 +22,15 @@ type RawTxn = {
   BUYER_ISHYIGA_ACCOUNT?: string
   BUYER_OWNER?: string
   momo?: string
-  CREATED_AT?: string
+  CREATED_AT?: number | string   // ← heure aliased as CREATED_AT (epoch ms or ISO)
+  ITEM_COUNT?: number            // some endpoints
+  ITEMS_COUNT?: number           // others
+  items?: Array<unknown>
 }
 
 function mapPaymentToStatus(name?: string): Order["status"] {
   const s = (name || "").toLowerCase().replace(/[\s_]+/g, " ")
-  if (/(pay on delivery|pay-on-delivery|pay_on_delivery|cod)/.test(s)) return "pending"
+  if (/(pay on delivery|pay-on-delivery|pay on delivery|cod)/.test(s)) return "pending"
   if (s.includes("delivered") || s.includes("completed")) return "delivered"
   if (s.includes("transit") || s.includes("shipped") || s.includes("out")) return "in-transit"
   if (s.includes("pending")) return "pending"
@@ -37,31 +40,34 @@ function mapPaymentToStatus(name?: string): Order["status"] {
 
 function statusIcon(status: Order["status"]) {
   switch (status) {
-    case "delivered":
-      return <CheckCircle className="h-5 w-5 text-green-600" />
-    case "in-transit":
-      return <Truck className="h-5 w-5 text-blue-600" />
-    default:
-      return <Clock className="h-5 w-5 text-yellow-600" />
+    case "delivered":  return <CheckCircle className="h-5 w-5 text-green-600" />
+    case "in-transit": return <Truck className="h-5 w-5 text-blue-600" />
+    default:           return <Clock className="h-5 w-5 text-yellow-600" />
   }
 }
 
 function statusBadge(status: Order["status"]) {
   const variant = status === "delivered" ? "default" : status === "in-transit" ? "secondary" : "outline"
-  return (
-    <Badge variant={variant as any} className="capitalize">
-      {status.replace("-", " ")}
-    </Badge>
-  )
+  return <Badge variant={variant as any} className="capitalize">{status.replace("-", " ")}</Badge>
 }
 
 function buildTracking(status: Order["status"]) {
   return [
-    { label: "Order Placed", completed: true, date: "" },
-    { label: "Processing", completed: status !== "pending", date: "" },
-    { label: "Out for Delivery", completed: status === "in-transit" || status === "delivered", date: "" },
-    { label: "Delivered", completed: status === "delivered", date: "" },
+    { label: "Order Placed", completed: true },
+    { label: "Processing", completed: status !== "pending" },
+    { label: "Out for Delivery", completed: status === "in-transit" || status === "delivered" },
+    { label: "Delivered", completed: status === "delivered" },
   ]
+}
+
+// Robustly convert CREATED_AT (epoch ms number OR ISO/epoch string) → ISO
+function toIso(v?: number | string): string {
+  if (v == null) return new Date().toISOString()
+  if (typeof v === "number") return new Date(v).toISOString()
+  const maybeNum = Number(v)
+  if (Number.isFinite(maybeNum) && v.trim() !== "") return new Date(maybeNum).toISOString() // epoch ms in string
+  const d = new Date(v)
+  return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString()
 }
 
 export default function OrdersPage() {
@@ -74,7 +80,7 @@ export default function OrdersPage() {
   // pagination UI state
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
-  const [total, setTotal] = useState<number | null>(null) // null => unknown (fallback mode)
+  const [total, setTotal] = useState<number | null>(null)
 
   useEffect(() => {
     if (!isAuthenticated) router.push("/login")
@@ -94,26 +100,32 @@ export default function OrdersPage() {
       const json = await res.json()
       if (!res.ok || json?.ok === false) throw new Error(json?.error || "Failed to load orders")
 
-      // accept either { transactions } or { orders }
       const txns: RawTxn[] = Array.isArray(json?.transactions)
         ? json.transactions
         : (Array.isArray(json?.orders) ? json.orders : [])
 
-      const mapped: Order[] = txns.map((t) => ({
-        id: String(t.ID_ORDER ?? ""),
-        sellerId: String(t.SELLER_ISHYIGA_ACCOUNT ?? ""),
-        sellerName: t.SELLER_NAMES || t.SELLER_OWNER || t.SELLER_ISHYIGA_ACCOUNT || "Supplier",
-        sellerLocation: undefined,
-        momo: t.momo ?? undefined,
-        items: [],
-        subtotal: Number(t.AMOUNT ?? 0),
-        status: mapPaymentToStatus(t.PAYMENT_NAME),
-        paymentStatus: String(t.PAYMENT_NAME || "").toLowerCase().includes("pay_on_delivery") ? "unpaid" : "paid",
-        createdAt: t.CREATED_AT || new Date().toISOString(),
-      }))
+      const mapped: Order[] = txns.map((t) => {
+        const itemsCount =
+          typeof t.ITEMS_COUNT === "number" ? t.ITEMS_COUNT :
+          typeof t.ITEM_COUNT === "number" ? t.ITEM_COUNT :
+          Array.isArray(t.items) ? t.items.length : 0
+
+        return {
+          id: String(t.ID_ORDER ?? ""),
+          sellerId: String(t.SELLER_ISHYIGA_ACCOUNT ?? ""),
+          sellerName: t.SELLER_NAMES || t.SELLER_OWNER || t.SELLER_ISHYIGA_ACCOUNT || "Supplier",
+          sellerLocation: undefined,
+          momo: t.momo ?? undefined,
+          items: [],
+          itemsCount,
+          subtotal: Number(t.AMOUNT ?? 0),
+          status: mapPaymentToStatus(t.PAYMENT_NAME),
+          paymentStatus: String(t.PAYMENT_NAME || "").toLowerCase().includes("pay on delivery") ? "unpaid" : "paid",
+          createdAt: toIso(t.CREATED_AT), // ← use heure from backend
+        }
+      })
 
       setOrders(mapped)
-      // server can send total; if not, stay in fallback mode
       setTotal(Number.isFinite(json?.total) ? Number(json.total) : null)
     } catch (e: any) {
       setErr(e?.message || "Failed to load orders")
@@ -124,15 +136,9 @@ export default function OrdersPage() {
 
   useEffect(() => { load() }, [load])
 
-  // derived pagination flags
-  const totalPages = useMemo(() => {
-    if (total == null) return null
-    return Math.max(1, Math.ceil(total / pageSize))
-  }, [total, pageSize])
-
+  const totalPages = useMemo(() => (total == null ? null : Math.max(1, Math.ceil(total / pageSize))), [total, pageSize])
   const hasPrev = page > 1
   const hasNext = totalPages != null ? page < totalPages : orders.length === pageSize
-
   const goPrev = () => { if (hasPrev) setPage((p) => p - 1) }
   const goNext = () => { if (hasNext) setPage((p) => p + 1) }
   const goto = (p: number) => { if (p >= 1 && (totalPages == null || p <= totalPages)) setPage(p) }
@@ -143,7 +149,7 @@ export default function OrdersPage() {
     const start = Math.max(1, page - Math.floor(maxToShow / 2))
     const end = Math.min(totalPages, start + maxToShow - 1)
     const first = Math.max(1, end - maxToShow + 1)
-    const arr = []
+    const arr: number[] = []
     for (let i = first; i <= end; i++) arr.push(i)
     return arr
   }, [page, totalPages])
@@ -170,23 +176,16 @@ export default function OrdersPage() {
   const paginationBar = (
     <div className="flex items-center justify-between mt-6">
       <div className="text-sm text-slate-600">
-        {total != null ? (
-          <>Page <span className="font-medium">{page}</span> of <span className="font-medium">{totalPages}</span> • {total} total</>
-        ) : (
-          <>Page <span className="font-medium">{page}</span></>
-        )}
+        {total != null
+          ? <>Page <span className="font-medium">{page}</span> of <span className="font-medium">{totalPages}</span> • {total} total</>
+          : <>Page <span className="font-medium">{page}</span></>}
       </div>
       <div className="flex items-center gap-1">
         <Button variant="outline" size="sm" onClick={goPrev} disabled={!hasPrev} className="gap-1">
           <ChevronLeft className="h-4 w-4" /> Prev
         </Button>
         {pageButtons && pageButtons.map((p) => (
-          <Button
-            key={p}
-            variant={p === page ? "default" : "outline"}
-            size="sm"
-            onClick={() => goto(p)}
-          >
+          <Button key={p} variant={p === page ? "default" : "outline"} size="sm" onClick={() => goto(p)}>
             {p}
           </Button>
         ))}
@@ -201,9 +200,7 @@ export default function OrdersPage() {
     if (loading) {
       return (
         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Loading orders…</CardTitle>
-          </CardHeader>
+          <CardHeader><CardTitle className="text-lg">Loading orders…</CardTitle></CardHeader>
           <CardContent className="text-sm text-muted-foreground">Please wait.</CardContent>
         </Card>
       )
@@ -233,23 +230,22 @@ export default function OrdersPage() {
         <div className="space-y-6">
           {orders.map((order) => {
             const steps = buildTracking(order.status)
-            const created = order.createdAt ? new Date(order.createdAt) : null
-            const createdStr = created ? created.toLocaleString() : ""
+            const createdStr = order.createdAt ? new Date(order.createdAt).toLocaleString() : ""
+            const count = order.itemsCount ?? order.items.length
             return (
               <Card key={order.id}>
                 <CardHeader>
                   <div className="flex items-start justify-between">
                     <div>
                       <CardTitle className="text-lg">
-                        <button
-                          onClick={() => router.push(`/orders/${order.id}`)}
-                          className="text-left hover:underline"
-                        >
+                        <button onClick={() => router.push(`/orders/${order.id}`)} className="text-left hover:underline">
                           {order.id}
                         </button>
                       </CardTitle>
                       <CardDescription>
-                        {createdStr} {createdStr ? "• " : ""}{order.sellerName}
+                        {createdStr} {createdStr ? "• " : ""}
+                        {count ? `${count} item${count === 1 ? "" : "s"} • ` : ""}
+                        {order.sellerName}
                       </CardDescription>
                     </div>
                     <div className="flex items-center gap-2">
@@ -260,35 +256,20 @@ export default function OrdersPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
-                    {/* Tracking Steps */}
                     <div className="relative">
                       <div className="space-y-4">
                         {steps.map((step, index) => (
                           <div key={index} className="flex items-start gap-3">
                             <div className="relative">
-                              <div
-                                className={`h-8 w-8 rounded-full flex items-center justify-center ${
-                                  step.completed ? "bg-green-600" : "bg-slate-200"
-                                }`}
-                              >
-                                {step.completed ? (
-                                  <CheckCircle className="h-5 w-5 text-white" />
-                                ) : (
-                                  <Clock className="h-5 w-5 text-slate-400" />
-                                )}
+                              <div className={`h-8 w-8 rounded-full flex items-center justify-center ${step.completed ? "bg-green-600" : "bg-slate-200"}`}>
+                                {step.completed ? <CheckCircle className="h-5 w-5 text-white" /> : <Clock className="h-5 w-5 text-slate-400" />}
                               </div>
                               {index < steps.length - 1 && (
-                                <div
-                                  className={`absolute left-4 top-8 w-0.5 h-8 ${
-                                    step.completed ? "bg-green-600" : "bg-slate-200"
-                                  }`}
-                                />
+                                <div className={`absolute left-4 top-8 w-0.5 h-8 ${step.completed ? "bg-green-600" : "bg-slate-200"}`} />
                               )}
                             </div>
                             <div className="flex-1 pt-1">
-                              <p className={`font-medium ${step.completed ? "text-slate-900" : "text-slate-500"}`}>
-                                {step.label}
-                              </p>
+                              <p className={`font-medium ${step.completed ? "text-slate-900" : "text-slate-500"}`}>{step.label}</p>
                             </div>
                           </div>
                         ))}
