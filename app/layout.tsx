@@ -11,6 +11,10 @@ export const metadata: Metadata = {
   title: "ihute.rw - Shop Everything You Need",
   description: "Rwanda's premier online marketplace for pharmacy, groceries, fashion, and more",
   generator: "v0.app",
+  icons: {
+    icon: "/images/ishyiga-logo.png",
+    apple: "/images/ishyiga-logo.png",
+  },
 }
 
 export default function RootLayout({

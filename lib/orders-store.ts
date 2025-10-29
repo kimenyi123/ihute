@@ -29,6 +29,7 @@ export type Order = {
   // ✨ Supplier view fields
   buyerId?: string
   buyerName?: string
+  isGuest?: boolean
 }
 
 type OrdersState = {

@@ -22,8 +22,7 @@ export function BusinessList({
   const trackRef = useRef<HTMLDivElement | null>(null)
 
   function getApiBase() {
-    if (process.env.NEXT_PUBLIC_API_BASE) return process.env.NEXT_PUBLIC_API_BASE
-    if (typeof window !== "undefined") return window.location.origin
+    // Always use empty string to make relative calls to Next.js API routes
     return ""
   }
 
@@ -34,7 +33,7 @@ export function BusinessList({
       setError(null)
       try {
         const base = getApiBase()
-        const url = `${base}/Trading/Kaos/fetchSuggestions?listSuppliersBySector=${encodeURIComponent(categoryId)}`
+        const url = `${base}/api/fetchSuggestions?listSuppliersBySector=${encodeURIComponent(categoryId)}`
         const res = await fetch(url, { cache: "no-store" })
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const data = (await res.json()) as Array<any>

@@ -55,6 +55,7 @@ export async function POST(req: Request) {
     // Build shared fields
     const shared = {
       buyerEmail,
+      buyerName: String(bodyIn.buyerName ?? ""),
       buyerPhone: String(bodyIn.buyerPhone ?? ""),
       buyerLocation: String(bodyIn.buyerLocation ?? "NA"),
       sellerAccount,
@@ -97,6 +98,7 @@ export async function POST(req: Request) {
           const form = new URLSearchParams()
           form.set("action", "createOrder")
           form.set("buyerEmail", shared.buyerEmail)
+          if (shared.buyerName) form.set("buyerName", shared.buyerName)
           form.set("buyerPhone", shared.buyerPhone)
           form.set("buyerLocation", shared.buyerLocation)
           form.set("sellerAccount", shared.sellerAccount)

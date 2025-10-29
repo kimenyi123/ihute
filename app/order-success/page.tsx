@@ -1,255 +1,236 @@
-// app/orders/page.tsx
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
-import { useRouter } from "next/navigation"
-import { useAuthStore } from "@/lib/auth-store"
+import { useEffect, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Truck, CheckCircle, Clock } from "lucide-react"
-import { useOrdersStore, type Order } from "@/lib/orders-store"
+import { CheckCircle, MessageCircle, Copy, ArrowRight } from "lucide-react"
 
-type RawTxn = {
-  ID_ORDER?: string
-  SELLER_NAMES?: string
-  SELLER_OWNER?: string
-  SELLER_ISHYIGA_ACCOUNT?: string
-  AMOUNT?: number
-  PAYMENT_NAME?: string
-  BUYER_ISHYIGA_ACCOUNT?: string
-  BUYER_OWNER?: string
-  momo?: string
-  CREATED_AT?: string           // backend timestamp (ISO or parseable)
-  ITEMS_COUNT?: number          // backend item count (optional)
-  items?: Array<unknown>        // optional: if you also return an array of items
+function normalizePhone(raw?: string | null): string {
+  let v = (raw || "").replace(/\s|-/g, "")
+  if (!v) return ""
+  if (v.startsWith("+250") || v.startsWith("+258")) return v
+  if (v.startsWith("250")) return "+" + v
+  if (v.startsWith("00250")) return "+250" + v.slice(5)
+  if (/^0?7\d{8}$/.test(v)) return "+250" + v.replace(/^0/, "")
+  return v.startsWith("+25") ? v : "+25" + v
 }
 
-function mapPaymentToStatus(name?: string): Order["status"] {
-  const s = (name || "").toLowerCase()
-  if (s.includes("delivered") || s.includes("completed")) return "delivered"
-  if (s.includes("transit") || s.includes("shipped") || s.includes("out")) return "in-transit"
-  if (s.includes("pending")) return "pending"
-  if (s.includes("paid") || s.includes("success") || s.includes("processing")) return "processing"
-  return "processing"
+function waHrefFor(phone: string, text: string) {
+  const p = phone.replace(/^\+/, "")
+  const encoded = encodeURIComponent(text)
+  return `https://wa.me/${p}?text=${encoded}`
 }
 
-function statusIcon(status: Order["status"]) {
-  switch (status) {
-    case "delivered":
-      return <CheckCircle className="h-5 w-5 text-green-600" />
-    case "in-transit":
-      return <Truck className="h-5 w-5 text-blue-600" />
-    default:
-      return <Clock className="h-5 w-5 text-yellow-600" />
-  }
-}
-
-function statusBadge(status: Order["status"]) {
-  const variant = status === "delivered" ? "default" : status === "in-transit" ? "secondary" : "outline"
-  return (
-    <Badge variant={variant as any} className="capitalize">
-      {status.replace("-", " ")}
-    </Badge>
-  )
-}
-
-function buildTracking(status: Order["status"]) {
-  return [
-    { label: "Order Placed", completed: true, date: "" },
-    { label: "Processing", completed: status !== "pending", date: "" },
-    { label: "Out for Delivery", completed: status === "in-transit" || status === "delivered", date: "" },
-    { label: "Delivered", completed: status === "delivered", date: "" },
-  ]
-}
-
-export default function OrdersPage() {
+export default function OrderSuccessPage() {
   const router = useRouter()
-  const { user, isAuthenticated } = useAuthStore()
-  const { orders, setOrders } = useOrdersStore()
-  const [loading, setLoading] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
+  const searchParams = useSearchParams()
+
+  const orderId = searchParams.get("orderId")
+  const sellerName = searchParams.get("sellerName")
+  const sellerPhone = searchParams.get("sellerPhone")
+  const buyerPhone = searchParams.get("buyerPhone")
+  const total = searchParams.get("total")
+
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
-    if (!isAuthenticated) router.push("/login")
-  }, [isAuthenticated, router])
-
-  useEffect(() => {
-    let cancel = false
-    async function load() {
-      if (!user?.email) return
-      setLoading(true)
-      setErr(null)
-      try {
-        const res = await fetch("/api/orders", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: user.email }),
-          cache: "no-store",
-        })
-        const json = await res.json()
-        if (!res.ok || json?.ok === false) throw new Error(json?.error || "Failed to load orders")
-
-        const txns: RawTxn[] = Array.isArray(json?.transactions) ? json.transactions : []
-
-        const mapped: Order[] = txns.map((t) => {
-          const itemsCount =
-            typeof t.ITEMS_COUNT === "number"
-              ? t.ITEMS_COUNT
-              : Array.isArray(t.items)
-              ? t.items.length
-              : 0
-
-          return {
-            id: String(t.ID_ORDER ?? ""),
-            sellerId: String(t.SELLER_ISHYIGA_ACCOUNT ?? ""),
-            sellerName: t.SELLER_NAMES || t.SELLER_OWNER || t.SELLER_ISHYIGA_ACCOUNT || "Supplier",
-            sellerLocation: undefined,
-            momo: t.momo ?? undefined,
-            items: [], // you can load detail items in a future call
-            itemsCount,                         // 👈 show count from backend
-            subtotal: Number(t.AMOUNT ?? 0),
-            status: mapPaymentToStatus(t.PAYMENT_NAME),
-            paymentStatus: "paid",              // or map a separate field if you return it
-            createdAt: t.CREATED_AT || new Date().toISOString(), // 👈 real timestamp
-          }
-        })
-
-        if (!cancel) setOrders(mapped)
-      } catch (e: any) {
-        if (!cancel) setErr(e?.message || "Failed to load orders")
-      } finally {
-        if (!cancel) setLoading(false)
-      }
+    if (!orderId) {
+      router.push("/")
     }
-    load()
-    return () => {
-      cancel = true
-    }
-  }, [user?.email, setOrders])
+  }, [orderId, router])
 
-  const content = useMemo(() => {
-    if (loading) {
-      return (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Loading orders…</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">Please wait.</CardContent>
-        </Card>
-      )
-    }
-    if (err) {
-      return (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Couldn’t load orders</CardTitle>
-            <CardDescription className="text-destructive">{err}</CardDescription>
-          </CardHeader>
-        </Card>
-      )
-    }
-    if (!orders.length) {
-      return (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">No orders yet</CardTitle>
-            <CardDescription>Your placed orders will appear here.</CardDescription>
-          </CardHeader>
-        </Card>
-      )
-    }
-    return (
-      <div className="space-y-6">
-        {orders.map((order) => {
-          const steps = buildTracking(order.status)
-          const created = order.createdAt ? new Date(order.createdAt) : null
-          const createdStr = created ? created.toLocaleString() : ""
-          const count = order.itemsCount ?? order.items.length
-          return (
-            <Card key={order.id}>
-              <CardHeader>
-                <div className="flex items-start justify-between">
-                  <div>
-                    <CardTitle className="text-lg">{order.id}</CardTitle>
-                    <CardDescription>
-                      {createdStr} {createdStr ? "• " : ""}
-                      {count ? `${count} item${count === 1 ? "" : "s"} • ` : ""}
-                      {order.sellerName}
-                    </CardDescription>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {statusIcon(order.status)}
-                    {statusBadge(order.status)}
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {/* Tracking Steps */}
-                  <div className="relative">
-                    <div className="space-y-4">
-                      {steps.map((step, index) => (
-                        <div key={index} className="flex items-start gap-3">
-                          <div className="relative">
-                            <div
-                              className={`h-8 w-8 rounded-full flex items-center justify-center ${
-                                step.completed ? "bg-green-600" : "bg-slate-200"
-                              }`}
-                            >
-                              {step.completed ? (
-                                <CheckCircle className="h-5 w-5 text-white" />
-                              ) : (
-                                <Clock className="h-5 w-5 text-slate-400" />
-                              )}
-                            </div>
-                            {index < steps.length - 1 && (
-                              <div
-                                className={`absolute left-4 top-8 w-0.5 h-8 ${
-                                  step.completed ? "bg-green-600" : "bg-slate-200"
-                                }`}
-                              />
-                            )}
-                          </div>
-                          <div className="flex-1 pt-1">
-                            <p className={`font-medium ${step.completed ? "text-slate-900" : "text-slate-500"}`}>
-                              {step.label}
-                            </p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+  if (!orderId) {
+    return null
+  }
 
-                  <div className="flex items-center justify-between pt-4 border-t">
-                    <div>
-                      <p className="text-sm text-slate-600">Total Amount</p>
-                      <p className="text-lg font-bold text-slate-900">{order.subtotal.toLocaleString()} RWF</p>
-                    </div>
-                    <Button variant="outline" size="sm" onClick={() => { /* router.push(`/orders/${order.id}`) */ }}>
-                      View Details
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )
-        })}
-      </div>
-    )
-  }, [orders, loading, err])
+  const trackingUrl = `${window.location.origin}/track-order/${orderId}`
+
+  // Build WhatsApp message in the same format as cart-summary
+  const whatsappMessage = [
+    'Order',
+    '',
+    `Shop: ${sellerName}`,
+    `Order ID: ${orderId}`,
+    '',
+    `Total: ${Number(total).toLocaleString()} RWF`,
+    `My phone: ${buyerPhone}`,
+    '',
+    `Follow: ${trackingUrl}`
+  ].filter(Boolean).join('\n')
+
+  const sellerPhoneNormalized = normalizePhone(sellerPhone)
+  const whatsappHref = sellerPhoneNormalized ? waHrefFor(sellerPhoneNormalized, whatsappMessage) : ""
+
+  const copyTrackingUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(trackingUrl)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch (err) {
+      console.error("Failed to copy:", err)
+    }
+  }
 
   return (
     <div className="min-h-screen bg-slate-50">
       <Header />
-      <main className="container mx-auto px-4 py-8">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-slate-900">My Orders</h1>
-          <p className="text-slate-600">Track and manage your orders</p>
+      <main className="container mx-auto px-4 py-12">
+        <div className="max-w-2xl mx-auto space-y-6">
+          {/* Success Message */}
+          <Card className="border-2 border-green-200 bg-green-50">
+            <CardHeader className="text-center pb-4">
+              <div className="flex justify-center mb-4">
+                <div className="h-16 w-16 rounded-full bg-green-600 flex items-center justify-center">
+                  <CheckCircle className="h-10 w-10 text-white" />
+                </div>
+              </div>
+              <CardTitle className="text-2xl text-green-900">Order Placed Successfully!</CardTitle>
+              <p className="text-green-700 mt-2">
+                Your order has been received and is being processed
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="bg-white rounded-lg p-4 space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Order ID:</span>
+                  <span className="font-mono font-bold">{orderId}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Seller:</span>
+                  <span className="font-medium">{sellerName}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Total:</span>
+                  <span className="font-bold">{Number(total).toLocaleString()} RWF</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Order Tracking */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Track Your Order</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="bg-slate-100 rounded-lg p-4">
+                <p className="text-xs text-muted-foreground mb-2">Order Tracking URL:</p>
+                <div className="flex gap-2">
+                  <code className="flex-1 bg-white px-3 py-2 rounded text-sm break-all border">
+                    {trackingUrl}
+                  </code>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={copyTrackingUrl}
+                    className="shrink-0"
+                  >
+                    {copied ? <CheckCircle className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                  </Button>
+                </div>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Save this link to track your order status anytime. You can also access it from the WhatsApp message sent to the seller.
+              </p>
+            </CardContent>
+          </Card>
+
+          {/* WhatsApp Notification */}
+          {sellerPhoneNormalized && (
+            <Card className="border-2 border-green-100">
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <MessageCircle className="h-5 w-5 text-[#25D366]" />
+                  Contact Seller on WhatsApp
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                  <p className="text-sm text-green-900 mb-3">
+                    <strong>Important:</strong> Click below to send your order details to the seller via WhatsApp.
+                    This helps ensure faster processing and delivery.
+                  </p>
+                  <Button
+                    className="w-full bg-[#25D366] hover:bg-[#20b05a] text-white"
+                    size="lg"
+                    asChild
+                  >
+                    <a href={whatsappHref} target="_blank" rel="noopener noreferrer">
+                      <MessageCircle className="h-5 w-5 mr-2" />
+                      Send Order Details to Seller
+                    </a>
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  The seller will receive your order details and contact you on {buyerPhone} for delivery confirmation.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Next Steps */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">What's Next?</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex gap-3">
+                <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
+                  <span className="text-sm font-bold text-blue-700">1</span>
+                </div>
+                <div>
+                  <p className="font-medium">Order Confirmation</p>
+                  <p className="text-sm text-muted-foreground">
+                    The seller will review your order and confirm availability
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
+                  <span className="text-sm font-bold text-blue-700">2</span>
+                </div>
+                <div>
+                  <p className="font-medium">Preparation & Packaging</p>
+                  <p className="text-sm text-muted-foreground">
+                    Your items will be carefully prepared for delivery
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
+                  <span className="text-sm font-bold text-blue-700">3</span>
+                </div>
+                <div>
+                  <p className="font-medium">Delivery</p>
+                  <p className="text-sm text-muted-foreground">
+                    The seller will contact you to arrange delivery
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Action Buttons */}
+          <div className="flex gap-3">
+            <Button
+              variant="outline"
+              className="flex-1"
+              onClick={() => router.push("/")}
+            >
+              Continue Shopping
+            </Button>
+            <Button
+              className="flex-1"
+              onClick={() => router.push(`/track-order/${orderId}`)}
+            >
+              Track Order
+              <ArrowRight className="h-4 w-4 ml-2" />
+            </Button>
+          </div>
         </div>
-        {content}
       </main>
       <Footer />
     </div>

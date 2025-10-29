@@ -98,8 +98,7 @@ export function ProductGrid({
   const [error, setError] = useState<string | null>(null);
 
   function getApiBase() {
-    if (process.env.NEXT_PUBLIC_API_BASE) return process.env.NEXT_PUBLIC_API_BASE;
-    if (typeof window !== "undefined") return window.location.origin;
+    // Always use empty string to make relative calls to Next.js API routes
     return "";
   }
 
@@ -121,8 +120,7 @@ export function ProductGrid({
         if (selectedSupplier === "all") {
           // show random products from sellers in this category
           const res = await fetch(
-            // `${base}/api/fetchSuggestions?listSuppliersWithProducts=${encodeURIComponent(categoryId)}&Currency=RWF`,
-             `${base}/Trading/Kaos/fetchSuggestions?listSuppliersWithProducts=${encodeURIComponent(categoryId)}&Currency=RWF`,
+            `${base}/api/fetchSuggestions?listSuppliersWithProducts=${encodeURIComponent(categoryId)}&Currency=RWF`,
             { cache: "no-store" }
           );
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -143,10 +141,9 @@ export function ProductGrid({
           if (!isMounted) return;
           setServerProducts(products);
         } else {
-          // ONLY the selected supplier’s items
+          // ONLY the selected supplier's items
           const res = await fetch(
-            // `${base}/api/fetchSuggestions?supplierProducts=${encodeURIComponent(selectedSupplier)}&limit=50&Currency=RWF`,
-            `${base}/Trading/Kaos/fetchSuggestions?supplierProducts=${encodeURIComponent(selectedSupplier)}&limit=50&Currency=RWF`,
+            `${base}/api/fetchSuggestions?supplierProducts=${encodeURIComponent(selectedSupplier)}&limit=50&Currency=RWF`,
             { cache: "no-store" }
           );
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
