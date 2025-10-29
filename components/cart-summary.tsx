@@ -100,6 +100,11 @@ export function CartSummary() {
   const [selectedSeller, setSelectedSeller] = useState<string | null>(null)
   const [paymentMethod, setPaymentMethod] = useState<"momo" | "cod">("momo")
 
+  // Anonymous checkout mode
+  const [checkoutMode, setCheckoutMode] = useState<"login" | "anonymous">(isAuthenticated ? "login" : "anonymous")
+  const [anonymousPhone, setAnonymousPhone] = useState("")
+  const [anonymousName, setAnonymousName] = useState("")
+
   // MoMo payment dialog
   const [momoOpen, setMomoOpen] = useState(false)
   const [momoForSeller, setMomoForSeller] = useState<string | null>(null)
@@ -112,9 +117,11 @@ export function CartSummary() {
 
   const groups = getGroupsBySeller()
   const grandTotal = Math.round(getGrandTotal())
-  const myPhone = user?.phone || ""
+  const myPhone = checkoutMode === "anonymous" ? anonymousPhone : (user?.phone || "")
 
   const requireLogin = () => {
+    // If anonymous mode, don't require login
+    if (checkoutMode === "anonymous") return true
     if (!isAuthenticated) { router.push("/login"); return false }
     return true
   }
@@ -200,9 +207,10 @@ export function CartSummary() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          buyerEmail: user?.email,
-          buyerPhone: opts.buyerPhone || user?.phone || "",
-          buyerLocation: opts.buyerLocation || user?.location || "NA",
+          buyerEmail: checkoutMode === "anonymous" ? `guest_${Date.now()}@ihute.rw` : user?.email,
+          buyerPhone: opts.buyerPhone || (checkoutMode === "anonymous" ? anonymousPhone : user?.phone || ""),
+          buyerLocation: opts.buyerLocation || (checkoutMode === "anonymous" ? deliveryLocation : user?.location || "NA"),
+          buyerName: checkoutMode === "anonymous" ? anonymousName : user?.name,
           sellerAccount: g.supplierId,
           sellerName: g.supplierName,
           paymentName: opts.paymentName,
@@ -215,13 +223,33 @@ export function CartSummary() {
       const json = await res.json()
 
       if (res.ok && json?.ok) {
-        if (json.orderId) setOrderIds(m => ({ ...m, [g.supplierId]: String(json.orderId) }))
-        if (json.sellerTel) setOrderPhones(m => ({ ...m, [g.supplierId]: String(json.sellerTel) }))
-        if (opts.paymentName === "PAID_MTN_MOMO" && json.orderId) {
-          pollPayment(String(json.orderId), g.supplierId)
+        const orderId = json.orderId ? String(json.orderId) : null
+        const sellerTel = json.sellerTel ? String(json.sellerTel) : null
+
+        if (orderId) setOrderIds(m => ({ ...m, [g.supplierId]: orderId }))
+        if (sellerTel) setOrderPhones(m => ({ ...m, [g.supplierId]: sellerTel }))
+
+        if (opts.paymentName === "PAID_MTN_MOMO" && orderId) {
+          pollPayment(orderId, g.supplierId)
         }
+
         clear()
-        router.push("/orders")
+
+        // Redirect to order success page with WhatsApp details
+        if (orderId) {
+          const params = new URLSearchParams({
+            orderId,
+            sellerName: g.supplierName,
+            sellerPhone: sellerTel || "",
+            buyerPhone: checkoutMode === "anonymous" ? anonymousPhone : (user?.phone || ""),
+            total: String(g.subtotal),
+          })
+          router.push(`/order-success?${params.toString()}`)
+        } else if (checkoutMode === "login" || isAuthenticated) {
+          router.push("/orders")
+        } else {
+          router.push("/")
+        }
         router.refresh()
       } else {
         setPaymentStatus(g.supplierId, "failed")
@@ -255,12 +283,26 @@ export function CartSummary() {
   // Handle payment method selection
   const proceedWithPayment = async () => {
     if (!selectedSeller) return
-    
+
+    // If user selected "login" mode, redirect to login
+    if (checkoutMode === "login" && !isAuthenticated) {
+      router.push("/login")
+      return
+    }
+
+    // Validate anonymous user info
+    if (checkoutMode === "anonymous") {
+      if (!anonymousName.trim() || !anonymousPhone.trim()) {
+        alert("Please fill in your name and phone number")
+        return
+      }
+    }
+
     if (paymentMethod === "cod") {
       setPaymentMethodOpen(false)
       setCodForSeller(selectedSeller)
-      setDeliveryLocation(user?.location || "")
-      setContactPhone(user?.phone || "")
+      setDeliveryLocation(checkoutMode === "anonymous" ? "" : user?.location || "")
+      setContactPhone(checkoutMode === "anonymous" ? anonymousPhone : user?.phone || "")
       setCodOpen(true)
       setSelectedSeller(null)
     } else {
@@ -354,31 +396,28 @@ export function CartSummary() {
                 )}
 
                 {/* WhatsApp actions */}
-                <div className="flex gap-2 pt-2">
-                  <Button
-                    className="flex-1 bg-[#25D366] hover:bg-[#20b05a]"
-                    asChild
-                    disabled={!wa?.phone || !isAuthenticated}
-                    title={
-                      !isAuthenticated
-                        ? "Sign in to contact seller"
-                        : (wa?.phone ? `Send order via WhatsApp to ${wa.phone}` : "No seller WhatsApp number")
-                    }
-                  >
-                    <a href={isAuthenticated ? (wa?.href || "#") : "#"} target="_blank" rel="noopener noreferrer">
-                      <MessageCircle className="h-4 w-4 mr-2" /> Send WhatsApp
-                    </a>
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="flex-1"
-                    onClick={async () => { try { await navigator.clipboard.writeText(wa?.message || "") } catch {} }}
-                    disabled={!isAuthenticated}
-                    title={isAuthenticated ? "Copy WhatsApp message" : "Sign in to copy"}
-                  >
-                    <MessageCircle className="h-4 w-4 mr-2" /> Copy message
-                  </Button>
-                </div>
+                {(status === "paid" || status === "pending") && (
+                  <div className="flex gap-2 pt-2">
+                    <Button
+                      className="flex-1 bg-[#25D366] hover:bg-[#20b05a]"
+                      asChild
+                      disabled={!wa?.phone}
+                      title={wa?.phone ? `Send order via WhatsApp to ${wa.phone}` : "No seller WhatsApp number"}
+                    >
+                      <a href={wa?.href || "#"} target="_blank" rel="noopener noreferrer">
+                        <MessageCircle className="h-4 w-4 mr-2" /> Send WhatsApp
+                      </a>
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="flex-1"
+                      onClick={async () => { try { await navigator.clipboard.writeText(wa?.message || "") } catch {} }}
+                      title="Copy WhatsApp message"
+                    >
+                      <MessageCircle className="h-4 w-4 mr-2" /> Copy message
+                    </Button>
+                  </div>
+                )}
               </CardContent>
             </Card>
           )
@@ -397,12 +436,60 @@ export function CartSummary() {
 
       {/* Payment method selection dialog */}
       <Dialog open={paymentMethodOpen} onOpenChange={setPaymentMethodOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Choose Payment Method</DialogTitle>
             <DialogDescription>Select how you'd like to pay for this order</DialogDescription>
           </DialogHeader>
-          
+
+          {/* Checkout Mode Selection */}
+          {!isAuthenticated && (
+            <div className="space-y-3 pb-4 border-b">
+              <Label className="text-sm font-medium">Checkout as:</Label>
+              <RadioGroup value={checkoutMode} onValueChange={(v) => setCheckoutMode(v as "login" | "anonymous")}>
+                <div className="flex items-center space-x-3 border rounded-lg p-3 cursor-pointer hover:bg-accent" onClick={() => setCheckoutMode("login")}>
+                  <RadioGroupItem value="login" id="checkout-login" />
+                  <Label htmlFor="checkout-login" className="cursor-pointer flex-1">
+                    <div className="font-medium">Sign in to checkout</div>
+                    <div className="text-xs text-muted-foreground">Track your orders easily</div>
+                  </Label>
+                </div>
+                <div className="flex items-center space-x-3 border rounded-lg p-3 cursor-pointer hover:bg-accent" onClick={() => setCheckoutMode("anonymous")}>
+                  <RadioGroupItem value="anonymous" id="checkout-anonymous" />
+                  <Label htmlFor="checkout-anonymous" className="cursor-pointer flex-1">
+                    <div className="font-medium">Continue as guest</div>
+                    <div className="text-xs text-muted-foreground">No account needed</div>
+                  </Label>
+                </div>
+              </RadioGroup>
+            </div>
+          )}
+
+          {/* Anonymous user info collection */}
+          {checkoutMode === "anonymous" && (
+            <div className="space-y-3 pb-4 border-b">
+              <div className="space-y-1">
+                <Label className="text-sm font-medium">Your Name *</Label>
+                <Input
+                  value={anonymousName}
+                  onChange={(e) => setAnonymousName(e.target.value)}
+                  placeholder="Enter your full name"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-sm font-medium">Phone Number *</Label>
+                <Input
+                  value={anonymousPhone}
+                  onChange={(e) => setAnonymousPhone(e.target.value)}
+                  placeholder="+250..."
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Your order details and tracking link will be sent via WhatsApp
+              </p>
+            </div>
+          )}
+
           <RadioGroup value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as "momo" | "cod")}>
             <div className="space-y-3">
               {selectedSeller && (() => {
@@ -458,18 +545,32 @@ export function CartSummary() {
             <DialogDescription>We'll hold the order and you can pay on delivery.</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
+            {checkoutMode === "anonymous" && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-2">
+                <div className="text-sm">
+                  <span className="text-muted-foreground">Name: </span>
+                  <span className="font-medium">{anonymousName}</span>
+                </div>
+                <div className="text-sm">
+                  <span className="text-muted-foreground">Phone: </span>
+                  <span className="font-medium">{anonymousPhone}</span>
+                </div>
+              </div>
+            )}
             <div className="space-y-1">
-              <label className="text-sm font-medium">Delivery location</label>
+              <label className="text-sm font-medium">Delivery location *</label>
               <Input value={deliveryLocation} onChange={(e) => setDeliveryLocation(e.target.value)} placeholder="e.g., Kigali, Kacyiru, Plot 12" />
             </div>
-            <div className="space-y-1">
-              <label className="text-sm font-medium">Contact phone</label>
-              <Input value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} placeholder="+2507…" />
-            </div>
+            {checkoutMode !== "anonymous" && (
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Contact phone</label>
+                <Input value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} placeholder="+2507…" />
+              </div>
+            )}
           </div>
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setCodOpen(false)}>Cancel</Button>
-            <Button onClick={submitCOD} disabled={!deliveryLocation || !contactPhone}>
+            <Button onClick={submitCOD} disabled={!deliveryLocation}>
               <Truck className="h-4 w-4 mr-2" />
               Place order (COD)
             </Button>

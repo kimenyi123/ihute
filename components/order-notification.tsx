@@ -136,8 +136,8 @@ export function OrderNotification() {
             const deduped = recent.filter((n: OrderNotification) => !seen.has(String(n.orderId)))
             const merged = [...deduped, ...prev].slice(0, 5)
 
-            // auto-open when new items arrive (if not pinned open already)
-            if (!pinned && deduped.length > 0 && !showNotifications) {
+            // Only auto-open if pinned (don't auto-reopen if user manually closed it)
+            if (pinned && deduped.length > 0) {
               setShowNotifications(true)
             }
             return merged

@@ -8,7 +8,7 @@ import { Footer } from "@/components/footer"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Truck, CheckCircle, Clock, ChevronLeft, ChevronRight } from "lucide-react"
+import { Truck, CheckCircle, Clock, ChevronLeft, ChevronRight, RotateCw } from "lucide-react"
 import { useOrdersStore, type Order } from "@/lib/orders-store"
 
 type RawTxn = {
@@ -18,9 +18,11 @@ type RawTxn = {
   SELLER_ISHYIGA_ACCOUNT?: string
   AMOUNT?: number
   PAYMENT_NAME?: string
-  PAYMENT_STATUS?: string // Add this line
+  PAYMENT_STATUS?: string
   BUYER_ISHYIGA_ACCOUNT?: string
   BUYER_OWNER?: string
+  BUYER_NAME?: string
+  BUYER_EMAIL?: string
   momo?: string
   CREATED_AT?: string
 }
@@ -83,6 +85,7 @@ export default function SupplierOrdersPage() {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [total, setTotal] = useState<number | null>(null)
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
 
   // Redirect to login if not authenticated
   useEffect(() => {
@@ -120,7 +123,11 @@ export default function SupplierOrdersPage() {
   const paymentName = t.PAYMENT_NAME || ""
   const paymentStatus = t.PAYMENT_STATUS || ""
   const isCOD = /(pay[_\s-]*on[_\s-]*delivery|cod)/i.test(paymentName)
-  
+
+  // Detect guest buyers
+  const buyerEmail = t.BUYER_EMAIL || ""
+  const isGuestBuyer = buyerEmail.startsWith("guest_") || !t.BUYER_ISHYIGA_ACCOUNT
+
   return {
     id: String(t.ID_ORDER ?? ""),
     sellerId: String(t.SELLER_ISHYIGA_ACCOUNT ?? ""),
@@ -133,11 +140,13 @@ export default function SupplierOrdersPage() {
     paymentStatus: isCOD ? "unpaid" : "paid",
     createdAt: t.CREATED_AT || new Date().toISOString(),
     buyerId: t.BUYER_ISHYIGA_ACCOUNT ?? undefined,
-    buyerName: t.BUYER_OWNER ?? t.BUYER_ISHYIGA_ACCOUNT ?? "Customer",
+    buyerName: t.BUYER_OWNER ?? t.BUYER_NAME ?? t.BUYER_ISHYIGA_ACCOUNT ?? "Guest Buyer",
+    isGuest: isGuestBuyer,
   }
 })
     setOrders(mapped)
     setTotal(Number.isFinite(json?.total) ? Number(json.total) : null)
+    setLastRefresh(new Date()) // Update last refresh timestamp
   } catch (e: any) {
     setErr(e?.message || "Failed to load orders")
   } finally {
@@ -146,6 +155,15 @@ export default function SupplierOrdersPage() {
 }, [user?.ishyigaAccount, page, pageSize, setOrders])
 
   useEffect(() => { loadOrders() }, [loadOrders])
+
+  // Auto-refresh every 30 seconds to check for new orders
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadOrders()
+    }, 30000) // 30 seconds
+
+    return () => clearInterval(interval)
+  }, [loadOrders])
 
   // Pagination helpers
   const totalPages = useMemo(() => (total != null ? Math.max(1, Math.ceil(total / pageSize)) : null), [total, pageSize])
@@ -175,17 +193,36 @@ export default function SupplierOrdersPage() {
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">My Orders</h1>
-            <p className="text-slate-600">Track and manage orders for your shop</p>
+            <p className="text-slate-600">
+              Track and manage orders for your shop
+              {lastRefresh && (
+                <span className="ml-2 text-xs text-slate-500">
+                  • Last updated: {lastRefresh.toLocaleTimeString()}
+                </span>
+              )}
+            </p>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-slate-600">Rows:</span>
-            <select
-              className="border rounded-md px-2 py-1 text-sm"
-              value={pageSize}
-              onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1) }}
+          <div className="flex items-center gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={loadOrders}
+              disabled={loading}
+              className="gap-2"
             >
-              {[10, 20, 50, 100].map((n) => <option key={n} value={n}>{n}</option>)}
-            </select>
+              <RotateCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-slate-600">Rows:</span>
+              <select
+                className="border rounded-md px-2 py-1 text-sm"
+                value={pageSize}
+                onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1) }}
+              >
+                {[10, 20, 50, 100].map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
           </div>
         </div>
 
@@ -225,8 +262,15 @@ export default function SupplierOrdersPage() {
                               {order.id}
                             </button>
                           </CardTitle>
-                          <CardDescription>
-                            {createdStr} {createdStr ? "• " : ""}{order.buyerName}
+                          <CardDescription className="flex items-center gap-2 flex-wrap">
+                            <span>{createdStr}</span>
+                            {createdStr && <span>•</span>}
+                            <span className="font-medium">{order.buyerName}</span>
+                            {order.isGuest && (
+                              <Badge variant="secondary" className="bg-amber-100 text-amber-800 border-amber-200 text-xs">
+                                Guest
+                              </Badge>
+                            )}
                           </CardDescription>
                         </div>
                         <div className="flex items-center gap-2">

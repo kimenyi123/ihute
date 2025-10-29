@@ -117,8 +117,7 @@ export function GlobalSearch({
           ...(location ? { location } : {}),
         }).toString()
 
-        // const res = await fetch(`/api/fetchSuggestions?${params}`, { cache: "no-store" })
-        const res = await fetch(`Trading/Kaos/fetchSuggestions?${params}`, { cache: "no-store" })
+        const res = await fetch(`/api/fetchSuggestions?${params}`, { cache: "no-store" })
         if (!res.ok) throw new Error(`Search failed: ${res.status}`)
         const json: GlobalSearchResponse = await res.json()
 

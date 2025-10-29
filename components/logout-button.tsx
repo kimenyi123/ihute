@@ -14,20 +14,20 @@ interface LogoutButtonProps {
 
 /**
  * Logout button component that properly clears all user data
- * and redirects to login page
+ * and redirects to home page
  */
-export function LogoutButton({ 
-  variant = "outline", 
-  size = "default", 
+export function LogoutButton({
+  variant = "outline",
+  size = "default",
   className,
-  children 
+  children
 }: LogoutButtonProps) {
   const logout = useAuthStore((state) => state.logout)
   const router = useRouter()
 
   const handleLogout = () => {
     logout()
-    router.push("/login")
+    router.push("/")
   }
 
   return (

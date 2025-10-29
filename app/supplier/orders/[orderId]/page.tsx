@@ -45,10 +45,10 @@ function getPaymentStatus(order: any): { status: string; displayName: string; is
   }
   
   // Default fallback
-  return { 
-    status: paymentStatus || 'pending', 
-    displayName: order?.PAYMENT_NAME || 'Pending Payment', 
-    isPaid: paymentStatus === 'paid' 
+  return {
+    status: paymentStatus || 'pending',
+    displayName: order?.PAYMENT_NAME || 'Pending',
+    isPaid: paymentStatus === 'paid'
   }
 }
 
@@ -156,7 +156,7 @@ export default function SupplierOrderDetailsPage() {
   const totalOf = (it: any) => Math.round(qtyOf(it) * unitPriceOf(it))
   const n = (v: number) => Number(v || 0).toLocaleString()
 
-  const { order, buyer, items, created, currency, grandTotal, paymentInfo, orderStatus } = useMemo(() => {
+  const { order, buyer, items, created, currency, grandTotal, paymentInfo, orderStatus, isGuestBuyer } = useMemo(() => {
     const order = detail?.order
     const buyer = detail?.buyer
     const items = detail?.items ?? []
@@ -165,12 +165,17 @@ export default function SupplierOrderDetailsPage() {
       : null
     const currency = order?.CURRENCY || "RWF"
     const grandTotal = items.reduce((sum, it) => sum + totalOf(it), 0)
-    
+
     // Get payment and order status
     const paymentInfo = getPaymentStatus(order)
     const orderStatus = getOrderStatus(order, paymentInfo)
-    
-    return { order, buyer, items, created, currency, grandTotal, paymentInfo, orderStatus }
+
+    // Detect if buyer is a guest (anonymous checkout)
+    // Guest buyers have email like "guest_timestamp@ihute.rw" or no BUYER_ISHYIGA_ACCOUNT
+    const buyerEmail = order?.BUYER_EMAIL || buyer?.EMAIL || ""
+    const isGuestBuyer = buyerEmail.startsWith("guest_") || !order?.BUYER_ISHYIGA_ACCOUNT
+
+    return { order, buyer, items, created, currency, grandTotal, paymentInfo, orderStatus, isGuestBuyer }
   }, [detail])
 
   // --- initial skeleton while store hydrates ---
@@ -265,22 +270,38 @@ export default function SupplierOrderDetailsPage() {
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Buyer</CardTitle>
-                  <CardDescription>Contact & identity</CardDescription>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>Buyer</CardTitle>
+                      <CardDescription>Contact & identity</CardDescription>
+                    </div>
+                    {isGuestBuyer && (
+                      <Badge variant="secondary" className="bg-amber-100 text-amber-800 border-amber-200">
+                        Guest
+                      </Badge>
+                    )}
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-2">
                   <div className="flex items-center gap-2 text-slate-800">
                     <User2 className="h-4 w-4" />
-                    <span>{buyer?.OWNER || buyer?.NAMES || "GUEST"}</span>
+                    <span className="font-medium">{order?.BUYER_OWNER || order?.BUYER_NAME || buyer?.OWNER || buyer?.NAMES || "Guest Buyer"}</span>
                   </div>
                   <div className="flex items-center gap-2 text-slate-700">
                     <Phone className="h-4 w-4" />
-                    <span>{buyer?.PHONE || "NA"}</span>
+                    <span>{order?.BUYER_PHONE || buyer?.PHONE || order?.BUYER_TEL || "Not provided"}</span>
                   </div>
                   <div className="flex items-center gap-2 text-slate-700">
                     <MapPin className="h-4 w-4" />
-                    <span>{order?.DELIVERY_LOCATION || "NA"}</span>
+                    <span>{order?.DELIVERY_LOCATION || "Not provided"}</span>
                   </div>
+                  {isGuestBuyer && (
+                    <div className="mt-3 pt-3 border-t">
+                      <p className="text-xs text-amber-700 bg-amber-50 p-2 rounded">
+                        ℹ️ This buyer checked out as a guest without creating an account
+                      </p>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </div>
