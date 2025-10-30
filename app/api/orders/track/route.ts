@@ -13,12 +13,23 @@ function log(requestId: string, ...args: any[]) {
 
 type OrderStatus = "pending" | "processing" | "in-transit" | "delivered"
 
-function mapPaymentToStatus(name?: string): OrderStatus {
-  const s = (name || "").toLowerCase()
-  if (s.includes("delivered") || s.includes("completed")) return "delivered"
-  if (s.includes("transit") || s.includes("shipped") || s.includes("out")) return "in-transit"
-  if (s.includes("pending")) return "pending"
-  if (s.includes("paid") || s.includes("success") || s.includes("processing")) return "processing"
+function mapPaymentToStatus(orderStatus?: string, paymentStatus?: string): OrderStatus {
+  // Priority 1: Check ORDER_STATUS if it exists
+  if (orderStatus) {
+    const s = orderStatus.toLowerCase()
+    if (s.includes("delivered") || s.includes("completed")) return "delivered"
+    if (s.includes("transit") || s.includes("shipped") || s.includes("out")) return "in-transit"
+  }
+  
+  // Priority 2: Check PAYMENT_STATUS
+  if (paymentStatus) {
+    const p = paymentStatus.toLowerCase()
+    if (p === "paid" || p === "success") return "processing"
+    if (p === "pending") return "pending"
+    if (p === "failed") return "pending"
+  }
+  
+  // Default to processing
   return "processing"
 }
 
@@ -39,31 +50,102 @@ export async function POST(req: NextRequest) {
 
     log(requestId, `Fetching order details for orderId=${orderId}`)
 
-    // Call Java backend to get order details
-    const url = new URL(JAVA_ORDERS_URL)
-    url.searchParams.set("action", "getOrderDetails")
-    url.searchParams.set("orderId", orderId)
+    // Try getOrderDetails first (if servlet is updated), fallback to buyerOrderDetails
+    let data: any = null
+    let usingFallback = false
 
-    log(requestId, `Calling ${url.toString()}`)
+    try {
+      // Try new endpoint first
+      const url = new URL(JAVA_ORDERS_URL)
+      url.searchParams.set("action", "getOrderDetails")
+      url.searchParams.set("orderId", orderId)
 
-    const response = await fetch(url.toString(), {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      cache: "no-store",
-    })
+      log(requestId, `Calling ${url.toString()}`)
 
-    log(requestId, `Backend responded with HTTP ${response.status}`)
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        cache: "no-store",
+      })
 
-    if (!response.ok) {
-      throw new Error(`Backend returned ${response.status}`)
+      log(requestId, `Backend responded with HTTP ${response.status}`)
+
+      if (response.ok) {
+        const result = await response.json()
+        log(requestId, "getOrderDetails response:", JSON.stringify(result).slice(0, 1000))
+        if (result.ok && result.order) {
+          data = result.order
+          log(requestId, "✅ Using getOrderDetails - PAYMENT_NAME:", data.PAYMENT_NAME, "PAYMENT_STATUS:", data.PAYMENT_STATUS)
+        }
+      }
+    } catch (err) {
+      log(requestId, "getOrderDetails failed, trying buyerOrderDetails fallback")
+      usingFallback = true
     }
 
-    const data = await response.json()
-    log(requestId, "Backend response:", JSON.stringify(data).slice(0, 500))
+    // Fallback to existing buyerOrderDetails endpoint
+    if (!data || usingFallback) {
+      const url = new URL(JAVA_ORDERS_URL)
+      url.searchParams.set("action", "buyerOrderDetails")
+      url.searchParams.set("orderId", orderId)
+
+      log(requestId, `Fallback: Calling ${url.toString()}`)
+
+      const response = await fetch(url.toString(), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        cache: "no-store",
+      })
+
+      if (!response.ok) {
+        throw new Error(`Backend returned ${response.status}`)
+      }
+
+      const result = await response.json()
+      log(requestId, "Backend response:", JSON.stringify(result).slice(0, 500))
+
+      if (!result.ok) {
+        throw new Error(result.error || "Failed to fetch order details")
+      }
+
+      // Use buyerOrderDetails format
+      const orderData = result.order || {}
+      const itemsData = result.items || []
+      const sellerData = result.seller || {}
+      const buyerData = result.buyer || {}
+
+      log(requestId, "Using fallback - orderData.PAYMENT_NAME:", orderData.PAYMENT_NAME)
+
+      data = {
+        ID_ORDER: orderData.ID_ORDER,
+        SELLER_NAMES: orderData.SELLER_NAMES || sellerData.OWNER,
+        SELLER_PHONE: sellerData.TEL,
+        BUYER_OWNER: buyerData.OWNER,
+        BUYER_PHONE: buyerData.PHONE || orderData.BUYER_PHONE,
+        DELIVERY_LOCATION: orderData.DELIVERY_LOCATION,
+        AMOUNT: orderData.AMOUNT,
+        PAYMENT_NAME: orderData.PAYMENT_NAME,
+        PAYMENT_STATUS: orderData.PAYMENT_STATUS,
+        ORDER_STATUS: orderData.ORDER_STATUS,
+        CREATED_AT: orderData.CREATED_AT,
+        items: itemsData.map((item: any) => ({
+          ITEM_NAME: item.ITEM_NAME,
+          QTY: item.QUANTITY,
+          UNIT_PRICE: item.UNIT_PRICE,
+          UNIT: item.UNIT,
+        })),
+      }
+
+      log(requestId, "Mapped data - PAYMENT_NAME:", data.PAYMENT_NAME, "PAYMENT_STATUS:", data.PAYMENT_STATUS)
+    }
 
     // Map backend response to frontend format
+    log(requestId, "Final mapping - PAYMENT_NAME:", data.PAYMENT_NAME, "PAYMENT_STATUS:", data.PAYMENT_STATUS, "ORDER_STATUS:", data.ORDER_STATUS)
+
     const order = {
       orderId: data.ID_ORDER || orderId,
       sellerName: data.SELLER_NAMES || data.SELLER_OWNER || "Unknown Seller",
@@ -74,21 +156,22 @@ export async function POST(req: NextRequest) {
       items: Array.isArray(data.items)
         ? data.items.map((item: any) => ({
             name: item.ITEM_NAME || item.name || "Product",
-            qty: Number(item.QTY || item.qty || 1),
+            qty: Number(item.QTY || item.qty || item.QUANTITY || 1),
             unitPrice: Number(item.UNIT_PRICE || item.unitPrice || 0),
             unit: item.UNIT || item.unit || undefined,
           }))
         : [],
       total: Number(data.AMOUNT || data.total || 0),
       paymentMethod: data.PAYMENT_NAME || data.paymentMethod || "Unknown",
-      status: mapPaymentToStatus(data.PAYMENT_NAME || data.status),
+      paymentStatus: data.PAYMENT_STATUS || undefined,
+      status: mapPaymentToStatus(data.ORDER_STATUS, data.PAYMENT_STATUS),
       createdAt: data.CREATED_AT || data.createdAt || new Date().toISOString(),
     }
 
-    log(requestId, "Order tracking SUCCESS")
+    log(requestId, "✅ Order tracking SUCCESS - paymentMethod:", order.paymentMethod, "paymentStatus:", order.paymentStatus, "status:", order.status)
     return NextResponse.json({ ok: true, order })
   } catch (error: any) {
-    log(requestId, "ERROR:", error?.message)
+    log(requestId, "❌ ERROR:", error?.message)
     return NextResponse.json(
       { ok: false, error: error?.message || "Failed to track order" },
       { status: 500 }

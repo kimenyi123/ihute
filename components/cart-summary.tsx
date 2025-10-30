@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Label } from "@/components/ui/label"
+import { formatPaymentMethod } from "@/lib/payment-utils"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog"
@@ -44,9 +45,32 @@ function ensureCur(v: unknown): string {
 function stripTrailingPriceParen(name: string): string {
   return String(name).replace(/\s*\((?:\d[\d.,\s]*)(?:RWF|Frw|RF)\)\s*$/i, "").trim()
 }
+// function formatPaidAt(v: unknown): string {
+//   if (v == null) return ""
+//   const s = String(v).trim()
+  
+//   // Handle new payment method names
+//   const map: Record<string, string> = {
+//     "PAID_MTN_MOMO": "MTN MoMo",
+//     "PAID_CARD": "Card Payment",
+//     "PAY_ON_DELIVERY": "Pay on delivery",
+//     "MTN_MOMO": "MTN MoMo",
+//     "MOMO": "Mobile Money",
+//     "CARD": "Card Payment"
+//   }
+  
+//   const normalized = map[s.toUpperCase()]
+//   if (normalized) return normalized
+  
+//   // Legacy formatting
+//   return s.replace(/\bMtn\b/i, "MTN")
+//     .replace(/\bMTN\s*(?=\d)/i, "MTN ")
+//     .replace(/\s+/g, " ")
+//     .trim()
+// }
 function formatPaidAt(v: unknown): string {
   if (v == null) return ""
-  return String(v).trim().replace(/\bMtn\b/i, "MTN").replace(/\bMTN\s*(?=\d)/i, "MTN ").replace(/\s+/g, " ").trim()
+  return formatPaymentMethod(String(v))
 }
 type WhatsItem = [name: string, qty: string | number, amount: string | number]
 function buildWhatsAppMessageStyled(args: {
@@ -148,7 +172,7 @@ export function CartSummary() {
   // WhatsApp prefill per seller
   const sellerWhatsData = useMemo(() => {
     return groups.map((g) => {
-      const chosenPhone = orderPhones[g.supplierId] || (g as any).phone || g.momo || ""
+      const chosenPhone = orderPhones[g.supplierId] || g.phone || g.momo || ""
       const phone = normalizePhone(chosenPhone)
       const items: WhatsItem[] = g.items.map((it) => {
         const name = stripTrailingPriceParen(it.name || "Product")
@@ -157,7 +181,7 @@ export function CartSummary() {
         return [name, qty, amount]
       })
       const orderId = orderIds[g.supplierId]
-      const hasUssdTarget = Boolean(((g as any).momo ?? "").trim())
+      const hasUssdTarget = Boolean((g.momo ?? "").trim())
       const isPaid = getPaymentStatus(g.supplierId) === "paid"
       const message = buildWhatsAppMessageStyled({
         shop: g.supplierName,
@@ -272,8 +296,8 @@ export function CartSummary() {
     if (!requireLogin()) return
     const g = groups.find(x => x.supplierId === supplierId)
     if (!g) return
-    
-    const hasUssdTarget = Boolean(((g as any).momo ?? "").trim())
+
+    const hasUssdTarget = Boolean((g.momo ?? "").trim())
     setSelectedSeller(supplierId)
     // Default to momo if available, otherwise cod
     setPaymentMethod(hasUssdTarget ? "momo" : "cod")
@@ -344,7 +368,7 @@ export function CartSummary() {
           const status = getPaymentStatus(g.supplierId)
           const wa = sellerWhatsData.find(x => x.supplierId === g.supplierId)
 
-          const momoTarget = ((g as any).momo ?? "").trim()
+          const momoTarget = (g.momo ?? "").trim()
           const hasUssdTarget = momoTarget.length > 0
           const unmark = () => setPaymentStatus(g.supplierId, "unpaid")
 
@@ -494,8 +518,8 @@ export function CartSummary() {
             <div className="space-y-3">
               {selectedSeller && (() => {
                 const g = groups.find(x => x.supplierId === selectedSeller)
-                const hasUssdTarget = g ? Boolean(((g as any).momo ?? "").trim()) : false
-                
+                const hasUssdTarget = g ? Boolean((g.momo ?? "").trim()) : false
+
                 return (
                   <>
                     <div 
@@ -589,8 +613,8 @@ export function CartSummary() {
           {momoForSeller && (() => {
             const g = groups.find(x => x.supplierId === momoForSeller)
             if (!g) return null
-            
-            const momoTarget = ((g as any).momo ?? "").trim()
+
+            const momoTarget = (g.momo ?? "").trim()
             const hasUssdTarget = momoTarget.length > 0
             const payload = `*182*8*1*${momoTarget}*${g.subtotal}#`
             const telHref = `tel:${encodeURIComponent(payload)}`
