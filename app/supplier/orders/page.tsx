@@ -170,7 +170,7 @@ export default function SupplierOrdersPage() {
       setOrders(orders.map(o => (o.id === order.id ? { ...o, status: nextBadge } : o)))
 
       try {
-        const res = await fetch("/Trading/OrderStatusServlet", {
+        const res = await fetch("/Trading/Kaos/OrderStatusServlet", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ orderId: Number(order.id), status: next }),
