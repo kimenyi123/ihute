@@ -1,12 +1,13 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useMemo } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { CheckCircle, MessageCircle, Copy, ArrowRight } from "lucide-react"
+import { formatPaymentMethod } from "@/lib/payment-utils" // ✅ IMPORTED
 
 function normalizePhone(raw?: string | null): string {
   let v = (raw || "").replace(/\s|-/g, "")
@@ -35,34 +36,120 @@ export default function OrderSuccessPage() {
   const total = searchParams.get("total")
 
   const [copied, setCopied] = useState(false)
+  const [orderDetails, setOrderDetails] = useState<any>(null)
+  const [loadingDetails, setLoadingDetails] = useState(true)
 
   useEffect(() => {
     if (!orderId) {
       router.push("/")
+      return
     }
+
+    // Fetch order details to get product items
+    async function fetchOrderDetails() {
+      try {
+        const res = await fetch("/api/orders/track", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ orderId }),
+          cache: "no-store",
+        })
+        const json = await res.json()
+        console.log("[Order Success] Fetched order details:", json)
+        if (json?.ok && json?.order) {
+          console.log("[Order Success] Payment method:", json.order.paymentMethod)
+          setOrderDetails(json.order)
+        }
+      } catch (err) {
+        console.error("[Order Success] Failed to fetch order details:", err)
+      } finally {
+        setLoadingDetails(false)
+      }
+    }
+
+    fetchOrderDetails()
   }, [orderId, router])
 
   if (!orderId) {
     return null
   }
 
-  const trackingUrl = `${window.location.origin}/track-order/${orderId}`
+  const trackingUrl = typeof window !== 'undefined'
+    ? `${window.location.origin}/track-order/${orderId}`
+    : `https://ihute.rw/track-order/${orderId}`
 
-  // Build WhatsApp message in the same format as cart-summary
-  const whatsappMessage = [
-    'Order',
-    '',
-    `Shop: ${sellerName}`,
-    `Order ID: ${orderId}`,
-    '',
-    `Total: ${Number(total).toLocaleString()} RWF`,
-    `My phone: ${buyerPhone}`,
-    '',
-    `Follow: ${trackingUrl}`
-  ].filter(Boolean).join('\n')
+  // Build WhatsApp message with product details - memoized to recalculate when orderDetails changes
+  const { whatsappMessage, whatsappHref } = useMemo(() => {
+    const formatCurrency = (amount: number) => `${amount.toLocaleString()} RWF`
+    const padRight = (s: string, w: number) => (s.length >= w ? s : s + ' '.repeat(w - s.length))
+    const padLeft = (s: string, w: number) => (s.length >= w ? s : ' '.repeat(w - s.length) + s)
+    const trunc = (s: string, w: number) => (s.length > w ? s.slice(0, w - 1) + '…' : s)
 
-  const sellerPhoneNormalized = normalizePhone(sellerPhone)
-  const whatsappHref = sellerPhoneNormalized ? waHrefFor(sellerPhoneNormalized, whatsappMessage) : ""
+    let message = ''
+
+    if (orderDetails?.items && orderDetails.items.length > 0) {
+      // Build detailed message with product table - matching cart-summary format
+      const NAME_W = 44, QTY_W = 5, AMT_W = 14
+      const header = padRight('Product name', NAME_W) + padLeft('Qty', QTY_W) + padLeft('Amount', AMT_W)
+      const sep = '-'.repeat(NAME_W + QTY_W + AMT_W)
+
+      const lines = orderDetails.items.map((item: any) => {
+        const nm = padRight(trunc(item.name.replace(/\s+/g, ' ').trim(), NAME_W), NAME_W)
+        const qt = padLeft(String(item.qty), QTY_W)
+        const amt = padLeft(formatCurrency(item.qty * item.unitPrice), AMT_W)
+        return nm + qt + amt
+      })
+
+      // Determine paid amount based on payment method
+      const paymentMethod = orderDetails.paymentMethod || 'Unknown'
+      const isPaid = paymentMethod && !paymentMethod.toLowerCase().includes('delivery')
+      const paidAmount = isPaid ? orderDetails.total : 0
+
+      console.log("[Order Success] Building WhatsApp message - Payment:", paymentMethod, "isPaid:", isPaid)
+
+      message = [
+        'Order',
+        '',
+        `Shop: ${sellerName || orderDetails.sellerName}`,
+        orderDetails.buyerLocation ? `Location: ${orderDetails.buyerLocation}` : '',
+        `Order ID: ${orderId}`,
+        '',
+        '```',
+        header,
+        sep,
+        ...lines,
+        '```',
+        '',
+        `Total: ${formatCurrency(orderDetails.total)}`,
+        `Discount: ${formatCurrency(0)}`,
+        `Paid: ${formatCurrency(paidAmount)}`,
+        '',
+        `Paid at: ${formatPaymentMethod(paymentMethod)}`,
+        `Message: ${orderId ? `ORDER ${orderId}` : '-'}`,
+        `My phone: ${buyerPhone}`,
+        '',
+        `Follow: ${trackingUrl}`
+      ].filter(Boolean).join('\n')
+    } else {
+      // Fallback message without product details
+      message = [
+        'Order',
+        '',
+        `Shop: ${sellerName}`,
+        `Order ID: ${orderId}`,
+        '',
+        `Total: ${Number(total).toLocaleString()} RWF`,
+        `My phone: ${buyerPhone}`,
+        '',
+        `Follow: ${trackingUrl}`
+      ].filter(Boolean).join('\n')
+    }
+
+    const sellerPhoneNormalized = normalizePhone(sellerPhone)
+    const href = sellerPhoneNormalized ? waHrefFor(sellerPhoneNormalized, message) : ""
+
+    return { whatsappMessage: message, whatsappHref: href }
+  }, [orderDetails, orderId, sellerName, sellerPhone, buyerPhone, total, trackingUrl])
 
   const copyTrackingUrl = async () => {
     try {
@@ -139,7 +226,7 @@ export default function OrderSuccessPage() {
           </Card>
 
           {/* WhatsApp Notification */}
-          {sellerPhoneNormalized && (
+          {normalizePhone(sellerPhone) && (
             <Card className="border-2 border-green-100">
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
@@ -153,16 +240,25 @@ export default function OrderSuccessPage() {
                     <strong>Important:</strong> Click below to send your order details to the seller via WhatsApp.
                     This helps ensure faster processing and delivery.
                   </p>
-                  <Button
-                    className="w-full bg-[#25D366] hover:bg-[#20b05a] text-white"
-                    size="lg"
-                    asChild
-                  >
-                    <a href={whatsappHref} target="_blank" rel="noopener noreferrer">
-                      <MessageCircle className="h-5 w-5 mr-2" />
-                      Send Order Details to Seller
-                    </a>
-                  </Button>
+                  {loadingDetails ? (
+                    <Button
+                      className="w-full bg-[#25D366] hover:bg-[#20b05a] text-white"
+                      disabled
+                    >
+                      <MessageCircle className="h-4 w-4 mr-2" />
+                      Loading order details...
+                    </Button>
+                  ) : (
+                    <Button
+                      className="w-full bg-[#25D366] hover:bg-[#20b05a] text-white"
+                      asChild
+                    >
+                      <a href={whatsappHref} target="_blank" rel="noopener noreferrer">
+                        <MessageCircle className="h-4 w-4 mr-2" />
+                        Contact Seller on WhatsApp
+                      </a>
+                    </Button>
+                  )}
                 </div>
                 <p className="text-xs text-muted-foreground">
                   The seller will receive your order details and contact you on {buyerPhone} for delivery confirmation.

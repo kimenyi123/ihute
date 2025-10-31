@@ -52,6 +52,36 @@ export async function POST(req: Request) {
       )
     }
 
+    // ✅ VALIDATE PAYMENT METHOD
+    let paymentName = String(bodyIn.paymentName ?? "PAY_ON_DELIVERY").toUpperCase()
+    const validPaymentMethods = [
+      "PAY_ON_DELIVERY", 
+      "PAID_MTN_MOMO", 
+      "PAID_CARD",
+      "MTN_MOMO",
+      "MOMO",
+      "CARD"
+    ]
+
+    if (!validPaymentMethods.includes(paymentName)) {
+      return NextResponse.json(
+        { ok: false, error: `Invalid payment method: ${paymentName}` },
+        { status: 400 }
+      )
+    }
+
+    // ✅ GENERATE PAYMENT ID IF NOT PROVIDED
+    let paymentId = String(bodyIn.paymentId ?? "")
+    if (!paymentId) {
+      if (paymentName.includes("MOMO")) {
+        paymentId = `MOMO_${Date.now()}`
+      } else if (paymentName.includes("CARD")) {
+        paymentId = `CARD_${Date.now()}`
+      } else {
+        paymentId = `COD_${Date.now()}`
+      }
+    }
+
     // Build shared fields
     const shared = {
       buyerEmail,
@@ -61,12 +91,26 @@ export async function POST(req: Request) {
       sellerAccount,
       sellerName: String(bodyIn.sellerName ?? ""),
       sellerPhone: String(bodyIn.sellerPhone ?? ""),
-      paymentName: String(bodyIn.paymentName ?? "PAY_ON_DELIVERY"),
-      paymentId: String(bodyIn.paymentId ?? ""),
+      paymentName, // ✅ USE VALIDATED PAYMENT NAME
+      paymentId,   // ✅ USE GENERATED PAYMENT ID
       reference: String(bodyIn.reference ?? ""),
       currency: String(bodyIn.currency ?? "RWF"),
       items,
+      // Table command fields
+      isTableCommand: Boolean(bodyIn.isTableCommand),
+      tableName: String(bodyIn.tableName ?? ""),
+      tableLocation: String(bodyIn.tableLocation ?? ""),
     }
+
+    console.log("[orders/create] Creating order with payment:", {
+      paymentName: shared.paymentName,
+      paymentId: shared.paymentId,
+      buyerEmail: shared.buyerEmail,
+      sellerAccount: shared.sellerAccount,
+      itemsCount: shared.items.length,
+      isTableCommand: shared.isTableCommand,
+      tableName: shared.tableName || "N/A"
+    })
 
     // Try each candidate until one returns valid JSON with ok=true
     let lastErr: { status?: number; raw?: string; url?: string } | undefined
@@ -104,11 +148,23 @@ export async function POST(req: Request) {
           form.set("sellerAccount", shared.sellerAccount)
           if (shared.sellerName) form.set("sellerName", shared.sellerName)
           if (shared.sellerPhone) form.set("sellerPhone", shared.sellerPhone)
-          form.set("paymentName", shared.paymentName)
-          form.set("paymentId", shared.paymentId)
+          form.set("paymentName", shared.paymentName) // ✅ SEND PAYMENT NAME
+          form.set("paymentId", shared.paymentId)     // ✅ SEND PAYMENT ID
           form.set("reference", shared.reference)
           form.set("currency", shared.currency)
           form.set("items", JSON.stringify(shared.items))
+          // Table command fields
+          if (shared.isTableCommand) {
+            form.set("isTableCommand", "true")
+            form.set("tableName", shared.tableName)
+            form.set("tableLocation", shared.tableLocation)
+          }
+
+          console.log("[orders/create] Sending form data:", {
+            paymentName: shared.paymentName,
+            paymentId: shared.paymentId,
+            action: "createOrder"
+          })
 
           res = await fetch(url, {
             method: "POST",
@@ -120,14 +176,21 @@ export async function POST(req: Request) {
           try { json = JSON.parse(text) } catch {}
         }
 
-        console.log("[orders/create] <-", url, "status:", res.status)
+        console.log("[orders/create] <-", url, "status:", res.status, "response:", text.slice(0, 200))
 
         // HTML means 404 page or similar
         const looksHtml = /^\s*<!doctype html/i.test(text) || /^\s*<html/i.test(text)
 
         if (res.ok && json?.ok) {
           const orderId = json?.orderId || `ORD-${Date.now()}`
-        return NextResponse.json({ ok: true, orderId, via: url, sellerTel: json?.sellerTel || "" })
+          console.log("[orders/create] ✅ Order created successfully:", { orderId, paymentName: shared.paymentName })
+          return NextResponse.json({ 
+            ok: true, 
+            orderId, 
+            via: url, 
+            sellerTel: json?.sellerTel || "",
+            paymentName: shared.paymentName // ✅ RETURN PAYMENT METHOD FOR VERIFICATION
+          })
         } else {
           lastErr = { status: res.status, raw: looksHtml ? text.slice(0, 200) : text.slice(0, 800), url }
           continue

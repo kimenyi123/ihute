@@ -60,8 +60,26 @@ export async function POST(req: Request) {
     params.set("sellerAccount", sellerAccount)                       // ISHYIGA account
     if (body.sellerName) params.set("sellerName", String(body.sellerName))
     if (body.sellerPhone) params.set("sellerPhone", String(body.sellerPhone))
-    params.set("paymentName", String(body.paymentName ?? "PAY_ON_DELIVERY"))
-    params.set("paymentId", String(body.paymentId ?? ""))
+    // Normalize payment method names
+const paymentName = String(body.paymentName ?? "PAY_ON_DELIVERY").toUpperCase()
+const validPaymentMethods = [
+  "PAY_ON_DELIVERY", 
+  "PAID_MTN_MOMO", 
+  "PAID_CARD",
+  "MTN_MOMO",
+  "MOMO",
+  "CARD"
+]
+
+if (!validPaymentMethods.includes(paymentName)) {
+  return NextResponse.json(
+    { ok: false, error: `Invalid payment method: ${paymentName}` },
+    { status: 400 }
+  )
+}
+
+params.set("paymentName", paymentName)
+params.set("paymentId", String(body.paymentId ?? ""))
     params.set("reference", String(body.reference ?? ""))
     params.set("currency", String(body.currency ?? "RWF"))
     params.set("items", JSON.stringify(items))

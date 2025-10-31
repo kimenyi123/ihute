@@ -27,22 +27,34 @@ export function CheckoutSummary({ isProcessing, showReview }: CheckoutSummaryPro
       <CardContent className="space-y-4">
         {/* Items List */}
         <div className="space-y-3 max-h-64 overflow-y-auto">
-          {items.map((item) => (
-            <div key={`${item.id}-${item.selectedUnit}`} className="flex gap-3">
-              <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-muted">
-                <Image src={item.image || "/placeholder.svg"} alt={item.name} fill className="object-cover" />
+          {items.map((item) => {
+            // ✅ Calculate line total: price × qty
+            const lineTotal = item.price * item.qty
+            
+            return (
+              <div key={`${item.id}-${item.selectedUnit}`} className="flex gap-3">
+                <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-muted">
+                  <Image 
+                    src={item.image || "/placeholder.svg"} 
+                    alt={item.name} 
+                    fill 
+                    className="object-cover" 
+                  />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{item.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {/* ✅ Use qty instead of quantity */}
+                    {item.qty} × {item.selectedUnit || item.unit || "pcs"}
+                  </p>
+                  <p className="text-sm font-semibold text-primary">
+                    {/* ✅ Use calculated lineTotal */}
+                    {lineTotal.toLocaleString()} RWF
+                  </p>
+                </div>
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{item.name}</p>
-                <p className="text-xs text-muted-foreground">
-                  {item.quantity} × {item.selectedUnit}
-                </p>
-                <p className="text-sm font-semibold text-primary">
-                  {(item.price * item.quantity * item.unitMultiplier).toLocaleString()} RWF
-                </p>
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
 
         <Separator />
@@ -59,7 +71,11 @@ export function CheckoutSummary({ isProcessing, showReview }: CheckoutSummaryPro
             <span className="font-medium">{deliveryFee === 0 ? "FREE" : `${deliveryFee.toLocaleString()} RWF`}</span>
           </div>
 
-          {deliveryFee > 0 && <p className="text-xs text-muted-foreground">Free delivery on orders over 50,000 RWF</p>}
+          {deliveryFee > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Free delivery on orders over 50,000 RWF
+            </p>
+          )}
         </div>
 
         <Separator />
@@ -74,7 +90,9 @@ export function CheckoutSummary({ isProcessing, showReview }: CheckoutSummaryPro
           <Lock className="h-4 w-4" />
           {isProcessing ? "Processing..." : showReview ? "Confirm & Pay" : "Review Order"}
         </Button>
-        <p className="text-xs text-center text-muted-foreground">Your payment information is secure and encrypted</p>
+        <p className="text-xs text-center text-muted-foreground">
+          Your payment information is secure and encrypted
+        </p>
       </CardFooter>
     </Card>
   )

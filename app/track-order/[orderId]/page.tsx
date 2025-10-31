@@ -7,7 +7,8 @@ import { Footer } from "@/components/footer"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Truck, CheckCircle, Clock, Package, MessageCircle, ArrowLeft } from "lucide-react"
+import { Truck, CheckCircle, Clock, Package, MessageCircle, ArrowLeft, CreditCard } from "lucide-react"
+import { formatPaymentMethod } from "@/lib/payment-utils" // ✅ IMPORTED
 
 type OrderStatus = "pending" | "processing" | "in-transit" | "delivered"
 
@@ -26,6 +27,7 @@ type OrderDetail = {
   }>
   total: number
   paymentMethod: string
+  paymentStatus?: string
   status: OrderStatus
   createdAt: string
 }
@@ -56,6 +58,26 @@ function statusBadge(status: OrderStatus) {
     </Badge>
   )
 }
+
+function paymentStatusBadge(paymentStatus?: string) {
+  if (!paymentStatus) return null
+  
+  const status = paymentStatus.toLowerCase()
+  
+  if (status === "paid" || status === "success") {
+    return <Badge className="bg-green-600">Paid</Badge>
+  }
+  if (status === "pending") {
+    return <Badge variant="outline" className="border-yellow-600 text-yellow-600">Pending</Badge>
+  }
+  if (status === "failed") {
+    return <Badge variant="destructive">Failed</Badge>
+  }
+  
+  return <Badge variant="outline">{paymentStatus}</Badge>
+}
+
+// ✅ REMOVED - Now using shared utility
 
 function buildTracking(status: OrderStatus) {
   return [
@@ -112,6 +134,7 @@ export default function TrackOrderPage() {
           throw new Error(json?.error || "Failed to load order")
         }
 
+        console.log("[Track Order] Order data received:", json.order)
         setOrder(json.order)
       } catch (err: any) {
         setError(err?.message || "Failed to load order")
@@ -187,6 +210,10 @@ export default function TrackOrderPage() {
     return nm + qt + amt
   })
 
+  // Determine paid amount based on payment method
+  const isPaid = order.paymentMethod && !order.paymentMethod.toLowerCase().includes('delivery')
+  const paidAmount = isPaid ? order.total : 0
+
   const whatsappMessage = [
     'Order',
     '',
@@ -202,10 +229,10 @@ export default function TrackOrderPage() {
     '',
     `Total: ${formatCurrency(order.total)}`,
     `Discount: ${formatCurrency(0)}`,
-    `Paid: ${formatCurrency(order.paymentMethod.includes('Delivery') ? 0 : order.total)}`,
+    `Paid: ${formatCurrency(paidAmount)}`,
     '',
-    `Paid at: ${order.paymentMethod}`,
-    `Message: Order #${orderId}`,
+    `Paid at: ${formatPaymentMethod(order.paymentMethod)}`, // ✅ USING SHARED UTIL
+    `Message: ${orderId ? `ORDER ${orderId}` : '-'}`,
     `My phone: ${order.buyerPhone || ''}`,
     '',
     `Follow: ${window.location.origin}/track-order/${orderId}`
@@ -249,11 +276,39 @@ export default function TrackOrderPage() {
                   <p className="text-sm text-muted-foreground">Seller</p>
                   <p className="font-medium">{order.sellerName}</p>
                 </div>
+                
+                {/* Enhanced Payment Method Display */}
                 <div>
                   <p className="text-sm text-muted-foreground">Payment Method</p>
-                  <p className="font-medium">{order.paymentMethod}</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <CreditCard className="h-4 w-4 text-slate-500" />
+                    <p className="font-medium">{formatPaymentMethod(order.paymentMethod)}</p> {/* ✅ USING SHARED UTIL */}
+                  </div>
                 </div>
+                
+                {order.buyerName && (
+                  <div>
+                    <p className="text-sm text-muted-foreground">Buyer Name</p>
+                    <p className="font-medium">{order.buyerName}</p>
+                  </div>
+                )}
+                {order.buyerPhone && (
+                  <div>
+                    <p className="text-sm text-muted-foreground">Buyer Phone</p>
+                    <p className="font-medium">{order.buyerPhone}</p>
+                  </div>
+                )}
               </div>
+
+              {/* Payment Status Badge */}
+              {order.paymentStatus && (
+                <div className="pt-4 border-t">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-muted-foreground">Payment Status</p>
+                    {paymentStatusBadge(order.paymentStatus)}
+                  </div>
+                </div>
+              )}
 
               {order.buyerLocation && (
                 <div>
@@ -345,12 +400,13 @@ export default function TrackOrderPage() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <MessageCircle className="h-5 w-5 text-[#25D366]" />
-                  Need Help?
+                  Contact Seller on WhatsApp
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-sm text-muted-foreground mb-4">
-                  Have questions about your order? Contact the seller directly on WhatsApp.
+                <p className="text-sm text-green-900 mb-3">
+                  <strong>Important:</strong> Make sure that you have sent the order to seller via WhatsApp.
+                  This helps ensure faster processing and delivery.
                 </p>
                 <Button
                   className="w-full bg-[#25D366] hover:bg-[#20b05a] text-white"
