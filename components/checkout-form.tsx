@@ -88,38 +88,60 @@ export function CheckoutForm() {
 
     setIsProcessing(true)
     try {
-      // Create paid order via backend
-      const res = await fetch("/api/confirmPayment", {
+      // ✅ UPDATED: Use correct endpoint and proper payload structure
+      const res = await fetch("/api/orders/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          sellerId: (items[0] && items[0].supplierId) || "",
-          sellerName: (items[0] && items[0].supplierName) || "",
-          momo: data.momoPhone || "",
-          amount: getTotalPrice(),
-          buyerEmail: "", // optional: fill if available
-          buyerPhone: data.momoPhone || "",
-          deliveryLocation: data.address || "",
-          paymentName: data.paymentMethod === "momo" ? "MTN_MOMO" : data.paymentMethod === "card" ? "CARD" : "UNKNOWN",
-          paymentId: `${Date.now()}`,
+          // Buyer information
+          buyerEmail: data.email,
+          buyerName: data.fullName,
+          buyerPhone: data.phone,
+          buyerLocation: `${data.address}, ${data.city}`,
+          
+          // Seller information (from first cart item)
+          sellerAccount: items[0]?.supplierId || "",
+          sellerName: items[0]?.supplierName || "",
+          sellerPhone: "", // Optional: add if available in cart
+          
+          // ✅ Payment information - KEY FIX
+          paymentName: data.paymentMethod === "momo" 
+            ? "PAID_MTN_MOMO"
+            : data.paymentMethod === "card" 
+              ? "PAID_CARD"
+              : "PAY_ON_DELIVERY",
+          paymentId: `TXN-${Date.now()}`,
+          reference: data.notes || `ORDER-${Date.now()}`,
+          currency: "RWF",
+          
+          // Items from cart
           items: items.map((it) => ({
-            id: it.id,
             name: it.name,
             qty: it.qty,
-            price: it.price,
-            unit: it.unit,
+            unitPrice: it.price,
+            unit: it.unit || "pcs",
           })),
+          
+          // Optional: subtotal (will be calculated if not provided)
+          subtotal: getTotalPrice(),
         }),
       })
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok || json?.ok === false) throw new Error(json?.error || "Payment failed")
 
+      const json = await res.json()
+      
+      if (!res.ok || !json?.ok) {
+        throw new Error(json?.error || "Order creation failed")
+      }
+
+      console.log("✅ Order created successfully:", json)
+      
+      // Clear cart and redirect to order tracking page
       clearCart()
-      router.push("/orders")
-    } catch (e) {
-      // fall back to success but ideally show error toast
-      clearCart()
-      router.push("/orders")
+      router.push(`/track-order/${json.orderId}`)
+      
+    } catch (e: any) {
+      console.error("❌ Order creation error:", e)
+      alert(e?.message || "Failed to create order. Please try again.")
     } finally {
       setIsProcessing(false)
     }
