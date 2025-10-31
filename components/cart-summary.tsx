@@ -211,85 +211,6 @@ export function CartSummary() {
   }
 
   // Unified order creator for MoMo & COD
-  const placeOrder = async (
-    g: ReturnType<typeof getGroupsBySeller>[number],
-    opts: { paymentName: "PAID_MTN_MOMO" | "PAY_ON_DELIVERY"; buyerPhone?: string; buyerLocation?: string; reference?: string }
-  ) => {
-    if (!requireLogin()) return
-    try {
-      setBusy(g.supplierId)
-      setPaymentStatus(g.supplierId, "pending")
-
-      const items = g.items.map(it => ({
-        name: it.name,
-        qty: it.qty,
-        unitPrice: it.price,
-        unit: it.unit ?? ""
-      }))
-
-      const res = await fetch("/api/orders/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          buyerEmail: checkoutMode === "anonymous" ? `guest_${Date.now()}@ihute.rw` : user?.email,
-          buyerPhone: opts.buyerPhone || (checkoutMode === "anonymous" ? anonymousPhone : user?.phone || ""),
-          buyerLocation: opts.buyerLocation || (checkoutMode === "anonymous" ? deliveryLocation : user?.location || "NA"),
-          buyerName: checkoutMode === "anonymous" ? anonymousName : user?.name,
-          sellerAccount: g.supplierId,
-          sellerName: g.supplierName,
-          paymentName: opts.paymentName,
-          reference: opts.reference || "",
-          currency: "RWF",
-          items
-        }),
-      })
-
-      const json = await res.json()
-
-      if (res.ok && json?.ok) {
-        const orderId = json.orderId ? String(json.orderId) : null
-        const sellerTel = json.sellerTel ? String(json.sellerTel) : null
-
-        if (orderId) setOrderIds(m => ({ ...m, [g.supplierId]: orderId }))
-        if (sellerTel) setOrderPhones(m => ({ ...m, [g.supplierId]: sellerTel }))
-
-        if (opts.paymentName === "PAID_MTN_MOMO" && orderId) {
-          pollPayment(orderId, g.supplierId)
-        }
-
-        clear()
-
-        // Redirect to order success page with WhatsApp details
-        if (orderId) {
-          const params = new URLSearchParams({
-            orderId,
-            sellerName: g.supplierName,
-            sellerPhone: sellerTel || "",
-            buyerPhone: checkoutMode === "anonymous" ? anonymousPhone : (user?.phone || ""),
-            total: String(g.subtotal),
-          })
-          router.push(`/order-success?${params.toString()}`)
-        } else if (checkoutMode === "login" || isAuthenticated) {
-          router.push("/orders")
-        } else {
-          router.push("/")
-        }
-        router.refresh()
-      } else {
-        setPaymentStatus(g.supplierId, "failed")
-        alert(`Failed to create order: ${json?.error || "Unknown error"}`)
-      }
-    } catch (error) {
-      console.error("Order creation error:", error)
-      setPaymentStatus(g.supplierId, "failed")
-      alert("Failed to create order. Please try again.")
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  const confirmPayment = (g: ReturnType<typeof getGroupsBySeller>[number]) =>
-    placeOrder(g, { paymentName: "PAID_MTN_MOMO", reference: `PAID_MTN_${Date.now()}` })
 
   // Open payment method selection
   const openPaymentMethod = (supplierId: string) => {
@@ -338,19 +259,132 @@ export function CartSummary() {
     }
   }
 
-  const submitCOD = async () => {
-    if (!codForSeller) return
-    const g = groups.find(x => x.supplierId === codForSeller)
-    if (!g) { setCodOpen(false); return }
-    await placeOrder(g, {
-      paymentName: "PAY_ON_DELIVERY",
-      buyerPhone: contactPhone,
-      buyerLocation: deliveryLocation,
-      reference: `PAY_ON_DELIVERY_${Date.now()}`
-    })
-    setCodOpen(false)
-    setCodForSeller(null)
+// Unified order creator for MoMo & COD
+const placeOrder = async (
+  g: ReturnType<typeof getGroupsBySeller>[number],
+  opts: { 
+    paymentName: "PAID_MTN_MOMO" | "PAY_ON_DELIVERY"; 
+    buyerPhone?: string; 
+    buyerLocation?: string; 
+    reference?: string;
+    paymentId?: string; // ✅ ADD PAYMENT ID OPTION
   }
+) => {
+  if (!requireLogin()) return
+  try {
+    setBusy(g.supplierId)
+    setPaymentStatus(g.supplierId, "pending")
+
+    const items = g.items.map(it => ({
+      name: it.name,
+      qty: it.qty,
+      unitPrice: it.price,
+      unit: it.unit ?? ""
+    }))
+
+    // ✅ GENERATE PAYMENT ID BASED ON PAYMENT METHOD
+    const paymentId = opts.paymentId || `${opts.paymentName}_${Date.now()}`
+
+    console.log("Placing order with payment:", {
+      paymentName: opts.paymentName,
+      paymentId: paymentId,
+      supplierId: g.supplierId
+    })
+
+    const res = await fetch("/api/orders/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        buyerEmail: checkoutMode === "anonymous" ? `guest_${Date.now()}@ihute.rw` : user?.email,
+        buyerPhone: opts.buyerPhone || (checkoutMode === "anonymous" ? anonymousPhone : user?.phone || ""),
+        buyerLocation: opts.buyerLocation || (checkoutMode === "anonymous" ? deliveryLocation : user?.location || "NA"),
+        buyerName: checkoutMode === "anonymous" ? anonymousName : user?.name,
+        sellerAccount: g.supplierId,
+        sellerName: g.supplierName,
+        sellerPhone: g.phone || "", // ✅ INCLUDE SELLER PHONE
+        paymentName: opts.paymentName, // ✅ SEND PAYMENT NAME
+        paymentId: paymentId, // ✅ SEND PAYMENT ID
+        reference: opts.reference || "",
+        currency: "RWF",
+        items
+      }),
+    })
+
+    const json = await res.json()
+
+    console.log("Order creation response:", json)
+
+    if (res.ok && json?.ok) {
+      const orderId = json.orderId ? String(json.orderId) : null
+      const sellerTel = json.sellerTel ? String(json.sellerTel) : null
+
+      if (orderId) setOrderIds(m => ({ ...m, [g.supplierId]: orderId }))
+      if (sellerTel) setOrderPhones(m => ({ ...m, [g.supplierId]: sellerTel }))
+
+      // ✅ LOG SUCCESSFUL PAYMENT METHOD
+      console.log(`✅ Order created with payment method: ${opts.paymentName}`)
+
+      if (opts.paymentName === "PAID_MTN_MOMO" && orderId) {
+        pollPayment(orderId, g.supplierId)
+      }
+
+      clear()
+
+      // Redirect to order success page with WhatsApp details
+      if (orderId) {
+        const params = new URLSearchParams({
+          orderId,
+          sellerName: g.supplierName,
+          sellerPhone: sellerTel || "",
+          buyerPhone: checkoutMode === "anonymous" ? anonymousPhone : (user?.phone || ""),
+          total: String(g.subtotal),
+          paymentMethod: opts.paymentName // ✅ INCLUDE PAYMENT METHOD IN REDIRECT
+        })
+        router.push(`/order-success?${params.toString()}`)
+      } else if (checkoutMode === "login" || isAuthenticated) {
+        router.push("/orders")
+      } else {
+        router.push("/")
+      }
+      router.refresh()
+    } else {
+      setPaymentStatus(g.supplierId, "failed")
+      alert(`Failed to create order: ${json?.error || "Unknown error"}`)
+    }
+  } catch (error) {
+    console.error("Order creation error:", error)
+    setPaymentStatus(g.supplierId, "failed")
+    alert("Failed to create order. Please try again.")
+  } finally {
+    setBusy(null)
+  }
+}
+
+// ✅ UPDATED: confirmPayment function with payment ID
+const confirmPayment = (g: ReturnType<typeof getGroupsBySeller>[number]) =>
+  placeOrder(g, { 
+    paymentName: "PAID_MTN_MOMO",
+    reference: `MOMO_${Date.now()}`,
+    paymentId: `MOMO_${Date.now()}` // ✅ INCLUDE PAYMENT ID
+  })
+
+// ✅ UPDATED: submitCOD function with payment ID
+const submitCOD = async () => {
+  if (!codForSeller) return
+  const g = groups.find(x => x.supplierId === codForSeller)
+  if (!g) { setCodOpen(false); return }
+  
+  await placeOrder(g, {
+    paymentName: "PAY_ON_DELIVERY",
+    buyerPhone: contactPhone,
+    buyerLocation: deliveryLocation,
+    reference: `COD_${Date.now()}`,
+    paymentId: `COD_${Date.now()}` // ✅ INCLUDE PAYMENT ID
+  })
+  
+  setCodOpen(false)
+  setCodForSeller(null)
+}
 
   const confirmMoMoPayment = async () => {
     if (!momoForSeller) return

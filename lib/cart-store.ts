@@ -41,18 +41,18 @@ type CartState = {
 
   // CRUD
   addItem: (item: Omit<CartItem, "qty">, qty?: number) => void
-  add: (item: Omit<CartItem, "qty">, qty?: number) => void            // alias
-  addOrInc: (item: Omit<CartItem, "qty">, qty?: number) => void       // NEW
+  add: (item: Omit<CartItem, "qty">, qty?: number) => void
+  addOrInc: (item: Omit<CartItem, "qty">, qty?: number) => void
   inc: (id: string, selectedUnit?: string) => void
   dec: (id: string, selectedUnit?: string) => void
   remove: (id: string, selectedUnit?: string) => void
   clear: () => void
-  clearCart: () => void                                                // ✅ ADDED alias
+  clearCart: () => void
   removeGroupBySeller: (supplierId: string) => void
 
   // Helpers
   getTotalItems: () => number
-  getTotalPrice: () => number                                          // ✅ ADDED alias
+  getTotalPrice: () => number
   getGrandTotal: () => number
   getGroupsBySeller: () => SellerGroup[]
 
@@ -119,7 +119,7 @@ export const useCartStore = create<CartState>()(
 
       clear: () => set({ items: [], payment: {} }),
 
-      // ✅ ADDED: Alias for clear() to match checkout form usage
+      // ✅ Alias for clear() to match checkout form usage
       clearCart: () => {
         set({ items: [], payment: {} })
       },
@@ -134,7 +134,7 @@ export const useCartStore = create<CartState>()(
 
       getGrandTotal: () => get().items.reduce((acc, it) => acc + it.price * it.qty, 0),
 
-      // ✅ ADDED: Alias for getGrandTotal() to match checkout form usage
+      // ✅ Alias for getGrandTotal() to match checkout form usage
       getTotalPrice: () => {
         return get().items.reduce((acc, it) => acc + it.price * it.qty, 0)
       },

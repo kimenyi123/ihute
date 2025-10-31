@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useMemo } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
@@ -74,78 +74,80 @@ export default function OrderSuccessPage() {
     return null
   }
 
-  // ✅ REMOVED - Now using shared utility
-
   const trackingUrl = `${window.location.origin}/track-order/${orderId}`
 
-  // Build WhatsApp message with product details
-  const formatCurrency = (amount: number) => `${amount.toLocaleString()} RWF`
-  const padRight = (s: string, w: number) => (s.length >= w ? s : s + ' '.repeat(w - s.length))
-  const padLeft = (s: string, w: number) => (s.length >= w ? s : ' '.repeat(w - s.length) + s)
-  const trunc = (s: string, w: number) => (s.length > w ? s.slice(0, w - 1) + '…' : s)
+  // Build WhatsApp message with product details - memoized to recalculate when orderDetails changes
+  const { whatsappMessage, whatsappHref } = useMemo(() => {
+    const formatCurrency = (amount: number) => `${amount.toLocaleString()} RWF`
+    const padRight = (s: string, w: number) => (s.length >= w ? s : s + ' '.repeat(w - s.length))
+    const padLeft = (s: string, w: number) => (s.length >= w ? s : ' '.repeat(w - s.length) + s)
+    const trunc = (s: string, w: number) => (s.length > w ? s.slice(0, w - 1) + '…' : s)
 
-  let whatsappMessage = ''
+    let message = ''
 
-  if (orderDetails?.items && orderDetails.items.length > 0) {
-    // Build detailed message with product table - matching cart-summary format
-    const NAME_W = 44, QTY_W = 5, AMT_W = 14
-    const header = padRight('Product name', NAME_W) + padLeft('Qty', QTY_W) + padLeft('Amount', AMT_W)
-    const sep = '-'.repeat(NAME_W + QTY_W + AMT_W)
+    if (orderDetails?.items && orderDetails.items.length > 0) {
+      // Build detailed message with product table - matching cart-summary format
+      const NAME_W = 44, QTY_W = 5, AMT_W = 14
+      const header = padRight('Product name', NAME_W) + padLeft('Qty', QTY_W) + padLeft('Amount', AMT_W)
+      const sep = '-'.repeat(NAME_W + QTY_W + AMT_W)
 
-    const lines = orderDetails.items.map((item: any) => {
-      const nm = padRight(trunc(item.name.replace(/\s+/g, ' ').trim(), NAME_W), NAME_W)
-      const qt = padLeft(String(item.qty), QTY_W)
-      const amt = padLeft(formatCurrency(item.qty * item.unitPrice), AMT_W)
-      return nm + qt + amt
-    })
+      const lines = orderDetails.items.map((item: any) => {
+        const nm = padRight(trunc(item.name.replace(/\s+/g, ' ').trim(), NAME_W), NAME_W)
+        const qt = padLeft(String(item.qty), QTY_W)
+        const amt = padLeft(formatCurrency(item.qty * item.unitPrice), AMT_W)
+        return nm + qt + amt
+      })
 
-    // Determine paid amount based on payment method
-    const paymentMethod = orderDetails.paymentMethod || 'Unknown'
-    const isPaid = paymentMethod && !paymentMethod.toLowerCase().includes('delivery')
-    const paidAmount = isPaid ? orderDetails.total : 0
+      // Determine paid amount based on payment method
+      const paymentMethod = orderDetails.paymentMethod || 'Unknown'
+      const isPaid = paymentMethod && !paymentMethod.toLowerCase().includes('delivery')
+      const paidAmount = isPaid ? orderDetails.total : 0
 
-    console.log("[Order Success] Building WhatsApp message - Payment:", paymentMethod, "isPaid:", isPaid)
+      console.log("[Order Success] Building WhatsApp message - Payment:", paymentMethod, "isPaid:", isPaid)
 
-    whatsappMessage = [
-      'Order',
-      '',
-      `Shop: ${sellerName || orderDetails.sellerName}`,
-      orderDetails.buyerLocation ? `Location: ${orderDetails.buyerLocation}` : '',
-      `Order ID: ${orderId}`,
-      '',
-      '```',
-      header,
-      sep,
-      ...lines,
-      '```',
-      '',
-      `Total: ${formatCurrency(orderDetails.total)}`,
-      `Discount: ${formatCurrency(0)}`,
-      `Paid: ${formatCurrency(paidAmount)}`,
-      '',
-      `Paid at: ${formatPaymentMethod(paymentMethod)}`, // ✅ USING SHARED UTIL
-      `Message: ${orderId ? `ORDER ${orderId}` : '-'}`,
-      `My phone: ${buyerPhone}`,
-      '',
-      `Follow: ${trackingUrl}`
-    ].filter(Boolean).join('\n')
-  } else {
-    // Fallback message without product details
-    whatsappMessage = [
-      'Order',
-      '',
-      `Shop: ${sellerName}`,
-      `Order ID: ${orderId}`,
-      '',
-      `Total: ${Number(total).toLocaleString()} RWF`,
-      `My phone: ${buyerPhone}`,
-      '',
-      `Follow: ${trackingUrl}`
-    ].filter(Boolean).join('\n')
-  }
+      message = [
+        'Order',
+        '',
+        `Shop: ${sellerName || orderDetails.sellerName}`,
+        orderDetails.buyerLocation ? `Location: ${orderDetails.buyerLocation}` : '',
+        `Order ID: ${orderId}`,
+        '',
+        '```',
+        header,
+        sep,
+        ...lines,
+        '```',
+        '',
+        `Total: ${formatCurrency(orderDetails.total)}`,
+        `Discount: ${formatCurrency(0)}`,
+        `Paid: ${formatCurrency(paidAmount)}`,
+        '',
+        `Paid at: ${formatPaymentMethod(paymentMethod)}`,
+        `Message: ${orderId ? `ORDER ${orderId}` : '-'}`,
+        `My phone: ${buyerPhone}`,
+        '',
+        `Follow: ${trackingUrl}`
+      ].filter(Boolean).join('\n')
+    } else {
+      // Fallback message without product details
+      message = [
+        'Order',
+        '',
+        `Shop: ${sellerName}`,
+        `Order ID: ${orderId}`,
+        '',
+        `Total: ${Number(total).toLocaleString()} RWF`,
+        `My phone: ${buyerPhone}`,
+        '',
+        `Follow: ${trackingUrl}`
+      ].filter(Boolean).join('\n')
+    }
 
-  const sellerPhoneNormalized = normalizePhone(sellerPhone)
-  const whatsappHref = sellerPhoneNormalized ? waHrefFor(sellerPhoneNormalized, whatsappMessage) : ""
+    const sellerPhoneNormalized = normalizePhone(sellerPhone)
+    const href = sellerPhoneNormalized ? waHrefFor(sellerPhoneNormalized, message) : ""
+
+    return { whatsappMessage: message, whatsappHref: href }
+  }, [orderDetails, orderId, sellerName, sellerPhone, buyerPhone, total, trackingUrl])
 
   const copyTrackingUrl = async () => {
     try {
@@ -222,7 +224,7 @@ export default function OrderSuccessPage() {
           </Card>
 
           {/* WhatsApp Notification */}
-          {sellerPhoneNormalized && (
+          {normalizePhone(sellerPhone) && (
             <Card className="border-2 border-green-100">
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
@@ -236,15 +238,25 @@ export default function OrderSuccessPage() {
                     <strong>Important:</strong> Click below to send your order details to the seller via WhatsApp.
                     This helps ensure faster processing and delivery.
                   </p>
-                  <Button
-                    className="w-full bg-[#25D366] hover:bg-[#20b05a] text-white"
-                    asChild
-                  >
-                    <a href={whatsappHref} target="_blank" rel="noopener noreferrer">
+                  {loadingDetails ? (
+                    <Button
+                      className="w-full bg-[#25D366] hover:bg-[#20b05a] text-white"
+                      disabled
+                    >
                       <MessageCircle className="h-4 w-4 mr-2" />
-                      Contact Seller on WhatsApp
-                    </a>
-                  </Button>
+                      Loading order details...
+                    </Button>
+                  ) : (
+                    <Button
+                      className="w-full bg-[#25D366] hover:bg-[#20b05a] text-white"
+                      asChild
+                    >
+                      <a href={whatsappHref} target="_blank" rel="noopener noreferrer">
+                        <MessageCircle className="h-4 w-4 mr-2" />
+                        Contact Seller on WhatsApp
+                      </a>
+                    </Button>
+                  )}
                 </div>
                 <p className="text-xs text-muted-foreground">
                   The seller will receive your order details and contact you on {buyerPhone} for delivery confirmation.
