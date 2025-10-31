@@ -40,6 +40,7 @@ import { usePrefsStore } from "@/lib/prefs-store"
 import { useOrdersStore } from "@/lib/orders-store"
 import { useTranslation } from "@/hooks/use-translation"
 import { RWANDA_DISTRICTS } from "@/lib/constants"
+import { TableCommandBanner } from "@/components/table-command-banner"
 
 export function Header() {
   const router = useRouter()
@@ -167,7 +168,7 @@ export function Header() {
                         )
                       }
                     >
-                      {t("myAccount")}
+                      My Account
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={handleLogout} className="text-red-600">
                       {t("logout")}
@@ -273,6 +274,7 @@ export function Header() {
           </div>
         </div>
       </div>
+      <TableCommandBanner />
     </header>
   )
 }

@@ -74,7 +74,9 @@ export default function OrderSuccessPage() {
     return null
   }
 
-  const trackingUrl = `${window.location.origin}/track-order/${orderId}`
+  const trackingUrl = typeof window !== 'undefined'
+    ? `${window.location.origin}/track-order/${orderId}`
+    : `https://ihute.rw/track-order/${orderId}`
 
   // Build WhatsApp message with product details - memoized to recalculate when orderDetails changes
   const { whatsappMessage, whatsappHref } = useMemo(() => {

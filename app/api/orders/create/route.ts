@@ -96,6 +96,10 @@ export async function POST(req: Request) {
       reference: String(bodyIn.reference ?? ""),
       currency: String(bodyIn.currency ?? "RWF"),
       items,
+      // Table command fields
+      isTableCommand: Boolean(bodyIn.isTableCommand),
+      tableName: String(bodyIn.tableName ?? ""),
+      tableLocation: String(bodyIn.tableLocation ?? ""),
     }
 
     console.log("[orders/create] Creating order with payment:", {
@@ -103,7 +107,9 @@ export async function POST(req: Request) {
       paymentId: shared.paymentId,
       buyerEmail: shared.buyerEmail,
       sellerAccount: shared.sellerAccount,
-      itemsCount: shared.items.length
+      itemsCount: shared.items.length,
+      isTableCommand: shared.isTableCommand,
+      tableName: shared.tableName || "N/A"
     })
 
     // Try each candidate until one returns valid JSON with ok=true
@@ -147,6 +153,12 @@ export async function POST(req: Request) {
           form.set("reference", shared.reference)
           form.set("currency", shared.currency)
           form.set("items", JSON.stringify(shared.items))
+          // Table command fields
+          if (shared.isTableCommand) {
+            form.set("isTableCommand", "true")
+            form.set("tableName", shared.tableName)
+            form.set("tableLocation", shared.tableLocation)
+          }
 
           console.log("[orders/create] Sending form data:", {
             paymentName: shared.paymentName,

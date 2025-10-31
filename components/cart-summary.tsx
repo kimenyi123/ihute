@@ -2,7 +2,7 @@
 "use client"
 
 import dynamic from "next/dynamic"
-import { useMemo, useState } from "react"
+import { useMemo, useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useAuthStore } from "@/lib/auth-store"
 import { useCartStore } from "@/lib/cart-store"
@@ -17,7 +17,20 @@ import { formatPaymentMethod } from "@/lib/payment-utils"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog"
-import { Copy, PhoneCall, CheckCircle2, RotateCcw, MessageCircle, Truck, CreditCard, Wallet } from "lucide-react"
+import { Copy, PhoneCall, CheckCircle2, RotateCcw, MessageCircle, Truck, CreditCard, Wallet, Beer, Users, Lock } from "lucide-react"
+import { isBarOrRestaurant } from "@/lib/constants"
+import { useTableCommandStore } from "@/lib/table-command-store"
+import { TableCommandDialog } from "@/components/table-command-dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 
 const QRCode = dynamic(() => import("react-qr-code"), { ssr: false })
 const CUR = "RWF"
@@ -129,6 +142,19 @@ export function CartSummary() {
   const [anonymousPhone, setAnonymousPhone] = useState("")
   const [anonymousName, setAnonymousName] = useState("")
 
+  // Table command mode
+  const { isInTableCommand, activeSession, lockTableCommand, canCloseTable, closeTableCommand } = useTableCommandStore()
+
+  // Pre-fill name from table command session if available
+  useEffect(() => {
+    if (isInTableCommand() && activeSession?.userName && !isAuthenticated) {
+      setAnonymousName(activeSession.userName)
+    }
+  }, [isInTableCommand, activeSession, isAuthenticated])
+  const [tableCommandDialogOpen, setTableCommandDialogOpen] = useState(false)
+  const [tableCommandSeller, setTableCommandSeller] = useState<{ id: string; name: string } | null>(null)
+  const [showCloseTableDialog, setShowCloseTableDialog] = useState(false)
+
   // MoMo payment dialog
   const [momoOpen, setMomoOpen] = useState(false)
   const [momoForSeller, setMomoForSeller] = useState<string | null>(null)
@@ -218,6 +244,17 @@ export function CartSummary() {
     const g = groups.find(x => x.supplierId === supplierId)
     if (!g) return
 
+    // Check if this is a bar/restaurant and offer table command mode
+    const isBar = isBarOrRestaurant(g.supplierName) || isBarOrRestaurant(g.supplierLocation || "")
+
+    // If it's a bar/restaurant and user is not already in a table command for this location
+    if (isBar && !isInTableCommand()) {
+      setTableCommandSeller({ id: supplierId, name: g.supplierName })
+      setTableCommandDialogOpen(true)
+      return
+    }
+
+    // Otherwise proceed with regular checkout
     const hasUssdTarget = Boolean((g.momo ?? "").trim())
     setSelectedSeller(supplierId)
     // Default to momo if available, otherwise cod
@@ -306,7 +343,11 @@ const placeOrder = async (
         paymentId: paymentId, // ✅ SEND PAYMENT ID
         reference: opts.reference || "",
         currency: "RWF",
-        items
+        items,
+        // Table command information
+        isTableCommand: isInTableCommand(),
+        tableName: activeSession?.tableName,
+        tableLocation: activeSession?.locationName,
       }),
     })
 
@@ -328,6 +369,18 @@ const placeOrder = async (
         pollPayment(orderId, g.supplierId)
       }
 
+      // Lock table command if in table mode
+      if (isInTableCommand() && activeSession) {
+        const userEmail = isAuthenticated ? (user?.email || user?.phone || `guest_${Date.now()}`) : `guest_${Date.now()}`
+        lockTableCommand(userEmail)
+
+        // Ask if user wants to close table
+        if (canCloseTable()) {
+          setShowCloseTableDialog(true)
+        }
+      }
+
+      // Clear cart (but table session persists in its own store)
       clear()
 
       // Redirect to order success page with WhatsApp details
@@ -373,15 +426,21 @@ const submitCOD = async () => {
   if (!codForSeller) return
   const g = groups.find(x => x.supplierId === codForSeller)
   if (!g) { setCodOpen(false); return }
-  
+
+  // Check if Pangolin's Burrows - use table/location instead of delivery input
+  const isPangolins = g.supplierName?.toUpperCase().includes("PANGOLIN")
+  const location = isPangolins
+    ? (isInTableCommand() ? `Table: ${activeSession?.tableName}` : g.supplierLocation || "In-person pickup")
+    : deliveryLocation
+
   await placeOrder(g, {
     paymentName: "PAY_ON_DELIVERY",
     buyerPhone: contactPhone,
-    buyerLocation: deliveryLocation,
+    buyerLocation: location,
     reference: `COD_${Date.now()}`,
     paymentId: `COD_${Date.now()}` // ✅ INCLUDE PAYMENT ID
   })
-  
+
   setCodOpen(false)
   setCodForSeller(null)
 }
@@ -599,38 +658,109 @@ const submitCOD = async () => {
       <Dialog open={codOpen} onOpenChange={setCodOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delivery details</DialogTitle>
-            <DialogDescription>We'll hold the order and you can pay on delivery.</DialogDescription>
+            <DialogTitle>
+              {(() => {
+                const g = codForSeller ? groups.find(x => x.supplierId === codForSeller) : null
+                const isPangolins = g?.supplierName?.toUpperCase().includes("PANGOLIN")
+                return isPangolins ? "Confirm Order" : "Delivery details"
+              })()}
+            </DialogTitle>
+            <DialogDescription>
+              {(() => {
+                const g = codForSeller ? groups.find(x => x.supplierId === codForSeller) : null
+                const isPangolins = g?.supplierName?.toUpperCase().includes("PANGOLIN")
+                return isPangolins
+                  ? "Review your order details and confirm."
+                  : "We'll hold the order and you can pay on delivery."
+              })()}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            {checkoutMode === "anonymous" && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-2">
-                <div className="text-sm">
-                  <span className="text-muted-foreground">Name: </span>
-                  <span className="font-medium">{anonymousName}</span>
-                </div>
-                <div className="text-sm">
-                  <span className="text-muted-foreground">Phone: </span>
-                  <span className="font-medium">{anonymousPhone}</span>
-                </div>
-              </div>
-            )}
-            <div className="space-y-1">
-              <label className="text-sm font-medium">Delivery location *</label>
-              <Input value={deliveryLocation} onChange={(e) => setDeliveryLocation(e.target.value)} placeholder="e.g., Kigali, Kacyiru, Plot 12" />
-            </div>
-            {checkoutMode !== "anonymous" && (
-              <div className="space-y-1">
-                <label className="text-sm font-medium">Contact phone</label>
-                <Input value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} placeholder="+2507…" />
-              </div>
-            )}
+            {(() => {
+              const g = codForSeller ? groups.find(x => x.supplierId === codForSeller) : null
+              const isPangolins = g?.supplierName?.toUpperCase().includes("PANGOLIN")
+
+              return (
+                <>
+                  {/* Order Summary */}
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
+                    {checkoutMode === "anonymous" && (
+                      <>
+                        <div className="text-sm">
+                          <span className="text-muted-foreground">Name: </span>
+                          <span className="font-medium">{anonymousName}</span>
+                        </div>
+                        <div className="text-sm">
+                          <span className="text-muted-foreground">Phone: </span>
+                          <span className="font-medium">{anonymousPhone}</span>
+                        </div>
+                      </>
+                    )}
+                    {isAuthenticated && (
+                      <>
+                        <div className="text-sm">
+                          <span className="text-muted-foreground">Name: </span>
+                          <span className="font-medium">{user?.name}</span>
+                        </div>
+                        <div className="text-sm">
+                          <span className="text-muted-foreground">Phone: </span>
+                          <span className="font-medium">{user?.phone}</span>
+                        </div>
+                      </>
+                    )}
+                    {isInTableCommand() && activeSession && (
+                      <div className="text-sm">
+                        <span className="text-muted-foreground">Table: </span>
+                        <span className="font-medium font-mono">{activeSession.tableName}</span>
+                      </div>
+                    )}
+                    {g && (
+                      <div className="text-sm">
+                        <span className="text-muted-foreground">Total: </span>
+                        <span className="font-bold">{g.subtotal.toLocaleString()} RWF</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Delivery location - only for non-Pangolins orders */}
+                  {!isPangolins && (
+                    <>
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium">Delivery location *</label>
+                        <Input
+                          value={deliveryLocation}
+                          onChange={(e) => setDeliveryLocation(e.target.value)}
+                          placeholder="e.g., Kigali, Kacyiru, Plot 12"
+                        />
+                      </div>
+                      {checkoutMode !== "anonymous" && (
+                        <div className="space-y-1">
+                          <label className="text-sm font-medium">Contact phone</label>
+                          <Input
+                            value={contactPhone}
+                            onChange={(e) => setContactPhone(e.target.value)}
+                            placeholder="+2507…"
+                          />
+                        </div>
+                      )}
+                    </>
+                  )}
+                </>
+              )
+            })()}
           </div>
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setCodOpen(false)}>Cancel</Button>
-            <Button onClick={submitCOD} disabled={!deliveryLocation}>
+            <Button
+              onClick={submitCOD}
+              disabled={(() => {
+                const g = codForSeller ? groups.find(x => x.supplierId === codForSeller) : null
+                const isPangolins = g?.supplierName?.toUpperCase().includes("PANGOLIN")
+                return !isPangolins && !deliveryLocation
+              })()}
+            >
               <Truck className="h-4 w-4 mr-2" />
-              Place order (COD)
+              Place order
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -736,6 +866,74 @@ const submitCOD = async () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Table Command Dialog */}
+      {tableCommandSeller && (
+        <TableCommandDialog
+          open={tableCommandDialogOpen}
+          onOpenChange={(open) => {
+            setTableCommandDialogOpen(open)
+            // If dialog closed after creating/joining table, proceed to payment method
+            if (!open && isInTableCommand() && tableCommandSeller) {
+              const g = groups.find(x => x.supplierId === tableCommandSeller.id)
+              if (g) {
+                const hasUssdTarget = Boolean((g.momo ?? "").trim())
+                setSelectedSeller(tableCommandSeller.id)
+                setPaymentMethod(hasUssdTarget ? "momo" : "cod")
+                setPaymentMethodOpen(true)
+              }
+            }
+          }}
+          onIndividualOrder={() => {
+            // User chose individual ordering - proceed with regular checkout flow
+            if (tableCommandSeller) {
+              const g = groups.find(x => x.supplierId === tableCommandSeller.id)
+              if (g) {
+                const hasUssdTarget = Boolean((g.momo ?? "").trim())
+                setSelectedSeller(tableCommandSeller.id)
+                setPaymentMethod(hasUssdTarget ? "momo" : "cod")
+                setPaymentMethodOpen(true)
+              }
+            }
+          }}
+          locationId={tableCommandSeller.id}
+          locationName={tableCommandSeller.name}
+        />
+      )}
+
+      {/* Close Table Dialog */}
+      <AlertDialog open={showCloseTableDialog} onOpenChange={setShowCloseTableDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <Lock className="h-5 w-5 text-orange-600" />
+              Close Table Command?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              You just sent an order for table "{activeSession?.tableName}".
+              <div className="mt-3 space-y-2">
+                <p className="font-medium text-foreground">Do you want to close this table?</p>
+                <ul className="text-sm space-y-1 ml-4 list-disc">
+                  <li><strong>Close Table:</strong> No one can add more items. Table is finished.</li>
+                  <li><strong>Keep Open:</strong> You or others can still add items and send another order.</li>
+                </ul>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep Open</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                closeTableCommand()
+                setShowCloseTableDialog(false)
+              }}
+              className="bg-orange-600 hover:bg-orange-700"
+            >
+              Close Table
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }
