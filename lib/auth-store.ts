@@ -10,7 +10,7 @@ export interface User {
   name: string
   role: UserRole
   phone: string
-  location: string
+  location: string 
   businessName?: string
   businessCategory?: string
   ishyigaAccount?: string
