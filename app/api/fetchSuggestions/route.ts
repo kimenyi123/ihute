@@ -8,7 +8,7 @@ function withTrailingSlash(u: string) {
 }
 
 async function forward(req: NextRequest) {
-  const backendBase = withTrailingSlash(process.env.JAVA_BACKEND_BASE ?? "https://ihute.rw/Trading")
+  const backendBase = withTrailingSlash(process.env.JAVA_BACKEND_BASE ?? "http://localhost:8080/Trading")
   const incoming = new URL(req.url)
   const target = new URL("Kaos/fetchSuggestions", backendBase)
 
