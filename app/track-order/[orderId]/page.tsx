@@ -7,7 +7,7 @@ import { Footer } from "@/components/footer"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Truck, CheckCircle, Clock, Package, MessageCircle, ArrowLeft, CreditCard } from "lucide-react"
+import { Truck, CheckCircle, Clock, Package, MessageCircle, ArrowLeft, CreditCard, Star } from "lucide-react"
 import { formatPaymentMethod } from "@/lib/payment-utils" // ✅ IMPORTED
 
 type OrderStatus = "pending" | "processing" | "in-transit" | "delivered"
@@ -417,6 +417,103 @@ export default function TrackOrderPage() {
                     Contact Seller on WhatsApp
                   </a>
                 </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Rating Section - All Rating Types */}
+          {order.status === "delivered" && (
+            <Card className="border-2 border-amber-100">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Star className="h-5 w-5 text-amber-600" />
+                  Rate Your Experience
+                </CardTitle>
+                <CardDescription>
+                  Help others by sharing your experience with this order
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {/* Rate Product */}
+                  <div className="p-4 border border-slate-200 rounded-lg bg-white hover:shadow-md transition-shadow">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1">
+                        <h3 className="font-semibold text-slate-900 mb-1">Rate Product Quality</h3>
+                        <p className="text-sm text-slate-600">
+                          How satisfied are you with the product you received?
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        className="bg-amber-500 hover:bg-amber-600 shrink-0"
+                        asChild
+                      >
+                        <a
+                          href={`/products/rate?orderId=${orderId}&productId=${order.items[0]?.name || 'unknown'}&productName=${order.items[0]?.name || 'Product'}&supplierId=${order.sellerName}&supplierName=${order.sellerName}`}
+                        >
+                          <Star className="h-4 w-4 mr-2" />
+                          Rate Product
+                        </a>
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Rate Supplier Service */}
+                  <div className="p-4 border border-slate-200 rounded-lg bg-white hover:shadow-md transition-shadow">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1">
+                        <h3 className="font-semibold text-slate-900 mb-1">Rate Supplier Service</h3>
+                        <p className="text-sm text-slate-600">
+                          Rate delivery speed and communication quality
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="border-amber-500 text-amber-600 hover:bg-amber-50 shrink-0"
+                        asChild
+                      >
+                        <a
+                          href={`/supplier-services/rate?orderId=${orderId}&supplierId=${order.sellerName}&supplierName=${order.sellerName}`}
+                        >
+                          <Star className="h-4 w-4 mr-2" />
+                          Rate Service
+                        </a>
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Rate Delivery Experience */}
+                  <div className="p-4 border border-slate-200 rounded-lg bg-white hover:shadow-md transition-shadow">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1">
+                        <h3 className="font-semibold text-slate-900 mb-1">Rate Delivery Experience</h3>
+                        <p className="text-sm text-slate-600">
+                          Overall satisfaction with the delivery process
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="border-blue-500 text-blue-600 hover:bg-blue-50 shrink-0"
+                        asChild
+                      >
+                        <a href="/deliveries">
+                          <Star className="h-4 w-4 mr-2" />
+                          Rate Delivery
+                        </a>
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Quick Rate All */}
+                  <div className="pt-3 border-t">
+                    <p className="text-xs text-slate-500 text-center">
+                      You can rate each aspect separately or all at once
+                    </p>
+                  </div>
+                </div>
               </CardContent>
             </Card>
           )}
