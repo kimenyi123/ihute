@@ -190,25 +190,25 @@ export default function SupplierOrdersPage() {
       <Header />
       <main className="container mx-auto px-4 py-8">
         {/* Header bar */}
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+        <div className="flex flex-col gap-3 mb-4">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">My Orders</h1>
-            <p className="text-slate-600">
+            <h1 className="text-xl sm:text-2xl font-bold text-slate-900">My Orders</h1>
+            <p className="text-sm sm:text-base text-slate-600">
               Track and manage orders for your shop
               {lastRefresh && (
-                <span className="ml-2 text-xs text-slate-500">
+                <span className="ml-2 text-xs text-slate-500 block sm:inline mt-1 sm:mt-0">
                   • Last updated: {lastRefresh.toLocaleTimeString()}
                 </span>
               )}
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
             <Button
               variant="outline"
               size="sm"
               onClick={loadOrders}
               disabled={loading}
-              className="gap-2"
+              className="gap-2 w-full sm:w-auto"
             >
               <RotateCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               Refresh
@@ -216,7 +216,7 @@ export default function SupplierOrdersPage() {
             <div className="flex items-center gap-2">
               <span className="text-sm text-slate-600">Rows:</span>
               <select
-                className="border rounded-md px-2 py-1 text-sm"
+                className="border rounded-md px-2 py-1 text-sm flex-1 sm:flex-none"
                 value={pageSize}
                 onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1) }}
               >
@@ -255,14 +255,14 @@ export default function SupplierOrdersPage() {
                 return (
                   <Card key={order.id}>
                     <CardHeader>
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <CardTitle className="text-lg">
+                      <div className="flex flex-col sm:flex-row items-start justify-between gap-3">
+                        <div className="flex-1">
+                          <CardTitle className="text-base sm:text-lg">
                             <button onClick={() => router.push(supplierOrderLink(order.id))} className="text-left hover:underline">
                               {order.id}
                             </button>
                           </CardTitle>
-                          <CardDescription className="flex items-center gap-2 flex-wrap">
+                          <CardDescription className="flex items-center gap-2 flex-wrap text-xs sm:text-sm">
                             <span>{createdStr}</span>
                             {createdStr && <span>•</span>}
                             <span className="font-medium">{order.buyerName}</span>
@@ -300,12 +300,12 @@ export default function SupplierOrdersPage() {
                             ))}
                           </div>
                         </div>
-                        <div className="flex items-center justify-between pt-4 border-t">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-4 border-t">
                           <div>
-                            <p className="text-sm text-slate-600">Total Amount</p>
-                            <p className="text-lg font-bold text-slate-900">{order.subtotal.toLocaleString()} RWF</p>
+                            <p className="text-xs sm:text-sm text-slate-600">Total Amount</p>
+                            <p className="text-base sm:text-lg font-bold text-slate-900">{order.subtotal.toLocaleString()} RWF</p>
                           </div>
-                          <Button variant="outline" size="sm" onClick={() => router.push(supplierOrderLink(order.id))}>View Details</Button>
+                          <Button variant="outline" size="sm" onClick={() => router.push(supplierOrderLink(order.id))} className="w-full sm:w-auto">View Details</Button>
                         </div>
                       </div>
                     </CardContent>
@@ -314,16 +314,16 @@ export default function SupplierOrdersPage() {
               })}
             </div>
             {/* Pagination */}
-            <div className="flex items-center justify-between mt-6">
-              <div className="text-sm text-slate-600">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-6">
+              <div className="text-xs sm:text-sm text-slate-600 order-2 sm:order-1">
                 {total != null ? <>Page <span className="font-medium">{page}</span> of <span className="font-medium">{totalPages}</span> • {total} total</> : <>Page <span className="font-medium">{page}</span></>}
               </div>
-              <div className="flex items-center gap-1">
-                <Button variant="outline" size="sm" onClick={goPrev} disabled={!hasPrev} className="gap-1"><ChevronLeft className="h-4 w-4" /> Prev</Button>
+              <div className="flex items-center gap-1 order-1 sm:order-2 overflow-x-auto w-full sm:w-auto justify-center">
+                <Button variant="outline" size="sm" onClick={goPrev} disabled={!hasPrev} className="gap-1 flex-shrink-0"><ChevronLeft className="h-4 w-4" /> <span className="hidden sm:inline">Prev</span></Button>
                 {pageButtons?.map((p) => (
-                  <Button key={p} variant={p === page ? "default" : "outline"} size="sm" onClick={() => goto(p)}>{p}</Button>
+                  <Button key={p} variant={p === page ? "default" : "outline"} size="sm" onClick={() => goto(p)} className="flex-shrink-0">{p}</Button>
                 ))}
-                <Button variant="outline" size="sm" onClick={goNext} disabled={!hasNext} className="gap-1">Next <ChevronRight className="h-4 w-4" /></Button>
+                <Button variant="outline" size="sm" onClick={goNext} disabled={!hasNext} className="gap-1 flex-shrink-0"><span className="hidden sm:inline">Next</span> <ChevronRight className="h-4 w-4" /></Button>
               </div>
             </div>
           </>
