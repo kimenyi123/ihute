@@ -4,6 +4,7 @@ import Link from "next/link"
 import Image from "next/image"
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import { Star } from "lucide-react"
 import {
   ShoppingCart,
   User,
@@ -11,6 +12,7 @@ import {
   Heart,
   Truck,
   PackageSearch,
+  PackageCheck,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -32,12 +34,14 @@ import {
 
 import { LanguageSelector } from "@/components/language-selector"
 import { GlobalSearch } from "@/components/global-search"
+import { LocationDialog } from "@/components/location-dialog"
 
 import { useCartStore } from "@/lib/cart-store"
 import { useFavoritesStore } from "@/lib/favorites-store"
 import { useAuthStore } from "@/lib/auth-store"
 import { usePrefsStore } from "@/lib/prefs-store"
 import { useOrdersStore } from "@/lib/orders-store"
+import { useLocationStore } from "@/lib/location-store"
 import { useTranslation } from "@/hooks/use-translation"
 import { RWANDA_DISTRICTS } from "@/lib/constants"
 import { TableCommandBanner } from "@/components/table-command-banner"
@@ -45,6 +49,7 @@ import { TableCommandBanner } from "@/components/table-command-banner"
 export function Header() {
   const router = useRouter()
   const { t } = useTranslation()
+  const { userLocation } = useLocationStore()
 
   const getTotalItems = useCartStore((s) => s.getTotalItems)
   const totalItems = getTotalItems()
@@ -61,6 +66,7 @@ export function Header() {
 
   const pendingCount = useOrdersStore((s) => s.getPendingCount())
   const [sellerCount, setSellerCount] = useState<number>(0)
+  const [locationDialogOpen, setLocationDialogOpen] = useState(false)
 
   useEffect(() => {
     let ignore = false
@@ -119,9 +125,17 @@ export function Header() {
 
           {/* Location Selector - Desktop */}
           <div className="hidden lg:flex items-center gap-2">
-            <MapPin className="h-4 w-4 text-muted-foreground shrink-0" />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setLocationDialogOpen(true)}
+              className={`h-9 w-9 p-0 ${userLocation ? "text-green-600" : "text-muted-foreground"}`}
+              title="Find nearest suppliers"
+            >
+              <MapPin className={`h-4 w-4 ${userLocation ? "fill-green-600" : ""}`} />
+            </Button>
             <Select value={selectedLocation} onValueChange={handleLocation}>
-              <SelectTrigger className="w-[140px] h-9">
+              <SelectTrigger className="w-[130px] sm:w-[140px] h-9 text-xs sm:text-sm">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -197,21 +211,35 @@ export function Header() {
 
                 {/* Customer Orders */}
                 {user?.role !== "supplier" && (
-                  <Link href="/orders">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="relative h-9 w-9"
-                      title="My Orders"
-                    >
-                      <Truck className="h-5 w-5" />
-                      {pendingCount > 0 && (
-                        <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">
-                          {pendingCount}
-                        </span>
-                      )}
-                    </Button>
-                  </Link>
+                  <>
+                    <Link href="/orders">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="relative h-9 w-9"
+                        title="My Orders"
+                      >
+                        <Truck className="h-5 w-5" />
+                        {pendingCount > 0 && (
+                          <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">
+                            {pendingCount}
+                          </span>
+                        )}
+                      </Button>
+                    </Link>
+
+                    {/* Deliveries */}
+                    <Link href="/deliveries">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="relative h-9 w-9"
+                        title="My Deliveries"
+                      >
+                        <PackageCheck className="h-5 w-5" />
+                      </Button>
+                    </Link>
+                  </>
                 )}
               </>
             ) : (
@@ -235,6 +263,13 @@ export function Header() {
               </Button>
             </Link>
 
+            {/* Ratings */}
+            <Link href="/ratings">
+              <Button variant="ghost" size="icon" className="relative h-9 w-9" title="My Ratings">
+                <Star className="h-5 w-5" />
+              </Button>
+            </Link>
+
             {/* Cart */}
             <Link href="/cart">
               <Button variant="ghost" size="icon" className="relative h-9 w-9" title="Cart">
@@ -255,9 +290,17 @@ export function Header() {
             <GlobalSearch placeholder={t("searchPlaceholder")} className="w-full" />
           </div>
           <div className="flex items-center gap-2">
-            <MapPin className="h-4 w-4 text-muted-foreground shrink-0" />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setLocationDialogOpen(true)}
+              className={`h-9 w-9 p-0 ${userLocation ? "text-green-600" : "text-muted-foreground"}`}
+              title="Find nearest suppliers"
+            >
+              <MapPin className={`h-4 w-4 ${userLocation ? "fill-green-600" : ""}`} />
+            </Button>
             <Select value={selectedLocation} onValueChange={handleLocation}>
-              <SelectTrigger>
+              <SelectTrigger className="text-xs sm:text-sm h-9">
                 <SelectValue placeholder="Select your district" />
               </SelectTrigger>
               <SelectContent>
@@ -275,6 +318,7 @@ export function Header() {
         </div>
       </div>
       <TableCommandBanner />
+      <LocationDialog open={locationDialogOpen} onOpenChange={setLocationDialogOpen} />
     </header>
   )
 }
