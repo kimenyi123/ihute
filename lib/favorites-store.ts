@@ -2,6 +2,7 @@
 "use client"
 
 import { create } from "zustand"
+import { persist, createJSONStorage } from "zustand/middleware"
 
 // what we save for each favorite (snapshot at the time of hearting)
 export type FavoriteItem = {
@@ -36,8 +37,10 @@ type FavoritesState = {
   }>
 }
 
-export const useFavoritesStore = create<FavoritesState>()((set, get) => ({
-  favorites: [],
+export const useFavoritesStore = create<FavoritesState>()(
+  persist(
+    (set, get) => ({
+      favorites: [],
 
   addFavorite: (item) =>
     set((state) => {
@@ -80,4 +83,10 @@ export const useFavoritesStore = create<FavoritesState>()((set, get) => ({
     }
     return Array.from(groups.values())
   },
-}))
+    }),
+    {
+      name: "ihute-favorites-storage",
+      storage: createJSONStorage(() => localStorage),
+    }
+  )
+)
