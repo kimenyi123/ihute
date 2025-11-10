@@ -5,7 +5,8 @@ import { ProductCard } from "@/components/product-card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { Search, Store } from "lucide-react";
+import { Search, Store, Loader2 } from "lucide-react";
+import { filterProductsByRelevance, filterSuppliersByRelevance } from "@/lib/search-utils";
 
 type ServerProduct = {
   item_commercial_name?: string;
@@ -96,6 +97,8 @@ export function ProductGrid({
   const [serverProducts, setServerProducts] = useState<ServerProduct[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [globalSearchResults, setGlobalSearchResults] = useState<ServerProduct[]>([]);
 
   function getApiBase() {
     // Always use empty string to make relative calls to Next.js API routes
@@ -106,7 +109,139 @@ export function ProductGrid({
   useEffect(() => {
     setSearchQuery("");
     setDisplayCount(12);
+    setGlobalSearchResults([]);
   }, [selectedSupplier]);
+
+  // Global search with debounce - searches both PRODUCTS and SUPPLIERS in this category
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setGlobalSearchResults([]);
+      setSearching(false);
+      return;
+    }
+
+    setSearching(true);
+    const timeoutId = setTimeout(async () => {
+      try {
+        const params = new URLSearchParams({
+          globalSearch: searchQuery.trim(),
+          sector: categoryId, // Filter to current category only
+          limit: "100",
+          Currency: "RWF",
+        });
+
+        const res = await fetch(`/api/fetchSuggestions?${params}`, {
+          cache: "no-store"
+        });
+
+        if (!res.ok) throw new Error("Search failed");
+
+        const json = await res.json();
+
+        // Get products from the search
+        const products = json.products || [];
+
+        console.log(`[ProductGrid Search] Query: "${searchQuery}" in ${categoryId}`);
+        console.log(`[ProductGrid Search] Received ${products.length} products from backend`);
+        if (products.length > 0) {
+          console.log(`[ProductGrid Search] Sample product:`, {
+            name: products[0].item_commercial_name || products[0].ITEM_NAME,
+            type: products[0].type || products[0].TYPE,
+            sector: products[0].sector || products[0].SECTOR,
+            category: products[0].category || products[0].CATEGORY
+          });
+        }
+
+        // Since backend should filter by sector param, we trust it
+        // But we'll do light filtering if category info exists
+        const categoryFilteredProducts = products;
+
+        console.log(`[ProductGrid Search] Using ${categoryFilteredProducts.length} products`);
+
+        // Get suppliers from the search (both by name and by product)
+        const suppliersByName = json.suppliersByName || [];
+        const suppliersByProduct = json.suppliersByProduct || [];
+
+        console.log(`[ProductGrid Search] Received ${suppliersByName.length} suppliers by name, ${suppliersByProduct.length} by product`);
+
+        // Combine and deduplicate suppliers
+        const allSuppliers = [...suppliersByName, ...suppliersByProduct];
+        const uniqueSuppliers = allSuppliers.filter((supplier, index, self) =>
+          index === self.findIndex((s) =>
+            (s.supplier_account || s.SELLER_ISHYIGA_ACCOUNT) === (supplier.supplier_account || supplier.SELLER_ISHYIGA_ACCOUNT)
+          )
+        );
+
+        console.log(`[ProductGrid Search] ${uniqueSuppliers.length} unique suppliers found`);
+
+        // Filter suppliers by relevance (backend should have already filtered by sector)
+        const filteredSuppliers = filterSuppliersByRelevance(
+          uniqueSuppliers.filter(s => s.supplier_name),
+          searchQuery.trim(),
+          8 // Lower threshold for more results
+        );
+
+        console.log(`[ProductGrid Search] ${filteredSuppliers.length} suppliers after relevance filtering`);
+
+        // For each supplier, fetch their products in this category
+        const allProducts: any[] = [];
+
+        // Add direct product matches (already category-filtered)
+        const filteredProducts = filterProductsByRelevance(categoryFilteredProducts, searchQuery.trim(), 10);
+        allProducts.push(...filteredProducts);
+
+        // Fetch products from matching suppliers
+        for (const supplier of filteredSuppliers) {
+          const supplierAccount = supplier.supplier_account || supplier.SELLER_ISHYIGA_ACCOUNT;
+          if (!supplierAccount) continue;
+
+          try {
+            const supplierRes = await fetch(
+              `/api/fetchSuggestions?supplierProducts=${encodeURIComponent(supplierAccount)}&limit=20&Currency=RWF`,
+              { cache: "no-store" }
+            );
+
+            if (supplierRes.ok) {
+              const supplierProducts = await supplierRes.json();
+              // Add supplier products
+              if (Array.isArray(supplierProducts)) {
+                allProducts.push(...supplierProducts.map((p: any) => ({
+                  ...p,
+                  supplier_name: supplier.supplier_name,
+                  supplier_location: supplier.supplier_location,
+                  supplier_account: supplierAccount
+                })));
+              }
+            }
+          } catch (err) {
+            console.error(`Failed to fetch products for supplier ${supplierAccount}:`, err);
+          }
+        }
+
+        // Remove duplicate products
+        const uniqueProducts = allProducts.filter((product, index, self) =>
+          index === self.findIndex((p) =>
+            (p.item_code || p.item_commercial_name) === (product.item_code || product.item_commercial_name) &&
+            (p.item_seller_account || p.supplier_account) === (product.item_seller_account || product.supplier_account)
+          )
+        );
+
+        console.log(`[ProductGrid Search] Final result: ${uniqueProducts.length} unique products`);
+
+        // Normalize all products
+        const normalized = uniqueProducts.map((p: any) => normalizeProduct(p));
+
+        setGlobalSearchResults(normalized);
+      } catch (error) {
+        console.error("Global search error:", error);
+        setGlobalSearchResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 300); // 300ms debounce
+
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery, categoryId]);
 
   useEffect(() => {
     let isMounted = true;
@@ -169,33 +304,34 @@ export function ProductGrid({
     };
   }, [categoryId, selectedSupplier, selectedSupplierName]);
 
-  const allProducts = useMemo(
-    () =>
-      (serverProducts || []).map((p, idx) => {
-        const firstCategoryHint =
-          toRouteCategoryId(p.type) ||
-          toRouteCategoryId(p.sector) ||
-          toRouteCategoryId(p.category);
+  const allProducts = useMemo(() => {
+    // Use global search results if searching, otherwise use server products
+    const sourceProducts = searchQuery.trim() ? globalSearchResults : serverProducts;
 
-        return {
-          id: `${categoryId}-${idx}`,
-          name: p.item_commercial_name || "Product",
-          description: p.item_key_words || "Quality product",
-          price: extractNumericPrice(p.item_emballage),
-          unit: p.item_packet,
-          inStock: true,
-          rating: 4,
-          supplierId: p.item_seller_account,
-          supplierName: p.supplier_name || p.item_seller_account || "Supplier",
-          supplierLocation: p.supplier_location,
-          image: p.image || "/placeholder.svg?height=300&width=300",
-          momo: p.momo,
-          // keep for category filtering when supplier is selected
-          _routeCategory: firstCategoryHint,
-        };
-      }),
-    [serverProducts, categoryId]
-  );
+    return (sourceProducts || []).map((p, idx) => {
+      const firstCategoryHint =
+        toRouteCategoryId(p.type) ||
+        toRouteCategoryId(p.sector) ||
+        toRouteCategoryId(p.category);
+
+      return {
+        id: `${categoryId}-${idx}`,
+        name: p.item_commercial_name || "Product",
+        description: p.item_key_words || "Quality product",
+        price: extractNumericPrice(p.item_emballage),
+        unit: p.item_packet,
+        inStock: true,
+        rating: 4,
+        supplierId: p.item_seller_account,
+        supplierName: p.supplier_name || p.item_seller_account || "Supplier",
+        supplierLocation: p.supplier_location,
+        image: p.image || "/placeholder.svg?height=300&width=300",
+        momo: p.momo,
+        // keep for category filtering when supplier is selected
+        _routeCategory: firstCategoryHint,
+      };
+    });
+  }, [serverProducts, globalSearchResults, searchQuery, categoryId]);
 
   const suppliers = useMemo(() => {
     const uniq = new Map<string, { id: string; name: string; location?: string }>();
@@ -224,16 +360,7 @@ export function ProductGrid({
       }
     }
 
-    // text filter
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      items = items.filter(
-        (p) =>
-          p.name.toLowerCase().includes(q) ||
-          p.description.toLowerCase().includes(q) ||
-          (p.supplierName || "").toLowerCase().includes(q)
-      );
-    }
+    // No need for local text filtering - global search handles it with multilingual support
 
     // sort
     switch (sortBy) {
@@ -251,7 +378,7 @@ export function ProductGrid({
     }
 
     return items;
-  }, [allProducts, selectedSupplier, searchQuery, sortBy, categoryId]);
+  }, [allProducts, selectedSupplier, sortBy, categoryId]);
 
   const displayedProducts = filteredProducts.slice(0, displayCount);
 
@@ -271,11 +398,14 @@ export function ProductGrid({
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               type="search"
-              placeholder="Search products…"
+              placeholder={`Search ${categoryName} products or suppliers…`}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
+              className="pl-10 pr-10"
             />
+            {searching && (
+              <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-blue-600" />
+            )}
           </div>
           <Select value={sortBy} onValueChange={setSortBy}>
             <SelectTrigger className="w-full sm:w-[200px]">

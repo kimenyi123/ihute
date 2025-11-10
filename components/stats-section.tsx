@@ -65,12 +65,13 @@ export function StatsSection() {
       label: "Happy Customers",
       color: "text-green-600",
     },
-    {
-      icon: CreditCard,
-      value: loading ? "..." : `${stats.paymentMethods}+`,
-      label: "Payment Methods",
-      color: "text-purple-600",
-    },
+    // Commented out Payment Methods stat - uncomment when needed
+    // {
+    //   icon: CreditCard,
+    //   value: loading ? "..." : `${stats.paymentMethods}+`,
+    //   label: "Payment Methods",
+    //   color: "text-purple-600",
+    // },
     {
       icon: Truck,
       value: "Fast",
