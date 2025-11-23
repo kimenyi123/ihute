@@ -220,7 +220,7 @@ export function CartSummary() {
         paidAt: isPaid ? "MTN MoMo" : (hasUssdTarget ? "Pending (MoMo)" : "Pay on delivery"),
         reference: orderId ? `ORDER ${orderId}` : undefined,
         myPhone,
-        link: orderId ? `https://ihute.rw/more_details.jsp?order_id=${orderId}` : undefined,
+        link: orderId ? `/orders/${orderId}` : undefined,
       })
       const href = phone ? waHrefFor(phone, message) : ""
       return { supplierId: g.supplierId, phone, message, href }
@@ -365,41 +365,39 @@ const placeOrder = async (
       // ✅ LOG SUCCESSFUL PAYMENT METHOD
       console.log(`✅ Order created with payment method: ${opts.paymentName}`)
 
-      if (opts.paymentName === "PAID_MTN_MOMO" && orderId) {
-        pollPayment(orderId, g.supplierId)
-      }
+     if (opts.paymentName === "PAID_MTN_MOMO" && orderId) {
+      pollPayment(orderId, g.supplierId)
+    }
 
       // Lock table command if in table mode
-      if (isInTableCommand() && activeSession) {
-        const userEmail = isAuthenticated ? (user?.email || user?.phone || `guest_${Date.now()}`) : `guest_${Date.now()}`
-        lockTableCommand(userEmail)
+     if (isInTableCommand() && activeSession?.isCreator) {
+  // Just show a success toast or alert
+  alert(`Order #${orderId} added to table "${activeSession.tableName}". Add more items or send the complete table order.`)
+  // Don't redirect - user needs to stay to use "Send Complete Table Order" button
+  return
+}
 
-        // Ask if user wants to close table
-        if (canCloseTable()) {
-          setShowCloseTableDialog(true)
-        }
-      }
 
       // Clear cart (but table session persists in its own store)
       clear()
 
       // Redirect to order success page with WhatsApp details
-      if (orderId) {
-        const params = new URLSearchParams({
-          orderId,
-          sellerName: g.supplierName,
-          sellerPhone: sellerTel || "",
-          buyerPhone: checkoutMode === "anonymous" ? anonymousPhone : (user?.phone || ""),
-          total: String(g.subtotal),
-          paymentMethod: opts.paymentName // ✅ INCLUDE PAYMENT METHOD IN REDIRECT
-        })
-        router.push(`/order-success?${params.toString()}`)
-      } else if (checkoutMode === "login" || isAuthenticated) {
-        router.push("/orders")
-      } else {
-        router.push("/")
-      }
-      router.refresh()
+  if (orderId) {
+  const params = new URLSearchParams({
+    orderId,
+    sellerName: g.supplierName,
+    sellerPhone: sellerTel || "",
+    buyerPhone: checkoutMode === "anonymous" ? anonymousPhone : (user?.phone || ""),
+    total: String(g.subtotal),
+    paymentMethod: opts.paymentName
+  })
+  router.push(`/order-success?${params.toString()}`)
+} else if (checkoutMode === "login" || isAuthenticated) {
+  router.push("/orders")
+} else {
+  router.push("/")
+}
+router.refresh()
     } else {
       setPaymentStatus(g.supplierId, "failed")
       alert(`Failed to create order: ${json?.error || "Unknown error"}`)

@@ -45,6 +45,8 @@ type TableCommandStore = {
 
   lockTableCommand: (userEmail: string) => void
 
+  sendTableOrder: () => Promise<void>
+
   closeTableCommand: () => Promise<void>
 
   setOrderMode: (mode: "individual" | "table_command") => void
@@ -144,6 +146,54 @@ export const useTableCommandStore = create<TableCommandStore>()(
               lastSentBy: userEmail,
             },
           })
+        }
+      },
+
+      sendTableOrder: async () => {
+        const session = get().activeSession
+        if (!session) throw new Error("No active table command session")
+
+        if (!session.isCreator) {
+          throw new Error("Only the table creator can send the complete order")
+        }
+
+        if (session.status !== "ACTIVE") {
+          throw new Error(`Cannot send order. Table status is ${session.status}`)
+        }
+
+        console.log("📤 Sending complete table order:", {
+          tableName: session.tableName,
+          locationId: session.locationId,
+          userEmail: session.userEmail,
+        })
+
+        try {
+          // Import the API function
+          const { sendTableOrder: apiSendTableOrder } = await import("@/lib/api/table-commands")
+
+          const result = await apiSendTableOrder(
+            session.tableName,
+            session.locationId,
+            session.userEmail
+          )
+
+          if (!result.ok) {
+            console.error("Backend error:", result)
+            throw new Error(result.error || "Failed to send table order")
+          }
+
+          // Update status to SENT and set lastSentBy
+          get().updateTableStatus("SENT", session.userEmail)
+          console.log("✅ Table order sent successfully:", {
+            masterOrderId: result.masterOrderId,
+            childOrderCount: result.childOrderCount,
+            totalAmount: result.totalAmount,
+          })
+
+          return result
+        } catch (error: any) {
+          console.error("❌ Error sending table order:", error)
+          throw error
         }
       },
 

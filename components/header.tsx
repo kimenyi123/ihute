@@ -13,6 +13,7 @@ import {
   Truck,
   PackageSearch,
   PackageCheck,
+  Users,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -237,6 +238,18 @@ export function Header() {
                         title="My Deliveries"
                       >
                         <PackageCheck className="h-5 w-5" />
+                      </Button>
+                    </Link>
+
+                    {/* Table Commands */}
+                    <Link href="/tables">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="relative h-9 w-9"
+                        title="Table Commands"
+                      >
+                        <Users className="h-5 w-5" />
                       </Button>
                     </Link>
                   </>
