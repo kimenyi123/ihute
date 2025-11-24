@@ -7,10 +7,11 @@ import { Footer } from "@/components/footer"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Truck, CheckCircle, Clock, Package, MessageCircle, ArrowLeft, CreditCard } from "lucide-react"
-import { formatPaymentMethod } from "@/lib/payment-utils" // ✅ IMPORTED
+import { Truck, CheckCircle, Clock, Package, MessageCircle, ArrowLeft, CreditCard, FileText } from "lucide-react"
+import { formatPaymentMethod } from "@/lib/payment-utils"
 
-type OrderStatus = "pending" | "processing" | "in-transit" | "delivered"
+// Updated to match supplier statuses
+type OrderStatus = "open" | "processing" | "invoice" | "delivered" | "pending" | "in-transit"
 
 type OrderDetail = {
   orderId: string
@@ -38,32 +39,40 @@ function statusIcon(status: OrderStatus) {
       return <CheckCircle className="h-5 w-5 text-green-600" />
     case "in-transit":
       return <Truck className="h-5 w-5 text-blue-600" />
+    case "invoice":
+      return <FileText className="h-5 w-5 text-indigo-600" />
     case "processing":
-      return <Package className="h-5 w-5 text-yellow-600" />
+      return <Package className="h-5 w-5 text-blue-600" />
+    case "open":
+    case "pending":
     default:
       return <Clock className="h-5 w-5 text-gray-600" />
   }
 }
 
 function statusBadge(status: OrderStatus) {
-  const variants = {
-    delivered: "default",
-    "in-transit": "secondary",
-    processing: "outline",
-    pending: "outline"
+  switch (status) {
+    case "delivered":
+      return <Badge className="bg-green-600 capitalize">Delivered</Badge>
+    case "in-transit":
+      return <Badge className="bg-blue-600 capitalize">In Transit</Badge>
+    case "invoice":
+      return <Badge className="bg-indigo-600 capitalize">Invoice</Badge>
+    case "processing":
+      return <Badge className="bg-blue-600 capitalize">Processing</Badge>
+    case "open":
+      return <Badge variant="outline" className="capitalize">Open</Badge>
+    case "pending":
+    default:
+      return <Badge variant="outline" className="capitalize">Pending</Badge>
   }
-  return (
-    <Badge variant={variants[status] as any} className="capitalize">
-      {status.replace("-", " ")}
-    </Badge>
-  )
 }
 
 function paymentStatusBadge(paymentStatus?: string) {
   if (!paymentStatus) return null
-  
+
   const status = paymentStatus.toLowerCase()
-  
+
   if (status === "paid" || status === "success") {
     return <Badge className="bg-green-600">Paid</Badge>
   }
@@ -73,18 +82,48 @@ function paymentStatusBadge(paymentStatus?: string) {
   if (status === "failed") {
     return <Badge variant="destructive">Failed</Badge>
   }
-  
-  return <Badge variant="outline">{paymentStatus}</Badge>
+
+  return <Badge variant="outline" className="capitalize">{paymentStatus}</Badge>
 }
 
-// ✅ REMOVED - Now using shared utility
-
 function buildTracking(status: OrderStatus) {
+  // Map real statuses to tracking steps
+  const statusMap: Record<OrderStatus, number> = {
+    "open": 0,
+    "pending": 0,
+    "processing": 1,
+    "invoice": 2,
+    "in-transit": 2,
+    "delivered": 3,
+  }
+
+  const currentStep = statusMap[status] ?? 0
+
   return [
-    { label: "Order Placed", completed: true, date: "" },
-    { label: "Processing", completed: status !== "pending", date: "" },
-    { label: "Out for Delivery", completed: status === "in-transit" || status === "delivered", date: "" },
-    { label: "Delivered", completed: status === "delivered", date: "" },
+    {
+      label: "Order Placed",
+      completed: currentStep >= 0,
+      date: "",
+      isCurrent: currentStep === 0
+    },
+    {
+      label: "Processing",
+      completed: currentStep >= 1,
+      date: "",
+      isCurrent: currentStep === 1
+    },
+    {
+      label: "Ready for Delivery",
+      completed: currentStep >= 2,
+      date: "",
+      isCurrent: currentStep === 2
+    },
+    {
+      label: "Delivered",
+      completed: currentStep >= 3,
+      date: "",
+      isCurrent: currentStep === 3
+    },
   ]
 }
 
@@ -231,7 +270,7 @@ export default function TrackOrderPage() {
     `Discount: ${formatCurrency(0)}`,
     `Paid: ${formatCurrency(paidAmount)}`,
     '',
-    `Paid at: ${formatPaymentMethod(order.paymentMethod)}`, // ✅ USING SHARED UTIL
+    `Paid at: ${formatPaymentMethod(order.paymentMethod)}`,
     `Message: ${orderId ? `ORDER ${orderId}` : '-'}`,
     `My phone: ${order.buyerPhone || ''}`,
     '',
@@ -260,7 +299,7 @@ export default function TrackOrderPage() {
           {/* Order Details */}
           <Card>
             <CardHeader>
-              <CardTitle>Order Information</CardTitle>
+              <CardTitle>Order Informations</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
@@ -276,16 +315,25 @@ export default function TrackOrderPage() {
                   <p className="text-sm text-muted-foreground">Seller</p>
                   <p className="font-medium">{order.sellerName}</p>
                 </div>
-                
+
                 {/* Enhanced Payment Method Display */}
                 <div>
                   <p className="text-sm text-muted-foreground">Payment Method</p>
                   <div className="flex items-center gap-2 mt-1">
                     <CreditCard className="h-4 w-4 text-slate-500" />
-                    <p className="font-medium">{formatPaymentMethod(order.paymentMethod)}</p> {/* ✅ USING SHARED UTIL */}
+                    <p className="font-medium">{formatPaymentMethod(order.paymentMethod)}</p>
                   </div>
                 </div>
-                
+
+                {/* Current Status */}
+                <div className="col-span-2 pt-2 border-t">
+                  <p className="text-sm text-muted-foreground mb-2">Current Status</p>
+                  <div className="flex items-center gap-2">
+                    {statusIcon(order.status)}
+                    {statusBadge(order.status)}
+                  </div>
+                </div>
+
                 {order.buyerName && (
                   <div>
                     <p className="text-sm text-muted-foreground">Buyer Name</p>
@@ -322,7 +370,8 @@ export default function TrackOrderPage() {
           {/* Tracking Timeline */}
           <Card>
             <CardHeader>
-              <CardTitle>Order Status</CardTitle>
+              <CardTitle>Order Progress</CardTitle>
+              <CardDescription>Track your order from placement to delivery</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="relative">
@@ -331,27 +380,42 @@ export default function TrackOrderPage() {
                     <div key={index} className="flex items-start gap-3">
                       <div className="relative">
                         <div
-                          className={`h-10 w-10 rounded-full flex items-center justify-center ${
-                            step.completed ? "bg-green-600" : "bg-slate-200"
+                          className={`h-10 w-10 rounded-full flex items-center justify-center transition-colors ${
+                            step.completed
+                              ? "bg-green-600"
+                              : step.isCurrent
+                                ? "bg-blue-500 ring-4 ring-blue-100"
+                                : "bg-slate-200"
                           }`}
                         >
                           {step.completed ? (
                             <CheckCircle className="h-6 w-6 text-white" />
+                          ) : step.isCurrent ? (
+                            <Clock className="h-6 w-6 text-white animate-pulse" />
                           ) : (
                             <Clock className="h-6 w-6 text-slate-400" />
                           )}
                         </div>
                         {index < steps.length - 1 && (
                           <div
-                            className={`absolute left-5 top-10 w-0.5 h-8 ${
+                            className={`absolute left-5 top-10 w-0.5 h-8 transition-colors ${
                               step.completed ? "bg-green-600" : "bg-slate-200"
                             }`}
                           />
                         )}
                       </div>
                       <div className="flex-1 pt-2">
-                        <p className={`font-medium ${step.completed ? "text-slate-900" : "text-slate-500"}`}>
+                        <p className={`font-medium ${
+                          step.completed
+                            ? "text-slate-900"
+                            : step.isCurrent
+                              ? "text-blue-600 font-semibold"
+                              : "text-slate-500"
+                        }`}>
                           {step.label}
+                          {step.isCurrent && (
+                            <span className="ml-2 text-xs text-blue-600 font-normal">(Current)</span>
+                          )}
                         </p>
                         {step.completed && step.date && (
                           <p className="text-sm text-slate-500">{step.date}</p>
