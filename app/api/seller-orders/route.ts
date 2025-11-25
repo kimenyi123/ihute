@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server"
 
 const JAVA_BACKEND_URL =
-  process.env.JAVA_SELLER_ORDERS_URL || "https://ihute.rw/Trading/OrdersServlet"
+  process.env.JAVA_SELLER_ORDERS_URL || "http://localhost:8080/Trading/OrdersServlet"
 
 function tryParseJson(raw: string) {
   try { return JSON.parse(raw) } catch {}

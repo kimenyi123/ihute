@@ -3,9 +3,12 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useAuthStore } from "@/lib/auth-store"
+import { Header } from "@/components/header"
+import { Footer } from "@/components/footer"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Star } from "lucide-react"
+import { HalfStarRating } from "@/components/half-star-rating"
+import { CheckCircle, Package } from "lucide-react"
 
 type DeliveryRow = {
   orderId: number
@@ -78,59 +81,113 @@ export default function DeliveriesPage() {
     }
   }
 
-  if (loading) return <div className="container mx-auto px-4 py-8">Loading…</div>
-  if (err) return <div className="container mx-auto px-4 py-8 text-red-600">{err}</div>
+  if (loading) return (
+    <div className="min-h-screen bg-slate-50">
+      <Header />
+      <div className="container mx-auto px-4 py-8">Loading…</div>
+      <Footer />
+    </div>
+  )
+  if (err) return (
+    <div className="min-h-screen bg-slate-50">
+      <Header />
+      <div className="container mx-auto px-4 py-8 text-red-600">{err}</div>
+      <Footer />
+    </div>
+  )
 
   return (
-    <div className="container mx-auto px-4 py-8 space-y-4">
-      <h1 className="text-2xl font-bold">Deliveries</h1>
+    <div className="min-h-screen bg-slate-50">
+      <Header />
+      <div className="container mx-auto px-4 py-8 space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-900">My Deliveries</h1>
+          <p className="text-slate-600 mt-1">Review and rate your received orders</p>
+        </div>
       {rows.length === 0 ? (
-        <Card><CardHeader><CardTitle>No deliveries</CardTitle></CardHeader></Card>
-      ) : rows.map(row => (
-        <Card key={row.orderId}>
+        <Card>
           <CardHeader>
-            <CardTitle>Order #{row.orderId} — {row.sellerName}</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <Package className="h-5 w-5" />
+              No Deliveries Yet
+            </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex items-center justify-between text-sm">
-              <span>Status</span>
-              <span className={`font-medium ${row.status === "RECEIVED" ? "text-green-700" : ""}`}>{row.status}</span>
+          <CardContent>
+            <p className="text-slate-600">Your received orders will appear here.</p>
+          </CardContent>
+        </Card>
+      ) : rows.map(row => (
+        <Card key={row.orderId} className="hover:shadow-md transition-shadow">
+          <CardHeader>
+            <div className="flex items-start justify-between">
+              <div>
+                <CardTitle className="text-lg">Order #{row.orderId}</CardTitle>
+                <p className="text-sm text-slate-600 mt-1">from {row.sellerName}</p>
+              </div>
+              {row.status === "RECEIVED" && (
+                <div className="flex items-center gap-1 text-green-600">
+                  <CheckCircle className="h-5 w-5" />
+                  <span className="text-sm font-medium">Received</span>
+                </div>
+              )}
             </div>
-            <div className="flex items-center justify-between text-sm">
-              <span>Subtotal</span>
-              <span className="font-semibold">{row.subtotal.toLocaleString()} RWF</span>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-2 gap-4 py-2">
+              <div>
+                <span className="text-xs text-slate-600 uppercase">Status</span>
+                <p className={`font-semibold ${row.status === "RECEIVED" ? "text-green-700" : "text-orange-600"}`}>
+                  {row.status}
+                </p>
+              </div>
+              <div>
+                <span className="text-xs text-slate-600 uppercase">Total</span>
+                <p className="font-bold text-lg">{row.subtotal.toLocaleString()} RWF</p>
+              </div>
             </div>
 
             {row.status === "PENDING" && (
-              <Button onClick={() => markReceived(row.orderId)} disabled={busy === row.orderId}>
-                {busy === row.orderId ? "Updating…" : "Mark as Received"}
+              <Button 
+                onClick={() => markReceived(row.orderId)} 
+                disabled={busy === row.orderId}
+                className="w-full"
+                size="lg"
+              >
+                {busy === row.orderId ? "Confirming…" : "Confirm Delivery Received"}
               </Button>
             )}
 
-            {/* Optional rating — can rate anytime, but you might gate it to RECEIVED only */}
-            <div className="pt-2 border-t">
-              <div className="flex items-center gap-2">
-                {[1,2,3,4,5].map(s => (
-                  <button key={s} onClick={() => setRating(r => ({ ...r, [row.orderId]: s }))} aria-label={`${s} stars`}>
-                    <Star className={`h-5 w-5 ${ (rating[row.orderId] || 0) >= s ? "fill-yellow-400 text-yellow-400" : "text-slate-400" }`} />
-                  </button>
-                ))}
-              </div>
+            {/* Rating Section */}
+            <div className="pt-4 border-t space-y-3">
+              <h3 className="text-sm font-semibold">Rate Your Experience</h3>
+              <HalfStarRating
+                value={rating[row.orderId] || 0}
+                onChange={(value) => setRating(r => ({ ...r, [row.orderId]: value }))}
+                maxStars={5}
+                size="lg"
+                showValue={true}
+              />
               <textarea
-                className="mt-2 w-full rounded border p-2 text-sm"
-                placeholder="Optional feedback…"
+                className="w-full rounded-lg border border-slate-300 p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Share your feedback about the delivery…"
+                rows={3}
                 value={feedback[row.orderId] || ""}
                 onChange={(e) => setFeedback(f => ({ ...f, [row.orderId]: e.target.value }))}
               />
-              <div className="mt-2">
-                <Button variant="outline" onClick={() => sendRating(row.orderId)} disabled={busy === row.orderId}>
-                  {busy === row.orderId ? "Sending…" : "Submit Rating"}
-                </Button>
-              </div>
+              <Button 
+                variant="outline" 
+                onClick={() => sendRating(row.orderId)} 
+                disabled={busy === row.orderId || !rating[row.orderId]}
+                className="w-full"
+              >
+                {busy === row.orderId ? "Submitting…" : "Submit Rating"}
+              </Button>
             </div>
           </CardContent>
         </Card>
       ))}
+      </div>
+      <Footer />
     </div>
   )
 }

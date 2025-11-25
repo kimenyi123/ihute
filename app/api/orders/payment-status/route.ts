@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 
-const JAVA_ORDERS_URL = process.env.JAVA_ORDERS_URL || "https://ihute.rw/Trading/OrdersServlet"
+const JAVA_ORDERS_URL = process.env.JAVA_ORDERS_URL || "http://localhost:8080/Trading/OrdersServlet"
 
 export async function POST(req: Request) {
   try {

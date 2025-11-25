@@ -202,6 +202,34 @@ export function getPaymentMethodInfo(method: string) {
     isCOD: isCashOnDelivery(method)
   }
 }
+export function mapToUrubutoChannel(internalMethod: string): 'MOMO' | 'CARD' | 'BANK' {
+  const method = internalMethod.toUpperCase();
+
+  if (method.includes('MOMO') || method.startsWith('MOMO_')) return 'MOMO';
+  if (method.includes('CARD') || method.startsWith('CARD_')) return 'CARD';
+  if (method.includes('BANK')) return 'BANK';
+
+  // Default to MOMO for unknown methods that require immediate payment
+  return 'MOMO';
+}
+
+/**
+ * Checks if a payment method is supported by UrubutoPay online payments
+ * @param method - The payment method code
+ * @returns true if the method supports online payment via UrubutoPay
+ */
+export function isUrubutoPaySupported(method: string): boolean {
+  const m = method.toUpperCase();
+
+  // Only MOMO, CARD, and BANK are supported for online payments
+  if (m.includes('MOMO') || m.startsWith('MOMO_') || m.includes('MTN')) return true;
+  if (m.includes('CARD') || m.startsWith('CARD_')) return true;
+  if (m.includes('BANK')) return true;
+
+  // COD and other methods are not supported for online payment
+  return false;
+}
+
 
 /**
  * Standard payment method constants for use in frontend
@@ -209,7 +237,8 @@ export function getPaymentMethodInfo(method: string) {
 export const PAYMENT_METHODS = {
   MOMO: "PAID_MTN_MOMO",
   CARD: "PAID_CARD", 
-  COD: "PAY_ON_DELIVERY"
+  COD: "PAY_ON_DELIVERY",
+  BANK: "BANK_TRANSFER"
 } as const
 
 export type PaymentMethodType = typeof PAYMENT_METHODS[keyof typeof PAYMENT_METHODS]
