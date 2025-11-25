@@ -220,7 +220,7 @@ export function CartSummary() {
         paidAt: isPaid ? "MTN MoMo" : (hasUssdTarget ? "Pending (MoMo)" : "Pay on delivery"),
         reference: orderId ? `ORDER ${orderId}` : undefined,
         myPhone,
-        link: orderId ? `/orders/${orderId}` : undefined,
+        link: orderId ? `https://ihute.rw/orders/${orderId}` : undefined,
       })
       const href = phone ? waHrefFor(phone, message) : ""
       return { supplierId: g.supplierId, phone, message, href }
