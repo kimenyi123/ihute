@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic"
 export const revalidate = 0
 
 // ✅ FIX: Add http:// protocol
-const JAVA_ORDERS_URL = process.env.JAVA_ORDERS_URL || "http://localhost:8080/Trading/OrdersServlet"
+const JAVA_ORDERS_URL = process.env.JAVA_ORDERS_URL || "https://ihute.rw/Trading/OrdersServlet"
 
 export async function GET(req: Request) {
   try {

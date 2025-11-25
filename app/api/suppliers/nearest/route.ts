@@ -4,7 +4,7 @@ export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 export const revalidate = 0
 
-const JAVA_BASE_URL = process.env.JAVA_BASE_URL || "http://localhost:8080/Trading"
+const JAVA_BASE_URL = process.env.JAVA_BASE_URL || "https://ihute.rw/Trading"
 
 /**
  * ENHANCED Find Nearest Suppliers API

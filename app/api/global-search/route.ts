@@ -4,7 +4,7 @@ import type { NextRequest } from "next/server"
 function withTrailingSlash(u: string) { return u.endsWith("/") ? u : u + "/" }
 
 async function forward(req: NextRequest) {
-  const backendBase = withTrailingSlash(process.env.JAVA_BACKEND_BASE ?? "http://localhost:8080/Trading")
+  const backendBase = withTrailingSlash(process.env.JAVA_BACKEND_BASE ?? "https://ihute.rw/Trading")
   const incoming = new URL(req.url)
   const target = new URL("/fetchSuggestions", backendBase)
 

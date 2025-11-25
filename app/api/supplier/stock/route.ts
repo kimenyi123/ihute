@@ -1,69 +1,126 @@
-import { NextRequest, NextResponse } from "next/server";
-import MySQLConnector from "@/lib/MySQLConnector";
-import { RowDataPacket } from "mysql2/promise";
+// app/api/supplier/stock/route.ts
+import { NextRequest, NextResponse } from "next/server"
 
-type SupplierProduct = {
-  ID: number;
-  ITEM_NAME: string;
-  ITEM_CODE: string;
-  stock: number;
-  price: number;
-  cost: number;
-  DESCRIPTION: string;
-  UNIT: string;
-  SELLER_ISHYIGA_ACCOUNT: string;
-  OWNER: string;
-};
+const JAVA_BACKEND_BASE = process.env.JAVA_BACKEND_BASE || "https://ihute.rw"
+const STOCK_SERVLET_URL = `${JAVA_BACKEND_BASE}/Trading/SupplierStock`
 
 export async function GET(req: NextRequest) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), Number(process.env.PROXY_TIMEOUT_MS ?? 12000))
+
   try {
-    const url = new URL(req.url);
-    const account = url.searchParams.get("account");
+    const searchParams = req.nextUrl.searchParams
+    const account = searchParams.get("account")
 
     if (!account) {
-      return NextResponse.json({ error: "Account parameter is required" }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, products: [], error: "account required" },
+        { status: 400 }
+      )
     }
 
-    // TODO: Add Redis caching here
-    // const redisKey = `supplier:${account}:products`;
-    // Check Redis first, if miss, query DB and cache result
-    // For now, querying database directly
+    console.log(`[SUPPLIER-STOCK] Fetching products for account: ${account}`)
 
-    const conn = await MySQLConnector.mpa();
+    const resp = await fetch(`${STOCK_SERVLET_URL}?account=${encodeURIComponent(account)}`, {
+      method: "GET",
+      headers: { 
+        "Content-Type": "application/json",
+        "Accept": "application/json" 
+      },
+      signal: controller.signal,
+      cache: "no-store",
+    })
 
-    // ✅ Cast the rows to RowDataPacket[] first
-    const [rows] = await conn.query<RowDataPacket[]>(
-      `SELECT
-          s.ID,
-          s.ITEM_NAME,
-          s.ITEM_CODE,
-          s.QUANTITY AS stock,
-          s.SALE_PRICE_INCLUSIVE AS price,
-          s.COST_PRICE_INCLUSIVE AS cost,
-          s.DESCRIPTION,
-          s.UNIT,
-          s.SELLER_ISHYIGA_ACCOUNT,
-          a.OWNER
-       FROM seller_add_stock s
-       JOIN account_signup a
-         ON s.SELLER_ISHYIGA_ACCOUNT = a.ISHYIGA_ACCOUNT
-       WHERE s.SELLER_ISHYIGA_ACCOUNT = ?
-       ORDER BY s.ID DESC`,
-      [account]
-    );
+    const text = await resp.text()
+    let data: any
 
-    await conn.end();
+    try {
+      data = JSON.parse(text)
+    } catch {
+      console.error("[SUPPLIER-STOCK] Failed to parse response")
+      return NextResponse.json({ ok: false, products: [] }, { status: 200 })
+    }
 
-    // ✅ Cast to SupplierProduct[]
-    const products = rows as SupplierProduct[];
+    // Handle different response formats
+    let products: any[] = []
+    
+    if (Array.isArray(data)) {
+      products = data
+    } else if (Array.isArray(data?.products)) {
+      products = data.products
+    } else if (typeof data?.products === "string") {
+      // Handle "No products found" string
+      products = []
+    }
 
-    // Return with fromCache flag (false since Redis not implemented yet)
-    return NextResponse.json({
+    console.log(`[SUPPLIER-STOCK] Found ${products.length} products (source: ${data.source || 'unknown'})`)
+
+    return NextResponse.json({ 
+      ok: true,
       products,
-      fromCache: false // Will be true when Redis is implemented
-    }, { status: 200 });
-  } catch (error: any) {
-    console.error("Error fetching supplier stock:", error);
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+      count: products.length,
+      source: data.source || 'unknown'
+    }, { status: 200 })
+
+  } catch (e: any) {
+    console.error("[SUPPLIER-STOCK] Error:", e)
+    
+    if (e.name === 'AbortError') {
+      return NextResponse.json(
+        { ok: false, products: [], error: "Request timeout" },
+        { status: 504 }
+      )
+    }
+    
+    return NextResponse.json(
+      { ok: false, products: [], error: e?.message },
+      { status: 200 }
+    )
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+// POST endpoint for adding products
+export async function POST(req: NextRequest) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 12000)
+
+  try {
+    const body = await req.json()
+    const action = body.action || "getProducts"
+
+    console.log(`[SUPPLIER-STOCK] POST action: ${action}`)
+
+    const resp = await fetch(STOCK_SERVLET_URL, {
+      method: "POST",
+      headers: { 
+        "Content-Type": "application/json",
+        "Accept": "application/json" 
+      },
+      body: JSON.stringify({ ...body, action }),
+      signal: controller.signal,
+      cache: "no-store",
+    })
+
+    const data = await resp.json().catch(() => ({ ok: false }))
+
+    if (!resp.ok || !data.ok) {
+      return NextResponse.json(
+        { ok: false, error: data.error || "Failed to process request" },
+        { status: resp.status || 500 }
+      )
+    }
+
+    return NextResponse.json(data)
+
+  } catch (e: any) {
+    console.error("[SUPPLIER-STOCK] POST error:", e)
+    return NextResponse.json(
+      { ok: false, error: e?.message || "Failed to process request" },
+      { status: 500 }
+    )
+  } finally {
+    clearTimeout(timeout)
   }
 }
