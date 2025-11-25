@@ -4,13 +4,14 @@
 import { useEffect, useRef, useState, KeyboardEvent } from "react"
 import { createPortal } from "react-dom"
 import { useRouter } from "next/navigation"
-import { Search } from "lucide-react"
+import { Search, Package, Store } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { usePrefsStore } from "@/lib/prefs-store"
 import { useCartStore } from "@/lib/cart-store"
+import { filterSuppliersByRelevance, filterProductsByRelevance } from "@/lib/search-utils"
 
-type GlobalResult = {
+export interface GlobalResult {
   type?: "product" | "supplier"
   item_code?: string
   item_commercial_name?: string
@@ -22,8 +23,14 @@ type GlobalResult = {
   supplier_name?: string
   supplier_location?: string
   momo?: string
-  match_type?: "product" | "supplier"
+  match_type?: "product" | "supplier" | "name"
+  match_score?: number
+  relevance_score?: number
+  finalScore?: number
   image?: string
+  product_count?: number
+  source?: string
+  cache_hit?: boolean
 }
 
 type GlobalSearchResponse = {
@@ -33,6 +40,12 @@ type GlobalSearchResponse = {
   query: string
   timestamp?: number
   error?: string
+  searchStats?: {
+    totalProducts: number
+    totalSuppliers: number
+    dataSource: string
+    cacheHit: boolean
+  }
 }
 
 function extractNumericPrice(value: any): number {
@@ -42,10 +55,25 @@ function extractNumericPrice(value: any): number {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+// Group products by supplier for better display
+function groupProductsBySupplier(products: GlobalResult[]): Map<string, GlobalResult[]> {
+  const grouped = new Map<string, GlobalResult[]>()
+
+  products.forEach(p => {
+    const supplierId = p.supplier_account || p.item_seller_account || "unknown"
+    if (!grouped.has(supplierId)) {
+      grouped.set(supplierId, [])
+    }
+    grouped.get(supplierId)!.push(p)
+  })
+
+  return grouped
+}
+
 export function GlobalSearch({
-  placeholder = "Search for products or suppliers... (e.g., 'FANTA' or 'Shop Name')",
+  placeholder = "Search products from multiple sellers...",
   className,
-  maxSuggestions = 12,
+  maxSuggestions = 15,
 }: {
   placeholder?: string
   className?: string
@@ -58,6 +86,7 @@ export function GlobalSearch({
   const [err, setErr] = useState<string | null>(null)
   const [products, setProducts] = useState<GlobalResult[]>([])
   const [suppliers, setSuppliers] = useState<GlobalResult[]>([])
+  const [stats, setStats] = useState<GlobalSearchResponse["searchStats"] | null>(null)
   const [mounted, setMounted] = useState(false)
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -68,16 +97,13 @@ export function GlobalSearch({
 
   const addToCartFn = useCartStore((s: any) => s.addOrInc ?? s.add)
 
-  // Mount detection for portal
   useEffect(() => {
     setMounted(true)
   }, [])
 
   const addProductAndGoToCart = (p: GlobalResult) => {
     if (!addToCartFn) return
-    const id =
-      p.item_code ||
-      `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`
+    const id = p.item_code || `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`
     const unit = p.item_packet || ""
     const price = extractNumericPrice(p.item_emballage)
 
@@ -92,6 +118,7 @@ export function GlobalSearch({
       supplierName: p.supplier_name || p.supplier_account || "Supplier",
       supplierLocation: p.supplier_location,
       image: p.image || "/placeholder.svg?height=300&width=300",
+      momo: p.momo,
     })
     router.push("/cart")
     setOpen(false)
@@ -102,12 +129,17 @@ export function GlobalSearch({
     if (!q.trim()) {
       setProducts([])
       setSuppliers([])
+      setStats(null)
       setOpen(false)
       return
     }
+
     const id = setTimeout(async () => {
       setLoading(true)
       setErr(null)
+
+      console.log(`[GlobalSearch] Searching for: "${q}"`)
+
       try {
         const params = new URLSearchParams({
           globalSearch: q,
@@ -117,31 +149,77 @@ export function GlobalSearch({
           ...(location ? { location } : {}),
         }).toString()
 
-        const res = await fetch(`/api/fetchSuggestions?${params}`, { cache: "no-store" })
-        if (!res.ok) throw new Error(`Search failed: ${res.status}`)
+        const res = await fetch(`/api/fetchSuggestions?${params}`, {
+          cache: "no-store",
+          headers: { 'Accept': 'application/json' }
+        })
+
+        if (!res.ok) {
+          throw new Error(`Search failed: ${res.status}`)
+        }
+
         const json: GlobalSearchResponse = await res.json()
 
-        const p = (json.products || []).slice(0, Math.max(6, Math.floor(maxSuggestions * 0.66)))
-        const s = [...(json.suppliersByName || []), ...(json.suppliersByProduct || [])]
-          .slice(0, Math.max(6, Math.floor(maxSuggestions * 0.34)))
+        console.log("[GlobalSearch] Raw response:", {
+          products: json.products?.length || 0,
+          suppliersByName: json.suppliersByName?.length || 0,
+          suppliersByProduct: json.suppliersByProduct?.length || 0,
+          stats: json.searchStats
+        })
+
+        // Validate response structure
+        if (!json.products && !json.suppliersByName && !json.suppliersByProduct) {
+          console.warn("[GlobalSearch] Empty response structure:", json)
+          setProducts([])
+          setSuppliers([])
+          setStats(null)
+          setOpen(true)
+          return
+        }
+
+        // Filter products with threshold of 10 for more results with multilingual support
+        const allProducts = json.products || []
+        const filteredProducts = filterProductsByRelevance(allProducts, q.trim(), 10)
+
+        // Filter suppliers with threshold of 8
+        const allSuppliers = [
+          ...(json.suppliersByName || []),
+          ...(json.suppliersByProduct || [])
+        ]
+        // Filter out suppliers without names and cast to proper type
+        const validSuppliers = allSuppliers.filter(s => s.supplier_name) as Array<GlobalResult & { supplier_name: string }>
+        const filteredSuppliers = filterSuppliersByRelevance(validSuppliers, q.trim(), 8)
+
+        const p = filteredProducts.slice(0, maxSuggestions)
+        const s = filteredSuppliers.slice(0, Math.max(4, Math.floor(maxSuggestions * 0.3)))
+
+        console.log("[GlobalSearch] Filtered results:", {
+          products: p.length,
+          suppliers: s.length,
+          topProductScores: p.slice(0, 3).map(x => x.finalScore)
+        })
 
         setProducts(p)
         setSuppliers(s)
+        setStats(json.searchStats || null)
         setOpen(true)
+
       } catch (e: any) {
-        console.error("Search error:", e)
+        console.error("[GlobalSearch] Error:", e)
         setErr(e?.message || "Search failed")
         setProducts([])
         setSuppliers([])
+        setStats(null)
         setOpen(true)
       } finally {
         setLoading(false)
       }
     }, 300)
+
     return () => clearTimeout(id)
   }, [q, maxSuggestions, sector, location])
 
-  // Click outside detection - now includes portal dropdown
+  // Click outside detection
   useEffect(() => {
     function onDoc(e: MouseEvent) {
       const target = e.target as Node
@@ -193,7 +271,6 @@ export function GlobalSearch({
     }
   }
 
-  // Get input position for dropdown placement
   const getDropdownPosition = () => {
     if (!inputRef.current) return { top: 0, left: 0, width: 0 }
     const rect = inputRef.current.getBoundingClientRect()
@@ -205,6 +282,10 @@ export function GlobalSearch({
   }
 
   const dropdownPos = getDropdownPosition()
+
+  // Group products by supplier
+  const productsBySupplier = groupProductsBySupplier(products)
+  const supplierCount = productsBySupplier.size
 
   return (
     <>
@@ -222,111 +303,148 @@ export function GlobalSearch({
         />
       </div>
 
-      {/* Portal-rendered dropdown */}
-      {mounted &&
-        open &&
-        createPortal(
-          <div
-            ref={dropdownRef}
-            className="fixed z-50 rounded-md border bg-popover text-popover-foreground shadow-lg"
-            style={{
-              top: `${dropdownPos.top}px`,
-              left: `${dropdownPos.left}px`,
-              width: `${dropdownPos.width}px`,
-              maxWidth: "90vw",
-              maxHeight: "60vh",
-              overflowY: "auto",
-              WebkitOverflowScrolling: "touch",
-            }}
-          >
-            {loading && <div className="px-3 py-2 text-sm text-muted-foreground">Searching…</div>}
-            {err && !loading && <div className="px-3 py-2 text-sm text-destructive">{err}</div>}
+      {mounted && open && createPortal(
+        <div
+          ref={dropdownRef}
+          className="fixed z-50 rounded-md border bg-popover text-popover-foreground shadow-lg"
+          style={{
+            top: `${dropdownPos.top}px`,
+            left: `${dropdownPos.left}px`,
+            width: `${dropdownPos.width}px`,
+            maxWidth: "90vw",
+            maxHeight: "60vh",
+            overflowY: "auto",
+            WebkitOverflowScrolling: "touch",
+          }}
+        >
+          {loading && (
+            <div className="px-3 py-2 text-sm text-muted-foreground flex items-center gap-2">
+              <div className="animate-spin h-3 w-3 border-2 border-blue-600 border-t-transparent rounded-full" />
+              Searching…
+            </div>
+          )}
 
-            {!loading && !err && (products.length > 0 || suppliers.length > 0) && (
-              <div className="p-3 space-y-3">
-                {/* Products */}
-                {products.length > 0 && (
-                  <section>
-                    <div className="px-1 pb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Products
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {products.map((p, i) => (
-                        <button
-                          key={`p-${p.item_code || p.item_commercial_name}-${i}`}
-                          className="w-full text-left rounded-lg border p-3 hover:border-blue-300 hover:bg-accent transition-colors group"
-                          onClick={() => addProductAndGoToCart(p)}
-                          title="Click to add & go to cart"
-                        >
-                          <div className="font-medium text-gray-900 group-hover:text-blue-700">
-                            {p.item_commercial_name}
-                          </div>
-                          <div className="text-xs text-gray-600 mt-0.5">{p.item_packet || ""}</div>
-                          <div className="mt-1 text-sm font-semibold text-green-600">
-                            {p.item_emballage || "Price not available"}
-                          </div>
-                          {p.supplier_name && (
-                            <div className="mt-1 text-[11px] text-gray-500">
-                              Sold by: {p.supplier_name}
-                              {p.supplier_location && ` • ${p.supplier_location}`}
-                            </div>
-                          )}
-                          <div className="mt-1 text-[11px] text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
-                            Add & go to cart →
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  </section>
-                )}
+          {err && !loading && (
+            <div className="px-3 py-2 text-sm text-destructive">{err}</div>
+          )}
 
-                {/* Suppliers */}
-                {suppliers.length > 0 && (
-                  <section>
-                    <div className="px-1 pb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Suppliers
-                    </div>
-                    <div className="space-y-1">
-                      {suppliers.map((s, i) => (
-                        <button
-                          key={`s-${s.supplier_account || s.supplier_name}-${i}`}
-                          className="flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm hover:border-blue-300 hover:bg-accent transition-colors"
-                          onClick={() => onSubmitSupplier(s)}
-                          title="Open this supplier in search (preselected)"
-                        >
-                          <div className="flex-1">
-                            <div className="font-medium leading-tight flex items-center gap-2">
-                              {s.supplier_name || s.supplier_account || "Supplier"}
-                              <span
-                                className={cn(
-                                  "text-[10px] px-1.5 py-0.5 rounded",
-                                  s.match_type === "product"
-                                    ? "bg-green-100 text-green-800"
-                                    : "bg-blue-100 text-blue-800"
-                                )}
+          {!loading && !err && (products.length > 0 || suppliers.length > 0) && (
+            <div className="p-3 space-y-3">
+              {/* Search Stats */}
+              {stats && (
+                <div className="px-2 py-1 text-[10px] text-muted-foreground flex items-center gap-3">
+                  <span className="flex items-center gap-1">
+                    <Package className="h-3 w-3" />
+                    {stats.totalProducts} products
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <Store className="h-3 w-3" />
+                    {supplierCount} suppliers
+                  </span>
+                  {stats.cacheHit && (
+                    <span className="text-green-600">⚡ Cached</span>
+                  )}
+                </div>
+              )}
+
+              {/* Products grouped by supplier */}
+              {products.length > 0 && (
+                <section>
+                  <div className="px-1 pb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center justify-between">
+                    <span>Products from {supplierCount} seller{supplierCount !== 1 ? 's' : ''}</span>
+                  </div>
+                  <div className="space-y-3">
+                    {Array.from(productsBySupplier.entries()).map(([supplierId, supplierProducts]) => {
+                      const firstProduct = supplierProducts[0]
+                      return (
+                        <div key={supplierId} className="space-y-1">
+                          {/* Supplier header */}
+                          <div className="text-[11px] font-medium text-gray-600 px-2 py-1 bg-gray-50 rounded flex items-center gap-1">
+                            <Store className="h-3 w-3" />
+                            {firstProduct.supplier_name || supplierId}
+                            {firstProduct.supplier_location && (
+                              <span className="text-gray-500">• {firstProduct.supplier_location}</span>
+                            )}
+                            <span className="ml-auto text-blue-600">
+                              {supplierProducts.length} product{supplierProducts.length !== 1 ? 's' : ''}
+                            </span>
+                          </div>
+
+                          {/* Products from this supplier */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {supplierProducts.map((p, i) => (
+                              <button
+                                key={`${supplierId}-${p.item_code}-${i}`}
+                                className="w-full text-left rounded-lg border p-3 hover:border-blue-300 hover:bg-accent transition-colors group"
+                                onClick={() => addProductAndGoToCart(p)}
+                                title="Click to add & go to cart"
                               >
-                                {s.match_type === "product" ? "Has Products" : "Supplier"}
-                              </span>
-                            </div>
-                            <div className="text-[11px] text-muted-foreground mt-0.5">
-                              {(s.supplier_location || "No location") +
-                                (s.match_type === "product" ? " • Product match" : " • Name match")}
-                            </div>
+                                <div className="font-medium text-gray-900 group-hover:text-blue-700 text-sm">
+                                  {p.item_commercial_name}
+                                </div>
+                                <div className="text-xs text-gray-600 mt-0.5">
+                                  {p.item_packet || ""}
+                                </div>
+                                <div className="mt-1 text-sm font-semibold text-green-600">
+                                  {p.item_emballage || "Price N/A"}
+                                </div>
+                                {p.finalScore && p.finalScore > 0 && (
+                                  <div className="mt-1 text-[10px] text-gray-400">
+                                    Score: {Math.round(p.finalScore)}
+                                  </div>
+                                )}
+                                <div className="mt-1 text-[11px] text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  Add & go to cart →
+                                </div>
+                              </button>
+                            ))}
                           </div>
-                        </button>
-                      ))}
-                    </div>
-                  </section>
-                )}
-              </div>
-            )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </section>
+              )}
 
-            {!loading && !err && products.length === 0 && suppliers.length === 0 && (
-              <div className="px-3 py-2 text-sm text-muted-foreground">No matches found</div>
-            )}
-          </div>,
-          document.body
-        )}
+              {/* Suppliers */}
+              {suppliers.length > 0 && (
+                <section>
+                  <div className="px-1 pb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    More Suppliers
+                  </div>
+                  <div className="space-y-1">
+                    {suppliers.map((s, i) => (
+                      <button
+                        key={`s-${s.supplier_account}-${i}`}
+                        className="flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm hover:border-blue-300 hover:bg-accent transition-colors"
+                        onClick={() => onSubmitSupplier(s)}
+                      >
+                        <Store className="h-4 w-4 text-gray-400" />
+                        <div className="flex-1">
+                          <div className="font-medium leading-tight">
+                            {s.supplier_name || s.supplier_account}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground mt-0.5">
+                            {s.supplier_location || "Location N/A"}
+                            {s.product_count && ` • ${s.product_count} products`}
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )}
+            </div>
+          )}
+
+          {!loading && !err && products.length === 0 && suppliers.length === 0 && (
+            <div className="px-3 py-4 text-sm text-center text-muted-foreground">
+              No results found for "{q}"
+            </div>
+          )}
+        </div>,
+        document.body
+      )}
     </>
   )
 }

@@ -8,6 +8,9 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { useCartStore } from "@/lib/cart-store"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { filterSuppliersByRelevance, filterProductsByRelevance } from "@/lib/search-utils"
+import { getTranslations } from "@/lib/keyword-mapping"
+import { Languages } from "lucide-react"
 
 type Shop = {
   supplier_account: string
@@ -30,6 +33,7 @@ type Product = {
   momo?: string
   type: string
   image?: string
+  relevance_score?: number
 }
 
 type SearchResult = {
@@ -138,34 +142,34 @@ export default function SearchPage() {
     }
   }
 
- // Small helper to push URL with preserved params (and real clearing support)
-const pushWith = (updates: Record<string, string | undefined>) => {
-  const params = new URLSearchParams()
+  // Small helper to push URL with preserved params (and real clearing support)
+  const pushWith = (updates: Record<string, string | undefined>) => {
+    const params = new URLSearchParams()
 
-  if (debouncedQ) params.set("q", debouncedQ)
-  if (supplierParam) params.set("supplier", supplierParam)
-  if (supplierNameParam) params.set("supplierName", supplierNameParam)
+    if (debouncedQ) params.set("q", debouncedQ)
+    if (supplierParam) params.set("supplier", supplierParam)
+    if (supplierNameParam) params.set("supplierName", supplierNameParam)
 
-  // location: if explicitly provided in updates, use it (empty string => remove)
-  const locProvided = Object.prototype.hasOwnProperty.call(updates, "location")
-  const locValue = locProvided ? updates.location : locationParam
-  if (locProvided) {
-    if (locValue) params.set("location", locValue)
-  } else if (locationParam) {
-    params.set("location", locationParam)
+    // location: if explicitly provided in updates, use it (empty string => remove)
+    const locProvided = Object.prototype.hasOwnProperty.call(updates, "location")
+    const locValue = locProvided ? updates.location : locationParam
+    if (locProvided) {
+      if (locValue) params.set("location", locValue)
+    } else if (locationParam) {
+      params.set("location", locationParam)
+    }
+
+    // sector: same idea
+    const secProvided = Object.prototype.hasOwnProperty.call(updates, "sector")
+    const secValue = secProvided ? updates.sector : sectorParam
+    if (secProvided) {
+      if (secValue) params.set("sector", secValue)
+    } else if (sectorParam) {
+      params.set("sector", sectorParam)
+    }
+
+    router.push(`/search?${params.toString()}`)
   }
-
-  // sector: same idea
-  const secProvided = Object.prototype.hasOwnProperty.call(updates, "sector")
-  const secValue = secProvided ? updates.sector : sectorParam
-  if (secProvided) {
-    if (secValue) params.set("sector", secValue)
-  } else if (sectorParam) {
-    params.set("sector", sectorParam)
-  }
-
-  router.push(`/search?${params.toString()}`)
-}
 
   // Sync search input with URL query param on mount and changes
   useEffect(() => {
@@ -198,7 +202,7 @@ const pushWith = (updates: Record<string, string | undefined>) => {
     return () => clearTimeout(t)
   }, [supplierSearch])
 
-  // Unified global search (LEFT)
+  // Unified global search (LEFT) - Now with enhanced relevance filtering
   useEffect(() => {
     let cancelled = false
     async function run() {
@@ -212,10 +216,10 @@ const pushWith = (updates: Record<string, string | undefined>) => {
         url.searchParams.set("globalSearch", debouncedQ)
         url.searchParams.set("Currency", "RWF")
         if (selectedShop?.supplier_account) {
-          url.searchParams.set("supplier", selectedShop.supplier_account) // server-side supplier filter
+          url.searchParams.set("supplier", selectedShop.supplier_account)
         }
         if (locationParam) {
-          url.searchParams.set("location", locationParam) // server-side location LIKE filter
+          url.searchParams.set("location", locationParam)
         }
 
         const res = await fetch(url.toString(), { cache: "no-store" })
@@ -223,7 +227,35 @@ const pushWith = (updates: Record<string, string | undefined>) => {
           ? await res.json()
           : { suppliersByName: [], suppliersByProduct: [], products: [], query: debouncedQ }
 
-        if (!cancelled) setSearchResult(data)
+        if (!cancelled) {
+          // Apply enhanced relevance filtering on the client side
+          // Using stricter thresholds to avoid unrelated results
+          const filteredProducts = filterProductsByRelevance(
+            data.products || [],
+            debouncedQ,
+            25 // Strict threshold - only word boundary matches or better
+          )
+
+          // Filter suppliers by relevance while preserving their original match_type
+          const filteredSuppliersByName = filterSuppliersByRelevance(
+            data.suppliersByName || [],
+            debouncedQ,
+            30 // Strict threshold - only word boundary matches or better
+          )
+
+          const filteredSuppliersByProduct = filterSuppliersByRelevance(
+            data.suppliersByProduct || [],
+            debouncedQ,
+            30 // Strict threshold - only word boundary matches or better
+          )
+
+          setSearchResult({
+            ...data,
+            products: filteredProducts,
+            suppliersByName: filteredSuppliersByName,
+            suppliersByProduct: filteredSuppliersByProduct,
+          })
+        }
       } catch (error) {
         console.error("Search error:", error)
         if (!cancelled) {
@@ -240,7 +272,6 @@ const pushWith = (updates: Record<string, string | undefined>) => {
       }
     }
     run()
-    // re-run when keyword, selected supplier, or location changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedQ, selectedShop?.supplier_account, locationParam])
 
@@ -256,7 +287,7 @@ const pushWith = (updates: Record<string, string | undefined>) => {
       try {
         const url = `/api/fetchSuggestions?supplierProducts=${encodeURIComponent(
           selectedShop.supplier_account,
-        )}&limit=100&Currency=RWF` // Increased limit for client-side search
+        )}&limit=100&Currency=RWF`
         const res = await fetch(url, { cache: "no-store" })
         const data: Product[] = res.ok ? await res.json() : []
         if (!cancelled) setShopProducts(Array.isArray(data) ? data : [])
@@ -272,15 +303,14 @@ const pushWith = (updates: Record<string, string | undefined>) => {
     }
   }, [selectedShop])
 
-  // Filter shop products based on supplier search
+  // Filter shop products based on supplier search with relevance
   const filteredShopProducts = useMemo(() => {
     if (!debouncedSupplierSearch) return shopProducts
     
-    const searchTerm = debouncedSupplierSearch.toLowerCase()
-    return shopProducts.filter(product => 
-      product.item_commercial_name?.toLowerCase().includes(searchTerm) ||
-      product.item_packet?.toLowerCase().includes(searchTerm) ||
-      product.item_key_words?.toLowerCase().includes(searchTerm)
+    return filterProductsByRelevance(
+      shopProducts,
+      debouncedSupplierSearch,
+      5 // Lower threshold for within-supplier search
     )
   }, [shopProducts, debouncedSupplierSearch])
 
@@ -308,7 +338,7 @@ const pushWith = (updates: Record<string, string | undefined>) => {
     // Clear global search when selecting a new seller
     setQ("")
     setDebouncedQ("")
-    setSupplierSearch("") // Also clear supplier search
+    setSupplierSearch("")
     setSelectedShop(shop)
     const params = new URLSearchParams({
       supplier: shop.supplier_account,
@@ -321,7 +351,7 @@ const pushWith = (updates: Record<string, string | undefined>) => {
 
   const handleClearShop = () => {
     setSelectedShop(null)
-    setSupplierSearch("") // Clear supplier search when clearing shop
+    setSupplierSearch("")
     const params = new URLSearchParams()
     if (locationParam) params.set("location", locationParam)
     if (sectorParam) params.set("sector", sectorParam)
@@ -363,19 +393,22 @@ const pushWith = (updates: Record<string, string | undefined>) => {
     }
   }, [sectorParam])
 
- // Location
-const applyLocation = () => pushWith({ location: locationDraft }) // '' clears
-const clearLocation = () => {
-  setLocationDraft("")
-  pushWith({ location: "" }) // explicit remove
-}
+  // Location
+  const applyLocation = () => pushWith({ location: locationDraft })
+  const clearLocation = () => {
+    setLocationDraft("")
+    pushWith({ location: "" })
+  }
 
-// Sector
-const applySector = (val?: string) => pushWith({ sector: val ?? sectorDraft }) // '' clears
-const clearSector = () => {
-  setSectorDraft("")
-  pushWith({ sector: "" }) // explicit remove
-}
+  // Sector
+  const applySector = (val?: string) => pushWith({ sector: val ?? sectorDraft })
+  const clearSector = () => {
+    setSectorDraft("")
+    pushWith({ sector: "" })
+  }
+
+  // Get translations for current query
+  const translations = debouncedQ ? getTranslations(debouncedQ) : null
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -388,11 +421,27 @@ const clearSector = () => {
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search for products or suppliers... (e.g., 'FANTA' or 'Shop Name')"
+            placeholder="Search in English or Kinyarwanda (e.g., water, amazi, honey, ubuki...)"
             className="w-full rounded-xl border px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
           />
           {loading && <span className="text-sm opacity-60 animate-pulse">Searching...</span>}
         </div>
+
+        {/* Translation Hint */}
+        {translations && (
+          <div className="mb-3 flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-xs">
+            <Languages className="h-4 w-4 text-blue-600 flex-shrink-0" />
+            <div className="flex-1">
+              <span className="text-slate-700">Also searching for: </span>
+              <span className="font-semibold text-blue-700">
+                {translations.english.slice(0, 3).join(", ")}
+                {translations.kinyarwanda.length > 0 && translations.kinyarwanda[0].toLowerCase() !== debouncedQ.toLowerCase() && (
+                  <> • {translations.kinyarwanda.slice(0, 2).join(", ")}</>
+                )}
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Compact Filter Bar */}
         <div className="mb-6 flex flex-col gap-3 rounded-xl border p-3 bg-white">
@@ -428,12 +477,10 @@ const clearSector = () => {
                 className="bg-transparent outline-none text-sm w-48"
                 value={sectorDraft}
                 onChange={(e) => {
-                const val = e.target.value
-                setSectorDraft(val)
-                applySector(val) // '' clears via pushWith()
-              }}
-
-
+                  const val = e.target.value
+                  setSectorDraft(val)
+                  applySector(val)
+                }}
               >
                 <option value="">Select sector…</option>
                 {SECTOR_OPTIONS.map((s) => (

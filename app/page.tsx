@@ -9,7 +9,8 @@ import { StatsSection } from "@/components/stats-section"
 import { PaymentMethods } from "@/components/payment-methods"
 import { CTASection } from "@/components/cta-section"
 import { PartnersSection } from "@/components/partners-section"
-import { Toaster } from "@/components/ui/toaster" 
+import { SupplierSearchBar } from "@/components/supplier-search-bar"
+import { Toaster } from "@/components/ui/toaster"
 
 export default function HomePage() {
   return (
@@ -18,11 +19,12 @@ export default function HomePage() {
       <main>
         <HeroSection />
         <StatsSection />
+        <SupplierSearchBar />
         <CategoryGrid />
         <PaymentMethods />
         <PartnersSection />
         <CTASection />
-        <Toaster /> 
+        <Toaster />
       </main>
       <Footer />
       <ChatSupport />

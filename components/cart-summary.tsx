@@ -220,7 +220,7 @@ export function CartSummary() {
         paidAt: isPaid ? "MTN MoMo" : (hasUssdTarget ? "Pending (MoMo)" : "Pay on delivery"),
         reference: orderId ? `ORDER ${orderId}` : undefined,
         myPhone,
-        link: orderId ? `https://ihute.rw/more_details.jsp?order_id=${orderId}` : undefined,
+        link: orderId ? `https://ihute.rw/orders/${orderId}` : undefined,
       })
       const href = phone ? waHrefFor(phone, message) : ""
       return { supplierId: g.supplierId, phone, message, href }
@@ -365,41 +365,39 @@ const placeOrder = async (
       // ✅ LOG SUCCESSFUL PAYMENT METHOD
       console.log(`✅ Order created with payment method: ${opts.paymentName}`)
 
-      if (opts.paymentName === "PAID_MTN_MOMO" && orderId) {
-        pollPayment(orderId, g.supplierId)
-      }
+     if (opts.paymentName === "PAID_MTN_MOMO" && orderId) {
+      pollPayment(orderId, g.supplierId)
+    }
 
       // Lock table command if in table mode
-      if (isInTableCommand() && activeSession) {
-        const userEmail = isAuthenticated ? (user?.email || user?.phone || `guest_${Date.now()}`) : `guest_${Date.now()}`
-        lockTableCommand(userEmail)
+     if (isInTableCommand() && activeSession?.isCreator) {
+  // Just show a success toast or alert
+  alert(`Order #${orderId} added to table "${activeSession.tableName}". Add more items or send the complete table order.`)
+  // Don't redirect - user needs to stay to use "Send Complete Table Order" button
+  return
+}
 
-        // Ask if user wants to close table
-        if (canCloseTable()) {
-          setShowCloseTableDialog(true)
-        }
-      }
 
       // Clear cart (but table session persists in its own store)
       clear()
 
       // Redirect to order success page with WhatsApp details
-      if (orderId) {
-        const params = new URLSearchParams({
-          orderId,
-          sellerName: g.supplierName,
-          sellerPhone: sellerTel || "",
-          buyerPhone: checkoutMode === "anonymous" ? anonymousPhone : (user?.phone || ""),
-          total: String(g.subtotal),
-          paymentMethod: opts.paymentName // ✅ INCLUDE PAYMENT METHOD IN REDIRECT
-        })
-        router.push(`/order-success?${params.toString()}`)
-      } else if (checkoutMode === "login" || isAuthenticated) {
-        router.push("/orders")
-      } else {
-        router.push("/")
-      }
-      router.refresh()
+  if (orderId) {
+  const params = new URLSearchParams({
+    orderId,
+    sellerName: g.supplierName,
+    sellerPhone: sellerTel || "",
+    buyerPhone: checkoutMode === "anonymous" ? anonymousPhone : (user?.phone || ""),
+    total: String(g.subtotal),
+    paymentMethod: opts.paymentName
+  })
+  router.push(`/order-success?${params.toString()}`)
+} else if (checkoutMode === "login" || isAuthenticated) {
+  router.push("/orders")
+} else {
+  router.push("/")
+}
+router.refresh()
     } else {
       setPaymentStatus(g.supplierId, "failed")
       alert(`Failed to create order: ${json?.error || "Unknown error"}`)
@@ -467,11 +465,11 @@ const submitCOD = async () => {
 
           return (
             <Card key={g.supplierId} className="border-2">
-              <CardHeader className="pb-2 flex flex-row items-center justify-between">
-                <CardTitle className="text-base">
+              <CardHeader className="pb-2 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                <CardTitle className="text-base flex-1">
                   {g.supplierName}
                   {g.supplierLocation ? (
-                    <span className="text-muted-foreground font-normal"> — {g.supplierLocation}</span>
+                    <span className="text-muted-foreground font-normal block sm:inline"> — {g.supplierLocation}</span>
                   ) : null}
                 </CardTitle>
                 {status === "paid" && (
@@ -514,7 +512,7 @@ const submitCOD = async () => {
 
                 {/* WhatsApp actions */}
                 {(status === "paid" || status === "pending") && (
-                  <div className="flex gap-2 pt-2">
+                  <div className="flex flex-col sm:flex-row gap-2 pt-2">
                     <Button
                       className="flex-1 bg-[#25D366] hover:bg-[#20b05a]"
                       asChild
@@ -544,9 +542,9 @@ const submitCOD = async () => {
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Grand Total</CardTitle>
           </CardHeader>
-          <CardContent className="flex items-center justify-between">
+          <CardContent className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div className="text-lg font-bold">{grandTotal.toLocaleString()} RWF</div>
-            <Button variant="outline" onClick={clear}>Clear Cart</Button>
+            <Button variant="outline" onClick={clear} className="w-full sm:w-auto">Clear Cart</Button>
           </CardContent>
         </Card>
       </div>
@@ -655,117 +653,155 @@ const submitCOD = async () => {
       </Dialog>
 
       {/* COD dialog */}
-      <Dialog open={codOpen} onOpenChange={setCodOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {(() => {
-                const g = codForSeller ? groups.find(x => x.supplierId === codForSeller) : null
-                const isPangolins = g?.supplierName?.toUpperCase().includes("PANGOLIN")
-                return isPangolins ? "Confirm Order" : "Delivery details"
-              })()}
-            </DialogTitle>
-            <DialogDescription>
-              {(() => {
-                const g = codForSeller ? groups.find(x => x.supplierId === codForSeller) : null
-                const isPangolins = g?.supplierName?.toUpperCase().includes("PANGOLIN")
-                return isPangolins
-                  ? "Review your order details and confirm."
-                  : "We'll hold the order and you can pay on delivery."
-              })()}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            {(() => {
-              const g = codForSeller ? groups.find(x => x.supplierId === codForSeller) : null
-              const isPangolins = g?.supplierName?.toUpperCase().includes("PANGOLIN")
 
-              return (
-                <>
-                  {/* Order Summary */}
-                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
-                    {checkoutMode === "anonymous" && (
-                      <>
-                        <div className="text-sm">
-                          <span className="text-muted-foreground">Name: </span>
-                          <span className="font-medium">{anonymousName}</span>
-                        </div>
-                        <div className="text-sm">
-                          <span className="text-muted-foreground">Phone: </span>
-                          <span className="font-medium">{anonymousPhone}</span>
-                        </div>
-                      </>
-                    )}
-                    {isAuthenticated && (
-                      <>
-                        <div className="text-sm">
-                          <span className="text-muted-foreground">Name: </span>
-                          <span className="font-medium">{user?.name}</span>
-                        </div>
-                        <div className="text-sm">
-                          <span className="text-muted-foreground">Phone: </span>
-                          <span className="font-medium">{user?.phone}</span>
-                        </div>
-                      </>
-                    )}
-                    {isInTableCommand() && activeSession && (
-                      <div className="text-sm">
-                        <span className="text-muted-foreground">Table: </span>
-                        <span className="font-medium font-mono">{activeSession.tableName}</span>
-                      </div>
-                    )}
-                    {g && (
-                      <div className="text-sm">
-                        <span className="text-muted-foreground">Total: </span>
-                        <span className="font-bold">{g.subtotal.toLocaleString()} RWF</span>
-                      </div>
+{/* COD dialog */}
+<Dialog open={codOpen} onOpenChange={setCodOpen}>
+  <DialogContent className="max-w-2xl">
+    <DialogHeader>
+      <DialogTitle>
+        {(() => {
+          const g = codForSeller ? groups.find(x => x.supplierId === codForSeller) : null
+          const isPangolins = g?.supplierName?.toUpperCase().includes("PANGOLIN")
+          return isPangolins ? "Confirm Order" : "Review Order & Delivery Details"
+        })()}
+      </DialogTitle>
+      <DialogDescription>
+        {(() => {
+          const g = codForSeller ? groups.find(x => x.supplierId === codForSeller) : null
+          const isPangolins = g?.supplierName?.toUpperCase().includes("PANGOLIN")
+          return isPangolins
+            ? "Review your order details and confirm."
+            : "Review your order and provide delivery details. Pay when you receive your order."
+        })()}
+      </DialogDescription>
+    </DialogHeader>
+    
+    <div className="space-y-4">
+      {/* Customer Information */}
+      <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-3">
+        <h4 className="font-medium text-sm text-muted-foreground">CUSTOMER INFORMATION</h4>
+        {checkoutMode === "anonymous" && (
+          <>
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Name:</span>
+              <span className="font-medium">{anonymousName}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Phone:</span>
+              <span className="font-medium">{anonymousPhone}</span>
+            </div>
+          </>
+        )}
+        {isAuthenticated && (
+          <>
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Name:</span>
+              <span className="font-medium">{user?.name}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Phone:</span>
+              <span className="font-medium">{user?.phone}</span>
+            </div>
+          </>
+        )}
+        {isInTableCommand() && activeSession && (
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">Table:</span>
+            <span className="font-medium font-mono">{activeSession.tableName}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Order Items - ALWAYS SHOW FOR ALL SELLERS */}
+      {codForSeller && (() => {
+        const g = groups.find(x => x.supplierId === codForSeller)
+        if (!g) return null
+
+        return (
+          <div className="border rounded-lg">
+            <div className="bg-slate-50 border-b p-3">
+              <h4 className="font-medium text-sm">ORDER ITEMS</h4>
+            </div>
+            <div className="max-h-60 overflow-y-auto">
+              {g.items.map((item, index) => (
+                <div key={index} className="flex justify-between items-center p-3 border-b last:border-b-0">
+                  <div className="flex-1">
+                    <div className="font-medium text-sm">{item.name}</div>
+                    {item.unit && (
+                      <div className="text-xs text-muted-foreground">Unit: {item.unit}</div>
                     )}
                   </div>
-
-                  {/* Delivery location - only for non-Pangolins orders */}
-                  {!isPangolins && (
-                    <>
-                      <div className="space-y-1">
-                        <label className="text-sm font-medium">Delivery location *</label>
-                        <Input
-                          value={deliveryLocation}
-                          onChange={(e) => setDeliveryLocation(e.target.value)}
-                          placeholder="e.g., Kigali, Kacyiru, Plot 12"
-                        />
-                      </div>
-                      {checkoutMode !== "anonymous" && (
-                        <div className="space-y-1">
-                          <label className="text-sm font-medium">Contact phone</label>
-                          <Input
-                            value={contactPhone}
-                            onChange={(e) => setContactPhone(e.target.value)}
-                            placeholder="+2507…"
-                          />
-                        </div>
-                      )}
-                    </>
-                  )}
-                </>
-              )
-            })()}
+                  <div className="flex items-center gap-4">
+                    <div className="text-sm text-muted-foreground">
+                      {item.qty} × {item.price?.toLocaleString()} {CUR}
+                    </div>
+                    <div className="font-medium text-sm w-20 text-right">
+                      {((item.price || 0) * (item.qty || 0)).toLocaleString()} {CUR}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="bg-slate-50 border-t p-3">
+              <div className="flex justify-between items-center">
+                <span className="font-medium">Total:</span>
+                <span className="font-bold text-lg">{g.subtotal.toLocaleString()} {CUR}</span>
+              </div>
+            </div>
           </div>
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setCodOpen(false)}>Cancel</Button>
-            <Button
-              onClick={submitCOD}
-              disabled={(() => {
-                const g = codForSeller ? groups.find(x => x.supplierId === codForSeller) : null
-                const isPangolins = g?.supplierName?.toUpperCase().includes("PANGOLIN")
-                return !isPangolins && !deliveryLocation
-              })()}
-            >
-              <Truck className="h-4 w-4 mr-2" />
-              Place order
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        )
+      })()}
 
+      {/* Delivery location - only for non-Pangolins AND non-table-command orders */}
+      {(() => {
+        const g = codForSeller ? groups.find(x => x.supplierId === codForSeller) : null
+        const isPangolins = g?.supplierName?.toUpperCase().includes("PANGOLIN")
+        
+        // Show delivery location for non-Pangolins AND when not in table command mode
+        if (!isPangolins && !isInTableCommand()) {
+          return (
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Delivery location *</label>
+                <Input
+                  value={deliveryLocation}
+                  onChange={(e) => setDeliveryLocation(e.target.value)}
+                  placeholder="e.g., Kigali, Kacyiru, Plot 12"
+                />
+              </div>
+              {checkoutMode !== "anonymous" && (
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">Contact phone</label>
+                  <Input
+                    value={contactPhone}
+                    onChange={(e) => setContactPhone(e.target.value)}
+                    placeholder="+2507…"
+                  />
+                </div>
+              )}
+            </div>
+          )
+        }
+      })()}
+    </div>
+
+    <DialogFooter className="gap-2">
+      <Button variant="outline" onClick={() => setCodOpen(false)}>Cancel</Button>
+      <Button
+        onClick={submitCOD}
+        disabled={(() => {
+          const g = codForSeller ? groups.find(x => x.supplierId === codForSeller) : null
+          const isPangolins = g?.supplierName?.toUpperCase().includes("PANGOLIN")
+          // Require delivery location only for non-Pangolins AND when not in table command
+          return !isPangolins && !isInTableCommand() && !deliveryLocation
+        })()}
+      >
+        <Truck className="h-4 w-4 mr-2" />
+        Place order
+      </Button>
+    </DialogFooter>
+  </DialogContent>
+</Dialog>
       {/* MoMo payment dialog */}
       <Dialog open={momoOpen} onOpenChange={setMomoOpen}>
         <DialogContent className="max-w-md">

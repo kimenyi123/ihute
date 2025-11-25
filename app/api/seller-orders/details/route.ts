@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server"
 
 const PRIMARY_URL =
-  process.env.JAVA_ORDERS_URL || "https://ihute.rw/Trading/OrdersServlet"
+  process.env.JAVA_ORDERS_URL || "http://localhost:8080/Trading/OrdersServlet"
 
 const FALLBACK_URLS = [
   process.env.JAVA_ORDERS_ALT_URL,

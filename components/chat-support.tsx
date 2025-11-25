@@ -46,7 +46,16 @@ export function ChatSupport() {
   }, [messages])
 
   const handleWhatsApp = () => {
-    window.open("https://wa.me/250780125242?text=Hello, I need help with ihute.rw", "_blank")
+    const message = encodeURIComponent(
+      "Hello! I need help with ihute.rw\n\n" +
+      "I'm interested in:\n" +
+      "• Product information\n" +
+      "• Order assistance\n" +
+      "• Payment options\n" +
+      "• Delivery services\n\n" +
+      "Please assist me. Thank you!"
+    )
+    window.open(`https://wa.me/250780125242?text=${message}`, "_blank")
   }
 
   const getSmartSuggestions = (context: string) => {

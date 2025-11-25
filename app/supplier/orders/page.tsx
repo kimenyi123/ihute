@@ -157,14 +157,12 @@ export default function SupplierOrdersPage() {
   const hasNext = totalPages != null ? page < totalPages : orders.length === pageSize
   const goPrev = () => hasPrev && setPage((p) => p - 1)
   const goNext = () => hasNext && setPage((p) => p + 1)
-  const goto = (p: number) => p >= 1 && (totalPages == null || p <= totalPages) && setPage(p)
 
   function InlineStatusPicker({ order }: { order: Order }) {
     const current: SupplierStatusKey = inferSupplierStatus(order)
 
     async function setStatus(next: SupplierStatusKey) {
       if (next === current) return
-      // optimistic update
       const prevBadge = order.status
       const nextBadge = toBadgeStatus(next)
       setOrders(orders.map(o => (o.id === order.id ? { ...o, status: nextBadge } : o)))
@@ -176,14 +174,10 @@ export default function SupplierOrdersPage() {
           body: JSON.stringify({ orderId: Number(order.id), status: next }),
         })
         const json = await res.json().catch(() => ({}))
-        if (!res.ok || json?.ok === false) {
-          throw new Error(json?.error || `HTTP ${res.status}`)
-        }
+        if (!res.ok || json?.ok === false) throw new Error(json?.error || `HTTP ${res.status}`)
       } catch (e) {
         console.error("Failed to update status", e)
-        // rollback on error
         setOrders(orders.map(o => (o.id === order.id ? { ...o, status: prevBadge } : o)))
-        // Optional: show a toast or banner with the specific error (e.g., 409 invalid transition)
       }
     }
 
@@ -215,125 +209,66 @@ export default function SupplierOrdersPage() {
     <div className="min-h-screen bg-slate-50">
       <Header />
       <main className="container mx-auto px-4 py-8">
-        {/* header */}
+        {/* Header bar */}
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">My Orders</h1>
-            <p className="text-slate-600">
+            <h1 className="text-xl sm:text-2xl font-bold text-slate-900">My Orders</h1>
+            <p className="text-sm sm:text-base text-slate-600">
               Track and manage orders for your shop
-              {lastRefresh && (<span className="ml-2 text-xs text-slate-500">• Last updated: {lastRefresh.toLocaleTimeString()}</span>)}
+              {lastRefresh && (
+                <span className="ml-2 text-xs text-slate-500 block sm:inline mt-1 sm:mt-0">
+                  • Last updated: {lastRefresh.toLocaleTimeString()}
+                </span>
+              )}
             </p>
           </div>
-          <div className="flex items-center gap-3">
-            <Button variant="outline" size="sm" onClick={loadOrders} disabled={loading} className="gap-2">
-              <RotateCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={loadOrders}
+              disabled={loading}
+              className="gap-2 w-full sm:w-auto"
+            >
+              <RotateCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               Refresh
             </Button>
             <div className="flex items-center gap-2">
               <span className="text-sm text-slate-600">Rows:</span>
-              <select className="border rounded-md px-2 py-1 text-sm bg-white" value={pageSize}
-                onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1) }}>
-                {[10, 20, 50, 100].map((n) => (<option key={n} value={n}>{n}</option>))}
+              <select
+                className="border rounded-md px-2 py-1 text-sm flex-1 sm:flex-none"
+                value={pageSize}
+                onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1) }}
+              >
+                {[10, 20, 50, 100].map((n) => <option key={n} value={n}>{n}</option>)}
               </select>
             </div>
           </div>
         </div>
 
-        {err && (
+        {/* Content */}
+        {loading ? (
+          <div className="py-8 text-center text-sm text-slate-500">Loading orders…</div>
+        ) : err ? (
           <div className="mb-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
             Couldn’t load orders: {err}
           </div>
+        ) : !orders.length ? (
+          <div className="py-8 text-center text-sm text-slate-500">No orders yet. Your orders will appear here.</div>
+        ) : (
+          <div className="space-y-6">
+            {orders.map((order) => (
+              <div key={order.id} className="border rounded p-4 bg-white">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="font-medium">{order.id}</span>
+                  <InlineStatusPicker order={order} />
+                </div>
+                <div className="text-sm text-slate-600">{order.buyerName}</div>
+                <div className="text-sm font-semibold">{order.subtotal.toLocaleString()} RWF</div>
+              </div>
+            ))}
+          </div>
         )}
-
-        {/* table */}
-        <div className="rounded-lg border bg-white">
-          <div className="overflow-x-auto">
-            <Table className="min-w-[1050px]">
-              <TableHeader className="bg-slate-50/70">
-                <TableRow>
-                  <TableHead className="w-[160px]">Order Number</TableHead>
-                  <TableHead className="w-[260px]">Customer</TableHead>
-                  <TableHead className="w-[180px]">Date</TableHead>
-                  <TableHead className="text-right w-[150px]">Total</TableHead>
-                  <TableHead className="w-[160px]">Payment Status</TableHead>
-                  <TableHead className="w-[210px]">Order Status</TableHead>
-                  <TableHead className="text-right w-[120px]">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-
-              <TableBody>
-                {loading && (
-                  <TableRow>
-                    <TableCell colSpan={8} className="py-8 text-center text-sm text-slate-500">Loading orders…</TableCell>
-                  </TableRow>
-                )}
-                {!loading && orders.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={8} className="py-8 text-center text-sm text-slate-500">No orders yet. Your orders will appear here.</TableCell>
-                  </TableRow>
-                )}
-                {!loading && orders.map((order) => {
-                  const createdStr = order.createdAt ? new Date(order.createdAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : ""
-                  // @ts-ignore
-                  const buyerName = (order as any).buyerName ?? "—"
-                  const buyerEmail = ""
-                  const itemsCount = order.itemsCount ?? order.items?.length ?? 0
-
-                  return (
-                    <TableRow key={order.id} className="hover:bg-slate-50/60">
-                      <TableCell>
-                        <button onClick={() => router.push(supplierOrderLink(order.id))} className="font-medium underline-offset-2 hover:underline">
-                          {order.id || "—"}
-                        </button>
-                      </TableCell>
-                      <TableCell className="truncate max-w-[260px]" title={buyerName}>
-                        <div className="flex flex-col">
-                          <span className="font-medium">{buyerName}</span>
-                          {buyerEmail && <span className="text-xs text-slate-500">{buyerEmail}</span>}
-                        </div>
-                      </TableCell>
-                      <TableCell>{createdStr}</TableCell>
-                      <TableCell className="text-right font-semibold">{order.subtotal.toLocaleString()} RWF</TableCell>
-                      <TableCell className="capitalize">{order.paymentStatus}</TableCell>
-                      <TableCell><InlineStatusPicker order={order} /></TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="outline" size="sm" onClick={() => router.push(supplierOrderLink(order.id))}>View</Button>
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-              </TableBody>
-            </Table>
-          </div>
-
-          <div className="flex items-center justify-between border-t px-3 py-3">
-            <div className="text-sm text-slate-600">
-              {total != null ? (<>Page <span className="font-medium">{page}</span> of <span className="font-medium">{totalPages}</span> • {total} total</>)
-                : (<>Page <span className="font-medium">{page}</span></>)}
-            </div>
-            <div className="flex items-center gap-1">
-              <Button variant="outline" size="sm" onClick={goPrev} disabled={!hasPrev} className="gap-1">
-                <ChevronLeft className="h-4 w-4" /> Prev
-              </Button>
-              {/* simple pager numbers */}
-              {(() => {
-                if (totalPages == null) return null
-                const maxToShow = 5
-                const start = Math.max(1, page - Math.floor(maxToShow / 2))
-                const end = Math.min(totalPages, start + maxToShow - 1)
-                const first = Math.max(1, end - maxToShow + 1)
-                return Array.from({ length: end - first + 1 }, (_, i) => first + i).map((p) => (
-                  <Button key={p} variant={p === page ? "default" : "outline"} size="sm" onClick={() => (p >= 1 && setPage(p))}>
-                    {p}
-                  </Button>
-                ))
-              })()}
-              <Button variant="outline" size="sm" onClick={goNext} disabled={!hasNext} className="gap-1">
-                Next <ChevronRight className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        </div>
       </main>
       <Footer />
     </div>

@@ -8,15 +8,20 @@ import { useAuthStore } from "@/lib/auth-store"
 import { useProductStore } from "@/lib/product-store"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { ArrowLeft, Upload, Download } from "lucide-react"
+import { ArrowLeft, Upload, Download, LogOut } from "lucide-react"
 import Link from "next/link"
 
 export default function BulkUploadPage() {
   const router = useRouter()
-  const { user } = useAuthStore()
+  const { user, logout } = useAuthStore()
   const addProduct = useProductStore((state) => state.addProduct)
   const [loading, setLoading] = useState(false)
   const [file, setFile] = useState<File | null>(null)
+
+  const handleLogout = () => {
+    logout()
+    router.push("/")
+  }
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -67,6 +72,24 @@ export default function BulkUploadPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
+      {/* Header */}
+      <header className="bg-white border-b sticky top-0 z-10">
+        <div className="container mx-auto px-4 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex-1">
+            <h1 className="text-xl sm:text-2xl font-bold text-slate-900">
+              {user?.businessName || "Supplier Dashboard"}
+            </h1>
+            <p className="text-xs sm:text-sm text-slate-600">
+              {user?.businessCategory || "Supplier Panel"}
+            </p>
+          </div>
+          <Button variant="outline" onClick={handleLogout} className="w-full sm:w-auto">
+            <LogOut className="h-4 w-4 mr-2" />
+            Logout
+          </Button>
+        </div>
+      </header>
+
       <div className="container mx-auto px-4 py-8 max-w-2xl">
         <Link href="/supplier/dashboard">
           <Button variant="ghost" className="mb-6">
