@@ -3,7 +3,7 @@ import { NextResponse } from "next/server"
 const JAVA_ORDERS_SERVLET_URL =
   process.env.JAVA_ORDERS_URL ||
   process.env.JAVA_SERVLET_URL ||
-  "http://localhost:8080/Trading/Kaos/OrdersServlet"
+  "https://ihute.rw/Trading/Kaos/OrdersServlet"
 
 export async function GET() {
   return NextResponse.json(

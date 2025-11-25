@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server"
 
 const PRIMARY_URL =
-  process.env.JAVA_ORDERS_URL || "http://localhost:8080/Trading/OrdersServlet"
+  process.env.JAVA_ORDERS_URL || "https://ihute.rw/Trading/OrdersServlet"
 
 const FALLBACK_URLS = [
   process.env.JAVA_ORDERS_ALT_URL,
@@ -50,70 +50,202 @@ function normalize(data: any) {
 }
 
 async function callOrdersServlet(url: string, orderId: string | number) {
-  const body = new URLSearchParams({ action: "buyerOrderDetails", orderId: String(orderId) }).toString()
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
-    body,
-    cache: "no-store",
-  })
-  const text = await res.text()
-  let data: any
-  try { data = safeParse(text) }
-  catch (e: any) {
-    return { ok: false as const, http: res.status, error: `Bad/HTML body (${e?.message})`, text }
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 15000)
+
+  try {
+    // ✅ FIXED: Use GET request with query parameters
+    const urlWithParams = `${url}?action=getOrderDetails&orderId=${orderId}`
+
+    console.log(`[callOrdersServlet] Calling ${urlWithParams}`)
+
+    const res = await fetch(urlWithParams, {
+      method: "GET",  // ✅ Changed to GET
+      headers: {
+        Accept: "application/json"
+      },
+      cache: "no-store",
+      signal: controller.signal,
+    })
+
+    clearTimeout(timeoutId)
+
+    console.log(`[callOrdersServlet] Response status: ${res.status}`)
+
+    const text = await res.text()
+    console.log(`[callOrdersServlet] Response text length: ${text.length}, preview:`, text.slice(0, 200))
+
+    let data: any
+    try {
+      data = safeParse(text)
+      console.log(`[callOrdersServlet] Parsed data successfully`)
+    }
+    catch (e: any) {
+      console.error(`[callOrdersServlet] Parse error:`, e?.message)
+      return {
+        ok: false as const,
+        http: res.status,
+        error: `Bad/HTML body (${e?.message})`,
+        text,
+        url
+      }
+    }
+
+    if (!res.ok || data?.ok === false) {
+      console.error(`[callOrdersServlet] Request failed:`, data?.error || `HTTP ${res.status}`)
+      return {
+        ok: false as const,
+        http: res.status,
+        error: data?.error || `HTTP ${res.status}`,
+        text,
+        url
+      }
+    }
+
+    return { ok: true as const, http: res.status, data, url }
+
+  } catch (e: any) {
+    clearTimeout(timeoutId)
+
+    if (e.name === 'AbortError') {
+      console.error(`[callOrdersServlet] Request timeout for ${url}`)
+      return {
+        ok: false as const,
+        http: 0,
+        error: 'Request timeout (15s)',
+        text: '',
+        url
+      }
+    }
+
+    console.error(`[callOrdersServlet] Network error:`, e?.message)
+    return {
+      ok: false as const,
+      http: 0,
+      error: `Network error: ${e?.message}`,
+      text: '',
+      url
+    }
   }
-  if (!res.ok || data?.ok === false) {
-    return { ok: false as const, http: res.status, error: data?.error || `HTTP ${res.status}`, text }
-  }
-  return { ok: true as const, http: res.status, data }
 }
 
 async function readOrderId(req: Request): Promise<string | null> {
   // 1) query param
   const url = new URL(req.url)
   const fromQuery = url.searchParams.get("orderId")
-  if (fromQuery) return fromQuery
+  if (fromQuery) {
+    console.log('[readOrderId] Found orderId in query:', fromQuery)
+    return fromQuery
+  }
 
   // 2) JSON body (if present)
   const ct = (req.headers.get("content-type") || "").toLowerCase()
   if (ct.includes("application/json")) {
     try {
       const j = await req.json()
-      return j?.orderId ?? j?.id ?? j?.order_id ?? null
-    } catch { /* empty/invalid body */ }
+      const orderId = j?.orderId ?? j?.id ?? j?.order_id ?? null
+      console.log('[readOrderId] Found orderId in JSON body:', orderId)
+      return orderId
+    } catch (e) {
+      console.log('[readOrderId] Failed to parse JSON body:', e)
+    }
   }
 
   // 3) form body (if present)
   if (ct.includes("application/x-www-form-urlencoded")) {
     const raw = await req.text()
     const sp = new URLSearchParams(raw)
-    return sp.get("orderId")
+    const orderId = sp.get("orderId")
+    console.log('[readOrderId] Found orderId in form body:', orderId)
+    return orderId
   }
 
+  console.log('[readOrderId] No orderId found')
   return null
 }
 
 export async function POST(req: Request) {
+  console.log('\n=== ORDER DETAILS REQUEST START ===')
+  console.log('Backend URLs configured:', {
+    primary: PRIMARY_URL,
+    fallbacks: FALLBACK_URLS,
+    total: 1 + FALLBACK_URLS.length
+  })
+
   try {
     const orderId = await readOrderId(req)
+
     if (!orderId) {
-      return NextResponse.json({ ok: false, error: "orderId required" }, { status: 400 })
+      console.error('[POST] Missing orderId')
+      return NextResponse.json({
+        ok: false,
+        error: "orderId required"
+      }, { status: 400 })
     }
 
-    for (const url of [PRIMARY_URL, ...FALLBACK_URLS]) {
-      console.log("[details] target:", url, "orderId:", orderId)
+    console.log(`[POST] Processing order details for orderId: ${orderId}`)
+
+    const attempts: any[] = []
+    const allUrls = [PRIMARY_URL, ...FALLBACK_URLS]
+
+    for (let i = 0; i < allUrls.length; i++) {
+      const url = allUrls[i]
+      console.log(`\n[POST] Attempt ${i + 1}/${allUrls.length}: ${url}`)
+
       const r = await callOrdersServlet(url, orderId)
+
+      attempts.push({
+        attempt: i + 1,
+        url: r.url,
+        http: r.http,
+        error: r.ok ? null : r.error,
+        success: r.ok,
+        textPreview: r.ok ? null : (r as any).text?.slice?.(0, 300)
+      })
+
       if (r.ok) {
+        console.log(`✅ [POST] Success on attempt ${i + 1}`)
         const out = normalize(r.data)
+        console.log('=== ORDER DETAILS REQUEST END (SUCCESS) ===\n')
         return NextResponse.json({ ok: true, ...out })
       }
-      console.warn("❌ details: attempt failed:", { url, http: r.http, error: r.error, snippet: (r as any).text?.slice?.(0, 200) })
+
+      console.warn(`❌ [POST] Attempt ${i + 1} failed:`, {
+        url,
+        http: r.http,
+        error: r.error,
+        textPreview: (r as any).text?.slice?.(0, 300)
+      })
     }
 
-    return NextResponse.json({ ok: false, error: "Failed to load order details" }, { status: 502 })
+    console.error('❌ [POST] All attempts failed')
+    console.log('=== ORDER DETAILS REQUEST END (FAILED) ===\n')
+
+    return NextResponse.json({
+      ok: false,
+      error: "All backend URLs failed to return valid data",
+      attempts,
+      orderId,
+      totalAttempts: allUrls.length
+    }, { status: 502 })
+
   } catch (e: any) {
-    console.error("❌ details: unexpected error:", e?.message)
-    return NextResponse.json({ ok: false, error: e?.message || "unknown error" }, { status: 500 })
+    console.error("[POST] Unexpected error:", e)
+    console.error("Stack trace:", e?.stack)
+    console.log('=== ORDER DETAILS REQUEST END (ERROR) ===\n')
+
+    return NextResponse.json({
+      ok: false,
+      error: e?.message || "Unknown error occurred",
+      type: e?.name || 'Error',
+      ...(process.env.NODE_ENV === 'development' && {
+        stack: e?.stack
+      })
+    }, { status: 500 })
   }
+}
+
+export async function GET(req: Request) {
+  // Support GET requests as well
+  return POST(req)
 }

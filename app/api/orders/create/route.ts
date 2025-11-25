@@ -12,7 +12,7 @@ const CANDIDATES = [
   // "https://ihute.rw/Trading/Kaos/OrdersServlet",
   // last-ditch fallback to your JSON servlet (different payload format)
   // "https://ihute.rw/Trading/api/delivery/create",
-  "http://localhost:8080/Trading/OrdersServlet"
+  "https://ihute.rw/Trading/OrdersServlet"
 ].filter(Boolean) as string[]
 
 type LineIn = {

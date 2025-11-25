@@ -87,42 +87,65 @@ function paymentStatusBadge(paymentStatus?: string) {
 }
 
 function buildTracking(status: OrderStatus) {
-  // Map real statuses to tracking steps
+  // Map real statuses to tracking steps (now with 5 distinct steps)
   const statusMap: Record<OrderStatus, number> = {
     "open": 0,
     "pending": 0,
     "processing": 1,
     "invoice": 2,
-    "in-transit": 2,
-    "delivered": 3,
+    "in-transit": 3,
+    "delivered": 4,
   }
 
   const currentStep = statusMap[status] ?? 0
 
+  // Get friendly name for current status
+  const statusLabels: Record<OrderStatus, string> = {
+    "open": "Order Placed",
+    "pending": "Awaiting Confirmation",
+    "processing": "Being Prepared",
+    "invoice": "Invoice",
+    "in-transit": "Out for Delivery",
+    "delivered": "Delivered Successfully"
+  }
+
+  const currentStatusLabel = statusLabels[status] || status
+
   return [
     {
       label: "Order Placed",
+      subtitle: currentStep === 0 ? currentStatusLabel : "",
       completed: currentStep >= 0,
       date: "",
       isCurrent: currentStep === 0
     },
     {
       label: "Processing",
+      subtitle: currentStep === 1 ? currentStatusLabel : "",
       completed: currentStep >= 1,
       date: "",
       isCurrent: currentStep === 1
     },
     {
-      label: "Ready for Delivery",
+      label: "Invoice",
+      subtitle: currentStep === 2 ? currentStatusLabel : "",
       completed: currentStep >= 2,
       date: "",
       isCurrent: currentStep === 2
     },
     {
-      label: "Delivered",
+      label: "Out for Delivery",
+      subtitle: currentStep === 3 ? currentStatusLabel : "",
       completed: currentStep >= 3,
       date: "",
       isCurrent: currentStep === 3
+    },
+    {
+      label: "Delivered",
+      subtitle: currentStep === 4 ? currentStatusLabel : "",
+      completed: currentStep >= 4,
+      date: "",
+      isCurrent: currentStep === 4
     },
   ]
 }
@@ -274,7 +297,7 @@ export default function TrackOrderPage() {
     `Message: ${orderId ? `ORDER ${orderId}` : '-'}`,
     `My phone: ${order.buyerPhone || ''}`,
     '',
-    `Follow: ${window.location.origin}/track-order/${orderId}`
+    `Follow: ${typeof window !== 'undefined' ? window.location.origin : ''}/track-order/${orderId}`
   ].filter(Boolean).join('\n')
 
   const whatsappHref = sellerPhoneNormalized ? waHrefFor(sellerPhoneNormalized, whatsappMessage) : ""
@@ -417,6 +440,9 @@ export default function TrackOrderPage() {
                             <span className="ml-2 text-xs text-blue-600 font-normal">(Current)</span>
                           )}
                         </p>
+                        {step.subtitle && (
+                          <p className="text-sm text-blue-600 font-medium mt-1">{step.subtitle}</p>
+                        )}
                         {step.completed && step.date && (
                           <p className="text-sm text-slate-500">{step.date}</p>
                         )}

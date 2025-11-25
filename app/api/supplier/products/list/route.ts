@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 
-const JAVA_SUPPLIER_URL = process.env.JAVA_SUPPLIER_URL || "http://localhost:8080/Trading/SupplierServlet"
+const JAVA_SUPPLIER_URL = process.env.JAVA_SUPPLIER_URL || "https://ihute.rw/Trading/SupplierServlet"
 
 /**
  * GET /api/supplier/products/list

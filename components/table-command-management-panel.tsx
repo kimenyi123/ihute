@@ -40,7 +40,7 @@ export function TableCommandManagementPanel({ userEmail, userName, locationId, l
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/Trading"
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw/Trading"
 
   // Fetch active/sent tables
   const fetchTables = async () => {
