@@ -1,3 +1,4 @@
+// app/supplier/orders/page.tsx
 "use client"
 
 import { useEffect, useMemo, useState, useCallback } from "react"
@@ -5,10 +6,10 @@ import { useRouter } from "next/navigation"
 import { useAuthStore } from "@/lib/auth-store"
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Truck, CheckCircle, Clock, ChevronLeft, ChevronRight, RotateCw } from "lucide-react"
+import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { ChevronLeft, ChevronRight, RotateCw, CheckCircle, Truck, Clock, ChevronDown } from "lucide-react"
 import { useOrdersStore, type Order } from "@/lib/orders-store"
 
 type RawTxn = {
@@ -27,58 +28,61 @@ type RawTxn = {
   CREATED_AT?: string
 }
 
-// Map payment string to order status
-function mapPaymentToStatus(name?: string, paymentStatus?: string): Order["status"] {
-  const s = (name || "").toLowerCase().replace(/[\s_]+/g, " ")
-  const ps = (paymentStatus || "").toLowerCase()
-  
-  // Check if payment is marked as PAID
-  if (ps === 'paid') return "processing"
-  
-  // Check payment method
-  if (/(momo|mtn|mobile money)/.test(s)) return "processing"
-  if (/(pay on delivery|pay-on-delivery|pay_on_delivery|cod)/.test(s)) return "pending"
-  if (s.includes("delivered") || s.includes("completed")) return "delivered"
-  if (s.includes("transit") || s.includes("shipped") || s.includes("out")) return "in-transit"
-  if (s.includes("pending")) return "pending"
-  if (s.includes("paid") || s.includes("success") || s.includes("processing")) return "processing"
-  
-  return "processing"
-}
+// Supplier-facing statuses
+const SUPPLIER_STATUS = [
+  { key: "pending", label: "Pending" },
+  { key: "processing", label: "Processing" },
+  { key: "invoice", label: "Invoice" },
+  { key: "delivered", label: "Delivered" },
+] as const
+export type SupplierStatusKey = typeof SUPPLIER_STATUS[number]["key"]
 
-function statusIcon(status: Order["status"]) {
-  switch (status) {
-    case "delivered":
-      return <CheckCircle className="h-5 w-5 text-green-600" />
-    case "in-transit":
-      return <Truck className="h-5 w-5 text-blue-600" />
-    default:
-      return <Clock className="h-5 w-5 text-yellow-600" />
+function toBadgeStatus(key: SupplierStatusKey): Order["status"] {
+  switch (key) {
+    case "delivered": return "delivered"
+    case "processing": return "processing"
+    case "invoice": return "processing"
+    case "pending":
+    default: return "pending"
   }
 }
-
-function statusBadge(status: Order["status"]) {
-  const variant = status === "delivered" ? "default" : status === "in-transit" ? "secondary" : "outline"
-  return (
-    <Badge variant={variant as any} className="capitalize">
-      {status.replace("-", " ")}
-    </Badge>
-  )
+function statusIcon(status: Order["status"]) {
+  switch (status) {
+    case "delivered": return <CheckCircle className="h-4 w-4" />
+    case "in-transit": return <Truck className="h-4 w-4" />
+    default: return <Clock className="h-4 w-4" />
+  }
 }
-
-function buildTracking(status: Order["status"]) {
-  return [
-    { label: "Order Placed", completed: true },
-    { label: "Processing", completed: status !== "pending" },
-    { label: "Out for Delivery", completed: status === "in-transit" || status === "delivered" },
-    { label: "Delivered", completed: status === "delivered" },
-  ]
+function inferSupplierStatus(o: Order): SupplierStatusKey {
+  if (o.status === "delivered") return "delivered"
+  if (String(o.paymentStatus).toLowerCase() === "paid") return "invoice"
+  if (o.status === "processing") return "processing"
+  return "pending"
 }
+const pillClass = (key: SupplierStatusKey) => {
+  switch (key) {
+    case "delivered": return "bg-green-50 text-green-700 border-green-300 hover:bg-green-100"
+    case "processing": return "bg-blue-50 text-blue-700 border-blue-300 hover:bg-blue-100"
+    case "invoice": return "bg-indigo-50 text-indigo-700 border-indigo-300 hover:bg-indigo-100"
+    case "pending":
+    default: return "bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100"
+  }
+}
+const dotClass = (key: SupplierStatusKey) => {
+  switch (key) {
+    case "delivered": return "bg-green-600"
+    case "processing": return "bg-blue-600"
+    case "invoice": return "bg-indigo-600"
+    case "pending": default: return "bg-slate-400"
+  }
+}
+const supplierOrderLink = (orderId: string) => `/supplier/orders/${orderId}`
 
 export default function SupplierOrdersPage() {
   const router = useRouter()
   const { user, isAuthenticated } = useAuthStore()
   const { orders, setOrders } = useOrdersStore()
+
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
@@ -87,110 +91,126 @@ export default function SupplierOrdersPage() {
   const [total, setTotal] = useState<number | null>(null)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
 
-  // Redirect to login if not authenticated
-  useEffect(() => {
-    if (!isAuthenticated) router.push("/login")
-  }, [isAuthenticated, router])
+  useEffect(() => { if (!isAuthenticated) router.push("/login") }, [isAuthenticated, router])
 
- const loadOrders = useCallback(async () => {
-  if (!user?.ishyigaAccount) return
-  setLoading(true)
-  setErr(null)
+  const loadOrders = useCallback(async () => {
+    if (!user?.ishyigaAccount) return
+    setLoading(true)
+    setErr(null)
+    try {
+      const res = await fetch("/api/seller-orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sellerAccount: user.ishyigaAccount, page, pageSize }),
+        cache: "no-store",
+      })
+      const json = await res.json()
+      if (!res.ok || json?.ok === false) throw new Error(json?.error || "Failed to load orders")
 
-  try {
-    // ✅ Changed from /api/orders to /api/seller-orders
-    // Use sellerAccount (not supplierId)
-    const res = await fetch("/api/seller-orders", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ 
-        sellerAccount: user.ishyigaAccount,  // ✅ Changed from supplierId
-        page, 
-        pageSize 
-      }),
-      cache: "no-store",
-    })
-    const json = await res.json()
+      const txns: RawTxn[] = Array.isArray(json?.orders) ? json.orders : []
+      const mapped: Order[] = txns.map((t) => {
+        const isCOD = /(pay[_\s-]*on[_\s-]*delivery|cod)/i.test(t.PAYMENT_NAME || "")
+        const buyerEmail = t.BUYER_EMAIL || ""
+        const isGuestBuyer = buyerEmail.startsWith("guest_") || !t.BUYER_ISHYIGA_ACCOUNT
 
-    if (!res.ok || json?.ok === false) throw new Error(json?.error || "Failed to load orders")
+        const o: Order = {
+          id: String(t.ID_ORDER ?? ""),
+          sellerId: String(t.SELLER_ISHYIGA_ACCOUNT ?? ""),
+          sellerName: t.SELLER_NAMES || t.SELLER_OWNER || t.SELLER_ISHYIGA_ACCOUNT || "Supplier",
+          sellerLocation: undefined,
+          momo: t.momo ?? undefined,
+          items: [],
+          itemsCount: undefined,
+          subtotal: Number(t.AMOUNT ?? 0),
+          status: (t.PAYMENT_STATUS === "paid" ? "processing" : "pending") as Order["status"],
+          paymentStatus: isCOD ? "unpaid" : "paid",
+          createdAt: t.CREATED_AT || new Date().toISOString(),
+        }
+        // @ts-ignore
+        o.buyerId = t.BUYER_ISHYIGA_ACCOUNT ?? undefined
+        // @ts-ignore
+        o.buyerName = t.BUYER_OWNER ?? t.BUYER_NAME ?? t.BUYER_ISHYIGA_ACCOUNT ?? "Guest Buyer"
+        // @ts-ignore
+        o.isGuest = isGuestBuyer
+        return o
+      })
 
-    // ✅ Backend returns 'orders' directly (not 'transactions')
-    const txns: RawTxn[] = Array.isArray(json?.orders)
-      ? json.orders
-      : []
-
-   const mapped: Order[] = txns.map((t) => {
-  const paymentName = t.PAYMENT_NAME || ""
-  const paymentStatus = t.PAYMENT_STATUS || ""
-  const isCOD = /(pay[_\s-]*on[_\s-]*delivery|cod)/i.test(paymentName)
-
-  // Detect guest buyers
-  const buyerEmail = t.BUYER_EMAIL || ""
-  const isGuestBuyer = buyerEmail.startsWith("guest_") || !t.BUYER_ISHYIGA_ACCOUNT
-
-  return {
-    id: String(t.ID_ORDER ?? ""),
-    sellerId: String(t.SELLER_ISHYIGA_ACCOUNT ?? ""),
-    sellerName: t.SELLER_NAMES || t.SELLER_OWNER || t.SELLER_ISHYIGA_ACCOUNT || "Supplier",
-    sellerLocation: undefined,
-    momo: t.momo ?? undefined,
-    items: [],
-    subtotal: Number(t.AMOUNT ?? 0),
-    status: mapPaymentToStatus(paymentName, paymentStatus), // Pass payment status
-    paymentStatus: isCOD ? "unpaid" : "paid",
-    createdAt: t.CREATED_AT || new Date().toISOString(),
-    buyerId: t.BUYER_ISHYIGA_ACCOUNT ?? undefined,
-    buyerName: t.BUYER_OWNER ?? t.BUYER_NAME ?? t.BUYER_ISHYIGA_ACCOUNT ?? "Guest Buyer",
-    isGuest: isGuestBuyer,
-  }
-})
-    setOrders(mapped)
-    setTotal(Number.isFinite(json?.total) ? Number(json.total) : null)
-    setLastRefresh(new Date()) // Update last refresh timestamp
-  } catch (e: any) {
-    setErr(e?.message || "Failed to load orders")
-  } finally {
-    setLoading(false)
-  }
-}, [user?.ishyigaAccount, page, pageSize, setOrders])
+      setOrders(mapped)
+      setTotal(Number.isFinite(json?.total) ? Number(json.total) : null)
+      setLastRefresh(new Date())
+    } catch (e: any) {
+      setErr(e?.message || "Failed to load orders")
+    } finally {
+      setLoading(false)
+    }
+  }, [user?.ishyigaAccount, page, pageSize, setOrders])
 
   useEffect(() => { loadOrders() }, [loadOrders])
 
-  // Auto-refresh every 30 seconds to check for new orders
   useEffect(() => {
-    const interval = setInterval(() => {
-      loadOrders()
-    }, 30000) // 30 seconds
-
+    const interval = setInterval(() => { loadOrders() }, 30000)
     return () => clearInterval(interval)
   }, [loadOrders])
 
-  // Pagination helpers
   const totalPages = useMemo(() => (total != null ? Math.max(1, Math.ceil(total / pageSize)) : null), [total, pageSize])
   const hasPrev = page > 1
   const hasNext = totalPages != null ? page < totalPages : orders.length === pageSize
   const goPrev = () => hasPrev && setPage((p) => p - 1)
   const goNext = () => hasNext && setPage((p) => p + 1)
-  const goto = (p: number) => p >= 1 && (totalPages == null || p <= totalPages) && setPage(p)
 
-  const pageButtons = useMemo(() => {
-    if (totalPages == null) return null
-    const maxToShow = 5
-    const start = Math.max(1, page - Math.floor(maxToShow / 2))
-    const end = Math.min(totalPages, start + maxToShow - 1)
-    const first = Math.max(1, end - maxToShow + 1)
-    return Array.from({ length: end - first + 1 }, (_, i) => first + i)
-  }, [page, totalPages])
+  function InlineStatusPicker({ order }: { order: Order }) {
+    const current: SupplierStatusKey = inferSupplierStatus(order)
 
-  const supplierOrderLink = (orderId: string) => `/supplier/orders/${orderId}`
+    async function setStatus(next: SupplierStatusKey) {
+      if (next === current) return
+      const prevBadge = order.status
+      const nextBadge = toBadgeStatus(next)
+      setOrders(orders.map(o => (o.id === order.id ? { ...o, status: nextBadge } : o)))
 
-  // Render logic remains unchanged
+      try {
+        const res = await fetch("/Trading/Kaos/OrderStatusServlet", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ orderId: Number(order.id), status: next }),
+        })
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok || json?.ok === false) throw new Error(json?.error || `HTTP ${res.status}`)
+      } catch (e) {
+        console.error("Failed to update status", e)
+        setOrders(orders.map(o => (o.id === order.id ? { ...o, status: prevBadge } : o)))
+      }
+    }
+
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition ${pillClass(current)}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <span className={`h-2.5 w-2.5 rounded-full ${dotClass(current)}`} />
+            {SUPPLIER_STATUS.find((s) => s.key === current)?.label}
+            <ChevronDown className="h-4 w-4 opacity-70" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-48">
+          {SUPPLIER_STATUS.map((opt) => (
+            <DropdownMenuItem key={opt.key} onClick={() => setStatus(opt.key)} className="cursor-pointer">
+              <span className={`mr-2 inline-block h-2.5 w-2.5 rounded-full ${dotClass(opt.key)}`} />
+              {opt.label}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-slate-50">
       <Header />
       <main className="container mx-auto px-4 py-8">
         {/* Header bar */}
-        <div className="flex flex-col gap-3 mb-4">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
           <div>
             <h1 className="text-xl sm:text-2xl font-bold text-slate-900">My Orders</h1>
             <p className="text-sm sm:text-base text-slate-600">
@@ -228,105 +248,26 @@ export default function SupplierOrdersPage() {
 
         {/* Content */}
         {loading ? (
-          <Card>
-            <CardHeader><CardTitle>Loading orders…</CardTitle></CardHeader>
-            <CardContent className="text-sm text-muted-foreground">Please wait.</CardContent>
-          </Card>
+          <div className="py-8 text-center text-sm text-slate-500">Loading orders…</div>
         ) : err ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>Couldn't load orders</CardTitle>
-              <CardDescription className="text-destructive">{err}</CardDescription>
-            </CardHeader>
-          </Card>
+          <div className="mb-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+            Couldn’t load orders: {err}
+          </div>
         ) : !orders.length ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>No orders yet</CardTitle>
-              <CardDescription>Your orders will appear here.</CardDescription>
-            </CardHeader>
-          </Card>
+          <div className="py-8 text-center text-sm text-slate-500">No orders yet. Your orders will appear here.</div>
         ) : (
-          <>
-            <div className="space-y-6">
-              {orders.map((order) => {
-                const steps = buildTracking(order.status)
-                const createdStr = order.createdAt ? new Date(order.createdAt).toLocaleString() : ""
-                return (
-                  <Card key={order.id}>
-                    <CardHeader>
-                      <div className="flex flex-col sm:flex-row items-start justify-between gap-3">
-                        <div className="flex-1">
-                          <CardTitle className="text-base sm:text-lg">
-                            <button onClick={() => router.push(supplierOrderLink(order.id))} className="text-left hover:underline">
-                              {order.id}
-                            </button>
-                          </CardTitle>
-                          <CardDescription className="flex items-center gap-2 flex-wrap text-xs sm:text-sm">
-                            <span>{createdStr}</span>
-                            {createdStr && <span>•</span>}
-                            <span className="font-medium">{order.buyerName}</span>
-                            {order.isGuest && (
-                              <Badge variant="secondary" className="bg-amber-100 text-amber-800 border-amber-200 text-xs">
-                                Guest
-                              </Badge>
-                            )}
-                          </CardDescription>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {statusIcon(order.status)}
-                          {statusBadge(order.status)}
-                        </div>
-                      </div>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-4">
-                        <div className="relative">
-                          <div className="space-y-4">
-                            {steps.map((step, idx) => (
-                              <div key={idx} className="flex items-start gap-3">
-                                <div className="relative">
-                                  <div className={`h-8 w-8 rounded-full flex items-center justify-center ${step.completed ? "bg-green-600" : "bg-slate-200"}`}>
-                                    {step.completed ? <CheckCircle className="h-5 w-5 text-white" /> : <Clock className="h-5 w-5 text-slate-400" />}
-                                  </div>
-                                  {idx < steps.length - 1 && (
-                                    <div className={`absolute left-4 top-8 w-0.5 h-8 ${step.completed ? "bg-green-600" : "bg-slate-200"}`} />
-                                  )}
-                                </div>
-                                <div className="flex-1 pt-1">
-                                  <p className={`font-medium ${step.completed ? "text-slate-900" : "text-slate-500"}`}>{step.label}</p>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-4 border-t">
-                          <div>
-                            <p className="text-xs sm:text-sm text-slate-600">Total Amount</p>
-                            <p className="text-base sm:text-lg font-bold text-slate-900">{order.subtotal.toLocaleString()} RWF</p>
-                          </div>
-                          <Button variant="outline" size="sm" onClick={() => router.push(supplierOrderLink(order.id))} className="w-full sm:w-auto">View Details</Button>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                )
-              })}
-            </div>
-            {/* Pagination */}
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-6">
-              <div className="text-xs sm:text-sm text-slate-600 order-2 sm:order-1">
-                {total != null ? <>Page <span className="font-medium">{page}</span> of <span className="font-medium">{totalPages}</span> • {total} total</> : <>Page <span className="font-medium">{page}</span></>}
+          <div className="space-y-6">
+            {orders.map((order) => (
+              <div key={order.id} className="border rounded p-4 bg-white">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="font-medium">{order.id}</span>
+                  <InlineStatusPicker order={order} />
+                </div>
+                <div className="text-sm text-slate-600">{order.buyerName}</div>
+                <div className="text-sm font-semibold">{order.subtotal.toLocaleString()} RWF</div>
               </div>
-              <div className="flex items-center gap-1 order-1 sm:order-2 overflow-x-auto w-full sm:w-auto justify-center">
-                <Button variant="outline" size="sm" onClick={goPrev} disabled={!hasPrev} className="gap-1 flex-shrink-0"><ChevronLeft className="h-4 w-4" /> <span className="hidden sm:inline">Prev</span></Button>
-                {pageButtons?.map((p) => (
-                  <Button key={p} variant={p === page ? "default" : "outline"} size="sm" onClick={() => goto(p)} className="flex-shrink-0">{p}</Button>
-                ))}
-                <Button variant="outline" size="sm" onClick={goNext} disabled={!hasNext} className="gap-1 flex-shrink-0"><span className="hidden sm:inline">Next</span> <ChevronRight className="h-4 w-4" /></Button>
-              </div>
-            </div>
-          </>
+            ))}
+          </div>
         )}
       </main>
       <Footer />
