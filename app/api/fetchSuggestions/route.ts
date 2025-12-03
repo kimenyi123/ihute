@@ -4,7 +4,9 @@ import type { NextRequest } from "next/server"
 const DEFAULT_TIMEOUT_MS = Number(process.env.PROXY_TIMEOUT_MS ?? 30000) // Reduced to 30s
 
 async function forward(req: NextRequest) {
-  const backendBase = process.env.JAVA_BACKEND_BASE ?? "https://ihute.rw/Trading"
+//   const backendBase = process.env.JAVA_BACKEND_BASE ?? "https://ihute.rw/Trading"
+   const backendBase = process.env.JAVA_BACKEND_BASE ?? "https://ihute.rw/Trading"
+
   const incoming = new URL(req.url)
   const target = new URL(`${backendBase}/Kaos/fetchSuggestions`)
 

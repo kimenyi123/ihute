@@ -5,6 +5,7 @@ import Image from "next/image"
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Star } from "lucide-react"
+import { RotateCcw, History, RefreshCcw } from "lucide-react"
 import {
   ShoppingCart,
   User,
@@ -275,6 +276,18 @@ export function Header() {
                 )}
               </Button>
             </Link>
+            {/* Reorder */}
+            <Link href="/reorder">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="relative h-9 w-9"
+                title="Reorder Items"
+              >
+                <RotateCcw className="h-5 w-5" />
+              </Button>
+            </Link>
+
 
             {/* Ratings */}
             <Link href="/ratings">
