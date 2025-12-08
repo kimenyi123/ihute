@@ -5,8 +5,8 @@ const DEFAULT_TIMEOUT_MS = Number(process.env.PROXY_TIMEOUT_MS ?? 30000) // Redu
 
 async function forward(req: NextRequest) {
 //   const backendBase = process.env.JAVA_BACKEND_BASE ?? "https://ihute.rw/Trading"
-   const backendBase = process.env.JAVA_BACKEND_BASE ?? "https://ihute.rw/Trading"
-
+//    const backendBase = process.env.JAVA_BACKEND_BASE ?? "https://ihute.rw/Trading"
+ const backendBase = process.env.JAVA_BACKEND_BASE ?? "http://localhost:8081/Trading"
   const incoming = new URL(req.url)
   const target = new URL(`${backendBase}/Kaos/fetchSuggestions`)
 

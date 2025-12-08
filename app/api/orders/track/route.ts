@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 
 const RID_HEADER = "x-request-id"
-const JAVA_ORDERS_URL = process.env.NEXT_PUBLIC_ORDERS_URL || "https://ihute.rw/Trading/Kaos/OrdersServlet"
+// const JAVA_ORDERS_URL = process.env.NEXT_PUBLIC_ORDERS_URL || "https://ihute.rw/Trading/Kaos/OrdersServlet"
+const JAVA_ORDERS_URL = process.env.NEXT_PUBLIC_ORDERS_URL || "http://localhost:8081/Trading/Kaos/OrdersServlet"
 
 function rid() {
   return Math.random().toString(36).slice(2, 12)

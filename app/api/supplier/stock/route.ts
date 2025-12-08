@@ -1,7 +1,8 @@
 // app/api/supplier/stock/route.ts
 import { NextRequest, NextResponse } from "next/server"
 
-const JAVA_BACKEND_BASE = process.env.JAVA_BACKEND_BASE || "https://ihute.rw"
+//const JAVA_BACKEND_BASE = process.env.JAVA_BACKEND_BASE || "https://ihute.rw"
+const JAVA_BACKEND_BASE = process.env.JAVA_BACKEND_BASE || "http://localhost:8081"
 const STOCK_SERVLET_URL = `${JAVA_BACKEND_BASE}/Trading/SupplierStock`
 
 export async function GET(req: NextRequest) {

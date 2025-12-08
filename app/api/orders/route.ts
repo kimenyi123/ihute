@@ -1,51 +1,175 @@
 // app/api/orders/route.ts
 import { NextResponse } from "next/server"
 
-const SERVLET =
-  (process.env.JAVA_SERVLET_URL && process.env.JAVA_SERVLET_URL.replace(/\/+$/, "")) ||
-  ((process.env.JAVA_BACKEND_BASE || "https://ihute.rw/Trading").replace(/\/+$/, "") + "/Kaos/fetchSuggestions")
+// Backend configuration
+// const JAVA_BACKEND_BASE = (process.env.JAVA_BACKEND_BASE || "https://ihute.rw/Trading").replace(/\/+$/, "")
+const JAVA_BACKEND_BASE = (process.env.JAVA_BACKEND_BASE || "https://ihute.rw/Trading").replace(/\/+$/, "")
+const FETCH_SUGGESTIONS_SERVLET = `http://localhost:8081/Trading/Kaos/fetchSuggestions`
+// const ORDERS_SERVLET = `${JAVA_BACKEND_BASE}/Kaos/OrdersServlet`
+const ORDERS_SERVLET = `http://localhost:8081/Trading/Kaos/OrdersServlet`
+
+const DEBUG = process.env.DEBUG_ORDERS === 'true'
+const TIMEOUT_MS = Number(process.env.PROXY_TIMEOUT_MS ?? 12000)
+
+/**
+ * Smart routing: Determines which servlet to use based on request
+ */
+function determineServlet(body: any): { url: string; payload: any; mode: string } {
+  const { email, action } = body
+
+  // If action is explicitly provided → Use OrdersServlet
+  if (action) {
+    console.log('🎯 Mode: ACTION-BASED → OrdersServlet')
+    return {
+      url: ORDERS_SERVLET,
+      payload: body, // Send entire body
+      mode: 'action-based'
+    }
+  }
+
+  // If only email (no action) → Use fetchSuggestions (legacy)
+  if (email && !action) {
+    console.log('🎯 Mode: LEGACY → fetchSuggestions')
+    return {
+      url: FETCH_SUGGESTIONS_SERVLET,
+      payload: { email }, // Only send email
+      mode: 'legacy'
+    }
+  }
+
+  // Invalid request
+  throw new Error('Request must include either "action" or "email"')
+}
 
 export async function POST(req: Request) {
+  const requestId = Math.random().toString(36).substring(7)
+  const startTime = Date.now()
+
+  console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+  console.log(`📥 [POST /api/orders] Request ID: ${requestId}`)
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+  console.log('⏰ Start time:', new Date().toISOString())
+
   const controller = new AbortController()
-  const t = setTimeout(() => controller.abort(), Number(process.env.PROXY_TIMEOUT_MS ?? 12000))
+  const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS)
 
   try {
-    const { email } = await req.json()
-    if (!email) return NextResponse.json({ transactions: [], error: "email required" }, { status: 200 })
+    // Parse request body
+    const bodyText = await req.text()
+    console.log('\n📦 Request Body (raw):')
+    console.log('   Length:', bodyText.length, 'bytes')
+    console.log('   Content:', bodyText.substring(0, 200))
 
-    const resp = await fetch(SERVLET, {
+    const requestBody = JSON.parse(bodyText)
+    console.log('✅ Body parsed successfully')
+    console.log('   Keys:', Object.keys(requestBody))
+
+    // Determine which servlet to use
+    const { url, payload, mode } = determineServlet(requestBody)
+
+    console.log('\n🎯 Backend Request:')
+    console.log('   Mode:', mode)
+    console.log('   URL:', url)
+    console.log('   Payload:', JSON.stringify(payload))
+
+    const fetchStart = Date.now()
+    console.log('\n📡 Calling backend servlet...')
+
+    const resp = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Accept": "application/json" },
-      body: JSON.stringify({ email }), // fetchSuggestions.doPost() -> fetchTransactionHistory(email)
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      body: JSON.stringify(payload),
       signal: controller.signal,
       cache: "no-store",
     })
 
-    const text = await resp.text()
-    let data: any
-    try { data = JSON.parse(text) } catch { return NextResponse.json({ transactions: [] }, { status: 200 }) }
+    const fetchDuration = Date.now() - fetchStart
+    console.log(`✅ Backend responded in ${fetchDuration}ms`)
+    console.log('   Status:', resp.status, resp.statusText)
+    console.log('   Content-Type:', resp.headers.get('content-type'))
 
-    // Explicitly handle upstream shapes:
-    // 1) { transactions: [...] }
-    // 2) { transactions: "No transaction found" }
-    // 3) [...] (array at top level)
-    // 4) anything else -> []
-    let transactions: any[] = []
-    if (Array.isArray(data)) {
-      transactions = data
-    } else if (Array.isArray(data?.transactions)) {
-      transactions = data.transactions
-    } else if (typeof data?.transactions === "string") {
-      // "No transaction found" (or any string) => empty list
-      transactions = []
-    } else {
-      transactions = []
+    // Get response
+    const text = await resp.text()
+    console.log('\n📦 Backend Response:')
+    console.log('   Length:', text.length, 'bytes')
+    console.log('   First 500 chars:', text.substring(0, 500))
+
+    // Parse response
+    let data: any
+    try {
+      data = JSON.parse(text)
+      console.log('✅ Response parsed successfully')
+      if (DEBUG) {
+        console.log('   Full data:', JSON.stringify(data, null, 2))
+      }
+    } catch (parseError) {
+      console.error('❌ Failed to parse response as JSON')
+      console.error('   Error:', parseError)
+      return NextResponse.json({ transactions: [] }, { status: 200 })
     }
 
-    return NextResponse.json({ transactions }, { status: 200 })
+    // Handle response based on mode
+    let result: any
+
+    if (mode === 'legacy') {
+      // Legacy mode: Extract transactions array
+      console.log('\n🔄 Processing LEGACY response...')
+      let transactions: any[] = []
+
+      if (Array.isArray(data)) {
+        transactions = data
+      } else if (Array.isArray(data?.transactions)) {
+        transactions = data.transactions
+      } else if (typeof data?.transactions === "string") {
+        transactions = []
+      } else {
+        transactions = []
+      }
+
+      console.log('   Transactions count:', transactions.length)
+      result = { transactions }
+
+    } else {
+      // Action-based mode: Return raw response from OrdersServlet
+      console.log('\n🔄 Processing ACTION-BASED response...')
+      console.log('   Response OK:', data.ok)
+      result = data
+    }
+
+    const totalDuration = Date.now() - startTime
+    console.log('\n⏱️  Performance:')
+    console.log('   Backend call:', fetchDuration, 'ms')
+    console.log('   Total time:', totalDuration, 'ms')
+
+    console.log('\n✅ Success')
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n')
+
+    return NextResponse.json(result, { status: 200 })
+
   } catch (e: any) {
-    return NextResponse.json({ transactions: [], error: e?.message }, { status: 200 })
+    const totalDuration = Date.now() - startTime
+
+    console.error('\n❌ ERROR in POST /api/orders')
+    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+    console.error('⏱️  Time before error:', totalDuration, 'ms')
+    console.error('🔴 Error:', e?.message || 'Unknown error')
+
+    if (e?.stack) {
+      console.error('📚 Stack:', e.stack)
+    }
+
+    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n')
+
+    return NextResponse.json({
+      transactions: [],
+      error: e?.message || 'Unknown error'
+    }, { status: 200 })
+
   } finally {
-    clearTimeout(t)
+    clearTimeout(timeout)
+    console.log(`🏁 Request ${requestId} completed in ${Date.now() - startTime}ms\n`)
   }
 }
