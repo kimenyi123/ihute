@@ -2,8 +2,9 @@
 
 import { useTableCommandStore } from "@/lib/table-command-store"
 import { Button } from "@/components/ui/button"
-import { Beer, X, Lock, CheckCircle, Send } from "lucide-react"
+import { Beer, X, Lock, CheckCircle, Send, Share2 } from "lucide-react"
 import { useState } from "react"
+import { TableCommandShareModal } from "@/components/table-command-share-modal"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,6 +28,7 @@ export function TableCommandBanner() {
   const [showLeaveDialog, setShowLeaveDialog] = useState(false)
   const [showCloseDialog, setShowCloseDialog] = useState(false)
   const [showSendDialog, setShowSendDialog] = useState(false)
+  const [showShareModal, setShowShareModal] = useState(false)
   const [closeError, setCloseError] = useState("")
   const [sendError, setSendError] = useState("")
   const [sendSuccess, setSendSuccess] = useState<any>(null)
@@ -303,6 +305,21 @@ export function TableCommandBanner() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Share Modal */}
+      {activeSession.shareableLink && (
+        <TableCommandShareModal
+          open={showShareModal}
+          onOpenChange={setShowShareModal}
+          data={{
+            tableName: activeSession.tableName,
+            tableLocation: activeSession.locationName,
+            shareableLink: activeSession.shareableLink,
+            qrCodeUrl: activeSession.qrCodeUrl || "",
+            shareableToken: activeSession.shareableToken || "",
+          }}
+        />
+      )}
     </>
   )
 }

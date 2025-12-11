@@ -46,6 +46,10 @@ export interface CreateOrderResponse {
     tableName: string;
     tableLocation: string;
     status: string;
+    tableCommandId?: number;
+    shareableLink?: string;
+    shareableToken?: string;
+    qrCodeUrl?: string;
   };
   error?: string;
   stockError?: boolean;

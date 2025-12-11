@@ -21,6 +21,7 @@ import { Copy, PhoneCall, CheckCircle2, RotateCcw, MessageCircle, Truck, CreditC
 import { isBarOrRestaurant } from "@/lib/constants"
 import { useTableCommandStore } from "@/lib/table-command-store"
 import { TableCommandDialog } from "@/components/table-command-dialog"
+import { TableCommandShareModal } from "@/components/table-command-share-modal"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -143,7 +144,7 @@ export function CartSummary() {
   const [anonymousName, setAnonymousName] = useState("")
 
   // Table command mode
-  const { isInTableCommand, activeSession, lockTableCommand, canCloseTable, closeTableCommand } = useTableCommandStore()
+  const { isInTableCommand, activeSession, lockTableCommand, canCloseTable, closeTableCommand, createTableCommand, updateTableShareData } = useTableCommandStore()
 
   // Pre-fill name from table command session if available
   useEffect(() => {
@@ -154,6 +155,14 @@ export function CartSummary() {
   const [tableCommandDialogOpen, setTableCommandDialogOpen] = useState(false)
   const [tableCommandSeller, setTableCommandSeller] = useState<{ id: string; name: string } | null>(null)
   const [showCloseTableDialog, setShowCloseTableDialog] = useState(false)
+  const [shareModalOpen, setShareModalOpen] = useState(false)
+  const [shareModalData, setShareModalData] = useState<{
+    tableName: string
+    tableLocation: string
+    shareableLink: string
+    qrCodeUrl: string
+    shareableToken: string
+  } | null>(null)
 
   // MoMo payment dialog
   const [momoOpen, setMomoOpen] = useState(false)
@@ -364,6 +373,44 @@ const placeOrder = async (
 
       // ✅ LOG SUCCESSFUL PAYMENT METHOD
       console.log(`✅ Order created with payment method: ${opts.paymentName}`)
+
+      // ✅ HANDLE TABLE COMMAND CREATION WITH SHARE DATA
+      if (json.tableCommand && json.tableCommand.shareableLink) {
+        // If we're not already in a table command session, create one with share data
+        if (!isInTableCommand()) {
+          createTableCommand(
+            json.tableCommand.tableName,
+            g.supplierId,
+            json.tableCommand.tableLocation,
+            checkoutMode === "anonymous" ? anonymousName : user?.name || "Guest",
+            checkoutMode === "anonymous" ? `guest_${Date.now()}@ihute.rw` : user?.email || "",
+            {
+              shareableLink: json.tableCommand.shareableLink,
+              shareableToken: json.tableCommand.shareableToken,
+              qrCodeUrl: json.tableCommand.qrCodeUrl,
+            }
+          )
+        } else if (activeSession && activeSession.isCreator) {
+          // Update existing session with share data
+          updateTableShareData({
+            shareableLink: json.tableCommand.shareableLink,
+            shareableToken: json.tableCommand.shareableToken,
+            qrCodeUrl: json.tableCommand.qrCodeUrl,
+          })
+        }
+
+        // Show share modal
+        setShareModalData({
+          tableName: json.tableCommand.tableName,
+          tableLocation: json.tableCommand.tableLocation,
+          shareableLink: json.tableCommand.shareableLink,
+          qrCodeUrl: json.tableCommand.qrCodeUrl,
+          shareableToken: json.tableCommand.shareableToken,
+        })
+        setShareModalOpen(true)
+        // Don't redirect - user needs to see the share modal
+        return
+      }
 
      if (opts.paymentName === "PAID_MTN_MOMO" && orderId) {
       pollPayment(orderId, g.supplierId)
@@ -936,6 +983,13 @@ const submitCOD = async () => {
           locationName={tableCommandSeller.name}
         />
       )}
+
+      {/* Table Command Share Modal */}
+      <TableCommandShareModal
+        open={shareModalOpen}
+        onOpenChange={setShareModalOpen}
+        data={shareModalData}
+      />
 
       {/* Close Table Dialog */}
       <AlertDialog open={showCloseTableDialog} onOpenChange={setShowCloseTableDialog}>

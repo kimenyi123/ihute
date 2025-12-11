@@ -10,7 +10,8 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { filterSuppliersByRelevance, filterProductsByRelevance } from "@/lib/search-utils"
 import { getTranslations } from "@/lib/keyword-mapping"
-import { Languages } from "lucide-react"
+import { Languages, Store } from "lucide-react"
+import { useTableCommandStore } from "@/lib/table-command-store"
 
 type Shop = {
   supplier_account: string
@@ -104,6 +105,13 @@ export default function SearchPage() {
   // Supplier product search
   const [supplierSearch, setSupplierSearch] = useState("")
   const [debouncedSupplierSearch, setDebouncedSupplierSearch] = useState("")
+  
+  // Table command store
+  const { 
+    activeSession: tableCommand, 
+    addToTableCart, 
+    tableCartItems 
+  } = useTableCommandStore()
 
   // Keep drafts in sync with URL changes
   useEffect(() => setLocationDraft(locationParam), [locationParam])
@@ -111,14 +119,53 @@ export default function SearchPage() {
 
   const addToCartFn = useCartStore((s: any) => s.addOrInc ?? s.add)
 
-  const addProductAndGoToCart = (p: Product) => {
-    if (!addToCartFn) {
-      console.warn("Cart store is missing addOrInc/add")
-      return
+const addProductToCart = (p: Product) => {
+  if (!addToCartFn) {
+    console.warn("Cart store is missing addOrInc/add")
+    return
+  }
+  
+     const id = p.item_code || `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`
+  const unit = p.item_packet || ""
+  const price = extractNumericPrice(p.item_emballage)
+  const supplierId = p.supplier_account || "unknown"
+  const supplierName = p.supplier_name || p.supplier_account || "Supplier"
+  
+  // Check if we're in a table command context
+  if (tableCommand && tableCommand.locationId === p.supplier_account) {
+    // Add to table command cart (special handling for table orders)
+    if (addToTableCart) {
+      addToTableCart({
+        id,
+        name: p.item_commercial_name,
+        price,
+        unit,
+        selectedUnit: unit,
+        qty: 1,
+        supplierId,
+        supplierName,
+        supplierLocation: p.supplier_location,
+        image: p.image || "/placeholder.svg?height=300&width=300",
+        momo: p.momo || (p as any)?.seller_momo || "",
+      })
+    } else {
+      // Fallback to regular cart
+      addToCartFn({
+        id,
+        name: p.item_commercial_name,
+        price,
+        unit,
+        selectedUnit: unit,
+        qty: 1,
+        supplierId,
+        supplierName,
+        supplierLocation: p.supplier_location,
+        image: p.image || "/placeholder.svg?height=300&width=300",
+        momo: p.momo || (p as any)?.seller_momo || "",
+      })
     }
-    const id = p.item_code || `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`
-    const unit = p.item_packet || ""
-    const price = extractNumericPrice(p.item_emballage)
+  } else {
+    // Regular order (not part of table command)
     addToCartFn({
       id,
       name: p.item_commercial_name,
@@ -126,21 +173,25 @@ export default function SearchPage() {
       unit,
       selectedUnit: unit,
       qty: 1,
-      supplierId: p.supplier_account,
-      supplierName: p.supplier_name || p.supplier_account || "Supplier",
+      supplierId,
+      supplierName,
       supplierLocation: p.supplier_location,
       image: p.image || "/placeholder.svg?height=300&width=300",
       momo: p.momo || (p as any)?.seller_momo || "",
     })
-    router.push("/cart")
   }
+  
+  // Show success message instead of redirecting
+  alert(`Added "${p.item_commercial_name}" to your cart!`)
+}
 
   const onTileKey = (e: KeyboardEvent<HTMLDivElement>, p: Product) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault()
-      addProductAndGoToCart(p)
-    }
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault()
+    addProductToCart(p)
   }
+}
+
 
   // Small helper to push URL with preserved params (and real clearing support)
   const pushWith = (updates: Record<string, string | undefined>) => {
@@ -240,13 +291,13 @@ export default function SearchPage() {
           const filteredSuppliersByName = filterSuppliersByRelevance(
             data.suppliersByName || [],
             debouncedQ,
-            30 // Strict threshold - only word boundary matches or better
+            15 // Lower threshold - show more supplier results
           )
 
           const filteredSuppliersByProduct = filterSuppliersByRelevance(
             data.suppliersByProduct || [],
             debouncedQ,
-            30 // Strict threshold - only word boundary matches or better
+            15 // Lower threshold - show more supplier results
           )
 
           setSearchResult({
@@ -410,11 +461,43 @@ export default function SearchPage() {
   // Get translations for current query
   const translations = debouncedQ ? getTranslations(debouncedQ) : null
 
+  // Calculate total items in table cart
+  const tableCartItemCount = tableCartItems.reduce((total, item) => total + item.qty, 0)
+
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
       <main className="container mx-auto flex-1 px-4 py-8">
         <h1 className="text-2xl font-semibold mb-4">Global Search</h1>
+        
+        {/* Table Context Indicator - Added here */}
+        {tableCommand && (
+          <div className="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-lg">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Store className="h-5 w-5 text-purple-600" />
+                <div>
+                  <span className="font-medium text-purple-800">
+                    Table Order: {tableCommand.tableName}
+                  </span>
+                  <span className="text-sm text-purple-600 ml-2">
+                    • Shopping at {tableCommand.locationName}
+                  </span>
+                </div>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                // onClick={() => router.push("/cart")}
+              >
+                View My Cart ({tableCartItemCount} items)
+              </Button>
+            </div>
+            <p className="text-xs text-purple-600 mt-1">
+              Your items will be grouped with others at this table. Only you can see your own items.
+            </p>
+          </div>
+        )}
 
         {/* Search Row */}
         <div className="flex gap-2 items-center mb-3">
@@ -474,6 +557,7 @@ export default function SearchPage() {
             <div className="flex items-center gap-2 bg-gray-50 rounded-full px-3 py-1.5 border">
               <span className="text-sm">🗂️</span>
               <select
+                aria-label="Select sector"
                 className="bg-transparent outline-none text-sm w-48"
                 value={sectorDraft}
                 onChange={(e) => {
@@ -612,7 +696,7 @@ export default function SearchPage() {
                               key={p.item_code + (p.supplier_account || s.seller_account)}
                               className="p-2 rounded border hover:border-blue-300 cursor-pointer"
                               onClick={() =>
-                                addProductAndGoToCart({
+                                addProductToCart({
                                   ...p,
                                   supplier_account: p.supplier_account || s.seller_account,
                                   supplier_name: p.supplier_name || s.seller_name,
@@ -659,7 +743,7 @@ export default function SearchPage() {
                       className="rounded-lg border p-3 hover:border-blue-300 transition-colors cursor-pointer group"
                       role="button"
                       tabIndex={0}
-                      onClick={() => addProductAndGoToCart(product)}
+                      onClick={() => addProductToCart(product)}
                       onKeyDown={(e) => onTileKey(e, product)}
                       title="Click to add to cart"
                     >
@@ -677,7 +761,7 @@ export default function SearchPage() {
                         </div>
                       )}
                       <div className="mt-3 text-xs text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
-                        Click to add & go to cart →
+                        Click to add to cart →
                       </div>
                     </div>
                   ))}
@@ -780,7 +864,7 @@ export default function SearchPage() {
                           className="rounded-lg border p-3 hover:border-blue-300 transition-colors cursor-pointer group"
                           role="button"
                           tabIndex={0}
-                          onClick={() => addProductAndGoToCart(product)}
+                          onClick={() => addProductToCart(product)}
                           onKeyDown={(e) => onTileKey(e, product)}
                           title="Click to add to cart"
                         >
@@ -793,7 +877,7 @@ export default function SearchPage() {
                           </div>
                           {product.momo && <div className="mt-2 text-xs text-gray-500">Seller MoMo: {product.momo}</div>}
                           <div className="mt-3 text-xs text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
-                            Click to add & go to cart →
+                            Click to add to cart →
                           </div>
                         </div>
                       ))
