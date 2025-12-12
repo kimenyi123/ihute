@@ -7,7 +7,7 @@
  * @author Gilbert (Frontend Integration)
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/Trading";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw/Trading";
 
 export interface TableStatus {
   ok: boolean;

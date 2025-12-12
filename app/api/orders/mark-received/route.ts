@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-const JAVA_ORDERS_URL = process.env.JAVA_ORDERS_URL || "http://localhost:8080/Trading/OrdersServlet" // e.g. https://your-java-host/Kaos/orders
+const JAVA_ORDERS_URL = process.env.JAVA_ORDERS_URL || "https://ihute.rw/Trading/OrdersServlet" // e.g. https://your-java-host/Kaos/orders
 
 export async function POST(req: Request) {
   try {

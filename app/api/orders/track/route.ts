@@ -11,7 +11,13 @@ function log(requestId: string, ...args: any[]) {
   console.log(`[RID ${requestId}]`, ...args)
 }
 
-type OrderStatus = "pending" | "processing" | "in-transit" | "delivered"
+type OrderStatus = "open" | "pending" | "processing" | "invoice" | "in-transit" | "delivered"
+
+type StatusHistoryEntry = {
+  status: OrderStatus
+  timestamp: string
+  note?: string
+}
 
 function mapPaymentToStatus(orderStatus?: string, paymentStatus?: string): OrderStatus {
   // Priority 1: Check ORDER_STATUS if it exists
@@ -19,18 +25,97 @@ function mapPaymentToStatus(orderStatus?: string, paymentStatus?: string): Order
     const s = orderStatus.toLowerCase()
     if (s.includes("delivered") || s.includes("completed")) return "delivered"
     if (s.includes("transit") || s.includes("shipped") || s.includes("out")) return "in-transit"
+    if (s.includes("invoice")) return "invoice"
+    if (s.includes("processing") || s.includes("preparing")) return "processing"
+    if (s.includes("open")) return "open"
   }
-  
+
   // Priority 2: Check PAYMENT_STATUS
   if (paymentStatus) {
     const p = paymentStatus.toLowerCase()
     if (p === "paid" || p === "success") return "processing"
     if (p === "pending") return "pending"
-    if (p === "failed") return "pending"
+    if (p === "failed") return "open"
   }
-  
-  // Default to processing
-  return "processing"
+
+  // Default to open
+  return "open"
+}
+
+/**
+ * Build status history based on available data
+ * This creates a synthetic history if the backend doesn't provide one
+ */
+function buildStatusHistory(
+  currentStatus: OrderStatus,
+  createdAt: string,
+  orderStatus?: string,
+  paymentStatus?: string,
+  updatedAt?: string
+): StatusHistoryEntry[] {
+  const history: StatusHistoryEntry[] = []
+  const now = new Date().toISOString()
+  const createdTime = new Date(createdAt).getTime()
+
+  // Always add the "open" status when order was created
+  history.push({
+    status: "open",
+    timestamp: createdAt,
+    note: "Order placed"
+  })
+
+  // Map of status progression with estimated time intervals (in milliseconds)
+  const statusProgression: Record<OrderStatus, number> = {
+    "open": 0,
+    "pending": 0,
+    "processing": 1000 * 60 * 30, // 30 minutes after open
+    "invoice": 1000 * 60 * 60 * 2, // 2 hours after open
+    "in-transit": 1000 * 60 * 60 * 24, // 1 day after open
+    "delivered": 1000 * 60 * 60 * 48, // 2 days after open
+  }
+
+  const statusOrder: OrderStatus[] = ["open", "processing", "invoice", "in-transit", "delivered"]
+  const currentIndex = statusOrder.indexOf(currentStatus)
+
+  // Add intermediate statuses with estimated timestamps
+  for (let i = 1; i <= currentIndex; i++) {
+    const status = statusOrder[i]
+    const estimatedTime = createdTime + statusProgression[status]
+    const timestamp = updatedAt && i === currentIndex ? updatedAt : new Date(estimatedTime).toISOString()
+
+    let note = ""
+    switch (status) {
+      case "processing":
+        note = paymentStatus === "paid" ? "Payment confirmed, preparing order" : "Order being prepared"
+        break
+      case "invoice":
+        note = "Invoice generated"
+        break
+      case "in-transit":
+        note = "Out for delivery"
+        break
+      case "delivered":
+        note = "Successfully delivered"
+        break
+    }
+
+    history.push({
+      status,
+      timestamp,
+      note
+    })
+  }
+
+  // If we have explicit ORDER_STATUS that differs from our mapped status, add it
+  if (orderStatus && orderStatus !== currentStatus) {
+    history.push({
+      status: currentStatus,
+      timestamp: updatedAt || now,
+      note: `Status: ${orderStatus}`
+    })
+  }
+
+  return history
 }
 
 export async function POST(req: NextRequest) {
@@ -77,7 +162,7 @@ export async function POST(req: NextRequest) {
         log(requestId, "getOrderDetails response:", JSON.stringify(result).slice(0, 1000))
         if (result.ok && result.order) {
           data = result.order
-          log(requestId, "✅ Using getOrderDetails - PAYMENT_NAME:", data.PAYMENT_NAME, "PAYMENT_STATUS:", data.PAYMENT_STATUS)
+          log(requestId, "✅ Using getOrderDetails - PAYMENT_NAME:", data.PAYMENT_NAME, "PAYMENT_STATUS:", data.PAYMENT_STATUS, "ORDER_STATUS:", data.ORDER_STATUS)
         }
       }
     } catch (err) {
@@ -118,7 +203,7 @@ export async function POST(req: NextRequest) {
       const sellerData = result.seller || {}
       const buyerData = result.buyer || {}
 
-      log(requestId, "Using fallback - orderData.PAYMENT_NAME:", orderData.PAYMENT_NAME)
+      log(requestId, "Using fallback - orderData.PAYMENT_NAME:", orderData.PAYMENT_NAME, "ORDER_STATUS:", orderData.ORDER_STATUS)
 
       data = {
         ID_ORDER: orderData.ID_ORDER,
@@ -132,6 +217,7 @@ export async function POST(req: NextRequest) {
         PAYMENT_STATUS: orderData.PAYMENT_STATUS,
         ORDER_STATUS: orderData.ORDER_STATUS,
         CREATED_AT: orderData.CREATED_AT,
+        UPDATED_AT: orderData.UPDATED_AT,
         items: itemsData.map((item: any) => ({
           ITEM_NAME: item.ITEM_NAME,
           QTY: item.QUANTITY,
@@ -140,11 +226,24 @@ export async function POST(req: NextRequest) {
         })),
       }
 
-      log(requestId, "Mapped data - PAYMENT_NAME:", data.PAYMENT_NAME, "PAYMENT_STATUS:", data.PAYMENT_STATUS)
+      log(requestId, "Mapped data - PAYMENT_NAME:", data.PAYMENT_NAME, "PAYMENT_STATUS:", data.PAYMENT_STATUS, "ORDER_STATUS:", data.ORDER_STATUS)
     }
 
     // Map backend response to frontend format
     log(requestId, "Final mapping - PAYMENT_NAME:", data.PAYMENT_NAME, "PAYMENT_STATUS:", data.PAYMENT_STATUS, "ORDER_STATUS:", data.ORDER_STATUS)
+
+    const mappedStatus = mapPaymentToStatus(data.ORDER_STATUS, data.PAYMENT_STATUS)
+
+    // Build status history
+    const statusHistory = buildStatusHistory(
+      mappedStatus,
+      data.CREATED_AT || new Date().toISOString(),
+      data.ORDER_STATUS,
+      data.PAYMENT_STATUS,
+      data.UPDATED_AT
+    )
+
+    log(requestId, "Generated status history with", statusHistory.length, "entries")
 
     const order = {
       orderId: data.ID_ORDER || orderId,
@@ -164,11 +263,13 @@ export async function POST(req: NextRequest) {
       total: Number(data.AMOUNT || data.total || 0),
       paymentMethod: data.PAYMENT_NAME || data.paymentMethod || "Unknown",
       paymentStatus: data.PAYMENT_STATUS || undefined,
-      status: mapPaymentToStatus(data.ORDER_STATUS, data.PAYMENT_STATUS),
+      status: mappedStatus,
       createdAt: data.CREATED_AT || data.createdAt || new Date().toISOString(),
+      updatedAt: data.UPDATED_AT || data.updatedAt || undefined,
+      statusHistory: statusHistory,
     }
 
-    log(requestId, "✅ Order tracking SUCCESS - paymentMethod:", order.paymentMethod, "paymentStatus:", order.paymentStatus, "status:", order.status)
+    log(requestId, "✅ Order tracking SUCCESS - paymentMethod:", order.paymentMethod, "paymentStatus:", order.paymentStatus, "status:", order.status, "history entries:", statusHistory.length)
     return NextResponse.json({ ok: true, order })
   } catch (error: any) {
     log(requestId, "❌ ERROR:", error?.message)

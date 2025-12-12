@@ -41,7 +41,7 @@ export function SendTableButton({
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<any>(null)
 
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/Trading"
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw/Trading"
 
   // Only show for ACTIVE tables and table creator
   if (!isCreator || tableStatus !== "ACTIVE") {

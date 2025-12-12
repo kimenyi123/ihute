@@ -4,9 +4,16 @@ export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 export const revalidate = 0
 
-// Use your environment variable
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/Trading"
-const CANDIDATES = [`${BACKEND_URL}/OrdersServlet`]
+// Primary candidates (your web.xml maps both)
+const CANDIDATES = [
+  process.env.JAVA_ORDERS_URL,
+  process.env.JAVA_SERVLET_URL,
+  // "https://ihute.rw/Trading/OrdersServlet",
+  // "https://ihute.rw/Trading/Kaos/OrdersServlet",
+  // last-ditch fallback to your JSON servlet (different payload format)
+  // "https://ihute.rw/Trading/api/delivery/create",
+  process.env.NEXT_PUBLIC_API_URL ? `${process.env.NEXT_PUBLIC_API_URL}/OrdersServlet` : "https://ihute.rw/Trading/OrdersServlet"
+].filter(Boolean) as string[]
 
 type LineIn = {
   name?: string
@@ -20,12 +27,7 @@ type LineIn = {
 }
 
 export async function GET() {
-  return NextResponse.json({ 
-    ok: true, 
-    route: "/api/orders/create", 
-    candidates: CANDIDATES,
-    backend: BACKEND_URL 
-  })
+  return NextResponse.json({ ok: true, route: "/api/orders/create", candidates: CANDIDATES })
 }
 
 export async function POST(req: Request) {
@@ -72,7 +74,13 @@ export async function POST(req: Request) {
     // ✅ GENERATE PAYMENT ID IF NOT PROVIDED
     let paymentId = String(bodyIn.paymentId ?? "")
     if (!paymentId) {
-      paymentId = `COD_${Date.now()}`
+      if (paymentName.includes("MOMO")) {
+        paymentId = `MOMO_${Date.now()}`
+      } else if (paymentName.includes("CARD")) {
+        paymentId = `CARD_${Date.now()}`
+      } else {
+        paymentId = `COD_${Date.now()}`
+      }
     }
 
     // Build shared fields
@@ -84,8 +92,8 @@ export async function POST(req: Request) {
       sellerAccount,
       sellerName: String(bodyIn.sellerName ?? ""),
       sellerPhone: String(bodyIn.sellerPhone ?? ""),
-      paymentName,
-      paymentId,
+      paymentName, // ✅ USE VALIDATED PAYMENT NAME
+      paymentId,   // ✅ USE GENERATED PAYMENT ID
       reference: String(bodyIn.reference ?? paymentId),
       currency: String(bodyIn.currency ?? "RWF"),
       items,
@@ -105,7 +113,8 @@ export async function POST(req: Request) {
       tableName: shared.tableName || "N/A"
     })
 
-    let lastError = null
+    // Try each candidate until one returns valid JSON with ok=true
+    let lastError: { status?: number; raw?: string; url?: string; json?: any } | null = null
 
     for (const url of CANDIDATES) {
       try {
@@ -115,14 +124,14 @@ export async function POST(req: Request) {
         const form = new URLSearchParams()
         form.set("action", "createOrder")
         form.set("buyerEmail", shared.buyerEmail)
-        form.set("buyerName", shared.buyerName)
+        if (shared.buyerName) form.set("buyerName", shared.buyerName)
         form.set("buyerPhone", shared.buyerPhone)
         form.set("buyerLocation", shared.buyerLocation)
         form.set("sellerAccount", shared.sellerAccount)
-        form.set("sellerName", shared.sellerName)
-        form.set("sellerPhone", shared.sellerPhone)
-        form.set("paymentName", shared.paymentName)
-        form.set("paymentId", shared.paymentId)
+        if (shared.sellerName) form.set("sellerName", shared.sellerName)
+        if (shared.sellerPhone) form.set("sellerPhone", shared.sellerPhone)
+        form.set("paymentName", shared.paymentName) // ✅ SEND PAYMENT NAME
+        form.set("paymentId", shared.paymentId)     // ✅ SEND PAYMENT ID
         form.set("reference", shared.reference)
         form.set("currency", shared.currency)
         form.set("items", JSON.stringify(shared.items))
@@ -179,7 +188,7 @@ export async function POST(req: Request) {
         if (json.ok === false) {
           console.log("[orders/create] Backend returned error:", json.error)
           
-          // If table is SENT, suggest new table name
+          // If table is SENT, suggest new table name (from HEAD)
           if (json.error && json.error.includes("already been sent")) {
             const tableMatch = json.error.match(/Table '([^']+)'/)
             const tableName = tableMatch ? tableMatch[1] : shared.tableName
@@ -214,7 +223,7 @@ export async function POST(req: Request) {
             orderId: json.orderId, 
             via: url, 
             sellerTel: json?.sellerTel || "",
-            paymentName: shared.paymentName,
+            paymentName: shared.paymentName, // ✅ RETURN PAYMENT METHOD FOR VERIFICATION
             tableCommand: json?.tableCommand || null
           })
         }
@@ -243,8 +252,8 @@ export async function POST(req: Request) {
         ok: false,
         error: "Failed to create order",
         lastError: lastError,
-        hint: `Check if backend is running at: ${BACKEND_URL}`,
-        backendUrl: BACKEND_URL
+        hint: `Check if backend is running. Tried: ${CANDIDATES.join(", ")}`,
+        candidates: CANDIDATES
       },
       { status: 502 }
     )
