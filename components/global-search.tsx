@@ -181,14 +181,19 @@ export function GlobalSearch({
         const allProducts = json.products || []
         const filteredProducts = filterProductsByRelevance(allProducts, q.trim(), 10)
 
-        // Filter suppliers with threshold of 8
+        // Filter suppliers with lower threshold when no products are found
         const allSuppliers = [
           ...(json.suppliersByName || []),
           ...(json.suppliersByProduct || [])
         ]
-        // Filter out suppliers without names and cast to proper type
-        const validSuppliers = allSuppliers.filter(s => s.supplier_name) as Array<GlobalResult & { supplier_name: string }>
-        const filteredSuppliers = filterSuppliersByRelevance(validSuppliers, q.trim(), 8)
+        // Filter out suppliers without names, then cast to proper type
+        const validSuppliers = allSuppliers.filter(s =>
+          s.supplier_name
+        ) as Array<GlobalResult & { supplier_name: string }>
+
+        // Use lower threshold (8) if we have products, higher (20) if we don't to show suppliers
+        const supplierThreshold = filteredProducts.length > 0 ? 8 : 20
+        const filteredSuppliers = filterSuppliersByRelevance(validSuppliers, q.trim(), supplierThreshold)
 
         const p = filteredProducts.slice(0, maxSuggestions)
         const s = filteredSuppliers.slice(0, Math.max(4, Math.floor(maxSuggestions * 0.3)))

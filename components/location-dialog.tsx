@@ -69,8 +69,16 @@ export function LocationDialog({ open, onOpenChange }: LocationDialogProps) {
 
       const result = await response.json()
       if (result.ok && result.suppliers) {
-        const sorted = [...result.suppliers].sort((a, b) => a.distance - b.distance)
-        setNearestSuppliers(sorted)
+        // Filter out suppliers with 0 stock
+        const suppliersWithStock = result.suppliers.filter(
+          (s: Supplier) => s.productCount && s.productCount > 0
+        )
+        const sorted = suppliersWithStock.sort((a, b) => a.distance - b.distance)
+        setNearestSuppliers(sorted.slice(0, 20))
+
+        if (sorted.length === 0) {
+          setSearchError("No suppliers with stock found nearby. Try expanding your search radius.")
+        }
       } else {
         const msg = result.error || "Failed to find suppliers"
         setSearchError(result.hint ? `${msg}. ${result.hint}` : msg)

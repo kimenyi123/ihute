@@ -26,7 +26,7 @@ export function calculateRelevanceScore(
   const {
     exactMatchBonus = 100,
     startsWithBonus = 50,
-    containsBonus = 5, // Reduced from 10 - loose substring matches score very low
+    containsBonus = 20, // Increased to help partial supplier name matches
     wordBoundaryBonus = 30,
     translationBonus = 40 // Bonus for matching translations
   } = options
@@ -97,7 +97,7 @@ function escapeRegex(str: string): string {
 export function filterSuppliersByRelevance<T extends { supplier_name: string }>(
   suppliers: T[],
   searchQuery: string,
-  minScore: number = 30 // Increased default minimum score for stricter filtering
+  minScore: number = 5 // Lower default to show more suppliers (can be overridden per call)
 ): (T & { finalScore: number })[] {
   if (!suppliers || suppliers.length === 0) {
     console.log("[SupplierFilter] No suppliers to filter")

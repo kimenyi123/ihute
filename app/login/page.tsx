@@ -30,7 +30,10 @@ type ApiLoginOK = {
 }
 
 function toUserRole(r?: string): UserRole {
-  return r?.toUpperCase() === "SELLER" ? "supplier" : "customer"
+  const role = r?.toUpperCase()
+  if (role === "ADMIN") return "admin"
+  if (role === "SELLER") return "supplier"
+  return "customer"
 }
 
 function normalizeToStoreUser(payload: ApiLoginOK): User {
@@ -91,7 +94,15 @@ export default function LoginPage() {
       log("LOGIN", `User normalized:`, user)
 
       login(user)
-      router.push(user.role === "supplier" ? "/supplier/dashboard" : "/")
+      
+      // Redirect based on role
+      if (user.role === "admin") {
+        router.push("/admin/dashboard")
+      } else if (user.role === "supplier") {
+        router.push("/supplier/dashboard")
+      } else {
+        router.push("/")
+      }
     } catch (err: any) {
       const errorMsg = err?.message || "Network error"
       log("LOGIN", `ERROR: ${errorMsg}`)

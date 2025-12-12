@@ -1,3 +1,166 @@
+// import { useState, useRef } from "react";
+
+// const API_BASE_URL = "http://localhost:5000"; // adjust if needed
+
+// interface Message {
+//   role: "user" | "assistant";
+//   content: string;
+// }
+
+// export default function ChatSupport() {
+//   const [isOpen, setIsOpen] = useState(false);
+//   const [input, setInput] = useState("");
+//   const [messages, setMessages] = useState<Message[]>([]);
+//   const chatBoxRef = useRef<HTMLDivElement>(null);
+//   const msgInputRef = useRef<HTMLInputElement>(null);
+
+//   // Send message using React state
+//   const sendMessage = async () => {
+//     if (!input.trim()) return;
+
+//     const userMessage: Message = { role: "user", content: input };
+//     setMessages((prev) => [...prev, userMessage]);
+
+//     try {
+//       const res = await fetch(`${API_BASE_URL}/api/chat`, {
+//         method: "POST",
+//         headers: { "Content-Type": "application/json" },
+//         body: JSON.stringify({ message: input }),
+//       });
+
+//       if (!res.ok) {
+//     // Try to parse the specific error from the backend
+//     const errorData = await res.json().catch(() => ({}));
+//     throw new Error(errorData.error || `Server error: ${res.status}`);
+// }
+
+//       const data = await res.json();
+//       const botMessage: Message = {
+//         role: "assistant",
+//         content: data.answer || "Sorry, I couldn't process that.",
+//       };
+//       setMessages((prev) => [...prev, botMessage]);
+//     } catch (error: any) {
+//     console.error("Chat error:", error);
+//     setMessages((prev) => [
+//       ...prev,
+//       // Now the UI will show the actual Java error message (e.g., "Missing OPENAI_API_KEY")
+//       { role: "assistant", content: `Error: ${error.message}` },
+//     ]);
+// }
+
+//     setInput("");
+//   };
+
+//   // Simple fallback HTML chat
+//   const handleHTMLChat = async () => {
+//     if (!msgInputRef.current || !chatBoxRef.current) return;
+
+//     const msg = msgInputRef.current.value.trim();
+//     if (!msg) return;
+
+//     const pUser = document.createElement("p");
+//     pUser.innerHTML = `<b>You:</b> ${msg}`;
+//     chatBoxRef.current.appendChild(pUser);
+
+//     try {
+//       const res = await fetch(`${API_BASE_URL}/api/chat`, {
+//         method: "POST",
+//         headers: { "Content-Type": "application/json" },
+//         body: JSON.stringify({ message: msg }),
+//       });
+
+//       if (!res.ok) throw new Error("Failed to fetch response");
+
+//       const data = await res.json();
+//       const pAI = document.createElement("p");
+//       pAI.innerHTML = `<b>AI:</b> ${data.answer || "Sorry, I couldn't process that."}`;
+//       chatBoxRef.current.appendChild(pAI);
+
+//       msgInputRef.current.value = "";
+//       chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
+//     } catch (error) {
+//       console.error("Chat error:", error);
+//       const errorP = document.createElement("p");
+//       errorP.innerHTML = `<b>Error:</b> An error occurred. Please try again.`;
+//       chatBoxRef.current.appendChild(errorP);
+//     }
+//   };
+
+//   return (
+//     <div>
+//       {/* Floating Chat Button */}
+//       <button
+//         onClick={() => setIsOpen(!isOpen)}
+//         className="fixed bottom-6 right-6 bg-blue-600 text-white p-4 rounded-full shadow-xl hover:bg-blue-700 transition-colors"
+//       >
+//         Chat
+//       </button>
+
+//       {/* Main Chat Window */}
+//       {isOpen && (
+//         <div className="fixed bottom-20 right-6 w-80 bg-white rounded-lg shadow-xl p-4 border">
+//           <h2 className="text-lg font-bold mb-2">AI Support</h2>
+
+//           <div className="h-64 overflow-y-auto border p-2 mb-3 rounded bg-gray-50">
+//             {messages.length === 0 ? (
+//               <p className="text-gray-500 text-sm">Start a conversation...</p>
+//             ) : (
+//               messages.map((msg, i) => (
+//                 <p
+//                   key={i}
+//                   className={msg.role === "user" ? "text-right mb-2" : "text-left mb-2"}
+//                 >
+//                   <b>{msg.role === "user" ? "You" : "AI"}:</b> {msg.content}
+//                 </p>
+//               ))
+//             )}
+//           </div>
+
+//           <div className="flex gap-2">
+//             <input
+//               value={input}
+//               onChange={(e) => setInput(e.target.value)}
+//               onKeyPress={(e) => e.key === "Enter" && sendMessage()}
+//               placeholder="Type a message..."
+//               className="border p-2 flex-1 rounded focus:outline-none focus:ring-2 focus:ring-blue-600"
+//             />
+//             <button
+//               onClick={sendMessage}
+//               className="bg-blue-600 text-white px-3 py-2 rounded hover:bg-blue-700 transition-colors"
+//             >
+//               Send
+//             </button>
+//           </div>
+//         </div>
+//       )}
+
+//       {/* Simple HTML Fallback Chat Widget */}
+//       <div className="p-4 mt-6">
+//         <h3 className="text-lg font-semibold mb-2">Simple Chat (HTML Version)</h3>
+
+//         <div
+//           ref={chatBoxRef}
+//           className="border p-3 rounded bg-white text-sm h-40 overflow-y-auto mb-3"
+//         ></div>
+
+//         <input
+//           ref={msgInputRef}
+//           placeholder="Ask Ihute..."
+//           onKeyPress={(e) => e.key === "Enter" && handleHTMLChat()}
+//           className="border p-2 w-[75%] rounded focus:outline-none focus:ring-2 focus:ring-blue-600"
+//         />
+
+//         <button
+//           onClick={handleHTMLChat}
+//           className="ml-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+//         >
+//           Send
+//         </button>
+//       </div>
+//     </div>
+//   );
+// }
 "use client"
 import React from "react"
 import { useState, useEffect, useRef, ReactNode } from "react"

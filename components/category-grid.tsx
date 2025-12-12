@@ -1,71 +1,125 @@
 "use client"
 
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import Image from "next/image"
 import { Card, CardContent } from "@/components/ui/card"
 import { useTranslation } from "@/hooks/use-translation"
 
-const categories = [
+interface Category {
+  id?: number
+  categoryId: string
+  nameKey: string
+  descKey: string
+  imageUrl: string
+  colorClass: string
+  displayOrder?: number
+  isActive?: boolean
+}
+
+// Default categories as fallback
+const defaultCategories: Category[] = [
   {
-    id: "pharmacy",
-    nameKey: "pharmacy" as const,
-    descKey: "pharmacyDesc" as const,
-    image: "/pharmacy-medicine-pills-bottles.jpg",
-    color: "bg-blue-500/10",
+    categoryId: "pharmacy",
+    nameKey: "pharmacy",
+    descKey: "pharmacyDesc",
+    imageUrl: "/pharmacy-medicine-pills-bottles.jpg",
+    colorClass: "bg-blue-500/10",
   },
   {
-    id: "liquor-store",
-    nameKey: "liquorStore" as const,
-    descKey: "liquorStoreDesc" as const,
-    image: "/wine-bottles-liquor-store.jpg",
-    color: "bg-purple-500/10",
+    categoryId: "liquor-store",
+    nameKey: "liquorStore",
+    descKey: "liquorStoreDesc",
+    imageUrl: "/wine-bottles-liquor-store.jpg",
+    colorClass: "bg-purple-500/10",
   },
   {
-    id: "boutique",
-    nameKey: "boutique" as const,
-    descKey: "boutiqueDesc" as const,
-    image: "/fashion-clothing-boutique-store.jpg",
-    color: "bg-pink-500/10",
+    categoryId: "boutique",
+    nameKey: "boutique",
+    descKey: "boutiqueDesc",
+    imageUrl: "/fashion-clothing-boutique-store.jpg",
+    colorClass: "bg-pink-500/10",
   },
   {
-    id: "bar-resto",
-    nameKey: "barResto" as const,
-    descKey: "barRestoDesc" as const,
-    image: "/restaurant-food-dining-bar.jpg",
-    color: "bg-orange-500/10",
+    categoryId: "bar-resto",
+    nameKey: "barResto",
+    descKey: "barRestoDesc",
+    imageUrl: "/restaurant-food-dining-bar.jpg",
+    colorClass: "bg-orange-500/10",
   },
   {
-    id: "supermarket",
-    nameKey: "supermarket" as const,
-    descKey: "supermarketDesc" as const,
-    image: "/supermarket-groceries-shopping-cart.jpg",
-    color: "bg-green-500/10",
+    categoryId: "supermarket",
+    nameKey: "supermarket",
+    descKey: "supermarketDesc",
+    imageUrl: "/supermarket-groceries-shopping-cart.jpg",
+    colorClass: "bg-green-500/10",
   },
   {
-    id: "coffee-shop",
-    nameKey: "coffeeShop" as const,
-    descKey: "coffeeShopDesc" as const,
-    image: "/coffee-shop-cafe-espresso.jpg",
-    color: "bg-amber-500/10",
+    categoryId: "coffee-shop",
+    nameKey: "coffeeShop",
+    descKey: "coffeeShopDesc",
+    imageUrl: "/coffee-shop-cafe-espresso.jpg",
+    colorClass: "bg-amber-500/10",
   },
   {
-    id: "beauty",
-    nameKey: "beauty" as const,
-    descKey: "beautyDesc" as const,
-    image: "/beauty-cosmetics-makeup-products.jpg",
-    color: "bg-rose-500/10",
+    categoryId: "beauty",
+    nameKey: "beauty",
+    descKey: "beautyDesc",
+    imageUrl: "/beauty-cosmetics-makeup-products.jpg",
+    colorClass: "bg-rose-500/10",
   },
   {
-    id: "general",
-    nameKey: "generalStore" as const,
-    descKey: "generalStoreDesc" as const,
-    image: "/general-store-retail-products.jpg",
-    color: "bg-slate-500/10",
+    categoryId: "general",
+    nameKey: "generalStore",
+    descKey: "generalStoreDesc",
+    imageUrl: "/general-store-retail-products.jpg",
+    colorClass: "bg-slate-500/10",
   },
 ]
 
 export function CategoryGrid() {
   const { t } = useTranslation()
+  const [categories, setCategories] = useState<Category[]>(defaultCategories)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    loadCategories()
+  }, [])
+
+  const loadCategories = async () => {
+    try {
+      // Fetch from public API endpoint (no auth required for homepage)
+      const res = await fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'getHomepageCategories' })
+      })
+      const data = await res.json()
+      
+      if (data.ok && data.categories && data.categories.length > 0) {
+        // Filter only active categories and sort by display order
+        const activeCategories = data.categories
+          .filter((cat: Category) => cat.isActive !== false)
+          .sort((a: Category, b: Category) => (a.displayOrder || 0) - (b.displayOrder || 0))
+        setCategories(activeCategories)
+      }
+    } catch (error) {
+      console.error('Error loading categories:', error)
+      // Keep default categories on error
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <section className="py-8 md:py-12 bg-slate-50/50">
+        <div className="container mx-auto px-4">
+          <div className="text-center text-gray-500">Loading categories...</div>
+        </div>
+      </section>
+    )
+  }
 
   return (
     <section className="py-8 md:py-12 bg-slate-50/50">
@@ -78,12 +132,12 @@ export function CategoryGrid() {
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8">
           {categories.map((category) => {
             return (
-              <Link key={category.id} href={`/category/${category.id}`}>
+              <Link key={category.categoryId} href={`/category/${category.categoryId}`}>
                 <Card className="group h-full transition-all hover:shadow-lg hover:scale-105 overflow-hidden">
                   <CardContent className="flex flex-col items-center justify-center p-3 md:p-4 text-center">
-                    <div className={`mb-2 rounded-xl overflow-hidden ${category.color} w-full aspect-square relative`}>
+                    <div className={`mb-2 rounded-xl overflow-hidden ${category.colorClass || "bg-gray-500/10"} w-full aspect-square relative`}>
                       <Image
-                        src={category.image || "/placeholder.svg"}
+                        src={category.imageUrl || "/placeholder.svg"}
                         alt={t(category.nameKey)}
                         fill
                         className="object-cover"
@@ -92,9 +146,11 @@ export function CategoryGrid() {
                     <h3 className="text-xs md:text-sm font-semibold text-foreground group-hover:text-primary line-clamp-2">
                       {t(category.nameKey)}
                     </h3>
-                    <p className="mt-1 text-[10px] md:text-xs text-muted-foreground line-clamp-1 hidden sm:block">
-                      {t(category.descKey)}
-                    </p>
+                    {category.descKey && (
+                      <p className="mt-1 text-[10px] md:text-xs text-muted-foreground line-clamp-1 hidden sm:block">
+                        {t(category.descKey)}
+                      </p>
+                    )}
                   </CardContent>
                 </Card>
               </Link>
