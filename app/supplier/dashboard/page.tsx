@@ -34,6 +34,8 @@ function SupplierDashboard() {
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated || user?.role !== "supplier") {
@@ -41,25 +43,109 @@ function SupplierDashboard() {
       return;
     }
 
-    if (!user?.ishyigaAccount) return;
+    if (!user?.ishyigaAccount) {
+      setError("No ishyigaAccount found for user");
+      setLoading(false);
+      return;
+    }
 
-    fetch(`/api/supplier/stock?account=${user?.ishyigaAccount}`)
-      .then((res) => res.json())
-      .then((data) => {
-        const mappedProducts = (data.products || [])
-          .map((p: any) => ({
-            ...p,
-            price: p.UNITY_PRICE || 0,
-            costPrice: p.UNIT_COST || p.COST || 0,
-            stock: p.stock || p.STOCK || 0,
-            category: p.category || "uncategorized",
-            sales: 0, // You can calculate actual sales
-          }))
-          .filter((p) => p.stock > 0);
+    setLoading(true);
+    setError(null);
 
-        setSupplierProducts(mappedProducts);
+    fetch(`/api/supplier/stock?account=${user.ishyigaAccount}`)
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error(`HTTP error! status: ${res.status}`);
+        }
+        return res.json();
       })
-      .catch((err) => console.error("Error fetching stock:", err));
+      .then((data) => {
+        console.log("=== API Response ===");
+        console.log("Full data:", data);
+        console.log("Products array:", data.products);
+        console.log("Count:", data.count);
+        console.log("Source:", data.source);
+
+        if (!data.ok) {
+          throw new Error(data.error || "API returned ok: false");
+        }
+
+        const products = data.products || [];
+        console.log(`Received ${products.length} products from ${data.source}`);
+
+        // Helper function to parse Redis price strings like "1880.0RWF"
+        const parsePrice = (value: any): number => {
+          if (typeof value === 'number') return value;
+          if (typeof value === 'string') {
+            // Remove "RWF" and parse
+            const cleaned = value.replace(/RWF/gi, '').trim();
+            const parsed = parseFloat(cleaned);
+            return isNaN(parsed) ? 0 : parsed;
+          }
+          return 0;
+        };
+
+        // Map products - handle both database and Redis formats
+        const mappedProducts = products.map((p: any, index: number) => {
+          console.log(`Product ${index}:`, p);
+
+          // Parse price from various sources
+          const price = parsePrice(
+            p.price ||
+            p.UNITY_PRICE ||
+            p.SALE_PRICE_INCLUSIVE ||
+            p.item_emballage ||  // Redis price field
+            0
+          );
+
+          const mapped = {
+            ...p, // Keep all original fields
+            // Normalize field names - handle database, Redis, and API variations
+            stock: Number(
+              p.stock ||
+              p.STOCK ||
+              p.item_packet ||  // Redis stock field
+              p.QUANTITY ||
+              0
+            ),
+            price: price,
+            costPrice: Number(
+              p.cost ||
+              p.COST_PRICE_INCLUSIVE ||
+              0
+            ),
+            itemName:
+              p.ITEM_NAME ||
+              p.itemName ||
+              p.item_commercial_name ||  // Redis name field
+              "Unknown",
+            itemCode:
+              p.ITEM_CODE ||
+              p.itemCode ||
+              p.item_key_words ||  // Redis code field
+              "",
+            batchInfo: p.item_state || "",  // Redis batch/expiry info
+            category: p.category || "uncategorized",
+            sales: 0,
+          };
+
+          console.log(`Mapped product ${index}:`, mapped);
+          return mapped;
+        });
+
+        console.log("=== All Mapped Products ===");
+        console.log(mappedProducts);
+        console.log(`Total: ${mappedProducts.length}`);
+
+        // Don't filter by stock > 0, show ALL products
+        setSupplierProducts(mappedProducts);
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error("Error fetching stock:", err);
+        setError(err.message);
+        setLoading(false);
+      });
   }, [isAuthenticated, user, router]);
 
   const handleLogout = () => {
@@ -70,12 +156,14 @@ function SupplierDashboard() {
   // Filter products
   const filteredProducts = supplierProducts.filter((p) => {
     const matchesSearch =
+      p.itemName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.ITEM_NAME?.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCategory =
       categoryFilter === "all" || p.category === categoryFilter;
     const matchesStatus =
       statusFilter === "all" ||
       (statusFilter === "low" && p.stock <= 10) ||
+      (statusFilter === "out" && p.stock === 0) ||
       (statusFilter === "active" && p.stock > 10);
 
     return matchesSearch && matchesCategory && matchesStatus;
@@ -93,22 +181,28 @@ function SupplierDashboard() {
   );
 
   const totalProducts = supplierProducts.length;
-  const lowStock = supplierProducts.filter((p) => p.stock <= 10).length;
+  const lowStock = supplierProducts.filter((p) => p.stock <= 10 && p.stock > 0).length;
+  const outOfStock = supplierProducts.filter((p) => p.stock === 0).length;
   const totalValue = supplierProducts.reduce(
     (sum, p) => sum + p.price * p.stock,
     0
   );
 
   const handleDelete = async (product: any) => {
-    if (!confirm(`Are you sure you want to delete ${product.ITEM_NAME}?`))
-      return;
+    const itemName = product.ITEM_NAME || product.itemName || "this product";
+    if (!confirm(`Are you sure you want to delete ${itemName}?`)) return;
+
     try {
-      const res = await fetch(`/api/supplier/stock/${product.ITEM_CODE}`, {
+      const itemCode = product.ITEM_CODE || product.itemCode;
+      const res = await fetch(`/api/supplier/stock/${itemCode}`, {
         method: "DELETE",
       });
+
       if (res.ok) {
         setSupplierProducts((prev) =>
-          prev.filter((prod) => prod.ITEM_CODE !== product.ITEM_CODE)
+          prev.filter((prod) =>
+            (prod.ITEM_CODE || prod.itemCode) !== itemCode
+          )
         );
       } else {
         const data = await res.json();
@@ -118,6 +212,35 @@ function SupplierDashboard() {
       alert("Error deleting product");
     }
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-slate-600">Loading products...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
+        <Card className="max-w-md">
+          <CardHeader>
+            <CardTitle className="text-red-600">Error</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-slate-700">{error}</p>
+            <Button onClick={() => window.location.reload()} className="mt-4">
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
@@ -129,7 +252,7 @@ function SupplierDashboard() {
               {user?.businessName || "Supplier Dashboard"}
             </h1>
             <p className="text-sm text-slate-600">
-              {user?.businessCategory || "Supplier Panel"}
+              {user?.businessCategory || "Supplier Panel"} • Account: {user?.ishyigaAccount}
             </p>
           </div>
           <Button variant="outline" onClick={handleLogout} className="gap-2">
@@ -140,8 +263,10 @@ function SupplierDashboard() {
       </header>
 
       <div className="container mx-auto px-6 py-8">
+
+
         {/* Stats Section */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <Card className="bg-white shadow-md hover:shadow-lg transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-slate-600">
@@ -155,9 +280,7 @@ function SupplierDashboard() {
               <div className="text-3xl font-bold text-slate-900">
                 {totalProducts}
               </div>
-              <p className="text-xs text-slate-500 mt-1">
-                Active products with stock
-              </p>
+              <p className="text-xs text-slate-500 mt-1">All products</p>
             </CardContent>
           </Card>
 
@@ -191,9 +314,24 @@ function SupplierDashboard() {
               <div className="text-3xl font-bold text-yellow-700">
                 {lowStock}
               </div>
-              <p className="text-xs text-slate-500 mt-1">
-                Items below 10 units
-              </p>
+              <p className="text-xs text-slate-500 mt-1">Items below 10 units</p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-white shadow-md hover:shadow-lg transition-shadow">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-slate-600">
+                Out of Stock
+              </CardTitle>
+              <div className="h-10 w-10 rounded-full bg-red-100 flex items-center justify-center">
+                <AlertTriangle className="h-5 w-5 text-red-600" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-red-700">
+                {outOfStock}
+              </div>
+              <p className="text-xs text-slate-500 mt-1">Items with 0 stock</p>
             </CardContent>
           </Card>
         </div>
@@ -268,8 +406,9 @@ function SupplierDashboard() {
                 }}
               >
                 <option value="all">All Status</option>
-                <option value="active">Active Stock</option>
-                <option value="low">Low Stock</option>
+                <option value="active">Active Stock (&gt;10)</option>
+                <option value="low">Low Stock (1-10)</option>
+                <option value="out">Out of Stock (0)</option>
               </select>
             </div>
 
@@ -280,8 +419,13 @@ function SupplierDashboard() {
                 <p className="text-slate-500 text-lg">
                   {searchTerm || categoryFilter !== "all" || statusFilter !== "all"
                     ? "No products found matching your filters"
-                    : "No products with available stock"}
+                    : "No products found"}
                 </p>
+                {supplierProducts.length === 0 && (
+                  <Link href="/supplier/products/add">
+                    <Button className="mt-4">Add Your First Product</Button>
+                  </Link>
+                )}
               </div>
             ) : (
               <>
@@ -302,7 +446,7 @@ function SupplierDashboard() {
                           Status
                         </th>
                         <th className="text-left px-4 py-3 text-sm font-semibold text-slate-700">
-                          Revenue
+                          Value
                         </th>
                         <th className="text-center px-4 py-3 text-sm font-semibold text-slate-700">
                           Actions
@@ -313,10 +457,12 @@ function SupplierDashboard() {
                     <tbody className="divide-y divide-slate-200">
                       {paginatedProducts.map((p) => {
                         const revenue = p.price * p.stock;
+                        const displayName = p.ITEM_NAME || p.itemName || "Unknown";
+                        const displayCode = p.ITEM_CODE || p.itemCode || "";
 
                         return (
                           <tr
-                            key={p.ITEM_CODE}
+                            key={displayCode}
                             className="hover:bg-slate-50 transition-colors"
                           >
                             <td className="px-4 py-4">
@@ -326,21 +472,30 @@ function SupplierDashboard() {
                                 </div>
                                 <div>
                                   <p className="font-medium text-slate-900">
-                                    {p.ITEM_NAME}
+                                    {displayName}
                                   </p>
+                                  <p className="text-xs text-slate-500">{displayCode}</p>
                                 </div>
                               </div>
                             </td>
                             <td className="px-4 py-4">
-                              <span className="font-medium text-slate-900">
-                                {p.price.toLocaleString()} RWF
-                              </span>
+                              {p.price > 0 ? (
+                                <span className="font-medium text-slate-900">
+                                  {p.price.toLocaleString()} RWF
+                                </span>
+                              ) : (
+                                <span className="text-slate-400 text-sm italic">
+                                  No price
+                                </span>
+                              )}
                             </td>
                             <td className="px-4 py-4 text-center">
                               <span
                                 className={`font-semibold ${
-                                  p.stock <= 10
+                                  p.stock === 0
                                     ? "text-red-600"
+                                    : p.stock <= 10
+                                    ? "text-yellow-600"
                                     : "text-slate-900"
                                 }`}
                               >
@@ -350,23 +505,31 @@ function SupplierDashboard() {
                             <td className="px-4 py-4 text-center">
                               <span
                                 className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
-                                  p.stock <= 10
+                                  p.stock === 0
                                     ? "bg-red-100 text-red-700"
+                                    : p.stock <= 10
+                                    ? "bg-yellow-100 text-yellow-700"
                                     : "bg-blue-100 text-blue-700"
                                 }`}
                               >
-                                {p.stock <= 10 ? "Low Stock" : "active"}
+                                {p.stock === 0 ? "Out of Stock" : p.stock <= 10 ? "Low Stock" : "Active"}
                               </span>
                             </td>
                             <td className="px-4 py-4">
-                              <span className="font-medium text-slate-900">
-                                {revenue.toLocaleString()} RWF
-                              </span>
+                              {revenue > 0 ? (
+                                <span className="font-medium text-slate-900">
+                                  {revenue.toLocaleString()} RWF
+                                </span>
+                              ) : (
+                                <span className="text-slate-400 text-sm italic">
+                                  -
+                                </span>
+                              )}
                             </td>
                             <td className="px-4 py-4">
                               <div className="flex items-center justify-center gap-2">
                                 <Link
-                                  href={`/supplier/products/edit/${p.ITEM_CODE}`}
+                                  href={`/supplier/products/edit/${displayCode}`}
                                 >
                                   <Button
                                     size="sm"
@@ -486,7 +649,6 @@ function SupplierDashboard() {
     </div>
   );
 }
-
 export default function SupplierDashboardPage() {
   return <SupplierDashboard />;
 }
