@@ -4,9 +4,9 @@ import { NextResponse } from "next/server"
 // Backend configuration
 // const JAVA_BACKEND_BASE = (process.env.JAVA_BACKEND_BASE || "https://ihute.rw/Trading").replace(/\/+$/, "")
 const JAVA_BACKEND_BASE = (process.env.JAVA_BACKEND_BASE || "https://ihute.rw/Trading").replace(/\/+$/, "")
-const FETCH_SUGGESTIONS_SERVLET = `http://localhost:8081/Trading/Kaos/fetchSuggestions`
+const FETCH_SUGGESTIONS_SERVLET = `https://ihute.rw/Trading/Kaos/fetchSuggestions`
 // const ORDERS_SERVLET = `${JAVA_BACKEND_BASE}/Kaos/OrdersServlet`
-const ORDERS_SERVLET = `http://localhost:8081/Trading/Kaos/OrdersServlet`
+const ORDERS_SERVLET = `https://ihute.rw/Trading/Kaos/OrdersServlet`
 
 const DEBUG = process.env.DEBUG_ORDERS === 'true'
 const TIMEOUT_MS = Number(process.env.PROXY_TIMEOUT_MS ?? 12000)

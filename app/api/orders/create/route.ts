@@ -4,7 +4,7 @@ export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 export const revalidate = 0
 
-// Primary candidates (your web.xml maps both)
+// Backend endpoints to try
 const CANDIDATES = [
   "https://ihute.rw/Trading/OrdersServlet",
   "https://ihute.rw/Trading/Kaos/OrdersServlet",
@@ -23,6 +23,9 @@ type LineIn = {
   measurement?: string
 }
 
+/* =========================
+   GET – health check
+========================= */
 export async function GET() {
   return NextResponse.json({
     ok: true,
@@ -30,29 +33,25 @@ export async function GET() {
     candidates: CANDIDATES,
     env: {
       JAVA_ORDERS_URL: process.env.JAVA_ORDERS_URL || "not set",
-      JAVA_SERVLET_URL: process.env.JAVA_SERVLET_URL || "not set"
-    }
+      JAVA_SERVLET_URL: process.env.JAVA_SERVLET_URL || "not set",
+    },
   })
 }
 
+/* =========================
+   POST – create order
+========================= */
 export async function POST(req: Request) {
   try {
     const bodyIn = await req.json().catch(() => ({} as any))
 
-    console.log("🚀 === ORDER CREATE DEBUG ===")
-    console.log("🚀 CANDIDATES:", CANDIDATES)
-    console.log("🚀 ENV VARS:", {
-      JAVA_ORDERS_URL: process.env.JAVA_ORDERS_URL,
-      JAVA_SERVLET_URL: process.env.JAVA_SERVLET_URL
-    })
-
-    // ---- normalize lines
+    /* -------- normalize items -------- */
     const rawItems: LineIn[] = Array.isArray(bodyIn.items) ? bodyIn.items : []
     const items = rawItems.map((it, i) => ({
-      name: (it.name ?? it.item_name ?? `Item ${i + 1}`) as string,
+      name: String(it.name ?? it.item_name ?? `Item ${i + 1}`),
       qty: Number(it.qty ?? it.quantity ?? 1),
       unitPrice: Number(it.unitPrice ?? it.price ?? 0),
-      unit: (it.unit ?? it.measurement ?? "") as string,
+      unit: String(it.unit ?? it.measurement ?? ""),
     }))
 
     const buyerEmail = String(bodyIn.buyerEmail ?? "")
@@ -65,7 +64,7 @@ export async function POST(req: Request) {
       )
     }
 
-    // ✅ VALIDATE PAYMENT METHOD
+    /* -------- payment validation -------- */
     let paymentName = String(bodyIn.paymentName ?? "PAY_ON_DELIVERY").toUpperCase()
     const validPaymentMethods = [
       "PAY_ON_DELIVERY",
@@ -73,7 +72,7 @@ export async function POST(req: Request) {
       "PAID_CARD",
       "MTN_MOMO",
       "MOMO",
-      "CARD"
+      "CARD",
     ]
 
     if (!validPaymentMethods.includes(paymentName)) {
@@ -83,19 +82,14 @@ export async function POST(req: Request) {
       )
     }
 
-    // ✅ GENERATE PAYMENT ID IF NOT PROVIDED
     let paymentId = String(bodyIn.paymentId ?? "")
     if (!paymentId) {
-      if (paymentName.includes("MOMO")) {
-        paymentId = `MOMO_${Date.now()}`
-      } else if (paymentName.includes("CARD")) {
-        paymentId = `CARD_${Date.now()}`
-      } else {
-        paymentId = `COD_${Date.now()}`
-      }
+      if (paymentName.includes("MOMO")) paymentId = `MOMO_${Date.now()}`
+      else if (paymentName.includes("CARD")) paymentId = `CARD_${Date.now()}`
+      else paymentId = `COD_${Date.now()}`
     }
 
-    // Build shared fields
+    /* -------- shared payload -------- */
     const shared = {
       buyerEmail,
       buyerName: String(bodyIn.buyerName ?? ""),
@@ -109,63 +103,55 @@ export async function POST(req: Request) {
       reference: String(bodyIn.reference ?? ""),
       currency: String(bodyIn.currency ?? "RWF"),
       items,
-      // Table command fields
       isTableCommand: Boolean(bodyIn.isTableCommand),
       tableName: String(bodyIn.tableName ?? ""),
       tableLocation: String(bodyIn.tableLocation ?? ""),
     }
 
-    console.log("[orders/create] Creating order with payment:", {
-      paymentName: shared.paymentName,
-      paymentId: shared.paymentId,
-      buyerEmail: shared.buyerEmail,
-      sellerAccount: shared.sellerAccount,
-      itemsCount: shared.items.length,
-      isTableCommand: shared.isTableCommand,
-      tableName: shared.tableName || "N/A"
-    })
-
-    // Try each candidate until one returns valid JSON
-    let lastErr: { status?: number; raw?: string; url?: string } | undefined
+    let lastErr:
+      | { status?: number; raw?: string; url?: string }
+      | undefined
     let lastBackendError: string | undefined
 
+    /* -------- try each backend -------- */
     for (const url of CANDIDATES) {
       try {
         let res: Response
-        let text: string
-        let json: any
+        let text = ""
+        let json: any = null
 
-        console.log("[orders/create] 🎯 Trying:", url)
-
+        // JSON backend
         if (url.endsWith("/api/delivery/create")) {
-          // DeliveryCreateServlet expects JSON body
           res = await fetch(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               ...shared,
-              subtotal: items.reduce((s, it) => s + it.qty * it.unitPrice, 0),
+              subtotal: items.reduce(
+                (s, it) => s + it.qty * it.unitPrice,
+                0
+              ),
             }),
             cache: "no-store",
           })
-          text = await res.text()
-          try { json = JSON.parse(text) } catch {}
-        } else {
-          // OrdersServlet expects form + action=createOrder
+        }
+        // Form backend
+        else {
           const form = new URLSearchParams()
           form.set("action", "createOrder")
           form.set("buyerEmail", shared.buyerEmail)
-          if (shared.buyerName) form.set("buyerName", shared.buyerName)
           form.set("buyerPhone", shared.buyerPhone)
           form.set("buyerLocation", shared.buyerLocation)
           form.set("sellerAccount", shared.sellerAccount)
-          if (shared.sellerName) form.set("sellerName", shared.sellerName)
-          if (shared.sellerPhone) form.set("sellerPhone", shared.sellerPhone)
           form.set("paymentName", shared.paymentName)
           form.set("paymentId", shared.paymentId)
           form.set("reference", shared.reference)
           form.set("currency", shared.currency)
           form.set("items", JSON.stringify(shared.items))
+
+          if (shared.buyerName) form.set("buyerName", shared.buyerName)
+          if (shared.sellerName) form.set("sellerName", shared.sellerName)
+          if (shared.sellerPhone) form.set("sellerPhone", shared.sellerPhone)
 
           if (shared.isTableCommand) {
             form.set("isTableCommand", "true")
@@ -173,147 +159,51 @@ export async function POST(req: Request) {
             form.set("tableLocation", shared.tableLocation)
           }
 
-          console.log("[orders/create] 📤 Sending form data:", {
-            paymentName: shared.paymentName,
-            paymentId: shared.paymentId,
-            action: "createOrder",
-            url: url
+          const controller = new AbortController()
+          const timeoutId = setTimeout(() => controller.abort(), 30000)
+
+          res = await fetch(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+              Accept: "application/json",
+            },
+            body: form.toString(),
+            signal: controller.signal,
+            cache: "no-store",
           })
 
-        // Send request with timeout
-        const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 30000) // 30 second timeout
+          clearTimeout(timeoutId)
+        }
 
-        const res = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Accept": "application/json"
-          },
-          body: form.toString(),
-          signal: controller.signal,
-          cache: "no-store",
-        })
-
-        clearTimeout(timeoutId)
-
-        const text = await res.text()
-        console.log("[orders/create] Response status:", res.status)
-        console.log("[orders/create] Response text (first 500 chars):", text.substring(0, 500))
-
-        let json
+        text = await res.text()
         try {
           json = JSON.parse(text)
-        } catch (e) {
-          console.error("[orders/create] Failed to parse JSON:", e instanceof Error ? e.message : String(e))
-          lastError = {
-            status: res.status,
-            raw: text.substring(0, 200),
-            url,
-            error: "Invalid JSON response from backend"
-          }
-          continue
-        }
+        } catch {}
 
-        console.log("[orders/create] 📥 Response from", url)
-        console.log("  Status:", res.status)
-        console.log("  Body:", text.slice(0, 300))
-
-        const looksHtml = /^\s*<!doctype html/i.test(text) || /^\s*<html/i.test(text)
-        // ✅ Handle backend response properly
-        if (json.ok === false) {
-          console.log("[orders/create] Backend returned error:", json.error)
-
-          // If table is SENT, suggest new table name (from HEAD)
-          if (json.error && json.error.includes("already been sent")) {
-            const tableMatch = json.error.match(/Table '([^']+)'/)
-            const tableName = tableMatch ? tableMatch[1] : shared.tableName
-            const newTableName = `${tableName}-${Date.now().toString().slice(-4)}`
-
-            return NextResponse.json({
-              ok: false,
-              error: json.error,
-              suggestion: `Please use a new table name like: ${newTableName}`,
-              tableStatus: "SENT",
-              canRetry: true,
-              newTableName: newTableName
-            }, { status: 400 })
-          }
-
-          return NextResponse.json({
-            ok: false,
-            error: json.error || "Backend error",
-            details: json
-          }, { status: 400 })
-        }
-
-        // Check if we got valid JSON response
-        if (res.ok && json) {
-          // Success case: backend says ok: true
-          if (json.ok === true) {
-            const orderId = json?.orderId || `ORD-${Date.now()}`
-            console.log("[orders/create] ✅ Order created successfully:", {
-              orderId,
-              paymentName: shared.paymentName,
-              via: url
-            })
-            return NextResponse.json({
-              ok: true,
-              orderId,
-              via: url,
-              sellerTel: json?.sellerTel || "",
-              paymentName: shared.paymentName
-            })
-          }
-
-          // Business logic error: backend says ok: false
-          if (json.ok === false) {
-            const errorMsg = json.error || "Order creation failed"
-            console.log("[orders/create] ⚠️ Backend returned error:", errorMsg)
-            lastBackendError = errorMsg
-
-            // Return immediately with the backend's error message
-            return NextResponse.json({
-              ok: false,
-              error: errorMsg,
-              details: json
-            }, { status: 400 })
-          }
-        }
-
-        // Invalid response - try next endpoint
-        console.log("[orders/create] ❌ Invalid response from", url)
-        lastErr = {
-          status: res.status,
-          raw: looksHtml ? text.slice(0, 200) : text.slice(0, 800),
-          url
-        }
-        continue
-
-        if (json.ok && json.orderId) {
-          console.log("[orders/create] ✅ Order created successfully:", {
-            orderId: json.orderId,
-            paymentName: shared.paymentName,
-            tableCommand: json.tableCommand ? "YES" : "NO"
-          })
-
+        if (res.ok && json?.ok === true) {
           return NextResponse.json({
             ok: true,
-            orderId: json.orderId,
+            orderId: json.orderId ?? `ORD-${Date.now()}`,
             via: url,
-            sellerTel: json?.sellerTel || "",
-            paymentName: shared.paymentName, // ✅ RETURN PAYMENT METHOD FOR VERIFICATION
-            tableCommand: json?.tableCommand || null
+            sellerTel: json?.sellerTel ?? "",
+            paymentName: shared.paymentName,
           })
         }
 
-        lastError = {
-          status: res.status,
-          raw: text.substring(0, 200),
-          url,
-          json
+        if (json?.ok === false) {
+          lastBackendError = json.error || "Backend error"
+          return NextResponse.json(
+            { ok: false, error: lastBackendError, details: json },
+            { status: 400 }
+          )
         }
 
+        lastErr = {
+          status: res.status,
+          raw: text.slice(0, 300),
+          url,
+        }
       } catch (e: any) {
         console.log("[orders/create] ❌ Exception:", e?.message)
         lastErr = { status: 0, raw: e?.message, url }
@@ -321,38 +211,25 @@ export async function POST(req: Request) {
       }
     }
 
-    // Nothing succeeded - all endpoints failed to connect
-    console.log("[orders/create] ❌ All endpoints failed. Last error:", lastErr)
-
-    // If we got a backend error, use that
-    if (lastBackendError) {
-      return NextResponse.json({
-        ok: false,
-        error: lastBackendError
-      }, { status: 400 })
-    }
-
-    // Otherwise, connection failed
+    /* -------- all backends failed -------- */
     return NextResponse.json(
       {
         ok: false,
-        error: "Failed to create order",
-        lastError: lastError,
-        hint: `Check if backend is running. Tried: ${CANDIDATES.join(", ")}`,
-        candidates: CANDIDATES
-        error: "Could not connect to order processing service",
+        error:
+          lastBackendError ||
+          "Could not connect to order processing service",
         last: lastErr,
         candidates: CANDIDATES,
-        hint: "Check if Java backend is running. Verify JAVA_ORDERS_URL and JAVA_SERVLET_URL in .env.local",
+        hint:
+          "Check if Java backend is running. Verify JAVA_ORDERS_URL and JAVA_SERVLET_URL in .env.local",
       },
       { status: 502 }
     )
   } catch (e: any) {
-    console.error("[orders/create] 💥 Fatal error:", e?.message)
-    console.error(e?.stack)
-    return NextResponse.json({
-      ok: false,
-      error: e?.message || "unknown error"
-    }, { status: 500 })
+    console.error("[orders/create] 💥 Fatal error:", e)
+    return NextResponse.json(
+      { ok: false, error: e?.message || "Unknown error" },
+      { status: 500 }
+    )
   }
 }

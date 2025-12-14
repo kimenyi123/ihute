@@ -4,7 +4,7 @@
 export async function POST(request) {
   try {
     const body = await request.json();
-    const JAVA_API_URL = process.env.JAVA_API_URL || 'http://localhost:8081';
+    const JAVA_API_URL = process.env.JAVA_API_URL || 'https://ihute.rw';
 
     console.log('Proxying request to:', `${JAVA_API_URL}/Trading/re_order`);
     console.log('Request body:', body);

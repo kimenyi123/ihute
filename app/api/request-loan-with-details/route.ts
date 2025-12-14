@@ -1,7 +1,7 @@
 // app/api/request-loan-with-details/route.ts
 import { NextRequest, NextResponse } from "next/server"
 
-const JAVA_API_BASE = process.env.JAVA_API_URL || "http://localhost:8081"
+const JAVA_API_BASE = process.env.JAVA_API_URL || "https://ihute.rw"
 const UMUSADA_AUTH_BASE = "https://umusada-master.umusada.com/umusada-master-service"
 const UMUSADA_BANK_API = "https://bank-apis.umusada.com/api/v1"
 const BASE_URL = process.env.BASE_URL || "http://localhost:3000"
