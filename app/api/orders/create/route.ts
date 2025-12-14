@@ -180,14 +180,39 @@ export async function POST(req: Request) {
             url: url
           })
 
-          res = await fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: form.toString(),
-            cache: "no-store",
-          })
-          text = await res.text()
-          try { json = JSON.parse(text) } catch {}
+        // Send request with timeout
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 30000) // 30 second timeout
+
+        const res = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json"
+          },
+          body: form.toString(),
+          signal: controller.signal,
+          cache: "no-store",
+        })
+
+        clearTimeout(timeoutId)
+
+        const text = await res.text()
+        console.log("[orders/create] Response status:", res.status)
+        console.log("[orders/create] Response text (first 500 chars):", text.substring(0, 500))
+
+        let json
+        try {
+          json = JSON.parse(text)
+        } catch (e) {
+          console.error("[orders/create] Failed to parse JSON:", e instanceof Error ? e.message : String(e))
+          lastError = {
+            status: res.status,
+            raw: text.substring(0, 200),
+            url,
+            error: "Invalid JSON response from backend"
+          }
+          continue
         }
 
         console.log("[orders/create] 📥 Response from", url)
@@ -195,6 +220,32 @@ export async function POST(req: Request) {
         console.log("  Body:", text.slice(0, 300))
 
         const looksHtml = /^\s*<!doctype html/i.test(text) || /^\s*<html/i.test(text)
+        // ✅ Handle backend response properly
+        if (json.ok === false) {
+          console.log("[orders/create] Backend returned error:", json.error)
+
+          // If table is SENT, suggest new table name (from HEAD)
+          if (json.error && json.error.includes("already been sent")) {
+            const tableMatch = json.error.match(/Table '([^']+)'/)
+            const tableName = tableMatch ? tableMatch[1] : shared.tableName
+            const newTableName = `${tableName}-${Date.now().toString().slice(-4)}`
+
+            return NextResponse.json({
+              ok: false,
+              error: json.error,
+              suggestion: `Please use a new table name like: ${newTableName}`,
+              tableStatus: "SENT",
+              canRetry: true,
+              newTableName: newTableName
+            }, { status: 400 })
+          }
+
+          return NextResponse.json({
+            ok: false,
+            error: json.error || "Backend error",
+            details: json
+          }, { status: 400 })
+        }
 
         // Check if we got valid JSON response
         if (res.ok && json) {
@@ -239,6 +290,30 @@ export async function POST(req: Request) {
         }
         continue
 
+        if (json.ok && json.orderId) {
+          console.log("[orders/create] ✅ Order created successfully:", {
+            orderId: json.orderId,
+            paymentName: shared.paymentName,
+            tableCommand: json.tableCommand ? "YES" : "NO"
+          })
+
+          return NextResponse.json({
+            ok: true,
+            orderId: json.orderId,
+            via: url,
+            sellerTel: json?.sellerTel || "",
+            paymentName: shared.paymentName, // ✅ RETURN PAYMENT METHOD FOR VERIFICATION
+            tableCommand: json?.tableCommand || null
+          })
+        }
+
+        lastError = {
+          status: res.status,
+          raw: text.substring(0, 200),
+          url,
+          json
+        }
+
       } catch (e: any) {
         console.log("[orders/create] ❌ Exception:", e?.message)
         lastErr = { status: 0, raw: e?.message, url }
@@ -261,6 +336,10 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         ok: false,
+        error: "Failed to create order",
+        lastError: lastError,
+        hint: `Check if backend is running. Tried: ${CANDIDATES.join(", ")}`,
+        candidates: CANDIDATES
         error: "Could not connect to order processing service",
         last: lastErr,
         candidates: CANDIDATES,
