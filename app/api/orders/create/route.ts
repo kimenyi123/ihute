@@ -226,7 +226,7 @@ export async function POST(req: Request) {
       { status: 502 }
     )
   } catch (e: any) {
-    console.error("[orders/create] 💥 Fatal error:", e)
+    console.error("[orders/create] Fatal error:", e)
     return NextResponse.json(
       { ok: false, error: e?.message || "Unknown error" },
       { status: 500 }
