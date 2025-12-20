@@ -11,6 +11,7 @@ import { StatsSection } from "@/components/stats-section"
 import { PaymentMethods } from "@/components/payment-methods"
 import { CTASection } from "@/components/cta-section"
 import { PartnersSection } from "@/components/partners-section"
+import { PersonalizedSections } from "@/components/personalized-sections"
 import { Toaster } from "@/components/ui/toaster"
 import { useAuthStore } from "@/lib/auth-store"
 
@@ -37,6 +38,7 @@ export default function HomePage() {
         <HeroSection />
         <StatsSection />
         <CategoryGrid />
+        <PersonalizedSections />
         <PaymentMethods />
         <PartnersSection />
         <CTASection />

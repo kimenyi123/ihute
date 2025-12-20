@@ -14,6 +14,7 @@ import {
   PackageSearch,
   PackageCheck,
   Users,
+  BarChart3,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -253,6 +254,20 @@ export function Header() {
                       </Button>
                     </Link>
                   </>
+                )}
+
+                {/* Payment Dashboard - Admin/Staff only */}
+                {(user?.role === "admin" || user?.role === "staff") && (
+                  <Link href="/payment/dashboard">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="relative h-9 w-9"
+                      title="Payment Dashboard"
+                    >
+                      <BarChart3 className="h-5 w-5" />
+                    </Button>
+                  </Link>
                 )}
               </>
             ) : (

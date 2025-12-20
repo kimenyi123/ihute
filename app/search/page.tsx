@@ -306,6 +306,19 @@ const addProductToCart = (p: Product) => {
             suppliersByName: filteredSuppliersByName,
             suppliersByProduct: filteredSuppliersByProduct,
           })
+
+          // Track search interaction (both interaction tracking and search intent)
+          const { trackSearch } = await import("@/lib/interaction-tracker")
+          const { recordSearch } = await import("@/lib/search-intent-tracker")
+          const totalResults = filteredProducts.length + filteredSuppliersByName.length + filteredSuppliersByProduct.length
+          
+          // Track in interaction system
+          trackSearch(debouncedQ, totalResults)
+          
+          // Track in search intent system (for personalization and notifications)
+          recordSearch(debouncedQ, totalResults, "global").catch(err => 
+            console.warn("[SearchIntent] Failed to record search:", err)
+          )
         }
       } catch (error) {
         console.error("Search error:", error)
