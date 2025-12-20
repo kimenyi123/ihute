@@ -3,7 +3,7 @@ import { create } from "zustand"
 import { persist, createJSONStorage } from "zustand/middleware"
 import { mergeSessionToUser } from "./interaction-tracker"
 
-export type UserRole = "customer" | "supplier" | "admin"
+export type UserRole = "customer" | "supplier" | "admin" | "staff"
 
 export interface User {
   id: string
