@@ -3,7 +3,7 @@ import { NextResponse } from "next/server"
 
 const JAVA_BACKEND_URL =
   process.env.JAVA_SELLER_ORDERS_URL || "https://ihute.rw/Trading/OrdersServlet"
-
+//  process.env.JAVA_SELLER_ORDERS_URL || "http://localhost:8080/Trading/OrdersServlet"
 function tryParseJson(raw: string) {
   try { return JSON.parse(raw) } catch {}
   let s = raw.replace(/\uFEFF/g, "").trim()
@@ -17,7 +17,13 @@ function tryParseJson(raw: string) {
 function normalizeOrders(input: any): any[] {
   const arr = Array.isArray(input?.orders) ? input.orders : []
   return arr.map((order: any) => ({
-    ...order,
+    ...order,  // This spreads all fields from the original order
+
+    // ✅ Explicitly ensure TIN fields are included and mapped correctly
+    SELLER_TIN: order.SELLER_TIN ?? order.sellerTin ?? "",
+    BUYER_TIN: order.BUYER_TIN ?? order.buyerTin ?? "",
+    BUYER_OWNER_NAME: order.BUYER_OWNER_NAME ?? order.buyerOwnerName ?? "",
+
     items: (Array.isArray(order?.items) ? order.items : []).map((item: any) => {
       const qty = Number(item.QUANTITY ?? item.qty ?? item.quantity ?? 0)
       const unitPrice = Number(
@@ -52,7 +58,7 @@ export async function POST(req: Request) {
       page: String(page),
       pageSize: String(pageSize),
     }).toString()
-
+console.log("🚀 POST - Calling servlet at:", JAVA_BACKEND_URL)
     const res = await fetch(JAVA_BACKEND_URL, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },

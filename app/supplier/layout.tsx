@@ -10,7 +10,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
 
   const menu = [
     { name: "Dashboard", href: "/supplier/dashboard" },
-    { name: "My Products", href: "/supplier/products" },
+//     { name: "My Products", href: "/supplier/products" },
     { name: "Orders", href: "/supplier/orders" },
     { name: "Expenses", href: "/supplier/expenses" },
     { name: "Add Product", href: "/supplier/products/add" },

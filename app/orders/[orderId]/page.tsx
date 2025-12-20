@@ -12,14 +12,11 @@ import {
   Package,
   MapPin,
   Phone,
-  Mail,
-  Clock,
   CreditCard,
   Store,
   User,
   CheckCircle,
   XCircle,
-  Loader2,
   MessageCircle,
   Copy,
   Beer,
@@ -54,8 +51,8 @@ interface OrderDetails {
   ORDER_STATUS: string
   REKISIYO_STATUS: string
   REFERENCE: string
-  AMOUNT: number
-  total: number
+  AMOUNT: number | null
+  total: number | null
   CURRENCY: string
   CREATED_AT: number
   createdAt: string
@@ -117,15 +114,21 @@ export default function OrderDetailsPage() {
     }
   }
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (status?: string) => {
+    if (!status) return "bg-gray-100 text-gray-800 border-gray-200"
+
     const s = status.toUpperCase()
-    if (s === "DELIVERED" || s === "COMPLETED") return "bg-green-100 text-green-800 border-green-200"
-    if (s === "OPEN" || s === "PENDING") return "bg-blue-100 text-blue-800 border-blue-200"
-    if (s === "CANCELLED" || s === "FAILED") return "bg-red-100 text-red-800 border-red-200"
+    if (s === "DELIVERED" || s === "COMPLETED")
+      return "bg-green-100 text-green-800 border-green-200"
+    if (s === "OPEN" || s === "PENDING")
+      return "bg-blue-100 text-blue-800 border-blue-200"
+    if (s === "CANCELLED" || s === "FAILED")
+      return "bg-red-100 text-red-800 border-red-200"
     return "bg-gray-100 text-gray-800 border-gray-200"
   }
 
-  const getPaymentStatusColor = (status: string) => {
+  const getPaymentStatusColor = (status?: string) => {
+    if (!status) return "bg-gray-100 text-gray-800 border-gray-200"
     const s = status.toUpperCase()
     if (s === "PAID") return "bg-green-100 text-green-800 border-green-200"
     if (s === "PENDING") return "bg-yellow-100 text-yellow-800 border-yellow-200"
@@ -150,11 +153,10 @@ export default function OrderDetailsPage() {
 
   const sendWhatsApp = () => {
     if (!order) return
-
     const items = order.items.map((item) => {
       const name = item.ITEM_NAME || item.name
-      const qty = item.QUANTITY || item.qty
-      const price = item.UNIT_PRICE || item.unitPrice
+      const qty = item.QUANTITY || item.qty || 0
+      const price = item.UNIT_PRICE || item.unitPrice || 0
       return `${name} x${qty} - ${(qty * price).toLocaleString()} RWF`
     }).join("\n")
 
@@ -167,7 +169,7 @@ export default function OrderDetailsPage() {
 📋 Items:
 ${items}
 
-💰 Total: ${(order.AMOUNT || order.total).toLocaleString()} ${order.CURRENCY}
+💰 Total: ${(order.AMOUNT || order.total || 0).toLocaleString()} ${order.CURRENCY}
 💳 Payment: ${formatPaymentMethod(order.PAYMENT_NAME)}
 📱 My Phone: ${order.BUYER_PHONE}
 
@@ -199,7 +201,7 @@ ${items}
           <CardContent className="pt-6 text-center space-y-4">
             <XCircle className="h-12 w-12 text-red-500 mx-auto" />
             <h2 className="text-xl font-semibold text-red-900">Order Not Found</h2>
-            <p className="text-red-700">{error || "This order does not exist or you don't have permission to view it."}</p>
+            <p className="text-red-700">{error || "This order does not exist."}</p>
             <Button onClick={() => router.push("/orders")} variant="outline">
               <ArrowLeft className="h-4 w-4 mr-2" />
               Back to Orders
@@ -225,8 +227,7 @@ ${items}
             </p>
           </div>
         </div>
-        
-        {/* WhatsApp Contact Button */}
+
         {order.SELLER_PHONE && (
           <Button onClick={sendWhatsApp} className="bg-[#25D366] hover:bg-[#20b05a]">
             <MessageCircle className="h-4 w-4 mr-2" />
@@ -261,7 +262,7 @@ ${items}
                 <div>
                   <p className="text-sm text-muted-foreground">Payment Status</p>
                   <Badge className={getPaymentStatusColor(order.PAYMENT_STATUS)} variant="outline">
-                    {order.PAYMENT_STATUS}
+                     {order?.PAYMENT_STATUS || "UNKNOWN"}
                   </Badge>
                 </div>
               </div>
@@ -270,25 +271,7 @@ ${items}
         </Card>
       </div>
 
-      {/* Table Command Info */}
-      {order.IS_TABLE_COMMAND && order.TABLE_NAME && (
-        <Card className="mb-6 border-amber-200 bg-amber-50">
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-3">
-              <Beer className="h-5 w-5 text-amber-600" />
-              <div>
-                <p className="text-sm font-medium text-amber-900">Table Command Order</p>
-                <p className="text-sm text-amber-700">
-                  Table: <span className="font-mono font-semibold">{order.TABLE_NAME}</span>
-                  {order.TABLE_LOCATION && ` at ${order.TABLE_LOCATION}`}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Order Items */}
+      {/* Order Items Table */}
       <Card className="mb-6">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -296,149 +279,49 @@ ${items}
             Order Items
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            {order.items.map((item, index) => {
-              const name = item.ITEM_NAME || item.name
-              const qty = item.QUANTITY || item.qty
-              const price = item.UNIT_PRICE || item.unitPrice
-              const unit = item.UNIT || item.unit || "pcs"
-              const total = qty * price
+        <CardContent className="overflow-x-auto">
+          <table className="min-w-full border border-gray-300 rounded-lg">
+            <thead className="bg-gray-100">
+              <tr>
+                <th className="px-4 py-2 border">Item</th>
+                <th className="px-4 py-2 border">Quantity</th>
+                <th className="px-4 py-2 border">Unit Price</th>
+                <th className="px-4 py-2 border">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {order.items.map((item, idx) => {
+                const name = item.ITEM_NAME || item.name
+                const qty = item.QUANTITY || item.qty || 0
+                const price = item.UNIT_PRICE || item.unitPrice || 0
+                const total = qty * price
+                return (
+                  <tr key={idx}>
+                    <td className="px-4 py-2 border">{name}</td>
+                    <td className="px-4 py-2 border">{qty}</td>
+                    <td className="px-4 py-2 border">{price.toLocaleString()} {order.CURRENCY}</td>
+                    <td className="px-4 py-2 border font-semibold">{total.toLocaleString()} {order.CURRENCY}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
 
-              return (
-                <div key={index}>
-                  <div className="flex items-center justify-between py-3">
-                    <div className="flex-1">
-                      <p className="font-medium">{name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {qty} {unit} × {price.toLocaleString()} {order.CURRENCY}
-                      </p>
-                    </div>
-                    <p className="font-semibold">{total.toLocaleString()} {order.CURRENCY}</p>
-                  </div>
-                  {index < order.items.length - 1 && <Separator />}
-                </div>
-              )
-            })}
-          </div>
-
-          <Separator className="my-4" />
-
-          <div className="flex items-center justify-between text-lg font-bold">
-            <span>Total</span>
-            <span>{(order.AMOUNT || order.total).toLocaleString()} {order.CURRENCY}</span>
+          <div className="flex justify-end mt-4 text-lg font-bold">
+            Total: {(order.AMOUNT || order.total || 0).toLocaleString()} {order.CURRENCY}
           </div>
         </CardContent>
       </Card>
 
-      {/* Delivery & Payment Info */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-        {/* Seller Info */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Store className="h-5 w-5" />
-              Seller Information
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex items-start gap-2">
-              <Store className="h-4 w-4 text-muted-foreground mt-0.5" />
-              <div className="flex-1">
-                <p className="text-sm text-muted-foreground">Name</p>
-                <p className="font-medium">{order.SELLER_NAMES}</p>
-              </div>
-            </div>
-            {order.SELLER_PHONE && (
-              <div className="flex items-start gap-2">
-                <Phone className="h-4 w-4 text-muted-foreground mt-0.5" />
-                <div className="flex-1">
-                  <p className="text-sm text-muted-foreground">Phone</p>
-                  <div className="flex items-center gap-2">
-                    <p className="font-medium">{order.SELLER_PHONE}</p>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => copyToClipboard(order.SELLER_PHONE, "Phone")}
-                    >
-                      <Copy className="h-3 w-3" />
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Buyer Info */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <User className="h-5 w-5" />
-              Customer Information
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex items-start gap-2">
-              <User className="h-4 w-4 text-muted-foreground mt-0.5" />
-              <div className="flex-1">
-                <p className="text-sm text-muted-foreground">Name</p>
-                <p className="font-medium">{order.BUYER_OWNER || order.BUYER_NAME}</p>
-              </div>
-            </div>
-            {order.BUYER_PHONE && (
-              <div className="flex items-start gap-2">
-                <Phone className="h-4 w-4 text-muted-foreground mt-0.5" />
-                <div className="flex-1">
-                  <p className="text-sm text-muted-foreground">Phone</p>
-                  <p className="font-medium">{order.BUYER_PHONE}</p>
-                </div>
-              </div>
-            )}
-            {order.DELIVERY_LOCATION || order.BUYER_LOCATION ? (
-              <div className="flex items-start gap-2">
-                <MapPin className="h-4 w-4 text-muted-foreground mt-0.5" />
-                <div className="flex-1">
-                  <p className="text-sm text-muted-foreground">Delivery Location</p>
-                  <p className="font-medium">{order.DELIVERY_LOCATION || order.BUYER_LOCATION}</p>
-                </div>
-              </div>
-            ) : null}
-          </CardContent>
-        </Card>
+      {/* Financing Button */}
+      <div className="flex justify-end mb-6">
+        <Button
+          variant="default"
+          disabled={order.ORDER_STATUS?.toUpperCase() !== "OPEN"}
+        >
+          Finance Order
+        </Button>
       </div>
-
-      {/* Payment Details */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <CreditCard className="h-5 w-5" />
-            Payment Details
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Payment Method</span>
-            <span className="font-medium">{formatPaymentMethod(order.PAYMENT_NAME)}</span>
-          </div>
-          <Separator />
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Payment Status</span>
-            <Badge className={getPaymentStatusColor(order.PAYMENT_STATUS)} variant="outline">
-              {order.PAYMENT_STATUS}
-            </Badge>
-          </div>
-          {order.REFERENCE && (
-            <>
-              <Separator />
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Reference</span>
-                <span className="font-mono text-sm">{order.REFERENCE}</span>
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
 
       {/* Success Toast */}
       {copied && (
