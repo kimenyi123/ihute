@@ -1,6 +1,7 @@
 // lib/auth-store.ts
 import { create } from "zustand"
 import { persist, createJSONStorage } from "zustand/middleware"
+import { mergeSessionToUser } from "./interaction-tracker"
 
 export type UserRole = "customer" | "supplier" | "admin"
 
@@ -39,6 +40,13 @@ export const useAuthStore = create<AuthState>()(
       login: (user) => {
         const now = Date.now()
         set({ user, isAuthenticated: true, loginTime: now })
+        
+        // Merge anonymous session interactions to user account
+        if (typeof window !== "undefined") {
+          mergeSessionToUser(user.email).catch((err) => {
+            console.warn("Failed to merge session interactions:", err)
+          })
+        }
       },
 
       logout: () => {

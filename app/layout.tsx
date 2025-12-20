@@ -5,6 +5,8 @@ import { GeistMono } from "geist/font/mono"
 import { Analytics } from "@vercel/analytics/next"
 import { Suspense } from "react"
 import { SessionProvider } from "@/components/session-provider"
+import { ServiceWorkerRegister } from "@/components/service-worker-register"
+import { NotificationPrompt } from "@/components/notification-prompt"
 import "./globals.css"
 
 export const metadata: Metadata = {
@@ -28,6 +30,8 @@ export default function RootLayout({
         <SessionProvider>
           <Suspense fallback={null}>{children}</Suspense>
         </SessionProvider>
+        <ServiceWorkerRegister />
+        <NotificationPrompt />
         <Analytics />
       </body>
     </html>
