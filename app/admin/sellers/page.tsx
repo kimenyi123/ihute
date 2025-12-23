@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { CheckCircle, XCircle, Eye, AlertCircle } from 'lucide-react'
+import { useAuthStore } from '@/lib/auth-store'
 
 interface Seller {
   id: number
@@ -20,6 +21,7 @@ interface Seller {
 }
 
 export default function SellersPage() {
+  const { user } = useAuthStore()
   const [activeTab, setActiveTab] = useState<'applications' | 'active' | 'suspended'>('applications')
   const [applications, setApplications] = useState<Seller[]>([])
   const [activeSellers, setActiveSellers] = useState<Seller[]>([])
@@ -59,7 +61,7 @@ export default function SellersPage() {
       const res = await fetch('/api/admin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, page, pageSize })
+        body: JSON.stringify({ action, page, pageSize, adminEmail: user?.email || '' })
       })
       const data = await res.json()
       
@@ -93,7 +95,7 @@ export default function SellersPage() {
       const res = await fetch('/api/admin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'approveSeller', sellerAccount })
+        body: JSON.stringify({ action: 'approveSeller', sellerAccount, adminEmail: user?.email || '' })
       })
       const data = await res.json()
       
@@ -120,7 +122,7 @@ export default function SellersPage() {
       const res = await fetch('/api/admin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'suspendSeller', sellerAccount, reason })
+        body: JSON.stringify({ action: 'suspendSeller', sellerAccount, reason, adminEmail: user?.email || '' })
       })
       const data = await res.json()
       
@@ -146,7 +148,7 @@ export default function SellersPage() {
       const res = await fetch('/api/admin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'reinstateSeller', sellerAccount })
+        body: JSON.stringify({ action: 'reinstateSeller', sellerAccount, adminEmail: user?.email || '' })
       })
       const data = await res.json()
       

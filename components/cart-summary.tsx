@@ -6,6 +6,7 @@ import { useMemo, useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useAuthStore } from "@/lib/auth-store"
 import { useCartStore } from "@/lib/cart-store"
+import { trackClick } from "@/lib/interaction-tracker"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
@@ -370,6 +371,15 @@ const placeOrder = async (
 
       if (orderId) setOrderIds(m => ({ ...m, [g.supplierId]: orderId }))
       if (sellerTel) setOrderPhones(m => ({ ...m, [g.supplierId]: sellerTel }))
+
+      // Track successful purchase for all items in this seller group (best-effort)
+      try {
+        g.items.forEach(it => {
+          trackClick("product", it.id, it.name)
+        })
+      } catch {
+        // ignore tracking errors
+      }
 
       // ✅ LOG SUCCESSFUL PAYMENT METHOD
       console.log(`✅ Order created with payment method: ${opts.paymentName}`)

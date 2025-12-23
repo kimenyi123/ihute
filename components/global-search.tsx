@@ -4,12 +4,14 @@
 import { useEffect, useRef, useState, KeyboardEvent } from "react"
 import { createPortal } from "react-dom"
 import { useRouter } from "next/navigation"
-import { Search, Package, Store } from "lucide-react"
+import { Search, Package, Store, Clock, Trash2 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { usePrefsStore } from "@/lib/prefs-store"
 import { useCartStore } from "@/lib/cart-store"
 import { filterSuppliersByRelevance, filterProductsByRelevance } from "@/lib/search-utils"
+import { useAuthStore } from "@/lib/auth-store"
+import { getRecentSearches, recordSearch, markSearchClick, clearLocalSearchHistory } from "@/lib/search-intent-tracker"
 
 export interface GlobalResult {
   type?: "product" | "supplier"
@@ -94,12 +96,16 @@ export function GlobalSearch({
 
   const sector = usePrefsStore((s) => s.sector)
   const location = usePrefsStore((s) => s.location)
+  const { user } = useAuthStore()
+  const [recentSearches, setRecentSearches] = useState<string[]>([])
 
   const addToCartFn = useCartStore((s: any) => s.addOrInc ?? s.add)
 
   useEffect(() => {
     setMounted(true)
-  }, [])
+    // Load recent searches for suggestions
+    getRecentSearches(5).then(setRecentSearches).catch(() => {})
+  }, [user])
 
   const addProductAndGoToCart = (p: GlobalResult) => {
     if (!addToCartFn) return
@@ -120,6 +126,16 @@ export function GlobalSearch({
       image: p.image || "/placeholder.svg?height=300&width=300",
       momo: p.momo,
     })
+    
+    // Track search click for search intent
+    if (q.trim()) {
+      markSearchClick(
+        q.trim(),
+        id,
+        p.supplier_account || p.item_seller_account
+      ).catch(err => console.warn("[SearchIntent] Failed to mark click:", err))
+    }
+    
     router.push("/cart")
     setOpen(false)
     setQ("")
@@ -208,6 +224,14 @@ export function GlobalSearch({
         setSuppliers(s)
         setStats(json.searchStats || null)
         setOpen(true)
+        
+        // Track search intent
+        if (q.trim().length >= 2) {
+          const totalResults = p.length + s.length
+          recordSearch(q.trim(), totalResults, "global").catch(err => 
+            console.warn("[SearchIntent] Failed to record search:", err)
+          )
+        }
 
       } catch (e: any) {
         console.error("[GlobalSearch] Error:", e)
@@ -333,6 +357,44 @@ export function GlobalSearch({
             <div className="px-3 py-2 text-sm text-destructive">{err}</div>
           )}
 
+          {/* Recent Searches Suggestions */}
+          {!loading && !err && q.trim().length === 0 && recentSearches.length > 0 && (
+            <div className="p-3 space-y-2">
+              <div className="px-1 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center justify-between">
+                <span className="flex items-center gap-1">
+                  <Clock className="h-3 w-3" />
+                  Recent Searches
+                </span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    clearLocalSearchHistory()
+                    setRecentSearches([])
+                  }}
+                  className="flex items-center gap-1 text-[10px] text-red-500 hover:text-red-600 hover:bg-red-50 px-2 py-1 rounded transition-colors"
+                  title="Clear search history"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  Clear
+                </button>
+              </div>
+              <div className="space-y-1">
+                {recentSearches.map((search, i) => (
+                  <button
+                    key={i}
+                    className="w-full text-left px-3 py-2 rounded-lg border hover:border-blue-300 hover:bg-accent transition-colors text-sm"
+                    onClick={() => {
+                      setQ(search)
+                      onSubmit(search)
+                    }}
+                  >
+                    {search}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {!loading && !err && (products.length > 0 || suppliers.length > 0) && (
             <div className="p-3 space-y-3">
               {/* Search Stats */}
@@ -381,7 +443,17 @@ export function GlobalSearch({
                               <button
                                 key={`${supplierId}-${p.item_code}-${i}`}
                                 className="w-full text-left rounded-lg border p-3 hover:border-blue-300 hover:bg-accent transition-colors group"
-                                onClick={() => addProductAndGoToCart(p)}
+                                onClick={() => {
+                                  // Track search click
+                                  if (q.trim()) {
+                                    markSearchClick(
+                                      q.trim(),
+                                      p.item_code || "",
+                                      supplierId
+                                    ).catch(err => console.warn("[SearchIntent] Failed to mark click:", err))
+                                  }
+                                  addProductAndGoToCart(p)
+                                }}
                                 title="Click to add & go to cart"
                               >
                                 <div className="font-medium text-gray-900 group-hover:text-blue-700 text-sm">
@@ -422,7 +494,17 @@ export function GlobalSearch({
                       <button
                         key={`s-${s.supplier_account}-${i}`}
                         className="flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm hover:border-blue-300 hover:bg-accent transition-colors"
-                        onClick={() => onSubmitSupplier(s)}
+                        onClick={() => {
+                          // Track search click for supplier
+                          if (q.trim()) {
+                            markSearchClick(
+                              q.trim(),
+                              undefined,
+                              s.supplier_account || ""
+                            ).catch(err => console.warn("[SearchIntent] Failed to mark click:", err))
+                          }
+                          onSubmitSupplier(s)
+                        }}
                       >
                         <Store className="h-4 w-4 text-gray-400" />
                         <div className="flex-1">

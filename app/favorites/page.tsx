@@ -1,22 +1,118 @@
 // app/favorites/page.tsx
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useEffect, useState } from "react"
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
 import { ProductCard } from "@/components/product-card"
 import { useFavoritesStore } from "@/lib/favorites-store"
-import { Heart, Store } from "lucide-react"
+import { useAuthStore } from "@/lib/auth-store"
+import { getSessionId } from "@/lib/interaction-tracker"
+import { Heart, Store, Sparkles, Clock } from "lucide-react"
+
+type RecommendedProduct = {
+  id: string
+  name: string
+  description?: string
+  price: number
+  unit?: string
+  image?: string
+  supplierId?: string
+  supplierName?: string
+  supplierLocation?: string
+  momo?: string
+  inStock?: boolean
+  rating?: number
+}
 
 export default function FavoritesPage() {
   // subscribe only to the pieces we need
   const favorites = useFavoritesStore((s) => s.favorites)
   const getGroupsBySeller = useFavoritesStore((s) => s.getGroupsBySeller)
+  const { user } = useAuthStore()
 
   // compute groups outside the selector to avoid the "getSnapshot" loop
   const groups = useMemo(() => getGroupsBySeller(), [getGroupsBySeller, favorites])
 
   const total = favorites.length
+
+  // Recommendations state
+  const [similarItems, setSimilarItems] = useState<RecommendedProduct[]>([])
+  const [previouslyViewed, setPreviouslyViewed] = useState<RecommendedProduct[]>([])
+  const [loadingRecommendations, setLoadingRecommendations] = useState(false)
+
+  // Load recommendations
+  useEffect(() => {
+    if (total > 0) {
+      loadRecommendations()
+    }
+  }, [total, user])
+
+  async function loadRecommendations() {
+    setLoadingRecommendations(true)
+    try {
+      const userId = user?.email || null
+      const sessionId = getSessionId()
+
+      // Get similar items based on favorites
+      if (favorites.length > 0) {
+        const favoriteIds = favorites.map(f => f.id)
+        const firstFavorite = favorites[0]
+
+        // Get similar items
+        const similarRes = await fetch("/api/personalization/recommendations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "getSimilarItems",
+            userId,
+            sessionId,
+            entityId: firstFavorite.id,
+            entityType: "product",
+            limit: 12,
+          }),
+        })
+
+        if (similarRes.ok) {
+          const similarData = await similarRes.json()
+          if (similarData.ok && similarData.similar) {
+            // Fetch product details (placeholder - implement based on your API)
+            const products = await fetchProductDetails(
+              similarData.similar.map((s: any) => s.id).filter((id: string) => !favoriteIds.includes(id))
+            )
+            setSimilarItems(products)
+          }
+        }
+
+        // Get previously viewed but not favorited
+        const viewedRes = await fetch(
+          `/api/personalization/recommendations?action=getRecommendations&limit=12${userId ? `&userId=${userId}` : `&sessionId=${sessionId}`}`
+        )
+
+        if (viewedRes.ok) {
+          const viewedData = await viewedRes.json()
+          if (viewedData.ok && viewedData.products) {
+            const products = await fetchProductDetails(
+              viewedData.products.filter((id: string) => !favoriteIds.includes(id))
+            )
+            setPreviouslyViewed(products)
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Error loading recommendations:", error)
+    } finally {
+      setLoadingRecommendations(false)
+    }
+  }
+
+  async function fetchProductDetails(productIds: string[]): Promise<RecommendedProduct[]> {
+    if (productIds.length === 0) return []
+    
+    // Placeholder - implement based on your product API
+    // This should fetch actual product details from your backend
+    return []
+  }
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -45,6 +141,7 @@ export default function FavoritesPage() {
           </div>
         ) : (
           <div className="space-y-10">
+            {/* Your Favorites */}
             {groups.map((g) => (
               <section key={g.supplierId}>
                 <div className="mb-3 flex items-center gap-2">
@@ -81,6 +178,48 @@ export default function FavoritesPage() {
                 </div>
               </section>
             ))}
+
+            {/* Similar Items */}
+            {similarItems.length > 0 && (
+              <section>
+                <div className="mb-3 flex items-center gap-2">
+                  <Sparkles className="h-5 w-5 text-muted-foreground" />
+                  <h2 className="text-lg font-semibold">You Might Also Like</h2>
+                  <span className="text-sm text-muted-foreground">
+                    Similar to your favorites
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                  {similarItems.map((product) => (
+                    <ProductCard key={product.id} product={product} />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Previously Viewed */}
+            {previouslyViewed.length > 0 && (
+              <section>
+                <div className="mb-3 flex items-center gap-2">
+                  <Clock className="h-5 w-5 text-muted-foreground" />
+                  <h2 className="text-lg font-semibold">Previously Viewed</h2>
+                  <span className="text-sm text-muted-foreground">
+                    Items you've browsed but haven't favorited yet
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                  {previouslyViewed.map((product) => (
+                    <ProductCard key={product.id} product={product} />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {loadingRecommendations && (
+              <div className="text-center py-8 text-muted-foreground">
+                Loading recommendations...
+              </div>
+            )}
           </div>
         )}
       </main>

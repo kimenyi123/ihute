@@ -89,12 +89,24 @@ export function CategoryGrid() {
   const loadCategories = async () => {
     try {
       // Fetch from public API endpoint (no auth required for homepage)
+      const requestBody = { action: 'getHomepageCategories' }
+      console.log('[CategoryGrid] Requesting categories with body:', requestBody)
+      
       const res = await fetch('/api/admin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'getHomepageCategories' })
+        body: JSON.stringify(requestBody)
       })
+      
       const data = await res.json()
+      console.log('[CategoryGrid] Response status:', res.status)
+      console.log('[CategoryGrid] Response data:', data)
+      
+      if (!res.ok) {
+        console.error('[CategoryGrid] API error:', data.error, data)
+        // Keep default categories on error
+        return
+      }
       
       if (data.ok && data.categories && data.categories.length > 0) {
         // Filter only active categories and sort by display order
@@ -104,7 +116,7 @@ export function CategoryGrid() {
         setCategories(activeCategories)
       }
     } catch (error) {
-      console.error('Error loading categories:', error)
+      console.error('[CategoryGrid] Error loading categories:', error)
       // Keep default categories on error
     } finally {
       setLoading(false)

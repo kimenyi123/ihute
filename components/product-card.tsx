@@ -1,10 +1,12 @@
 "use client"
 
+import { useEffect } from "react"
 import Image from "next/image"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { useCartStore } from "@/lib/cart-store"
 import { useFavoritesStore } from "@/lib/favorites-store"
+import { trackProductView, trackClick } from "@/lib/interaction-tracker"
 import { Heart } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
@@ -46,6 +48,14 @@ export function ProductCard({ product }: { product: Product }) {
   } = product
 
   const fav = isFavorite(id)
+
+  // Track product view when component mounts
+  useEffect(() => {
+    trackProductView(id, name, {
+      supplierId,
+      categoryId: undefined, // Add if available
+    })
+  }, [id, name, supplierId])
 
   return (
     <Card className="group h-full overflow-hidden transition-all hover:shadow-lg">
@@ -119,6 +129,9 @@ export function ProductCard({ product }: { product: Product }) {
           size="sm"
           className="mt-1"
           onClick={() => {
+            // Track click
+            trackClick("product", id, name)
+            
             addItem(
               {
                 id,

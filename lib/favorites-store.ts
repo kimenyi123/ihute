@@ -3,6 +3,7 @@
 
 import { create } from "zustand"
 import { persist, createJSONStorage } from "zustand/middleware"
+import { trackInteraction } from "./interaction-tracker"
 
 // what we save for each favorite (snapshot at the time of hearting)
 export type FavoriteItem = {
@@ -42,16 +43,29 @@ export const useFavoritesStore = create<FavoritesState>()(
     (set, get) => ({
       favorites: [],
 
-  addFavorite: (item) =>
-    set((state) => {
+  addFavorite: (item) => {
+    // Track favorite interaction
+    trackInteraction("favorite", "product", item.id, {
+      entityName: item.name,
+      metadata: {
+        supplierId: item.supplierId,
+        price: item.price,
+      },
+    })
+    
+    return set((state) => {
       if (state.favorites.some((f) => f.id === item.id)) return state
       return { favorites: [item, ...state.favorites] }
-    }),
+    })
+  },
 
-  removeFavorite: (productId) =>
-    set((state) => ({
+  removeFavorite: (productId) => {
+    // Note: We don't track unfavorite as a separate interaction
+    // The absence of favorite interactions will naturally decay
+    return set((state) => ({
       favorites: state.favorites.filter((f) => f.id !== productId),
-    })),
+    }))
+  },
 
   isFavorite: (productId) => get().favorites.some((f) => f.id === productId),
 

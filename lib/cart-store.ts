@@ -2,6 +2,7 @@
 
 import { create } from "zustand"
 import { persist, createJSONStorage } from "zustand/middleware"
+import { trackClick } from "./interaction-tracker"
 
 export type CartItem = {
   id: string
@@ -72,6 +73,14 @@ export const useCartStore = create<CartState>()(
           const selectedUnit = item.selectedUnit ?? item.unit
           const keyMatch = (x: CartItem) => x.id === item.id && x.selectedUnit === selectedUnit
           const existing = state.items.find(keyMatch)
+
+          // Track add-to-cart as a preference (best-effort)
+          try {
+            trackClick("product", item.id, item.name)
+          } catch {
+            // ignore tracking errors
+          }
+
           if (existing) {
             return {
               items: state.items.map((x) => (keyMatch(x) ? { ...x, qty: x.qty + qty } : x)),
