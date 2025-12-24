@@ -5,6 +5,7 @@ import { GeistMono } from "geist/font/mono"
 import { Analytics } from "@vercel/analytics/next"
 import { Suspense } from "react"
 import { SessionProvider } from "@/components/session-provider"
+import PerformanceMonitor from "@/components/PerformanceMonitor"
 import "./globals.css"
 
 export const metadata: Metadata = {
@@ -29,6 +30,8 @@ export default function RootLayout({
           <Suspense fallback={null}>{children}</Suspense>
         </SessionProvider>
         <Analytics />
+            {/* Performance Monitor - Dev Mode Only */}
+                {process.env.NODE_ENV === 'development' && <PerformanceMonitor />}
       </body>
     </html>
   )
