@@ -94,6 +94,15 @@ export default function DiscoverPage() {
       const userId = user?.email || null
       const sessionId = getSessionId()
       
+      // 🔒 DEBUG: Log session info for verification
+      if (process.env.NODE_ENV === 'development') {
+        console.log("[Discover] Loading recommendations", {
+          userId: userId || "null",
+          sessionId: sessionId ? sessionId.substring(0, 50) + "..." : "null",
+          hasUser: !!user
+        })
+      }
+      
       const params = new URLSearchParams()
       if (userId) params.set("userId", userId)
       if (sessionId) params.set("sessionId", sessionId)
@@ -102,6 +111,16 @@ export default function DiscoverPage() {
       // Get recommendations
       const res = await fetch(`/api/personalization/recommendations?${params.toString()}`)
       const data = await res.json()
+      
+      // 🔒 DEBUG: Log response source
+      if (process.env.NODE_ENV === 'development') {
+        console.log("[Discover] Recommendations response", {
+          ok: data.ok,
+          source: data.source || "unknown",
+          productCount: data.products?.length || 0,
+          hasScores: !!data.productScores
+        })
+      }
 
       const newSections: RecommendationSection[] = []
 
@@ -121,7 +140,7 @@ export default function DiscoverPage() {
       }
 
       // Recommended products
-      if (data.ok && data.products && data.products.length > 0) {
+      if (data.ok && data.products && data.products.length > 0 && !data.isFirstTime) {
         const recommendedProducts = await fetchProductDetails(data.products)
         if (recommendedProducts.length > 0) {
           newSections.push({
@@ -134,12 +153,14 @@ export default function DiscoverPage() {
         }
       }
 
-      // Trending (always show as fallback)
-      if (newSections.length === 0 || data.source === "trending") {
+      // 🔒 FIRST-TIME USER: Don't show trending fallback - keep it empty
+      // Only show trending if user explicitly has no recommendations but has interactions
+      // (This should rarely happen, but handle edge case)
+      if (newSections.length === 0 && data.ok && !data.isFirstTime && data.source === "trending") {
         const trendingRes = await fetch("/api/personalization/recommendations?action=getRecommendations&limit=20")
         const trendingData = await trendingRes.json()
         
-        if (trendingData.ok && trendingData.products) {
+        if (trendingData.ok && trendingData.products && !trendingData.isFirstTime) {
           const trendingProducts = await fetchProductDetails(trendingData.products)
           if (trendingProducts.length > 0) {
             newSections.push({
@@ -264,15 +285,32 @@ export default function DiscoverPage() {
           <p className="text-xs text-muted-foreground mt-1">
             Recommendations update based on your browsing activity. Refresh to see latest updates.
           </p>
+          {process.env.NODE_ENV === 'development' && (
+            <div className="mt-2 p-2 bg-muted rounded text-xs font-mono">
+              <div>User: {user?.email || "Anonymous"}</div>
+              <div>Session: {getSessionId().substring(0, 50)}...</div>
+            </div>
+          )}
         </div>
 
         {/* Sections */}
         {sections.length === 0 ? (
           <div className="text-center py-12">
-            <p className="text-muted-foreground mb-4">No recommendations available yet.</p>
-            <p className="text-sm text-muted-foreground">
-              Start browsing products to get personalized recommendations!
-            </p>
+            <div className="max-w-md mx-auto">
+              <Sparkles className="h-12 w-12 mx-auto text-muted-foreground mb-4 opacity-50" />
+              <h2 className="text-xl font-semibold mb-2">Start Your Shopping Journey</h2>
+              <p className="text-muted-foreground mb-4">
+                We'll personalize your recommendations based on what you browse and search for.
+              </p>
+              <p className="text-sm text-muted-foreground mb-6">
+                Visit the homepage to explore products, search for items, or browse categories.
+              </p>
+              <Link href="/">
+                <Button>
+                  Explore Products
+                </Button>
+              </Link>
+            </div>
           </div>
         ) : (
           <div className="space-y-12">

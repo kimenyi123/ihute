@@ -10,8 +10,10 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { filterSuppliersByRelevance, filterProductsByRelevance } from "@/lib/search-utils"
 import { getTranslations } from "@/lib/keyword-mapping"
-import { Languages, Store } from "lucide-react"
+import { Languages, MapPin, Store } from "lucide-react"
 import { useTableCommandStore } from "@/lib/table-command-store"
+import { useLocationStoreEnhanced } from "@/lib/location-store-enhanced"
+import { LocationBadge } from "@/components/location-badge"
 
 type Shop = {
   supplier_account: string
@@ -272,6 +274,16 @@ const addProductToCart = (p: Product) => {
         if (locationParam) {
           url.searchParams.set("location", locationParam)
         }
+        
+        // Add location-aware parameters from enhanced location store
+        const { useLocationStoreEnhanced } = await import("@/lib/location-store-enhanced")
+        const userLocation = useLocationStoreEnhanced.getState().location
+        if (userLocation?.district) {
+          url.searchParams.set("district", userLocation.district)
+        }
+        if (userLocation?.cell) {
+          url.searchParams.set("cell", userLocation.cell)
+        }
 
         const res = await fetch(url.toString(), { cache: "no-store" })
         const data: SearchResult = res.ok
@@ -481,7 +493,10 @@ const addProductToCart = (p: Product) => {
     <div className="min-h-screen flex flex-col">
       <Header />
       <main className="container mx-auto flex-1 px-4 py-8">
-        <h1 className="text-2xl font-semibold mb-4">Global Search</h1>
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-2xl font-semibold">Global Search</h1>
+          <LocationBadge />
+        </div>
         
         {/* Table Context Indicator - Added here */}
         {tableCommand && (
@@ -647,6 +662,35 @@ const addProductToCart = (p: Product) => {
             {searchResult.error}
           </div>
         )}
+
+        {/* Location-Aware Search Indicator */}
+        {(() => {
+          const locationData = useLocationStoreEnhanced.getState().location
+          if (locationData?.district) {
+            return (
+              <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center gap-2">
+                <MapPin className="h-4 w-4 text-blue-600" />
+                <span className="text-sm text-blue-800">
+                  Showing results near <strong>{locationData.district}</strong>
+                  {locationData.cell && `, ${locationData.cell}`}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto h-6 text-xs"
+                  onClick={() => {
+                    const { useLocationStoreEnhanced } = require("@/lib/location-store-enhanced")
+                    useLocationStoreEnhanced.getState().clearLocation()
+                    window.location.reload()
+                  }}
+                >
+                  Change location
+                </Button>
+              </div>
+            )
+          }
+          return null
+        })()}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left Column (scrollable) */}

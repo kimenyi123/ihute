@@ -9,7 +9,6 @@ import { RotateCcw, History, RefreshCcw } from "lucide-react"
 import {
   ShoppingCart,
   User,
-  MapPin,
   Heart,
   Truck,
   PackageSearch,
@@ -19,13 +18,6 @@ import {
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -37,22 +29,18 @@ import {
 
 import { LanguageSelector } from "@/components/language-selector"
 import { GlobalSearch } from "@/components/global-search"
-import { LocationDialog } from "@/components/location-dialog"
 
 import { useCartStore } from "@/lib/cart-store"
 import { useFavoritesStore } from "@/lib/favorites-store"
 import { useAuthStore } from "@/lib/auth-store"
-import { usePrefsStore } from "@/lib/prefs-store"
 import { useOrdersStore } from "@/lib/orders-store"
-import { useLocationStore } from "@/lib/location-store"
 import { useTranslation } from "@/hooks/use-translation"
-import { RWANDA_DISTRICTS } from "@/lib/constants"
 import { TableCommandBanner } from "@/components/table-command-banner"
+import { LocationBadge } from "@/components/location-badge"
 
 export function Header() {
   const router = useRouter()
   const { t } = useTranslation()
-  const { userLocation } = useLocationStore()
 
   const getTotalItems = useCartStore((s) => s.getTotalItems)
   const totalItems = getTotalItems()
@@ -62,14 +50,8 @@ export function Header() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
   const logout = useAuthStore((s) => s.logout)
 
-  const [selectedLocation, setSelectedLocation] = useState(
-    user?.location || t("allLocations")
-  )
-  const setLoc = usePrefsStore((s) => s.setLocation)
-
   const pendingCount = useOrdersStore((s) => s.getPendingCount())
   const [sellerCount, setSellerCount] = useState<number>(0)
-  const [locationDialogOpen, setLocationDialogOpen] = useState(false)
 
   useEffect(() => {
     let ignore = false
@@ -106,11 +88,6 @@ export function Header() {
     router.refresh()
   }
 
-  const handleLocation = (val: string) => {
-    setSelectedLocation(val)
-    setLoc(val === t("allLocations") ? null : val)
-  }
-
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-white shadow-sm">
       <div className="container mx-auto px-4">
@@ -126,37 +103,10 @@ export function Header() {
             />
           </Link>
 
-          {/* Location Selector - Desktop */}
-          <div className="hidden lg:flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setLocationDialogOpen(true)}
-              className={`h-9 w-9 p-0 ${userLocation ? "text-green-600" : "text-muted-foreground"}`}
-              title="Find nearest suppliers"
-            >
-              <MapPin className={`h-4 w-4 ${userLocation ? "fill-green-600" : ""}`} />
-            </Button>
-            <Select value={selectedLocation} onValueChange={handleLocation}>
-              <SelectTrigger className="w-[130px] sm:w-[140px] h-9 text-xs sm:text-sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={t("allLocations")}>
-                  {t("allLocations")}
-                </SelectItem>
-                {RWANDA_DISTRICTS.map((dist) => (
-                  <SelectItem key={dist} value={dist}>
-                    {dist}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
           {/* Global Search - Desktop */}
-          <div className="hidden lg:flex flex-1 max-w-md relative">
+          <div className="hidden lg:flex flex-1 max-w-md relative items-center gap-2">
             <GlobalSearch placeholder={t("searchPlaceholder")} className="w-full" />
+            <LocationBadge />
           </div>
 
           {/* Actions */}
@@ -330,36 +280,12 @@ export function Header() {
           <div className="relative w-full">
             <GlobalSearch placeholder={t("searchPlaceholder")} className="w-full" />
           </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setLocationDialogOpen(true)}
-              className={`h-9 w-9 p-0 ${userLocation ? "text-green-600" : "text-muted-foreground"}`}
-              title="Find nearest suppliers"
-            >
-              <MapPin className={`h-4 w-4 ${userLocation ? "fill-green-600" : ""}`} />
-            </Button>
-            <Select value={selectedLocation} onValueChange={handleLocation}>
-              <SelectTrigger className="text-xs sm:text-sm h-9">
-                <SelectValue placeholder="Select your district" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={t("allLocations")}>
-                  {t("allLocations")}
-                </SelectItem>
-                {RWANDA_DISTRICTS.map((dist) => (
-                  <SelectItem key={dist} value={dist}>
-                    {dist}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="flex items-center justify-center">
+            <LocationBadge />
           </div>
         </div>
       </div>
       <TableCommandBanner />
-      <LocationDialog open={locationDialogOpen} onOpenChange={setLocationDialogOpen} />
     </header>
   )
 }
