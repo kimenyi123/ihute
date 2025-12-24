@@ -15,7 +15,8 @@ import {
   BarChart3,
   Menu,
   X,
-  LogOut
+  LogOut,
+  Wallet
 } from 'lucide-react'
 import { useAuthStore } from '@/lib/auth-store'
 
@@ -29,6 +30,7 @@ const menuItems = [
   { href: '/admin/content', label: 'Content Manager', icon: Image },
   { href: '/admin/notifications', label: 'Notification Center', icon: Bell },
   { href: '/admin/analytics', label: 'Analytics & Reports', icon: BarChart3 },
+  { href: '/admin/payment', label: 'Payment Dashboard', icon: Wallet },
 ]
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
