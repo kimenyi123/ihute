@@ -45,13 +45,24 @@ export async function subscribeToPushNotifications(): Promise<PushSubscription |
     return null;
   }
   
-  // Register service worker
+  // Register service worker if not already registered
   let registration: ServiceWorkerRegistration;
   try {
+    // Check if service worker is already registered
+    let existingRegistration = await navigator.serviceWorker.getRegistration();
+    
+    if (!existingRegistration) {
+      console.log('[Notifications] Service worker not found, registering...');
+      existingRegistration = await navigator.serviceWorker.register('/sw.js');
+      console.log('[Notifications] Service worker registered, waiting for activation...');
+    }
+    
+    // Wait for service worker to be ready
     registration = await navigator.serviceWorker.ready;
+    console.log('[Notifications] Service worker is ready');
   } catch (error) {
-    console.error('[Notifications] Service worker not ready:', error);
-    return null;
+    console.error('[Notifications] Service worker error:', error);
+    throw new Error('Failed to register service worker. Please refresh the page and try again.');
   }
   
   // Check if already subscribed
@@ -183,13 +194,20 @@ function getUserIdentifiers(): { userId: string | null; sessionId: string } {
     }
   }
   
-  // Get session ID
+  // Get session ID - use the same key as interaction-tracker
   let sessionId = 'server';
   if (typeof window !== 'undefined') {
-    const key = 'ihute_session_id';
-    sessionId = localStorage.getItem(key) || `anon_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
-    if (!localStorage.getItem(key)) {
-      localStorage.setItem(key, sessionId);
+    try {
+      // Try to use the session ID from interaction-tracker
+      const { getSessionId } = require('@/lib/interaction-tracker');
+      sessionId = getSessionId();
+    } catch (e) {
+      // Fallback: use localStorage directly with correct key
+      const key = 'ihute-session-id'; // Match interaction-tracker key
+      sessionId = localStorage.getItem(key) || `anon_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+      if (!localStorage.getItem(key)) {
+        localStorage.setItem(key, sessionId);
+      }
     }
   }
   

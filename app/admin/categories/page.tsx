@@ -19,6 +19,7 @@ interface HomepageCategory {
   colorClass: string
   displayOrder?: number
   isActive?: boolean
+  sellerCount?: number
 }
 
 export default function CategoriesPage() {
@@ -147,6 +148,30 @@ export default function CategoriesPage() {
       }
     } catch (error) {
       console.error('Error deleting category:', error)
+    }
+  }
+
+  const handleToggleCategory = async (categoryId: string, isActive: boolean) => {
+    try {
+      const res = await fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          action: 'toggleHomepageCategory', 
+          categoryId, 
+          isActive,
+          adminEmail: user?.email || '' 
+        })
+      })
+      const data = await res.json()
+      if (data.ok) {
+        loadHomepageCategories()
+      } else {
+        alert('Error toggling category: ' + (data.error || 'Unknown error'))
+      }
+    } catch (error) {
+      console.error('Error toggling category:', error)
+      alert('Error toggling category')
     }
   }
 
@@ -291,13 +316,36 @@ export default function CategoriesPage() {
                   {homepageCategories.map((category) => (
                     <div key={category.categoryId} className="border border-gray-200 rounded-lg p-4">
                       <div className="flex items-center justify-between">
-                        <div>
-                          <h3 className="font-semibold text-gray-900">{category.categoryId}</h3>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3">
+                            <h3 className="font-semibold text-gray-900">{category.categoryId}</h3>
+                            <span className={`px-2 py-1 rounded text-xs font-medium ${
+                              category.isActive !== false
+                                ? 'bg-green-100 text-green-800'
+                                : 'bg-red-100 text-red-800'
+                            }`}>
+                              {category.isActive !== false ? 'Active' : 'Inactive'}
+                            </span>
+                            {category.sellerCount !== undefined && (
+                              <span className="px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                {category.sellerCount} {category.sellerCount === 1 ? 'supplier' : 'suppliers'}
+                              </span>
+                            )}
+                          </div>
                           <p className="text-sm text-gray-600 mt-1">
                             Name: {category.nameKey} | Order: {category.displayOrder || 0}
                           </p>
                         </div>
                         <div className="flex items-center gap-2">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={category.isActive !== false}
+                              onChange={(e) => handleToggleCategory(category.categoryId, e.target.checked)}
+                              className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                            />
+                            <span className="text-sm text-gray-700">Enable</span>
+                          </label>
                           <button
                             onClick={() => setEditingCategory(category)}
                             className="p-2 text-gray-400 hover:text-blue-600"

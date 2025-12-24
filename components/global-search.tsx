@@ -12,6 +12,7 @@ import { useCartStore } from "@/lib/cart-store"
 import { filterSuppliersByRelevance, filterProductsByRelevance } from "@/lib/search-utils"
 import { useAuthStore } from "@/lib/auth-store"
 import { getRecentSearches, recordSearch, markSearchClick, clearLocalSearchHistory } from "@/lib/search-intent-tracker"
+import { useLocationStoreEnhanced } from "@/lib/location-store-enhanced"
 
 export interface GlobalResult {
   type?: "product" | "supplier"
@@ -97,6 +98,7 @@ export function GlobalSearch({
   const sector = usePrefsStore((s) => s.sector)
   const location = usePrefsStore((s) => s.location)
   const { user } = useAuthStore()
+  const userLocation = useLocationStoreEnhanced((s) => s.location)
   const [recentSearches, setRecentSearches] = useState<string[]>([])
 
   const addToCartFn = useCartStore((s: any) => s.addOrInc ?? s.add)
@@ -157,13 +159,17 @@ export function GlobalSearch({
       console.log(`[GlobalSearch] Searching for: "${q}"`)
 
       try {
-        const params = new URLSearchParams({
-          globalSearch: q,
-          limit: String(maxSuggestions),
-          Currency: "RWF",
-          ...(sector ? { sector } : {}),
-          ...(location ? { location } : {}),
-        }).toString()
+      const locationData = useLocationStoreEnhanced.getState().location
+      const params = new URLSearchParams({
+        globalSearch: q,
+        limit: String(maxSuggestions),
+        Currency: "RWF",
+        ...(sector ? { sector } : {}),
+        ...(location ? { location } : {}),
+        // Add location-aware parameters (district and cell)
+        ...(locationData?.district ? { district: locationData.district } : {}),
+        ...(locationData?.cell ? { cell: locationData.cell } : {}),
+      }).toString()
 
         const res = await fetch(`/api/fetchSuggestions?${params}`, {
           cache: "no-store",
