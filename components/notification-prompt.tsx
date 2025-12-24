@@ -17,7 +17,6 @@ import { subscribeToPushNotifications } from "@/lib/notification-service"
 export function NotificationPrompt() {
   const [showPrompt, setShowPrompt] = useState(false)
   const [isSubscribing, setIsSubscribing] = useState(false)
-  const [hasInteracted, setHasInteracted] = useState(false)
 
   useEffect(() => {
     // Check if we should show the prompt
@@ -36,42 +35,63 @@ export function NotificationPrompt() {
       if (daysSinceDismissed < 7) return
     }
 
-    // Show prompt after user has interacted with the page
-    const handleInteraction = () => {
-      setHasInteracted(true)
-    }
-
-    // Listen for meaningful user interactions
-    document.addEventListener("click", handleInteraction, { once: true })
-    document.addEventListener("scroll", handleInteraction, { once: true })
-
-    return () => {
-      document.removeEventListener("click", handleInteraction)
-      document.removeEventListener("scroll", handleInteraction)
-    }
-  }, [])
-
-  // Show prompt 3 seconds after first interaction
-  useEffect(() => {
-    if (!hasInteracted) return
-    
+    // Show prompt 2 minutes (120 seconds) after page load to avoid conflict with location popup
     const timer = setTimeout(() => {
       setShowPrompt(true)
-    }, 3000)
+    }, 120000) // 2 minutes = 120,000ms
 
     return () => clearTimeout(timer)
-  }, [hasInteracted])
+  }, [])
 
   async function handleEnable() {
     setIsSubscribing(true)
     try {
+      console.log("[Notifications] Starting subscription process...")
+      
+      // Check if service worker is supported
+      if (!("serviceWorker" in navigator)) {
+        alert("Push notifications are not supported in this browser. Please use a modern browser like Chrome, Firefox, or Edge.")
+        setIsSubscribing(false)
+        return
+      }
+      
+      // Check if service worker is registered
+      let registration: ServiceWorkerRegistration | null = null
+      try {
+        registration = await navigator.serviceWorker.getRegistration()
+        if (!registration) {
+          console.log("[Notifications] Service worker not registered, registering now...")
+          registration = await navigator.serviceWorker.register("/sw.js")
+          console.log("[Notifications] Service worker registered, waiting for activation...")
+          // Wait for service worker to be ready
+          await navigator.serviceWorker.ready
+          console.log("[Notifications] Service worker is ready")
+        } else {
+          console.log("[Notifications] Service worker already registered")
+          // Ensure it's ready
+          await navigator.serviceWorker.ready
+        }
+      } catch (swError) {
+        console.error("[Notifications] Service worker error:", swError)
+        alert("Failed to register service worker. Please check your browser settings and try again.")
+        setIsSubscribing(false)
+        return
+      }
+      
+      // Now subscribe
       const subscription = await subscribeToPushNotifications()
       if (subscription) {
-        console.log("[Notifications] Subscribed successfully")
+        console.log("[Notifications] ✅ Subscribed successfully!")
         setShowPrompt(false)
+        // Show success message
+        alert("✅ Notifications enabled! You'll now receive alerts for price drops, new products, and more.")
+      } else {
+        console.warn("[Notifications] Subscription returned null")
+        alert("Failed to enable notifications. Please check your browser settings and try again.")
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("[Notifications] Error subscribing:", error)
+      alert(`Failed to enable notifications: ${error?.message || "Unknown error"}. Please try again.`)
     } finally {
       setIsSubscribing(false)
     }
@@ -215,6 +235,8 @@ export function NotificationToggle() {
     </div>
   )
 }
+
+
 
 
 

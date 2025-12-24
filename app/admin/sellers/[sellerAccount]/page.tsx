@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { ArrowLeft, Edit, Save, X } from 'lucide-react'
+import { useAuthStore } from '@/lib/auth-store'
 
 interface SellerProfile {
   id: number
@@ -31,6 +32,7 @@ interface SalesData {
 export default function SellerDetailPage() {
   const params = useParams()
   const router = useRouter()
+  const { user } = useAuthStore()
   const sellerAccount = params.sellerAccount as string
 
   const [profile, setProfile] = useState<SellerProfile | null>(null)
@@ -39,31 +41,49 @@ export default function SellerDetailPage() {
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(false)
   const [editData, setEditData] = useState<Partial<SellerProfile>>({})
+  const [error, setError] = useState<string | null>(null)
+  const [productPage, setProductPage] = useState(1)
+  const [productPageSize] = useState(20)
+  const [totalProducts, setTotalProducts] = useState(0)
 
   useEffect(() => {
     if (sellerAccount) {
       loadSellerDetails()
     }
-  }, [sellerAccount])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sellerAccount, productPage])
 
   const loadSellerDetails = async () => {
     try {
       setLoading(true)
+      setError(null)
       const res = await fetch('/api/admin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'getSellerDetails', sellerAccount })
+        body: JSON.stringify({ 
+          action: 'getSellerDetails', 
+          sellerAccount,
+          adminEmail: user?.email || '',
+          productPage,
+          productPageSize
+        })
       })
       const data = await res.json()
       
-      if (data.ok) {
+      if (data.ok && data.profile && Object.keys(data.profile).length > 0) {
         setProfile(data.profile)
         setSales(data.sales)
         setProducts(data.products || [])
         setEditData(data.profile)
+        setTotalProducts(data.totalProducts || 0)
+      } else {
+        setError(data.error || 'Seller not found')
+        setProfile(null)
       }
     } catch (error) {
       console.error('Error loading seller details:', error)
+      setError('Failed to load seller details')
+      setProfile(null)
     } finally {
       setLoading(false)
     }
@@ -77,6 +97,7 @@ export default function SellerDetailPage() {
         body: JSON.stringify({
           action: 'updateSeller',
           sellerAccount,
+          adminEmail: user?.email || '',
           ...editData
         })
       })
@@ -99,8 +120,18 @@ export default function SellerDetailPage() {
     return <div className="text-center py-12 text-gray-500">Loading seller details...</div>
   }
 
-  if (!profile) {
-    return <div className="text-center py-12 text-red-500">Seller not found</div>
+  if (!profile || error) {
+    return (
+      <div className="text-center py-12">
+        <div className="text-red-500 mb-4">{error || 'Seller not found'}</div>
+        <button
+          onClick={() => router.back()}
+          className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+        >
+          Go Back
+        </button>
+      </div>
+    )
   }
 
   return (
@@ -309,40 +340,74 @@ export default function SellerDetailPage() {
 
       {/* Products/Listings */}
       <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Products/Listings</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900">
+            Products/Listings {totalProducts > 0 && `(${totalProducts})`}
+          </h2>
+        </div>
         {products.length === 0 ? (
           <p className="text-gray-500">No products found</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Item Code</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Item Name</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Quantity</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Price</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Sector</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {products.map((product: any) => (
-                  <tr key={product.id}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{product.itemCode}</td>
-                    <td className="px-6 py-4 text-sm text-gray-900">{product.itemName}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{product.quantity}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {new Intl.NumberFormat('en-RW', {
-                        style: 'currency',
-                        currency: 'RWF',
-                        minimumFractionDigits: 0,
-                      }).format(product.price)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{product.sector || 'N/A'}</td>
+          <>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Item Code</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Item Name</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Quantity</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Price</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Sector</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {products.map((product: any) => (
+                    <tr key={product.id}>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{product.itemCode}</td>
+                      <td className="px-6 py-4 text-sm text-gray-900">{product.itemName}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{product.quantity}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {new Intl.NumberFormat('en-RW', {
+                          style: 'currency',
+                          currency: 'RWF',
+                          minimumFractionDigits: 0,
+                        }).format(product.price)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{product.sector || 'N/A'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            
+            {/* Pagination */}
+            {totalProducts > productPageSize && (
+              <div className="mt-4 flex items-center justify-between border-t border-gray-200 pt-4">
+                <div className="text-sm text-gray-700">
+                  Showing {(productPage - 1) * productPageSize + 1} to {Math.min(productPage * productPageSize, totalProducts)} of {totalProducts} products
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setProductPage(p => Math.max(1, p - 1))}
+                    disabled={productPage === 1}
+                    className="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Previous
+                  </button>
+                  <span className="px-3 py-2 text-sm font-medium text-gray-700">
+                    Page {productPage} of {Math.ceil(totalProducts / productPageSize)}
+                  </span>
+                  <button
+                    onClick={() => setProductPage(p => p + 1)}
+                    disabled={productPage >= Math.ceil(totalProducts / productPageSize)}
+                    className="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

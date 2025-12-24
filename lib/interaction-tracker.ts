@@ -37,17 +37,96 @@ const SESSION_KEY = "ihute-session-id"
 const MAX_LOCAL_INTERACTIONS = 500 // Limit local storage size
 
 /**
+ * Generate a browser fingerprint for session isolation
+ * This ensures each browser/device gets a unique session ID
+ */
+function generateBrowserFingerprint(): string {
+  if (typeof window === "undefined") return ""
+  
+  try {
+    const canvas = document.createElement("canvas")
+    const ctx = canvas.getContext("2d")
+    if (ctx) {
+      ctx.textBaseline = "top"
+      ctx.font = "14px 'Arial'"
+      ctx.fillText("Browser fingerprint", 2, 2)
+    }
+    
+    // Access experimental APIs with type assertion
+    const nav = navigator as Navigator & { deviceMemory?: number }
+    
+    const fingerprint = [
+      navigator.userAgent,
+      navigator.language,
+      screen.width + "x" + screen.height,
+      new Date().getTimezoneOffset(),
+      canvas.toDataURL(),
+      navigator.hardwareConcurrency || "",
+      nav.deviceMemory || "",
+    ].join("|")
+    
+    // Create a simple hash
+    let hash = 0
+    for (let i = 0; i < fingerprint.length; i++) {
+      const char = fingerprint.charCodeAt(i)
+      hash = ((hash << 5) - hash) + char
+      hash = hash & hash // Convert to 32-bit integer
+    }
+    
+    return Math.abs(hash).toString(36)
+  } catch {
+    // Fallback if fingerprinting fails
+    return Math.random().toString(36).substring(2, 9)
+  }
+}
+
+/**
  * Get or create session ID
+ * Enhanced with browser fingerprinting to ensure proper isolation
  */
 export function getSessionId(): string {
   if (typeof window === "undefined") return ""
   
   let sessionId = localStorage.getItem(SESSION_KEY)
-  if (!sessionId) {
-    sessionId = `anon_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
-    localStorage.setItem(SESSION_KEY, sessionId)
+  const browserFingerprint = generateBrowserFingerprint()
+  
+  // Validate existing session ID format (should include fingerprint)
+  if (sessionId) {
+    // Check if session ID is in the new format (includes fingerprint)
+    // Old format: anon_TIMESTAMP_RANDOM
+    // New format: anon_TIMESTAMP_FINGERPRINT_RANDOM
+    const parts = sessionId.split("_")
+    if (parts.length >= 3 && parts[0] === "anon") {
+      // If fingerprint doesn't match, generate new session (different browser/device)
+      if (parts.length >= 4 && parts[2] !== browserFingerprint) {
+        console.warn("[Session] Browser fingerprint mismatch, generating new session")
+        sessionId = null // Force regeneration
+      }
+    } else {
+      // Invalid format, regenerate
+      sessionId = null
+    }
   }
+  
+  if (!sessionId) {
+    // Generate new session ID with fingerprint
+    const timestamp = Date.now()
+    const random = Math.random().toString(36).substring(2, 11)
+    sessionId = `anon_${timestamp}_${browserFingerprint}_${random}`
+    localStorage.setItem(SESSION_KEY, sessionId)
+    console.log("[Session] Generated new session ID:", sessionId.substring(0, 50) + "...")
+  }
+  
   return sessionId
+}
+
+/**
+ * Clear session (useful for testing or logout)
+ */
+export function clearSession(): void {
+  if (typeof window === "undefined") return
+  localStorage.removeItem(SESSION_KEY)
+  localStorage.removeItem(STORAGE_KEY)
 }
 
 /**

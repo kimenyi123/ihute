@@ -109,9 +109,9 @@ export function CategoryGrid() {
       }
       
       if (data.ok && data.categories && data.categories.length > 0) {
-        // Filter only active categories and sort by display order
+        // Filter only active categories that have suppliers, and sort by display order
         const activeCategories = data.categories
-          .filter((cat: Category) => cat.isActive !== false)
+          .filter((cat: Category) => cat.isActive !== false && (cat as any).sellerCount > 0)
           .sort((a: Category, b: Category) => (a.displayOrder || 0) - (b.displayOrder || 0))
         setCategories(activeCategories)
       }
@@ -141,34 +141,55 @@ export function CategoryGrid() {
           <p className="mt-2 text-sm md:text-base text-muted-foreground">{t("findWhatYouNeed")}</p>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8">
-          {categories.map((category) => {
-            return (
-              <Link key={category.categoryId} href={`/category/${category.categoryId}`}>
-                <Card className="group h-full transition-all hover:shadow-lg hover:scale-105 overflow-hidden">
-                  <CardContent className="flex flex-col items-center justify-center p-3 md:p-4 text-center">
-                    <div className={`mb-2 rounded-xl overflow-hidden ${category.colorClass || "bg-gray-500/10"} w-full aspect-square relative`}>
-                      <Image
-                        src={category.imageUrl || "/placeholder.svg"}
-                        alt={t(category.nameKey)}
-                        fill
-                        className="object-cover"
-                      />
-                    </div>
-                    <h3 className="text-xs md:text-sm font-semibold text-foreground group-hover:text-primary line-clamp-2">
-                      {t(category.nameKey)}
-                    </h3>
-                    {category.descKey && (
-                      <p className="mt-1 text-[10px] md:text-xs text-muted-foreground line-clamp-1 hidden sm:block">
-                        {t(category.descKey)}
-                      </p>
-                    )}
-                  </CardContent>
-                </Card>
-              </Link>
-            )
-          })}
-        </div>
+        {categories.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">
+            <p>No categories available at the moment.</p>
+          </div>
+        ) : (
+          <div className="flex flex-wrap justify-center items-start gap-3 sm:gap-4 md:gap-5">
+            {categories.map((category) => {
+              // Calculate responsive width based on category count
+              const getCategoryWidth = () => {
+                const count = categories.length
+                if (count === 1) return "w-full max-w-[280px]"
+                if (count === 2) return "w-full sm:w-[calc(50%-0.75rem)] max-w-[240px]"
+                if (count === 3) return "w-full sm:w-[calc(50%-0.75rem)] md:w-[calc(33.333%-1rem)] max-w-[220px]"
+                if (count === 4) return "w-full sm:w-[calc(50%-0.75rem)] md:w-[calc(33.333%-1rem)] lg:w-[calc(25%-1rem)] max-w-[200px]"
+                if (count <= 6) return "w-full sm:w-[calc(50%-0.75rem)] md:w-[calc(33.333%-1rem)] lg:w-[calc(25%-1rem)] xl:w-[calc(20%-1rem)] max-w-[180px]"
+                return "w-full sm:w-[calc(50%-0.75rem)] md:w-[calc(33.333%-1rem)] lg:w-[calc(25%-1rem)] xl:w-[calc(20%-1rem)] 2xl:w-[calc(16.666%-1rem)] max-w-[160px]"
+              }
+              
+              return (
+                <Link 
+                  key={category.categoryId} 
+                  href={`/category/${category.categoryId}`}
+                  className={getCategoryWidth()}
+                >
+                  <Card className="group h-full transition-all hover:shadow-lg hover:scale-105 overflow-hidden">
+                    <CardContent className="flex flex-col items-center justify-center p-3 md:p-4 text-center">
+                      <div className={`mb-2 rounded-xl overflow-hidden ${category.colorClass || "bg-gray-500/10"} w-full aspect-square relative`}>
+                        <Image
+                          src={category.imageUrl || "/placeholder.svg"}
+                          alt={t(category.nameKey)}
+                          fill
+                          className="object-cover"
+                        />
+                      </div>
+                      <h3 className="text-xs md:text-sm font-semibold text-foreground group-hover:text-primary line-clamp-2">
+                        {t(category.nameKey)}
+                      </h3>
+                      {category.descKey && (
+                        <p className="mt-1 text-[10px] md:text-xs text-muted-foreground line-clamp-1 hidden sm:block">
+                          {t(category.descKey)}
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+                </Link>
+              )
+            })}
+          </div>
+        )}
       </div>
     </section>
   )
