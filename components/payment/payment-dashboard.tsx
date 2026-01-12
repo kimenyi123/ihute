@@ -10,27 +10,30 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
 } from '@/components/ui/table';
-import { 
-  AlertCircle, 
-  CheckCircle, 
-  Clock, 
-  XCircle, 
-  Download, 
+import {
+  AlertCircle,
+  CheckCircle,
+  Clock,
+  XCircle,
+  Download,
   RefreshCw,
   TrendingUp,
   DollarSign,
   Users,
   Activity,
   Trash2,
-  Eye
+  Eye,
+  Search,
+  X
 } from 'lucide-react';
 // import { PaymentDashboardDebug } from './payment-dashboard-debug';
 import { WebhookMonitor } from './webhook-monitor';
@@ -38,9 +41,44 @@ import { WebhookMonitor } from './webhook-monitor';
 import { paymentDashboardApi } from '@/lib/payment-dashboard-api';
 import type { Transaction, SummaryStats, Alert, HealthStatus } from '@/lib/payment-dashboard-api';
 
-// Types imported from payment-dashboard-api.ts
+// Types
+interface PaymentDashboardFilters {
+  status?: string;
+  channel?: string;
+  from_date?: string;
+  to_date?: string;
+  search?: string;
+}
 
-export function PaymentDashboard() {
+interface PaymentDashboardProps {
+  initialFilters?: Partial<PaymentDashboardFilters>;
+}
+
+/**
+ * Convert UTC timestamp to local time for display
+ * UrubutoPay sends timestamps in UTC (e.g., "2026-01-10 08:29:33" or "2026-01-10T08:29:33.609Z")
+ * but we need to display them in local timezone (CAT/UTC+2)
+ */
+const formatUTCTimestamp = (timestamp: string | null | undefined): string => {
+  if (!timestamp) return 'N/A';
+
+  try {
+    // Handle ISO format with Z (UTC indicator)
+    if (timestamp.includes('Z') || timestamp.includes('T')) {
+      return new Date(timestamp).toLocaleString();
+    }
+
+    // Handle format "YYYY-MM-DD HH:MM:SS" (assume UTC from UrubutoPay)
+    // Append 'Z' to explicitly mark as UTC
+    const dateObj = new Date(timestamp + 'Z');
+    return dateObj.toLocaleString();
+  } catch (error) {
+    console.error('Error parsing timestamp:', timestamp, error);
+    return timestamp;
+  }
+};
+
+export default function PaymentDashboard({ initialFilters }: PaymentDashboardProps) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [summary, setSummary] = useState<SummaryStats | null>(null);
   const [alerts, setAlerts] = useState<Alert[]>([]);
@@ -48,9 +86,10 @@ export function PaymentDashboard() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Filters
-  const [statusFilter, setStatusFilter] = useState<string>('');
-  const [channelFilter, setChannelFilter] = useState<string>('');
+  // Filters - no date filter by default to show ALL transactions
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [channelFilter, setChannelFilter] = useState<string>('all');
+  // No default date filter - show all transactions
   const [fromDate, setFromDate] = useState<string>('');
   const [toDate, setToDate] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -74,6 +113,10 @@ export function PaymentDashboard() {
   // Transaction details modal
   const [selectedTransactionDetails, setSelectedTransactionDetails] = useState<any>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
+
+  // Alert details modal
+  const [showAlertModal, setShowAlertModal] = useState(false);
+  const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
 
   useEffect(() => {
     loadDashboardData();
@@ -424,8 +467,8 @@ export function PaymentDashboard() {
   }
 
   // Show error state if health check failed
-  const hasConnectionError = health?.issues?.some(issue => 
-    issue?.toLowerCase().includes('unable to connect') || 
+  const hasConnectionError = health?.issues?.some(issue =>
+    issue?.toLowerCase().includes('unable to connect') ||
     issue?.toLowerCase().includes('network error')
   ) || false;
 
@@ -468,438 +511,490 @@ export function PaymentDashboard() {
 
         <TabsContent value="transactions" className="space-y-6">
           {/* Health Status & Alerts */}
-      {health && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {health && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Activity className="h-5 w-5" />
+                    System Health
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-600">Status</span>
+                      <Badge variant={health.status === 'healthy' ? 'default' : 'destructive'}>
+                        {health.status.toUpperCase()}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-600">Database</span>
+                      <span className="text-sm">{health.database}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-600">Failure Rate</span>
+                      <span className="text-sm">{health.failure_rate.toFixed(2)}%</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-600">Pending Transactions</span>
+                      <span className="text-sm">{health.pending_transactions}</span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {alerts.length > 0 && (
+                <Card className="cursor-pointer hover:shadow-lg transition-shadow" onClick={() => {
+                  setSelectedAlert(alerts[0])
+                  setShowAlertModal(true)
+                }}>
+                  <CardHeader>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <AlertCircle className="h-5 w-5 text-orange-500" />
+                      Active Alerts ({alerts.length})
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {alerts.slice(0, 3).map((alert, idx) => (
+                        <Alert key={idx} variant={getSeverityColor(alert.severity) as any}>
+                          <AlertCircle className="h-4 w-4" />
+                          <AlertTitle>{alert.type}</AlertTitle>
+                          <AlertDescription>{alert.message}</AlertDescription>
+                        </Alert>
+                      ))}
+                    </div>
+                    <p className="text-sm text-gray-500 mt-3">Click to see details →</p>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          )}
+
+          {/* Summary Statistics */}
+          {summary && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Total Transactions</CardTitle>
+                  <Activity className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{summary.total_transactions}</div>
+                  <p className="text-xs text-muted-foreground">
+                    {summary.success_rate.toFixed(1)}% success rate
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Total Amount</CardTitle>
+                  <DollarSign className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">
+                    {new Intl.NumberFormat('en-RW', {
+                      style: 'currency',
+                      currency: 'RWF',
+                      minimumFractionDigits: 0
+                    }).format(summary.total_amount)}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Avg: {new Intl.NumberFormat('en-RW', {
+                      style: 'currency',
+                      currency: 'RWF',
+                      minimumFractionDigits: 0
+                    }).format(summary.avg_amount)}
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Successful</CardTitle>
+                  <CheckCircle className="h-4 w-4 text-green-600" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-green-600">{summary.successful}</div>
+                  <p className="text-xs text-muted-foreground">
+                    {summary.failed} failed, {summary.pending} pending
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Unique Payers</CardTitle>
+                  <Users className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{summary.unique_payers}</div>
+                  <p className="text-xs text-muted-foreground">
+                    {summary.payment_channels} payment channels
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {/* Filters and Actions */}
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Activity className="h-5 w-5" />
-                System Health
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">Status</span>
-                  <Badge variant={health.status === 'healthy' ? 'default' : 'destructive'}>
-                    {health.status.toUpperCase()}
-                  </Badge>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Transactions</CardTitle>
+                  <CardDescription>View and manage payment transactions</CardDescription>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">Database</span>
-                  <span className="text-sm">{health.database}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">Failure Rate</span>
-                  <span className="text-sm">{health.failure_rate.toFixed(2)}%</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">Pending Transactions</span>
-                  <span className="text-sm">{health.pending_transactions}</span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {alerts.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <AlertCircle className="h-5 w-5" />
-                  Active Alerts ({alerts.length})
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  {alerts.slice(0, 3).map((alert, idx) => (
-                    <Alert key={idx} variant={getSeverityColor(alert.severity) as any}>
-                      <AlertCircle className="h-4 w-4" />
-                      <AlertTitle>{alert.type}</AlertTitle>
-                      <AlertDescription>{alert.message}</AlertDescription>
-                    </Alert>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      )}
-
-      {/* Summary Statistics */}
-      {summary && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Transactions</CardTitle>
-              <Activity className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{summary.total_transactions}</div>
-              <p className="text-xs text-muted-foreground">
-                {summary.success_rate.toFixed(1)}% success rate
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Amount</CardTitle>
-              <DollarSign className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {new Intl.NumberFormat('en-RW', { 
-                  style: 'currency', 
-                  currency: 'RWF',
-                  minimumFractionDigits: 0 
-                }).format(summary.total_amount)}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Avg: {new Intl.NumberFormat('en-RW', { 
-                  style: 'currency', 
-                  currency: 'RWF',
-                  minimumFractionDigits: 0 
-                }).format(summary.avg_amount)}
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Successful</CardTitle>
-              <CheckCircle className="h-4 w-4 text-green-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-green-600">{summary.successful}</div>
-              <p className="text-xs text-muted-foreground">
-                {summary.failed} failed, {summary.pending} pending
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Unique Payers</CardTitle>
-              <Users className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{summary.unique_payers}</div>
-              <p className="text-xs text-muted-foreground">
-                {summary.payment_channels} payment channels
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Filters and Actions */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>Transactions</CardTitle>
-              <CardDescription>View and manage payment transactions</CardDescription>
-            </div>
-            <div className="flex gap-2">
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={loadDashboardData}
-                disabled={refreshing}
-              >
-                <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
-                Refresh
-              </Button>
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={handleCheckGhost}
-                disabled={checkingGhost || transactions.length === 0}
-              >
-                <Activity className={`h-4 w-4 mr-2 ${checkingGhost ? 'animate-spin' : ''}`} />
-                {checkingGhost ? 'Checking...' : 'Check Ghost'}
-              </Button>
-              {ghostResults && ghostResults.ghost && ghostResults.ghost.length > 0 && (
-                <Button 
-                  variant="destructive" 
-                  size="sm" 
-                  onClick={handleDeleteGhost}
-                  disabled={deletingGhost}
-                >
-                  <XCircle className={`h-4 w-4 mr-2 ${deletingGhost ? 'animate-spin' : ''}`} />
-                  {deletingGhost ? 'Deleting...' : `Delete ${ghostResults.ghost.length} Ghost`}
-                </Button>
-              )}
-              {selectedTransactions.size > 0 && (
-                <Button 
-                  variant="destructive" 
-                  size="sm" 
-                  onClick={handleBulkDelete}
-                  disabled={deletingGhost}
-                >
-                  <XCircle className={`h-4 w-4 mr-2 ${deletingGhost ? 'animate-spin' : ''}`} />
-                  {deletingGhost ? 'Deleting...' : `Delete ${selectedTransactions.size} Selected`}
-                </Button>
-              )}
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={() => handleExport('csv')}
-              >
-                <Download className="h-4 w-4 mr-2" />
-                Export CSV
-              </Button>
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={() => handleExport('json')}
-              >
-                <Download className="h-4 w-4 mr-2" />
-                Export JSON
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-4">
-            <div>
-              <Label htmlFor="status">Status</Label>
-              <Select value={statusFilter || "all"} onValueChange={(value) => setStatusFilter(value === "all" ? "" : value)}>
-                <SelectTrigger id="status">
-                  <SelectValue placeholder="All Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Status</SelectItem>
-                  <SelectItem value="VALID">Valid</SelectItem>
-                  <SelectItem value="PENDING">Pending</SelectItem>
-                  <SelectItem value="FAILED">Failed</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="channel">Channel</Label>
-              <Select value={channelFilter || "all"} onValueChange={(value) => setChannelFilter(value === "all" ? "" : value)}>
-                <SelectTrigger id="channel">
-                  <SelectValue placeholder="All Channels" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Channels</SelectItem>
-                  <SelectItem value="MOMO">MOMO</SelectItem>
-                  <SelectItem value="AIRTEL_MONEY">Airtel Money</SelectItem>
-                  <SelectItem value="CARD">Card</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="fromDate">From Date</Label>
-              <Input
-                id="fromDate"
-                type="date"
-                value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
-              />
-            </div>
-            <div>
-              <Label htmlFor="toDate">To Date</Label>
-              <Input
-                id="toDate"
-                type="date"
-                value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
-              />
-            </div>
-            <div>
-              <Label htmlFor="search">Search (Live)</Label>
-              <Input
-                id="search"
-                placeholder="Transaction ID, Slip Number, Payer Code, or Internal ID"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full"
-              />
-              {searchQuery && searchQuery !== debouncedSearchQuery && (
-                <p className="text-xs text-gray-500 mt-1">Searching...</p>
-              )}
-            </div>
-          </div>
-
-          {/* Ghost Transaction Results */}
-          {ghostResults && (
-            <Alert className={`mb-4 ${ghostResults.ghost && ghostResults.ghost.length > 0 ? 'border-yellow-500 bg-yellow-50' : 'border-green-500 bg-green-50'}`}>
-              <AlertCircle className="h-4 w-4" />
-              <AlertTitle>Ghost Transaction Check Results</AlertTitle>
-              <AlertDescription>
-                <div className="mt-2">
-                  <p>Total Checked: {ghostResults.total_checked || 0}</p>
-                  <p className={ghostResults.ghost && ghostResults.ghost.length > 0 ? 'text-yellow-700 font-semibold' : 'text-green-700'}>
-                    {ghostResults.ghost && ghostResults.ghost.length > 0 
-                      ? `⚠️ Found ${ghostResults.ghost.length} ghost transaction(s) not in database`
-                      : '✅ All transactions exist in database'}
-                  </p>
-                  {ghostResults.ghost && ghostResults.ghost.length > 0 && (
-                    <div className="mt-2 text-xs">
-                      <p className="font-semibold">Ghost Transactions:</p>
-                      <ul className="list-disc list-inside mt-1">
-                        {ghostResults.ghost.slice(0, 5).map((tx: any, idx: number) => (
-                          <li key={idx}>{tx.transaction_id}</li>
-                        ))}
-                        {ghostResults.ghost.length > 5 && (
-                          <li>... and {ghostResults.ghost.length - 5} more</li>
-                        )}
-                      </ul>
-                    </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={loadDashboardData}
+                    disabled={refreshing}
+                  >
+                    <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+                    Refresh
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCheckGhost}
+                    disabled={checkingGhost || transactions.length === 0}
+                  >
+                    <Activity className={`h-4 w-4 mr-2 ${checkingGhost ? 'animate-spin' : ''}`} />
+                    {checkingGhost ? 'Checking...' : 'Check Ghost'}
+                  </Button>
+                  {ghostResults && ghostResults.ghost && ghostResults.ghost.length > 0 && (
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={handleDeleteGhost}
+                      disabled={deletingGhost}
+                    >
+                      <XCircle className={`h-4 w-4 mr-2 ${deletingGhost ? 'animate-spin' : ''}`} />
+                      {deletingGhost ? 'Deleting...' : `Delete ${ghostResults.ghost.length} Ghost`}
+                    </Button>
                   )}
+                  {selectedTransactions.size > 0 && (
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={handleBulkDelete}
+                      disabled={deletingGhost}
+                    >
+                      <XCircle className={`h-4 w-4 mr-2 ${deletingGhost ? 'animate-spin' : ''}`} />
+                      {deletingGhost ? 'Deleting...' : `Delete ${selectedTransactions.size} Selected`}
+                    </Button>
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleExport('csv')}
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    Export CSV
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleExport('json')}
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    Export JSON
+                  </Button>
                 </div>
-              </AlertDescription>
-            </Alert>
-          )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              {/* Filters */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
+                {/* Status Filter */}
+                <div>
+                  <label className="text-xs font-medium text-gray-700 mb-1.5 block">
+                    Status
+                  </label>
+                  <Select value={statusFilter} onValueChange={setStatusFilter}>
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="All Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Status</SelectItem>
+                      <SelectItem value="VALID">✓ Valid</SelectItem>
+                      <SelectItem value="PENDING">⏳ Pending</SelectItem>
+                      <SelectItem value="FAILED">✗ Failed</SelectItem>
+                      <SelectItem value="INITIATED">→ Initiated</SelectItem>
+                      <SelectItem value="REVERSED">↩ Reversed</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
-          {/* Transactions Table */}
-          <div className="border rounded-lg">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-12">
-                    <input
-                      type="checkbox"
-                      checked={selectedTransactions.size === transactions.length && transactions.length > 0}
-                      onChange={toggleSelectAll}
-                      className="cursor-pointer"
+                {/* Channel Filter */}
+                <div>
+                  <label className="text-xs font-medium text-gray-700 mb-1.5 block">
+                    Channel
+                  </label>
+                  <Select value={channelFilter} onValueChange={setChannelFilter}>
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="All Channels" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Channels</SelectItem>
+                      <SelectItem value="MOMO">📱 MOMO</SelectItem>
+                      <SelectItem value="AIRTEL">📱 Airtel</SelectItem>
+                      <SelectItem value="CARD">💳 Card</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* From Date */}
+                <div>
+                  <label className="text-xs font-medium text-gray-700 mb-1.5 block">
+                    From Date
+                  </label>
+                  <Input
+                    type="date"
+                    value={fromDate}
+                    onChange={(e) => setFromDate(e.target.value)}
+                    className="h-9"
+                  />
+                </div>
+
+                {/* To Date */}
+                <div>
+                  <label className="text-xs font-medium text-gray-700 mb-1.5 block">
+                    To Date
+                  </label>
+                  <Input
+                    type="date"
+                    value={toDate}
+                    onChange={(e) => setToDate(e.target.value)}
+                    placeholder="mm/dd/yyyy"
+                    className="h-9"
+                  />
+                </div>
+
+                {/* Search */}
+                <div>
+                  <label className="text-xs font-medium text-gray-700 mb-1.5 block">
+                    Search
+                  </label>
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
+                    <Input
+                      type="text"
+                      placeholder="TX ID, Slip, Payer..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="h-9 pl-8"
                     />
-                  </TableHead>
-                  <TableHead>Transaction ID</TableHead>
-                  <TableHead>Payer</TableHead>
-                  <TableHead>Amount</TableHead>
-                  <TableHead>Channel</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead className="w-20">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {transactions.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={8} className="text-center py-8 text-gray-500">
-                      No transactions found
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  transactions.map((tx) => (
-                    <TableRow key={tx.transaction_id}>
-                      <TableCell>
+                  </div>
+                </div>
+              </div>
+
+              {/* Clear Filters Button */}
+              {(statusFilter !== 'all' || channelFilter !== 'all' || fromDate || toDate || searchQuery) && (
+                <div className="mb-4">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setStatusFilter('all');
+                      setChannelFilter('all');
+                      setFromDate('');
+                      setToDate('');
+                      setSearchQuery('');
+                    }}
+                    className="text-gray-600 hover:text-gray-900"
+                  >
+                    <X className="h-4 w-4 mr-1" />
+                    Clear All Filters
+                  </Button>
+                </div>
+              )}
+
+              {/* Ghost Transaction Results */}
+              {ghostResults && (
+                <Alert className={`mb-4 ${ghostResults.ghost && ghostResults.ghost.length > 0 ? 'border-yellow-500 bg-yellow-50' : 'border-green-500 bg-green-50'}`}>
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertTitle>Ghost Transaction Check Results</AlertTitle>
+                  <AlertDescription>
+                    <div className="mt-2">
+                      <p>Total Checked: {ghostResults.total_checked || 0}</p>
+                      <p className={ghostResults.ghost && ghostResults.ghost.length > 0 ? 'text-yellow-700 font-semibold' : 'text-green-700'}>
+                        {ghostResults.ghost && ghostResults.ghost.length > 0
+                          ? `⚠️ Found ${ghostResults.ghost.length} ghost transaction(s) not in database`
+                          : '✅ All transactions exist in database'}
+                      </p>
+                      {ghostResults.ghost && ghostResults.ghost.length > 0 && (
+                        <div className="mt-2 text-xs">
+                          <p className="font-semibold">Ghost Transactions:</p>
+                          <ul className="list-disc list-inside mt-1">
+                            {ghostResults.ghost.slice(0, 5).map((tx: any, idx: number) => (
+                              <li key={idx}>{tx.transaction_id}</li>
+                            ))}
+                            {ghostResults.ghost.length > 5 && (
+                              <li>... and {ghostResults.ghost.length - 5} more</li>
+                            )}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {/* Transactions Table */}
+              <div className="border rounded-lg">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-12">
                         <input
                           type="checkbox"
-                          checked={selectedTransactions.has(tx.transaction_id)}
-                          onChange={() => toggleSelectTransaction(tx.transaction_id)}
+                          checked={selectedTransactions.size === transactions.length && transactions.length > 0}
+                          onChange={toggleSelectAll}
                           className="cursor-pointer"
                         />
-                      </TableCell>
-                      <TableCell className="font-mono text-xs">
-                        {tx.transaction_id ? (tx.transaction_id.length > 20 ? tx.transaction_id.substring(0, 20) + '...' : tx.transaction_id) : 'N/A'}
-                      </TableCell>
-                      <TableCell>
-                        <div>
-                          <div className="font-medium">{tx.payer_names || tx.payer_code}</div>
-                          <div className="text-xs text-gray-500">{tx.payer_code}</div>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        {new Intl.NumberFormat('en-RW', { 
-                          style: 'currency', 
-                          currency: tx.currency || 'RWF',
-                          minimumFractionDigits: 0 
-                        }).format(tx.amount)}
-                      </TableCell>
-                      <TableCell>{tx.payment_channel_name || tx.payment_channel}</TableCell>
-                      <TableCell>{getStatusBadge(tx.status)}</TableCell>
-                      <TableCell className="text-xs">
-                        {tx.payment_date_time 
-                          ? new Date(tx.payment_date_time).toLocaleString()
-                          : tx.created_at ? new Date(tx.created_at).toLocaleString() : 'N/A'}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleViewDetails(tx.transaction_id)}
-                            disabled={loadingDetails}
-                            className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                            title="View Details"
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDeleteTransaction(tx.transaction_id)}
-                            disabled={deletingTransactions.has(tx.transaction_id)}
-                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                            title="Delete"
-                          >
-                            <Trash2 className={`h-4 w-4 ${deletingTransactions.has(tx.transaction_id) ? 'animate-spin' : ''}`} />
-                          </Button>
-                        </div>
-                      </TableCell>
+                      </TableHead>
+                      <TableHead>Transaction ID</TableHead>
+                      <TableHead>Payer</TableHead>
+                      <TableHead>Amount</TableHead>
+                      <TableHead>Channel</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Date</TableHead>
+                      <TableHead className="w-20">Actions</TableHead>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
+                  </TableHeader>
+                  <TableBody>
+                    {transactions.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={8} className="text-center py-8 text-gray-500">
+                          No transactions found
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      transactions.map((tx) => (
+                        <TableRow key={tx.transaction_id}>
+                          <TableCell>
+                            <input
+                              type="checkbox"
+                              checked={selectedTransactions.has(tx.transaction_id)}
+                              onChange={() => toggleSelectTransaction(tx.transaction_id)}
+                              className="cursor-pointer"
+                            />
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">
+                            {tx.transaction_id || 'N/A'}
+                          </TableCell>
+                          <TableCell>
+                            <div>
+                              <div className="font-medium">
+                                {tx.payer_names || tx.payer_email || tx.payer_code || 'N/A'}
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                {tx.payer_code}
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            {new Intl.NumberFormat('en-RW', {
+                              style: 'currency',
+                              currency: tx.currency || 'RWF',
+                              minimumFractionDigits: 0
+                            }).format(tx.amount)}
+                          </TableCell>
+                          <TableCell>{tx.payment_channel_name || tx.payment_channel}</TableCell>
+                          <TableCell>{getStatusBadge(tx.status)}</TableCell>
+                          <TableCell className="text-xs" title={tx.payment_date_time || tx.created_at || ''}>
+                            {tx.payment_date_time
+                              ? formatUTCTimestamp(tx.payment_date_time)
+                              : tx.created_at ? new Date(tx.created_at).toLocaleString() : 'N/A'}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleViewDetails(tx.transaction_id)}
+                                disabled={loadingDetails}
+                                className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                                title="View Details"
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDeleteTransaction(tx.transaction_id)}
+                                disabled={deletingTransactions.has(tx.transaction_id)}
+                                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                title="Delete"
+                              >
+                                <Trash2 className={`h-4 w-4 ${deletingTransactions.has(tx.transaction_id) ? 'animate-spin' : ''}`} />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
 
-          {/* Pagination */}
-          {totalTransactions > 0 && (
-            <div className="flex items-center justify-between mt-4">
-              <div className="text-sm text-gray-600">
-                Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, totalTransactions)} of {totalTransactions} transactions
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                  disabled={currentPage === 1}
-                >
-                  Previous
-                </Button>
-                <div className="flex items-center gap-1">
-                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                    let pageNum;
-                    if (totalPages <= 5) {
-                      pageNum = i + 1;
-                    } else if (currentPage <= 3) {
-                      pageNum = i + 1;
-                    } else if (currentPage >= totalPages - 2) {
-                      pageNum = totalPages - 4 + i;
-                    } else {
-                      pageNum = currentPage - 2 + i;
-                    }
-                    return (
-                      <Button
-                        key={pageNum}
-                        variant={currentPage === pageNum ? "default" : "outline"}
-                        size="sm"
-                        onClick={() => setCurrentPage(pageNum)}
-                      >
-                        {pageNum}
-                      </Button>
-                    );
-                  })}
+              {/* Pagination */}
+              {totalTransactions > 0 && (
+                <div className="flex items-center justify-between mt-4">
+                  <div className="text-sm text-gray-600">
+                    Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, totalTransactions)} of {totalTransactions} transactions
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                      disabled={currentPage === 1}
+                    >
+                      Previous
+                    </Button>
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                        let pageNum;
+                        if (totalPages <= 5) {
+                          pageNum = i + 1;
+                        } else if (currentPage <= 3) {
+                          pageNum = i + 1;
+                        } else if (currentPage >= totalPages - 2) {
+                          pageNum = totalPages - 4 + i;
+                        } else {
+                          pageNum = currentPage - 2 + i;
+                        }
+                        return (
+                          <Button
+                            key={pageNum}
+                            variant={currentPage === pageNum ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => setCurrentPage(pageNum)}
+                          >
+                            {pageNum}
+                          </Button>
+                        );
+                      })}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                      disabled={currentPage === totalPages || !hasMore}
+                    >
+                      Next
+                    </Button>
+                  </div>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                  disabled={currentPage === totalPages || !hasMore}
-                >
-                  Next
-                </Button>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="webhook" className="space-y-6">
@@ -932,10 +1027,10 @@ export function PaymentDashboard() {
                 <div>
                   <Label className="text-xs text-gray-500">Amount (Stored in DB)</Label>
                   <div className="font-semibold">
-                    {new Intl.NumberFormat('en-RW', { 
-                      style: 'currency', 
+                    {new Intl.NumberFormat('en-RW', {
+                      style: 'currency',
                       currency: selectedTransactionDetails.currency || 'RWF',
-                      minimumFractionDigits: 0 
+                      minimumFractionDigits: 0
                     }).format(selectedTransactionDetails.amount)}
                   </div>
                 </div>
@@ -947,17 +1042,16 @@ export function PaymentDashboard() {
                   <>
                     <div>
                       <Label className="text-xs text-gray-500">Amount (From UrubutoPay Callback)</Label>
-                      <div className={`font-semibold ${
-                        selectedTransactionDetails.raw_callback_amount !== selectedTransactionDetails.amount 
-                          ? 'text-red-600' 
-                          : 'text-green-600'
-                      }`}>
-                        {selectedTransactionDetails.raw_callback_amount !== undefined 
-                          ? new Intl.NumberFormat('en-RW', { 
-                              style: 'currency', 
-                              currency: selectedTransactionDetails.currency || 'RWF',
-                              minimumFractionDigits: 0 
-                            }).format(selectedTransactionDetails.raw_callback_amount)
+                      <div className={`font-semibold ${selectedTransactionDetails.raw_callback_amount !== selectedTransactionDetails.amount
+                        ? 'text-red-600'
+                        : 'text-green-600'
+                        }`}>
+                        {selectedTransactionDetails.raw_callback_amount !== undefined
+                          ? new Intl.NumberFormat('en-RW', {
+                            style: 'currency',
+                            currency: selectedTransactionDetails.currency || 'RWF',
+                            minimumFractionDigits: 0
+                          }).format(selectedTransactionDetails.raw_callback_amount)
                           : 'N/A'}
                         {selectedTransactionDetails.raw_callback_amount !== selectedTransactionDetails.amount && (
                           <span className="text-xs ml-2">⚠️ MISMATCH!</span>
@@ -977,37 +1071,180 @@ export function PaymentDashboard() {
                 )}
               </div>
 
-              {selectedTransactionDetails.urubuto_verified && selectedTransactionDetails.urubuto_data && (
-                <div className="border-t pt-4">
-                  <Label className="text-xs text-gray-500 mb-2 block">✅ Verified with UrubutoPay API</Label>
-                  <pre className="bg-gray-50 p-3 rounded text-xs overflow-auto">
-                    {JSON.stringify(selectedTransactionDetails.urubuto_data, null, 2)}
-                  </pre>
-                </div>
-              )}
+              {/* Collapsible Technical Details */}
+              <Accordion type="multiple" className="w-full">
+                {selectedTransactionDetails.urubuto_verified && selectedTransactionDetails.urubuto_data && (
+                  <AccordionItem value="urubuto-verified">
+                    <AccordionTrigger className="text-sm font-medium">
+                      ✅ Verified with UrubutoPay API
+                    </AccordionTrigger>
+                    <AccordionContent>
+                      <div className="space-y-2 p-3 bg-green-50 rounded-lg">
+                        {selectedTransactionDetails.urubuto_data.data && (
+                          <div className="grid grid-cols-2 gap-3 text-sm">
+                            <div>
+                              <span className="text-gray-600">Status:</span>
+                              <span className="ml-2 font-medium">{selectedTransactionDetails.urubuto_data.data.transaction_status}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-600">Slip Number:</span>
+                              <span className="ml-2 font-mono text-xs">{selectedTransactionDetails.urubuto_data.data.slip_number || 'N/A'}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-600">Channel Ref:</span>
+                              <span className="ml-2 font-mono text-xs">{selectedTransactionDetails.urubuto_data.data.payment_channel_transaction_ref_number || 'N/A'}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-600">Internal TX ID:</span>
+                              <span className="ml-2 font-mono text-xs">{selectedTransactionDetails.urubuto_data.data.internal_transaction_id || 'N/A'}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-600">Phone:</span>
+                              <span className="ml-2">{selectedTransactionDetails.urubuto_data.data.phone_number || 'N/A'}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-600">Email:</span>
+                              <span className="ml-2 text-xs">{selectedTransactionDetails.urubuto_data.data.payer_email || 'N/A'}</span>
+                            </div>
+                          </div>
+                        )}
+                        <details className="mt-3">
+                          <summary className="cursor-pointer text-xs text-gray-600 hover:text-gray-900">Raw JSON</summary>
+                          <pre className="mt-2 bg-white p-2 rounded text-xs overflow-auto">
+                            {JSON.stringify(selectedTransactionDetails.urubuto_data, null, 2)}
+                          </pre>
+                        </details>
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                )}
 
-              {selectedTransactionDetails.raw_callback_data && (
-                <div className="border-t pt-4">
-                  <Label className="text-xs text-gray-500 mb-2 block">Raw Callback Data (What UrubutoPay Sent)</Label>
-                  <pre className="bg-gray-50 p-3 rounded text-xs overflow-auto">
-                    {typeof selectedTransactionDetails.raw_callback_data === 'string'
-                      ? selectedTransactionDetails.raw_callback_data
-                      : JSON.stringify(selectedTransactionDetails.raw_callback_data, null, 2)}
-                  </pre>
-                </div>
-              )}
+                {selectedTransactionDetails.raw_callback_data && (
+                  <AccordionItem value="callback-data">
+                    <AccordionTrigger className="text-sm font-medium">
+                      📨 Raw Callback Data (What UrubutoPay Sent)
+                    </AccordionTrigger>
+                    <AccordionContent>
+                      <pre className="bg-gray-50 p-3 rounded text-xs overflow-auto">
+                        {typeof selectedTransactionDetails.raw_callback_data === 'string'
+                          ? selectedTransactionDetails.raw_callback_data
+                          : JSON.stringify(selectedTransactionDetails.raw_callback_data, null, 2)}
+                      </pre>
+                    </AccordionContent>
+                  </AccordionItem>
+                )}
 
-              <div className="border-t pt-4">
-                <Label className="text-xs text-gray-500 mb-2 block">Full Transaction Data</Label>
-                <pre className="bg-gray-50 p-3 rounded text-xs overflow-auto">
-                  {JSON.stringify(selectedTransactionDetails, null, 2)}
-                </pre>
-              </div>
+                <AccordionItem value="full-data">
+                  <AccordionTrigger className="text-sm font-medium">
+                    🔧 Full Transaction Data (Technical)
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <pre className="bg-gray-50 p-3 rounded text-xs overflow-auto">
+                      {JSON.stringify(selectedTransactionDetails, null, 2)}
+                    </pre>
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
             </div>
           ) : null}
         </DialogContent>
       </Dialog>
+
+      {/* Alert Details Modal */}
+      {showAlertModal && selectedAlert && (
+        <Dialog open={showAlertModal} onOpenChange={setShowAlertModal}>
+          <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <AlertCircle className="h-5 w-5 text-orange-500" />
+                {selectedAlert.type}
+              </DialogTitle>
+              <DialogDescription>
+                {selectedAlert.message}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="mt-4">
+              {/* Show pending transactions if this is a pending alert */}
+              {selectedAlert.type === 'OLD_PENDING_TRANSACTIONS' && (
+                <div>
+                  <h3 className="font-semibold mb-3">Pending Transactions</h3>
+                  <div className="border rounded-lg overflow-hidden">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Transaction ID</TableHead>
+                          <TableHead>Payer</TableHead>
+                          <TableHead>Amount</TableHead>
+                          <TableHead>Channel</TableHead>
+                          <TableHead>Created</TableHead>
+                          <TableHead>Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {transactions
+                          .filter(tx => tx.status === 'PENDING')
+                          .map((tx) => (
+                            <TableRow key={tx.transaction_id}>
+                              <TableCell className="font-mono text-xs">
+                                {tx.transaction_id || 'null'}
+                              </TableCell>
+                              <TableCell>
+                                <div>
+                                  <div className="font-medium">{tx.payer_names || tx.payer_email || tx.payer_code || 'N/A'}</div>
+                                  <div className="text-xs text-gray-500">{tx.payer_code}</div>
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                {new Intl.NumberFormat('en-RW', {
+                                  style: 'currency',
+                                  currency: tx.currency || 'RWF',
+                                  minimumFractionDigits: 0
+                                }).format(tx.amount)}
+                              </TableCell>
+                              <TableCell>{tx.payment_channel_name || tx.payment_channel}</TableCell>
+                              <TableCell className="text-xs">
+                                {tx.created_at ? new Date(tx.created_at).toLocaleString() : 'N/A'}
+                              </TableCell>
+                              <TableCell>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    handleViewDetails(tx.transaction_id)
+                                    setShowAlertModal(false)
+                                  }}
+                                  className="text-blue-600 hover:text-blue-700"
+                                >
+                                  <Eye className="h-4 w-4" />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  {transactions.filter(tx => tx.status === 'PENDING').length === 0 && (
+                    <p className="text-center text-gray-500 py-4">No pending transactions found</p>
+                  )}
+                </div>
+              )}
+
+              {/* For other alert types, show generic info */}
+              {selectedAlert.type !== 'OLD_PENDING_TRANSACTIONS' && (
+                <div className="p-4 bg-orange-50 rounded-lg">
+                  <p className="text-sm text-gray-700">{selectedAlert.details || 'No additional details available'}</p>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-4 flex justify-end">
+              <Button onClick={() => setShowAlertModal(false)}>Close</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }
-

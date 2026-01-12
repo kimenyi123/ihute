@@ -1,6 +1,6 @@
 'use client';
-
-import { PaymentDashboard } from '@/components/payment/payment-dashboard';
+import React from 'react';
+import PaymentDashboard from '@/components/payment/payment-dashboard';
 
 export default function AdminPaymentPage() {
   return (
