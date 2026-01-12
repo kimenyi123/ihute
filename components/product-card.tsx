@@ -8,9 +8,8 @@ import { useCartStore } from "@/lib/cart-store"
 import { useFavoritesStore } from "@/lib/favorites-store"
 import { trackProductView, trackClick } from "@/lib/interaction-tracker"
 import { Heart } from "lucide-react"
-import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { useToast } from "@/components/ui/use-toast"   // 👈 add
+import { useToast } from "@/components/ui/use-toast"
 
 type Product = {
   id: string
@@ -28,11 +27,10 @@ type Product = {
 }
 
 export function ProductCard({ product }: { product: Product }) {
-  const router = useRouter()
   const addItem = useCartStore((s) => s.addItem)
   const toggleFavorite = useFavoritesStore((s) => s.toggleFavorite)
   const isFavorite = useFavoritesStore((s) => s.isFavorite)
-  const { toast } = useToast()                              // 👈 add
+  const { toast } = useToast()
 
   const {
     id,
@@ -147,7 +145,13 @@ export function ProductCard({ product }: { product: Product }) {
               },
               1
             )
-            router.push("/cart")
+            
+            // Show success toast instead of redirecting
+            toast({
+              title: "Added to cart!",
+              description: name,
+              duration: 2000,
+            })
           }}
         >
           Buy

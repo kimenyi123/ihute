@@ -6,6 +6,7 @@ import { ProductCard } from "./product-card"
 import { TrendingUp, ArrowRight } from "lucide-react"
 import { useAuthStore } from "@/lib/auth-store"
 import { getSessionId } from "@/lib/interaction-tracker"
+import { getSmartRecommendations } from "@/lib/recommendation-service"
 import Link from "next/link"
 
 interface Product {
@@ -19,6 +20,7 @@ interface Product {
   supplierName?: string
   supplierLocation?: string
   momo?: string
+  category?: string
   inStock?: boolean
   rating?: number
 }
@@ -66,35 +68,28 @@ export function PersonalizedSections() {
 
   async function loadPersonalizedSections() {
     setLoading(true)
-    
+
     try {
-      const userId = user?.email || null
-      const sessionId = getSessionId()
-      
-      const params = new URLSearchParams()
-      if (userId) params.set("userId", userId)
-      if (sessionId) params.set("sessionId", sessionId)
-      params.set("limit", "12")
+      // Use smart caching service instead of direct API calls
+      const { products: productNames, source } = await getSmartRecommendations(12)
 
-      // Get recommendations
-      const res = await fetch(`/api/personalization/recommendations?${params.toString()}`)
-      const data = await res.json()
+      console.log(`[PersonalizedSections] Recommendations from ${source}`)
 
-      if (!data.ok || !data.products || data.products.length === 0) {
-        // Fallback to trending
-        loadTrendingSections()
+      if (!productNames || productNames.length === 0) {
+        // No recommendations available
+        setSections([])
         return
       }
 
       // Fetch product details for recommended products
-      const recommendedProducts = await fetchProductDetails(data.products)
-      
+      const recommendedProducts = await fetchProductDetails(productNames)
+
       // Only show if we have products AND user has interaction history
       // This prevents showing recommendations to brand-new users
       if (recommendedProducts.length > 0 && hasInteractionHistory) {
         // Limit to 6 products max on homepage (prevents clutter)
         const limitedProducts = recommendedProducts.slice(0, 6)
-        
+
         setSections([
           {
             title: "For You",
@@ -117,12 +112,12 @@ export function PersonalizedSections() {
           },
         ])
       } else {
-        // If no products found, try trending
-        loadTrendingSections()
+        // No products available
+        setSections([])
       }
     } catch (error) {
       console.error("Error loading personalized sections:", error)
-      loadTrendingSections()
+      setSections([])
     } finally {
       setLoading(false)
     }
@@ -130,15 +125,26 @@ export function PersonalizedSections() {
 
   async function loadTrendingSections() {
     try {
-      // Fetch trending products (you'll need to implement this endpoint)
-      const res = await fetch("/api/personalization/recommendations?action=getRecommendations&limit=12")
+      // Fetch trending products with cache-busting
+      const params = new URLSearchParams()
+      params.set("action", "getRecommendations")
+      params.set("limit", "12")
+      params.set("_t", Date.now().toString())
+
+      const res = await fetch(`/api/personalization/recommendations?${params.toString()}`, {
+        cache: "no-store",
+        headers: {
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          "Pragma": "no-cache",
+        },
+      })
       const data = await res.json()
-      
+
       if (data.ok && data.products) {
         const trendingProducts = await fetchProductDetails(data.products)
         // Limit to 6 products max
         const limitedProducts = trendingProducts.slice(0, 6)
-        
+
         if (limitedProducts.length > 0) {
           setSections([
             {
@@ -160,41 +166,54 @@ export function PersonalizedSections() {
 
   async function fetchProductDetails(productNames: string[]): Promise<Product[]> {
     if (productNames.length === 0) return []
-    
+
     try {
       // Search for products by name using fetchSuggestions API
       // We'll search for each product name and collect unique results
       const allProducts: Product[] = []
       const seenIds = new Set<string>()
-      
+
       // Search for up to 12 products (limit to avoid too many requests)
       const searchLimit = Math.min(productNames.length, 12)
-      
+
       for (let i = 0; i < searchLimit; i++) {
         const productName = productNames[i]?.trim()
         if (!productName) continue
-        
+
         try {
           const res = await fetch(
-            `/api/fetchSuggestions?globalSearch=${encodeURIComponent(productName)}&limit=3&Currency=RWF`,
-            { cache: "no-store" }
+            `/api/fetchSuggestions?globalSearch=${encodeURIComponent(productName)}&limit=3&Currency=RWF&_t=${Date.now()}`,
+            {
+              cache: "no-store",
+              headers: {
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+              },
+            }
           )
-          
+
           if (!res.ok) continue
-          
+
           const data = await res.json()
           const products = data.products || []
-          
+
           // Map to Product interface
           for (const p of products) {
             const productId = p.ITEM_CODE || p.item_code || p.id || `${productName}-${i}`
-            
+
             // Skip if we've already seen this product
             if (seenIds.has(productId)) continue
             seenIds.add(productId)
-            
+
             const price = parseFloat(p.SALE_PRICE_INCLUSIVE || p.item_emballage || p.price || "0")
-            
+            const category =
+              p.FAMILLE ||
+              p.famille ||
+              p.business_category ||
+              p.Business_Category ||
+              p.CATEGORY ||
+              ""
+
             allProducts.push({
               id: productId,
               name: p.ITEM_NAME || p.item_commercial_name || p.name || productName,
@@ -206,9 +225,10 @@ export function PersonalizedSections() {
               supplierName: p.SELLER_NAMES || p.supplier_name || "",
               supplierLocation: p.LOCATION || p.supplier_location || "",
               momo: p.momo || undefined,
+              category: category || undefined,
               inStock: true,
             })
-            
+
             // Stop after finding one match per product name
             break
           }
@@ -217,8 +237,25 @@ export function PersonalizedSections() {
           // Continue to next product
         }
       }
-      
-      return allProducts.slice(0, 12) // Limit to 12 products max
+
+      const limited = allProducts.slice(0, 12)
+
+      // Prefer keeping personalized sections within a dominant category
+      if (limited.length > 0) {
+        const counts: Record<string, number> = {}
+        for (const p of limited) {
+          const cat = (p.category || "").trim()
+          if (!cat) continue
+          counts[cat] = (counts[cat] || 0) + 1
+        }
+        const mainCategory = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0]
+        if (mainCategory) {
+          const filtered = limited.filter((p) => (p.category || "").trim() === mainCategory)
+          if (filtered.length > 0) return filtered
+        }
+      }
+
+      return limited
     } catch (error) {
       console.error("Error fetching product details:", error)
       return []
@@ -267,8 +304,8 @@ export function PersonalizedSections() {
               </div>
             </div>
             {/* "See More" link to discover page */}
-            <Link 
-              href="/discover" 
+            <Link
+              href="/discover"
               className="text-sm text-primary hover:underline flex items-center gap-1 hidden sm:flex"
             >
               See More
@@ -285,8 +322,8 @@ export function PersonalizedSections() {
               </div>
               {/* Mobile "See More" link */}
               <div className="mt-4 text-center sm:hidden">
-                <Link 
-                  href="/discover" 
+                <Link
+                  href="/discover"
                   className="text-sm text-primary hover:underline inline-flex items-center gap-1"
                 >
                   See More Recommendations

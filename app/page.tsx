@@ -12,7 +12,7 @@ import { PaymentMethods } from "@/components/payment-methods"
 import { CTASection } from "@/components/cta-section"
 import { PartnersSection } from "@/components/partners-section"
 import { PersonalizedSections } from "@/components/personalized-sections"
-import { Toaster } from "@/components/ui/toaster"
+import { BecauseYouViewed } from "@/components/because-you-viewed"
 import { useAuthStore } from "@/lib/auth-store"
 
 export default function HomePage() {
@@ -39,10 +39,12 @@ export default function HomePage() {
         <StatsSection />
         <CategoryGrid />
         <PersonalizedSections />
+        <div className="container mx-auto px-4 py-8">
+          <BecauseYouViewed limit={6} />
+        </div>
         <PaymentMethods />
         <PartnersSection />
         <CTASection />
-        <Toaster />
       </main>
       <Footer />
       <ChatSupport />

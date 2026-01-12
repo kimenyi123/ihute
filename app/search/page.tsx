@@ -107,12 +107,12 @@ export default function SearchPage() {
   // Supplier product search
   const [supplierSearch, setSupplierSearch] = useState("")
   const [debouncedSupplierSearch, setDebouncedSupplierSearch] = useState("")
-  
+
   // Table command store
-  const { 
-    activeSession: tableCommand, 
-    addToTableCart, 
-    tableCartItems 
+  const {
+    activeSession: tableCommand,
+    addToTableCart,
+    tableCartItems
   } = useTableCommandStore()
 
   // Keep drafts in sync with URL changes
@@ -121,37 +121,53 @@ export default function SearchPage() {
 
   const addToCartFn = useCartStore((s: any) => s.addOrInc ?? s.add)
 
-const addProductToCart = (p: Product) => {
-  if (!addToCartFn) {
-    console.warn("Cart store is missing addOrInc/add")
-    return
-  }
-  
-     const id = p.item_code || `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`
-  const unit = p.item_packet || ""
-  const price = extractNumericPrice(p.item_emballage)
-  const supplierId = p.supplier_account || "unknown"
-  const supplierName = p.supplier_name || p.supplier_account || "Supplier"
-  
-  // Check if we're in a table command context
-  if (tableCommand && tableCommand.locationId === p.supplier_account) {
-    // Add to table command cart (special handling for table orders)
-    if (addToTableCart) {
-      addToTableCart({
-        id,
-        name: p.item_commercial_name,
-        price,
-        unit,
-        selectedUnit: unit,
-        qty: 1,
-        supplierId,
-        supplierName,
-        supplierLocation: p.supplier_location,
-        image: p.image || "/placeholder.svg?height=300&width=300",
-        momo: p.momo || (p as any)?.seller_momo || "",
-      })
+  const addProductToCart = (p: Product) => {
+    if (!addToCartFn) {
+      console.warn("Cart store is missing addOrInc/add")
+      return
+    }
+
+    const id = p.item_code || `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`
+    const unit = p.item_packet || ""
+    const price = extractNumericPrice(p.item_emballage)
+    const supplierId = p.supplier_account || "unknown"
+    const supplierName = p.supplier_name || p.supplier_account || "Supplier"
+
+    // Check if we're in a table command context
+    if (tableCommand && tableCommand.locationId === p.supplier_account) {
+      // Add to table command cart (special handling for table orders)
+      if (addToTableCart) {
+        addToTableCart({
+          id,
+          name: p.item_commercial_name,
+          price,
+          unit,
+          selectedUnit: unit,
+          qty: 1,
+          supplierId,
+          supplierName,
+          supplierLocation: p.supplier_location,
+          image: p.image || "/placeholder.svg?height=300&width=300",
+          momo: p.momo || (p as any)?.seller_momo || "",
+        })
+      } else {
+        // Fallback to regular cart
+        addToCartFn({
+          id,
+          name: p.item_commercial_name,
+          price,
+          unit,
+          selectedUnit: unit,
+          qty: 1,
+          supplierId,
+          supplierName,
+          supplierLocation: p.supplier_location,
+          image: p.image || "/placeholder.svg?height=300&width=300",
+          momo: p.momo || (p as any)?.seller_momo || "",
+        })
+      }
     } else {
-      // Fallback to regular cart
+      // Regular order (not part of table command)
       addToCartFn({
         id,
         name: p.item_commercial_name,
@@ -166,33 +182,17 @@ const addProductToCart = (p: Product) => {
         momo: p.momo || (p as any)?.seller_momo || "",
       })
     }
-  } else {
-    // Regular order (not part of table command)
-    addToCartFn({
-      id,
-      name: p.item_commercial_name,
-      price,
-      unit,
-      selectedUnit: unit,
-      qty: 1,
-      supplierId,
-      supplierName,
-      supplierLocation: p.supplier_location,
-      image: p.image || "/placeholder.svg?height=300&width=300",
-      momo: p.momo || (p as any)?.seller_momo || "",
-    })
+
+    // Show success message instead of redirecting
+    alert(`Added "${p.item_commercial_name}" to your cart!`)
   }
-  
-  // Show success message instead of redirecting
-  alert(`Added "${p.item_commercial_name}" to your cart!`)
-}
 
   const onTileKey = (e: KeyboardEvent<HTMLDivElement>, p: Product) => {
-  if (e.key === "Enter" || e.key === " ") {
-    e.preventDefault()
-    addProductToCart(p)
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault()
+      addProductToCart(p)
+    }
   }
-}
 
 
   // Small helper to push URL with preserved params (and real clearing support)
@@ -274,7 +274,7 @@ const addProductToCart = (p: Product) => {
         if (locationParam) {
           url.searchParams.set("location", locationParam)
         }
-        
+
         // Add location-aware parameters from enhanced location store
         const { useLocationStoreEnhanced } = await import("@/lib/location-store-enhanced")
         const userLocation = useLocationStoreEnhanced.getState().location
@@ -323,12 +323,12 @@ const addProductToCart = (p: Product) => {
           const { trackSearch } = await import("@/lib/interaction-tracker")
           const { recordSearch } = await import("@/lib/search-intent-tracker")
           const totalResults = filteredProducts.length + filteredSuppliersByName.length + filteredSuppliersByProduct.length
-          
+
           // Track in interaction system
           trackSearch(debouncedQ, totalResults)
-          
+
           // Track in search intent system (for personalization and notifications)
-          recordSearch(debouncedQ, totalResults, "global").catch(err => 
+          recordSearch(debouncedQ, totalResults, "global").catch(err =>
             console.warn("[SearchIntent] Failed to record search:", err)
           )
         }
@@ -382,7 +382,7 @@ const addProductToCart = (p: Product) => {
   // Filter shop products based on supplier search with relevance
   const filteredShopProducts = useMemo(() => {
     if (!debouncedSupplierSearch) return shopProducts
-    
+
     return filterProductsByRelevance(
       shopProducts,
       debouncedSupplierSearch,
@@ -497,7 +497,7 @@ const addProductToCart = (p: Product) => {
           <h1 className="text-2xl font-semibold">Global Search</h1>
           <LocationBadge />
         </div>
-        
+
         {/* Table Context Indicator - Added here */}
         {tableCommand && (
           <div className="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-lg">
@@ -516,7 +516,7 @@ const addProductToCart = (p: Product) => {
               <Button
                 size="sm"
                 variant="outline"
-                // onClick={() => router.push("/cart")}
+              // onClick={() => router.push("/cart")}
               >
                 View My Cart ({tableCartItemCount} items)
               </Button>
@@ -617,9 +617,8 @@ const addProductToCart = (p: Product) => {
               {QUICK_LOCATIONS.map((city) => (
                 <button
                   key={city}
-                  className={`text-xs px-3 py-1 rounded-full border ${
-                    locationParam === city ? "bg-blue-600 text-white border-blue-600" : "hover:bg-gray-100"
-                  }`}
+                  className={`text-xs px-3 py-1 rounded-full border ${locationParam === city ? "bg-blue-600 text-white border-blue-600" : "hover:bg-gray-100"
+                    }`}
                   onClick={() => {
                     setLocationDraft(city)
                     pushWith({ location: city })
@@ -841,11 +840,10 @@ const addProductToCart = (p: Product) => {
                   {allSuppliers.map((supplier) => (
                     <div
                       key={supplier.supplier_account}
-                      className={`p-3 rounded-lg border cursor-pointer transition-all ${
-                        selectedShop?.supplier_account === supplier.supplier_account
+                      className={`p-3 rounded-lg border cursor-pointer transition-all ${selectedShop?.supplier_account === supplier.supplier_account
                           ? "border-blue-500 bg-blue-50"
                           : "border-gray-200 hover:border-blue-300 hover:bg-gray-50"
-                      }`}
+                        }`}
                       onClick={() => handleSelectShop(supplier)}
                       title="Click to preview this supplier's products"
                     >
@@ -917,7 +915,7 @@ const addProductToCart = (p: Product) => {
                     {filteredShopProducts.length > 0 ? (
                       filteredShopProducts.map((product) => (
                         <div
-                          key={product.item_code}
+                          key={product.item_code + (product.supplier_account || selectedShop?.supplier_account || "")}
                           className="rounded-lg border p-3 hover:border-blue-300 transition-colors cursor-pointer group"
                           role="button"
                           tabIndex={0}
@@ -941,7 +939,7 @@ const addProductToCart = (p: Product) => {
                     ) : (
                       !loadingProducts && (
                         <div className="text-center py-4 text-gray-500">
-                          {debouncedSupplierSearch 
+                          {debouncedSupplierSearch
                             ? `No products found matching "${debouncedSupplierSearch}"`
                             : "No products available from this supplier"
                           }
