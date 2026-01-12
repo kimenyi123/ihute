@@ -87,11 +87,29 @@ export function NotificationPrompt() {
         alert("✅ Notifications enabled! You'll now receive alerts for price drops, new products, and more.")
       } else {
         console.warn("[Notifications] Subscription returned null")
-        alert("Failed to enable notifications. Please check your browser settings and try again.")
+        throw new Error("Subscription failed - no subscription object returned")
       }
     } catch (error: any) {
       console.error("[Notifications] Error subscribing:", error)
-      alert(`Failed to enable notifications: ${error?.message || "Unknown error"}. Please try again.`)
+      
+      // Provide user-friendly error messages
+      let errorMessage = "Failed to enable notifications. "
+      
+      if (error?.message) {
+        if (error.message.includes("VAPID")) {
+          errorMessage += "Server configuration error. Please contact support."
+        } else if (error.message.includes("InvalidAccessError") || error.message.includes("applicationServerKey")) {
+          errorMessage += "Invalid server key. Please contact support."
+        } else if (error.message.includes("Permission denied") || error.message.includes("denied")) {
+          errorMessage += "Permission was denied. Please enable notifications in your browser settings."
+        } else {
+          errorMessage += error.message
+        }
+      } else {
+        errorMessage += "Please check your browser settings and try again."
+      }
+      
+      alert(errorMessage)
     } finally {
       setIsSubscribing(false)
     }
@@ -195,9 +213,26 @@ export function NotificationToggle() {
     setIsLoading(true)
     try {
       const subscription = await subscribeToPushNotifications()
-      setIsEnabled(!!subscription)
-    } catch (error) {
+      if (subscription) {
+        setIsEnabled(true)
+        alert("✅ Notifications enabled!")
+      } else {
+        throw new Error("Subscription failed")
+      }
+    } catch (error: any) {
       console.error("[Notifications] Error:", error)
+      let errorMessage = "Failed to enable notifications. "
+      if (error?.message) {
+        if (error.message.includes("VAPID")) {
+          errorMessage += "Server configuration error. Please contact support."
+        } else {
+          errorMessage += error.message
+        }
+      } else {
+        errorMessage += "Please try again."
+      }
+      alert(errorMessage)
+      setIsEnabled(false)
     } finally {
       setIsLoading(false)
     }

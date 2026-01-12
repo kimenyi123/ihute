@@ -9,9 +9,10 @@
  */
 
 const CACHE_NAME = 'ihute-v1';
-// VAPID_PUBLIC_KEY will be injected at build time or passed from main thread
-// For now, we'll get it from the notification service when needed
-const VAPID_PUBLIC_KEY = '';
+// VAPID public key - this will be passed from the notification service
+// during subscription via applicationServerKey parameter
+// You can also hardcode it here if needed: const VAPID_PUBLIC_KEY = 'YOUR_KEY_HERE';
+const VAPID_PUBLIC_KEY = self.VAPID_PUBLIC_KEY || '';
 
 // Install event
 self.addEventListener('install', (event) => {
@@ -28,7 +29,7 @@ self.addEventListener('activate', (event) => {
 // Push event - receive push notification
 self.addEventListener('push', (event) => {
   console.log('[SW] Push received:', event);
-  
+
   let notificationData = {
     title: 'New Update',
     body: 'You have a new notification',
@@ -38,7 +39,7 @@ self.addEventListener('push', (event) => {
       url: '/',
     },
   };
-  
+
   if (event.data) {
     try {
       const payload = event.data.json();
@@ -54,7 +55,7 @@ self.addEventListener('push', (event) => {
       notificationData.body = event.data.text();
     }
   }
-  
+
   event.waitUntil(
     self.registration.showNotification(notificationData.title, {
       body: notificationData.body,
@@ -87,12 +88,12 @@ self.addEventListener('push', (event) => {
 // Notification click event
 self.addEventListener('notificationclick', (event) => {
   console.log('[SW] Notification clicked:', event);
-  
+
   event.notification.close();
-  
+
   const action = event.action;
   const data = event.notification.data || {};
-  
+
   // Handle dismiss action
   if (action === 'dismiss') {
     // Mark as ignored (if we have notification tracking)
@@ -112,12 +113,12 @@ self.addEventListener('notificationclick', (event) => {
     }
     return;
   }
-  
+
   // Get the deep link URL from notification data
   // For search notifications, this should be: /search?q=keyword
   // For other notifications, it could be: /product/{id}, /category/{id}, etc.
   const urlToOpen = data.url || '/';
-  
+
   event.waitUntil(
     clients
       .matchAll({
@@ -140,7 +141,7 @@ self.addEventListener('notificationclick', (event) => {
             });
           }
         }
-        
+
         // No existing window found, open a new one with the deep link
         if (clients.openWindow) {
           return clients.openWindow(urlToOpen);
@@ -174,7 +175,7 @@ self.addEventListener('notificationclick', (event) => {
 // Background sync (optional)
 self.addEventListener('sync', (event) => {
   console.log('[SW] Background sync:', event.tag);
-  
+
   if (event.tag === 'sync-search-history') {
     event.waitUntil(syncSearchHistory());
   }
@@ -190,7 +191,7 @@ async function syncSearchHistory() {
         action: 'syncLocalHistory',
       }),
     });
-    
+
     if (response.ok) {
       console.log('[SW] Search history synced');
     }
