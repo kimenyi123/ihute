@@ -2,7 +2,7 @@
 
 import { create } from "zustand"
 import { persist, createJSONStorage } from "zustand/middleware"
-import { trackClick } from "./interaction-tracker"
+import { trackClick, trackInteraction } from "./interaction-tracker"
 
 export type CartItem = {
   id: string
@@ -68,7 +68,7 @@ export const useCartStore = create<CartState>()(
       items: [],
       payment: {},
 
-      addItem: (item, qty = 1) =>
+      addItem: (item, qty = 1) => {
         set((state) => {
           const selectedUnit = item.selectedUnit ?? item.unit
           const keyMatch = (x: CartItem) => x.id === item.id && x.selectedUnit === selectedUnit
@@ -77,6 +77,14 @@ export const useCartStore = create<CartState>()(
           // Track add-to-cart as a preference (best-effort)
           try {
             trackClick("product", item.id, item.name)
+            // Also track a dedicated add_to_cart interaction for personalization / abandoned cart
+            trackInteraction("add_to_cart", "product", item.id, {
+              entityName: item.name,
+              metadata: {
+                supplierId: item.supplierId,
+                supplierName: item.supplierName,
+              },
+            })
           } catch {
             // ignore tracking errors
           }
@@ -87,7 +95,63 @@ export const useCartStore = create<CartState>()(
             }
           }
           return { items: [...state.items, { ...item, selectedUnit, qty }] }
-        }),
+        })
+
+        // Track cart activity for abandoned cart reminders
+        try {
+          // Get email from auth store
+          let userEmail: string | null = null
+          try {
+            const authStorage = localStorage.getItem('auth-storage')
+            if (authStorage) {
+              const authData = JSON.parse(authStorage)
+              userEmail = authData?.state?.user?.email || null
+            }
+          } catch (e) {
+            console.error('[Abandoned Cart] Error reading auth storage:', e)
+          }
+
+          console.log('[Abandoned Cart] Tracking attempt:', {
+            email: userEmail,
+            hasEmail: !!userEmail,
+            itemId: item.id,
+            itemName: item.name
+          })
+
+          if (userEmail && typeof window !== 'undefined') {
+            // Get current cart state
+            const currentItems = get().items
+            const cartTotal = currentItems.reduce((sum, i) => sum + (i.price * i.qty), 0)
+
+            console.log('[Abandoned Cart] Calling trackCartActivity for:', userEmail)
+
+            fetch('http://localhost:8080/Trading/OrdersServlet?action=trackCartActivity', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: new URLSearchParams({
+                buyerEmail: userEmail,
+                itemCount: currentItems.length.toString(),
+                cartValue: cartTotal.toString(),
+                currency: 'RWF'
+              })
+            })
+              .then(response => {
+                console.log('[Abandoned Cart] Response status:', response.status)
+                return response.json()
+              })
+              .then(data => {
+                console.log('[Abandoned Cart] Success:', data)
+              })
+              .catch(error => {
+                console.error('[Abandoned Cart] Error:', error)
+              })
+          } else {
+            console.warn('[Abandoned Cart] No user email found in storage')
+          }
+        } catch (error) {
+          console.error('[Abandoned Cart] Exception:', error)
+        }
+      },
 
       // alias for compatibility with older calls (s.add)
       add: (item, qty = 1) => get().addItem(item, qty),
