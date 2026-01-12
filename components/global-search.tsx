@@ -13,6 +13,7 @@ import { filterSuppliersByRelevance, filterProductsByRelevance } from "@/lib/sea
 import { useAuthStore } from "@/lib/auth-store"
 import { getRecentSearches, recordSearch, markSearchClick, clearLocalSearchHistory } from "@/lib/search-intent-tracker"
 import { useLocationStoreEnhanced } from "@/lib/location-store-enhanced"
+import { useToast } from "@/components/ui/use-toast"
 
 export interface GlobalResult {
   type?: "product" | "supplier"
@@ -100,6 +101,7 @@ export function GlobalSearch({
   const { user } = useAuthStore()
   const userLocation = useLocationStoreEnhanced((s) => s.location)
   const [recentSearches, setRecentSearches] = useState<string[]>([])
+  const { toast } = useToast()
 
   const addToCartFn = useCartStore((s: any) => s.addOrInc ?? s.add)
 
@@ -138,7 +140,14 @@ export function GlobalSearch({
       ).catch(err => console.warn("[SearchIntent] Failed to mark click:", err))
     }
     
-    router.push("/cart")
+    // Show success toast instead of redirecting
+    toast({
+      title: "Added to cart!",
+      description: p.item_commercial_name || "Product",
+      duration: 2000,
+    })
+    
+    // User stays on current page - they can click cart icon when ready
     setOpen(false)
     setQ("")
   }

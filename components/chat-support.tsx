@@ -151,8 +151,7 @@ export function ChatSupport() {
       // Show success message
       toast.success(`${itemName} added to cart!`)
       
-      // Navigate to cart
-      router.push("/cart")
+      // Don't redirect - user stays on current page
       setIsOpen(false)
     }
   }
@@ -182,7 +181,7 @@ export function ChatSupport() {
             initial={{ scale: 0, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0, opacity: 0 }}
-            className="fixed bottom-6 right-6 z-50 flex flex-col gap-3"
+            className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-50 flex flex-col gap-3"
           >
             {/* WhatsApp Button */}
             <motion.div whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.95 }}>
@@ -199,7 +198,7 @@ export function ChatSupport() {
                   )
                   window.open(`https://wa.me/250780125242?text=${message}`, "_blank")
                 }}
-                className="h-14 w-14 rounded-full bg-green-500 hover:bg-green-600 shadow-lg"
+                className="h-12 w-12 sm:h-14 sm:w-14 rounded-full bg-green-500 hover:bg-green-600 shadow-lg"
                 size="icon"
               >
                 <svg className="h-7 w-7" fill="white" viewBox="0 0 24 24">
@@ -212,10 +211,10 @@ export function ChatSupport() {
             <motion.div whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.95 }}>
               <Button
                 onClick={() => setIsOpen(true)}
-                className="h-14 w-14 rounded-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 shadow-lg"
+                className="h-12 w-12 sm:h-14 sm:w-14 rounded-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 shadow-lg"
                 size="icon"
               >
-                <MessageCircle className="h-6 w-6" />
+                <MessageCircle className="h-5 w-5 sm:h-6 sm:w-6" />
               </Button>
             </motion.div>
           </motion.div>
@@ -225,21 +224,32 @@ export function ChatSupport() {
       {/* Chat Window */}
       <AnimatePresence>
         {isOpen && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 20 }}
-            transition={{ duration: 0.2 }}
-          >
-            <Card className="fixed bottom-6 right-6 z-50 w-[420px] shadow-2xl border-0">
-              <CardHeader className="flex flex-row items-center justify-between bg-gradient-to-r from-slate-800 to-slate-700 text-white rounded-t-lg">
+          <>
+            {/* Backdrop for mobile */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              onClick={() => setIsOpen(false)}
+              className="fixed inset-0 bg-black/50 z-40 sm:hidden"
+            />
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              transition={{ duration: 0.2 }}
+              className="fixed inset-0 sm:inset-auto sm:bottom-6 sm:right-6 z-50 flex items-end sm:items-start justify-center sm:justify-end p-4 sm:p-0"
+            >
+            <Card className="w-full max-w-[420px] sm:w-[420px] h-[85vh] sm:h-auto sm:max-h-[600px] shadow-2xl border-0 flex flex-col">
+              <CardHeader className="flex flex-row items-center justify-between bg-gradient-to-r from-slate-800 to-slate-700 text-white rounded-t-lg flex-shrink-0">
                 <div className="flex items-center gap-2">
                   <div className="relative">
-                    <Bot className="h-6 w-6 text-blue-400" />
-                    <span className="absolute -bottom-1 -right-1 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-white"></span>
+                    <Bot className="h-5 w-5 sm:h-6 sm:w-6 text-blue-400" />
+                    <span className="absolute -bottom-1 -right-1 w-2 h-2 sm:w-2.5 sm:h-2.5 bg-green-500 rounded-full border-2 border-white"></span>
                   </div>
                   <div>
-                    <CardTitle className="text-base font-medium">Shopping Assistant</CardTitle>
+                    <CardTitle className="text-sm sm:text-base font-medium">Shopping Assistant</CardTitle>
                     <span className="text-xs text-green-300">Online</span>
                   </div>
                 </div>
@@ -247,13 +257,13 @@ export function ChatSupport() {
                   variant="ghost"
                   size="icon"
                   onClick={() => setIsOpen(false)}
-                  className="text-white hover:bg-slate-600/50"
+                  className="text-white hover:bg-slate-600/50 h-8 w-8 sm:h-10 sm:w-10"
                 >
                   <X className="h-4 w-4" />
                 </Button>
               </CardHeader>
-              <CardContent className="p-0">
-                <div className="space-y-3 h-[450px] overflow-y-auto px-4 py-3 bg-gray-50/50">
+              <CardContent className="p-0 flex-1 flex flex-col min-h-0">
+                <div className="space-y-3 flex-1 overflow-y-auto px-3 sm:px-4 py-3 bg-gray-50/50">
                   {messages.map((msg, index) => (
                     <motion.div
                       key={index}
@@ -263,10 +273,10 @@ export function ChatSupport() {
                       className="space-y-2"
                     >
                       <div
-                        className={`rounded-lg p-3 shadow-sm ${
+                        className={`rounded-lg p-2 sm:p-3 shadow-sm ${
                           msg.type === "user" 
-                            ? "bg-blue-500 ml-12 text-white" 
-                            : "bg-white mr-12 border border-gray-100"
+                            ? "bg-blue-500 ml-8 sm:ml-12 text-white" 
+                            : "bg-white mr-8 sm:mr-12 border border-gray-100"
                         }`}
                       >
                         <div className="flex items-center gap-2 mb-2">
@@ -286,7 +296,7 @@ export function ChatSupport() {
 
                       {/* Show search results */}
                       {msg.type === "bot" && msg.searchResults && (
-                        <div className="mr-12 space-y-2">
+                        <div className="mr-8 sm:mr-12 space-y-2">
                           {/* Products */}
                           {msg.searchResults.products.length > 0 && (
                             <div className="bg-white border border-gray-200 rounded-lg p-3">
@@ -354,36 +364,37 @@ export function ChatSupport() {
                   ))}
                   
                   {isTyping && (
-                    <div className="bg-slate-100 rounded-lg p-3 mr-8 flex items-center gap-2">
-                      <Loader2 className="h-4 w-4 animate-spin text-gray-500" />
-                      <span className="text-sm text-gray-500">Searching...</span>
+                    <div className="bg-slate-100 rounded-lg p-2 sm:p-3 mr-4 sm:mr-8 flex items-center gap-2">
+                      <Loader2 className="h-3 w-3 sm:h-4 sm:w-4 animate-spin text-gray-500" />
+                      <span className="text-xs sm:text-sm text-gray-500">Searching...</span>
                     </div>
                   )}
                   <div ref={messagesEndRef} />
                 </div>
-                <div className="flex gap-2 p-4 bg-white border-t">
+                <div className="flex gap-2 p-3 sm:p-4 bg-white border-t flex-shrink-0">
                   <div className="relative flex-1">
                     <Input
-                      placeholder="Search for products, categories, or suppliers..."
+                      placeholder="Search for products..."
                       value={message}
                       onChange={(e) => setMessage(e.target.value)}
                       onKeyPress={(e) => e.key === "Enter" && !isTyping && handleSendMessage()}
-                      className="pr-12 bg-gray-50 border-gray-200 focus:border-blue-300 focus:ring-blue-200"
+                      className="pr-10 sm:pr-12 bg-gray-50 border-gray-200 focus:border-blue-300 focus:ring-blue-200 text-sm sm:text-base h-9 sm:h-10"
                       disabled={isTyping}
                     />
                   </div>
                   <Button 
                     size="default" 
                     onClick={() => handleSendMessage()}
-                    className="bg-blue-600 hover:bg-blue-700 text-white rounded-full px-4 h-10"
+                    className="bg-blue-600 hover:bg-blue-700 text-white rounded-full px-3 sm:px-4 h-9 sm:h-10 w-9 sm:w-auto flex-shrink-0"
                     disabled={isTyping}
                   >
-                    <Send className="h-4 w-4" />
+                    <Send className="h-3 w-3 sm:h-4 sm:w-4" />
                   </Button>
                 </div>
               </CardContent>
             </Card>
           </motion.div>
+          </>
         )}
       </AnimatePresence>
     </div>
