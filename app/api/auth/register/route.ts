@@ -7,7 +7,7 @@ export async function POST(req: Request) {
   const t0 = Date.now()
 
   try {
-    const { email, password, firstName, lastName, tel, location, role } = await req.json()
+    const { email, password, firstName, lastName, tel, location, role, latitude, longitude, gpsAccuracy } = await req.json()
     if (!JAVA_AUTH_URL) {
       console.error(`[RID ${rid}] Missing JAVA_AUTH_URL`)
       return NextResponse.json({ ok: false, error: "JAVA_AUTH_URL not configured", rid }, { status: 500 })
@@ -23,7 +23,18 @@ export async function POST(req: Request) {
     form.set("location", String(location || ""))
     form.set("role", String(role || "BUYER").toUpperCase())
 
-    console.log(`[RID ${rid}] -> POST ${JAVA_AUTH_URL} action=register email=${email} role=${role}`)
+    // Add GPS coordinates if provided (for sellers)
+    if (latitude !== null && latitude !== undefined) {
+      form.set("latitude", String(latitude))
+    }
+    if (longitude !== null && longitude !== undefined) {
+      form.set("longitude", String(longitude))
+    }
+    if (gpsAccuracy !== null && gpsAccuracy !== undefined) {
+      form.set("gpsAccuracy", String(gpsAccuracy))
+    }
+
+    console.log(`[RID ${rid}] -> POST ${JAVA_AUTH_URL} action=register email=${email} role=${role} hasGPS=${!!latitude}`)
 
     const res = await fetch(JAVA_AUTH_URL, {
       method: "POST",

@@ -1,9 +1,11 @@
 // lib/auth-store.ts
+"use client"
+
 import { create } from "zustand"
 import { persist, createJSONStorage } from "zustand/middleware"
 import { mergeSessionToUser } from "./interaction-tracker"
 
-export type UserRole = "customer" | "supplier" | "admin" | "staff"
+export type UserRole = "buyer" | "seller" | "admin" | "staff"
 
 export interface User {
   id: string
@@ -21,23 +23,26 @@ interface AuthState {
   user: User | null
   isAuthenticated: boolean
   loginTime: number | null
-  lastActivityTime: number | null  // Track last activity for inactivity timeout
+  lastActivityTime: number | null
   sessionTimeout: number
-  _hasHydrated: boolean  // Track localStorage rehydration
+
+  // ✅ one hydration flag + setter
+  hasHydrated: boolean
+  setHasHydrated: (v: boolean) => void
+
   login: (user: User) => void
   logout: () => void
   updateUser: (user: Partial<User>) => void
   checkSession: () => boolean
-  updateActivity: () => void  // Update last activity time
+  updateActivity: () => void
   setSessionTimeout: (timeout: number) => void
 }
 
-// Role-specific timeout durations
-const SESSION_TIMEOUTS = {
-  admin: 15 * 60 * 1000,      // 15 minutes for admin (security)
-  staff: 24 * 60 * 60 * 1000, // 24 hours for staff
-  customer: 24 * 60 * 60 * 1000, // 24 hours for customers
-  supplier: 24 * 60 * 60 * 1000, // 24 hours for suppliers
+const SESSION_TIMEOUTS: Record<UserRole, number> = {
+  admin: 15 * 60 * 1000,
+  staff: 24 * 60 * 60 * 1000,
+  buyer: 24 * 60 * 60 * 1000,
+  seller: 24 * 60 * 60 * 1000,
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -47,24 +52,24 @@ export const useAuthStore = create<AuthState>()(
       isAuthenticated: false,
       loginTime: null,
       lastActivityTime: null,
-      sessionTimeout: 24 * 60 * 60 * 1000, // Default 24 hours
-      _hasHydrated: false,  // Initially false, set to true after rehydration
+      sessionTimeout: 24 * 60 * 60 * 1000,
+
+      // ✅ hydration flag
+      hasHydrated: false,
+      setHasHydrated: (v) => set({ hasHydrated: v }),
 
       login: (user) => {
         const now = Date.now()
-        const timeout = SESSION_TIMEOUTS[user.role] || SESSION_TIMEOUTS.customer
+        const timeout = SESSION_TIMEOUTS[user.role] ?? SESSION_TIMEOUTS.buyer
 
         set({
           user,
           isAuthenticated: true,
           loginTime: now,
-          lastActivityTime: now,  // Set initial activity time
-          sessionTimeout: timeout
+          lastActivityTime: now,
+          sessionTimeout: timeout,
         })
 
-        console.log(`✅ User logged in as ${user.role}. Session timeout: ${timeout / 60000} minutes`)
-
-        // Merge anonymous session interactions to user account
         if (typeof window !== "undefined") {
           mergeSessionToUser(user.email).catch((err) => {
             console.warn("Failed to merge session interactions:", err)
@@ -73,8 +78,6 @@ export const useAuthStore = create<AuthState>()(
       },
 
       logout: () => {
-        console.log("🔒 User logged out")
-        // Clear extra app storages
         if (typeof window !== "undefined") {
           localStorage.removeItem("cart-storage")
           localStorage.removeItem("favorites-storage")
@@ -90,17 +93,16 @@ export const useAuthStore = create<AuthState>()(
 
       checkSession: () => {
         const state = get()
-        if (!state.isAuthenticated || !state.lastActivityTime) {
-          return false
-        }
+
+        // ✅ don’t invalidate session until hydration is done
+        if (!state.hasHydrated) return true
+
+        if (!state.isAuthenticated || !state.lastActivityTime) return false
 
         const now = Date.now()
-        const timeSinceLastActivity = now - state.lastActivityTime
-        const sessionExpired = timeSinceLastActivity > state.sessionTimeout
+        const sessionExpired = now - state.lastActivityTime > state.sessionTimeout
 
         if (sessionExpired) {
-          const minutesInactive = Math.floor(timeSinceLastActivity / 60000)
-          console.log(`⏰ Session expired after ${minutesInactive} minutes of inactivity`)
           state.logout()
           return false
         }
@@ -108,12 +110,9 @@ export const useAuthStore = create<AuthState>()(
         return true
       },
 
-      // Update last activity time (call this on any user interaction)
       updateActivity: () => {
         const state = get()
-        if (state.isAuthenticated) {
-          set({ lastActivityTime: Date.now() })
-        }
+        if (state.isAuthenticated) set({ lastActivityTime: Date.now() })
       },
 
       setSessionTimeout: (timeout) => set({ sessionTimeout: timeout }),
@@ -121,15 +120,17 @@ export const useAuthStore = create<AuthState>()(
     {
       name: "auth-storage",
       storage: createJSONStorage(() => localStorage),
+
+      // ✅ IMPORTANT: use setter, don’t mutate state directly
       onRehydrateStorage: () => (state) => {
-        // Set hydration flag when localStorage rehydration completes
-        state._hasHydrated = true
+        state?.setHasHydrated(true)
       },
+
       partialize: (s) => ({
         user: s.user,
         isAuthenticated: s.isAuthenticated,
         loginTime: s.loginTime,
-        lastActivityTime: s.lastActivityTime,  // Persist activity time
+        lastActivityTime: s.lastActivityTime,
         sessionTimeout: s.sessionTimeout,
       }),
     }

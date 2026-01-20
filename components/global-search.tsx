@@ -1,10 +1,10 @@
 // components/global-search.tsx
 "use client"
 
-import { useEffect, useRef, useState, KeyboardEvent } from "react"
+import { useEffect, useRef, useState, KeyboardEvent, useMemo } from "react"
 import { createPortal } from "react-dom"
 import { useRouter } from "next/navigation"
-import { Search, Package, Store, Clock, Trash2 } from "lucide-react"
+import { Search, Package, Store, Clock, Trash2, MapPin } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { usePrefsStore } from "@/lib/prefs-store"
@@ -14,6 +14,10 @@ import { useAuthStore } from "@/lib/auth-store"
 import { getRecentSearches, recordSearch, markSearchClick, clearLocalSearchHistory } from "@/lib/search-intent-tracker"
 import { useLocationStoreEnhanced } from "@/lib/location-store-enhanced"
 import { useToast } from "@/components/ui/use-toast"
+import { useGeolocation } from "@/hooks/use-geolocation"
+import { searchNearbyProducts, NearbyProduct } from "@/lib/location-search-api"
+import { DistanceBadge } from "@/components/distance-badge"
+import { Badge } from "@/components/ui/badge"
 
 export interface GlobalResult {
   type?: "product" | "supplier"
@@ -35,6 +39,8 @@ export interface GlobalResult {
   product_count?: number
   source?: string
   cache_hit?: boolean
+  distance_km?: number
+  calculated_distance_km?: number
 }
 
 type GlobalSearchResponse = {
@@ -101,15 +107,154 @@ export function GlobalSearch({
   const { user } = useAuthStore()
   const userLocation = useLocationStoreEnhanced((s) => s.location)
   const [recentSearches, setRecentSearches] = useState<string[]>([])
+  const [nearbySuppliers, setNearbySuppliers] = useState<GlobalResult[]>([])
+  const [loadingNearby, setLoadingNearby] = useState(false)
   const { toast } = useToast()
 
+  // GPS-based nearby product search
+  const { location: userGPS, loading: gpsLoading, denied: gpsDenied } = useGeolocation()
+  const [nearbyProducts, setNearbyProducts] = useState<{ results: NearbyProduct[]; query: string; radius_used_km: number } | null>(null)
+  const [loadingNearbyProducts, setLoadingNearbyProducts] = useState(false)
+
+  // Supplier GPS coordinates map for distance calculation
+  const [supplierGPSMap, setSupplierGPSMap] = useState<Map<string, { lat: number; lng: number }>>(new Map())
+
   const addToCartFn = useCartStore((s: any) => s.addOrInc ?? s.add)
+
+  // Helper function to calculate distance using Haversine formula
+  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+    const R = 6371 // Earth's radius in km
+    const dLat = (lat2 - lat1) * Math.PI / 180
+    const dLon = (lon2 - lon1) * Math.PI / 180
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2)
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+    return R * c
+  }
 
   useEffect(() => {
     setMounted(true)
     // Load recent searches for suggestions
-    getRecentSearches(5).then(setRecentSearches).catch(() => {})
+    getRecentSearches(5).then(setRecentSearches).catch(() => { })
   }, [user])
+
+  // Fetch supplier GPS coordinates for distance calculation
+  useEffect(() => {
+    const fetchSupplierGPS = async () => {
+      try {
+        const response = await fetch('/api/admin/gps-audit', { cache: 'no-store' })
+        if (!response.ok) return
+
+        const data = await response.json()
+        const suppliers = data.issues || []
+
+        // Build GPS map for quick lookup
+        const gpsMap = new Map<string, { lat: number; lng: number }>()
+        suppliers.forEach((s: any) => {
+          if (s.ISHYIGA_ACCOUNT && s.supplier_latitude && s.supplier_longitude) {
+            gpsMap.set(s.ISHYIGA_ACCOUNT, {
+              lat: s.supplier_latitude,
+              lng: s.supplier_longitude
+            })
+          }
+        })
+
+        setSupplierGPSMap(gpsMap)
+        console.log(`[GlobalSearch] Loaded GPS data for ${gpsMap.size} suppliers`)
+      } catch (error) {
+        console.error('[GlobalSearch] Failed to fetch GPS data:', error)
+      }
+    }
+
+    fetchSupplierGPS()
+  }, [])
+
+  // Fetch nearby suppliers when user has location
+  useEffect(() => {
+    const fetchNearbySuppliers = async () => {
+      if (!userLocation?.latitude || !userLocation?.longitude) {
+        setNearbySuppliers([])
+        return
+      }
+      setLoadingNearby(true)
+      try {
+        // Fetch all suppliers with GPS from admin endpoint
+        const response = await fetch('/api/admin/gps-audit', { cache: 'no-store' })
+        if (!response.ok) throw new Error('Failed to fetch suppliers')
+
+        const data = await response.json()
+        const suppliers = data.issues || []
+
+        // Calculate distances and filter suppliers with coordinates
+        const suppliersWithDistance = suppliers
+          .filter((s: any) => s.supplier_latitude && s.supplier_longitude)
+          .map((s: any) => {
+            const distance = calculateDistance(
+              userLocation.latitude!,
+              userLocation.longitude!,
+              s.supplier_latitude,
+              s.supplier_longitude
+            )
+            return {
+              type: 'supplier' as const,
+              supplier_account: s.ISHYIGA_ACCOUNT,
+              supplier_name: s.nickname,
+              supplier_location: [s.loc_cell, s.loc_district].filter(Boolean).join(', ') || 'Location not set',
+              distance_km: distance,
+              product_count: 0,
+            }
+          })
+          .sort((a, b) => a.distance_km - b.distance_km)
+          .slice(0, 10) // Top 10 nearest
+
+        setNearbySuppliers(suppliersWithDistance)
+      } catch (error) {
+        console.error('[NearbySuppliers] Fetch error:', error)
+        setNearbySuppliers([])
+      } finally {
+        setLoadingNearby(false)
+      }
+    }
+    fetchNearbySuppliers()
+  }, [userLocation?.latitude, userLocation?.longitude])
+
+  // Fetch nearby products when user has GPS and types a query
+  useEffect(() => {
+    let cancelled = false
+
+    const fetchNearbyProducts = async () => {
+      // Only search nearby if we have a query and GPS location
+      if (!q.trim() || q.trim().length < 2 || !userGPS) {
+        setNearbyProducts(null)
+        return
+      }
+
+      setLoadingNearbyProducts(true)
+      try {
+        const data = await searchNearbyProducts(q.trim(), userGPS.lat, userGPS.lng, 5)
+        if (!cancelled) {
+          setNearbyProducts(data)
+        }
+      } catch (error) {
+        console.error('[NearbyProducts] Fetch error:', error)
+        if (!cancelled) {
+          setNearbyProducts(null)
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingNearbyProducts(false)
+        }
+      }
+    }
+
+    const timeout = setTimeout(fetchNearbyProducts, 300) // Debounce
+    return () => {
+      cancelled = true
+      clearTimeout(timeout)
+    }
+  }, [q, userGPS])
 
   const addProductAndGoToCart = (p: GlobalResult) => {
     if (!addToCartFn) return
@@ -130,7 +275,7 @@ export function GlobalSearch({
       image: p.image || "/placeholder.svg?height=300&width=300",
       momo: p.momo,
     })
-    
+
     // Track search click for search intent
     if (q.trim()) {
       markSearchClick(
@@ -139,14 +284,14 @@ export function GlobalSearch({
         p.supplier_account || p.item_seller_account
       ).catch(err => console.warn("[SearchIntent] Failed to mark click:", err))
     }
-    
+
     // Show success toast instead of redirecting
     toast({
       title: "Added to cart!",
       description: p.item_commercial_name || "Product",
       duration: 2000,
     })
-    
+
     // User stays on current page - they can click cart icon when ready
     setOpen(false)
     setQ("")
@@ -168,17 +313,17 @@ export function GlobalSearch({
       console.log(`[GlobalSearch] Searching for: "${q}"`)
 
       try {
-      const locationData = useLocationStoreEnhanced.getState().location
-      const params = new URLSearchParams({
-        globalSearch: q,
-        limit: String(maxSuggestions),
-        Currency: "RWF",
-        ...(sector ? { sector } : {}),
-        ...(location ? { location } : {}),
-        // Add location-aware parameters (district and cell)
-        ...(locationData?.district ? { district: locationData.district } : {}),
-        ...(locationData?.cell ? { cell: locationData.cell } : {}),
-      }).toString()
+        const locationData = useLocationStoreEnhanced.getState().location
+        const params = new URLSearchParams({
+          globalSearch: q,
+          limit: String(maxSuggestions),
+          Currency: "RWF",
+          ...(sector ? { sector } : {}),
+          ...(location ? { location } : {}),
+          // Add location-aware parameters (district and cell)
+          ...(locationData?.district ? { district: locationData.district } : {}),
+          ...(locationData?.cell ? { cell: locationData.cell } : {}),
+        }).toString()
 
         const res = await fetch(`/api/fetchSuggestions?${params}`, {
           cache: "no-store",
@@ -239,11 +384,11 @@ export function GlobalSearch({
         setSuppliers(s)
         setStats(json.searchStats || null)
         setOpen(true)
-        
+
         // Track search intent
         if (q.trim().length >= 2) {
           const totalResults = p.length + s.length
-          recordSearch(q.trim(), totalResults, "global").catch(err => 
+          recordSearch(q.trim(), totalResults, "global").catch(err =>
             console.warn("[SearchIntent] Failed to record search:", err)
           )
         }
@@ -327,8 +472,49 @@ export function GlobalSearch({
 
   const dropdownPos = getDropdownPosition()
 
+  // Enrich products with distance and sort by proximity when GPS available
+  const productsWithDistance = useMemo(() => {
+    if (!userGPS || !supplierGPSMap.size || !products.length) {
+      return products
+    }
+
+    // Add distance to each product
+    const enriched = products.map(p => {
+      const supplierId = p.supplier_account || p.item_seller_account
+      if (!supplierId) return { ...p, calculated_distance_km: undefined }
+
+      const supplierGPS = supplierGPSMap.get(supplierId)
+      if (!supplierGPS) return { ...p, calculated_distance_km: undefined }
+
+      const distance = calculateDistance(
+        userGPS.lat,
+        userGPS.lng,
+        supplierGPS.lat,
+        supplierGPS.lng
+      )
+
+      return { ...p, calculated_distance_km: distance }
+    })
+
+    // Sort by RELEVANCE (finalScore) first, then by distance
+    return enriched.sort((a: GlobalResult, b: GlobalResult) => {
+      // Primary sort: relevance score (higher is better)
+      const scoreA = a.relevance_score || a.finalScore || 0
+      const scoreB = b.relevance_score || b.finalScore || 0
+
+      if (scoreB !== scoreA) {
+        return scoreB - scoreA // High score first
+      }
+
+      // Secondary sort: distance (lower is better)
+      const distA = a.calculated_distance_km ?? Infinity
+      const distB = b.calculated_distance_km ?? Infinity
+      return distA - distB
+    })
+  }, [products, userGPS, supplierGPSMap])
+
   // Group products by supplier
-  const productsBySupplier = groupProductsBySupplier(products)
+  const productsBySupplier = groupProductsBySupplier(productsWithDistance)
   const supplierCount = productsBySupplier.size
 
   return (
@@ -410,6 +596,168 @@ export function GlobalSearch({
             </div>
           )}
 
+          {/* Nearby Suppliers - Show when search is empty and user has location */}
+          {!loading && !err && q.trim().length === 0 && nearbySuppliers.length > 0 && (
+            <div className="p-3 space-y-2">
+              <div className="px-1 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1">
+                <Store className="h-3 w-3" />
+                📍 Nearest Suppliers ({nearbySuppliers.length})
+              </div>
+              {loadingNearby ? (
+                <div className="px-3 py-2 text-sm text-muted-foreground flex items-center gap-2">
+                  <div className="animate-spin h-3 w-3 border-2 border-blue-600 border-t-transparent rounded-full" />
+                  Finding nearby suppliers…
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {nearbySuppliers.map((s, i) => (
+                    <button
+                      key={`nearby-${s.supplier_account}-${i}`}
+                      className="flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm hover:border-green-300 hover:bg-green-50 transition-colors group"
+                      onClick={() => onSubmitSupplier(s)}
+                    >
+                      <Store className="h-4 w-4 text-green-600" />
+                      <div className="flex-1">
+                        <div className="font-medium leading-tight group-hover:text-green-700">
+                          {s.supplier_name || s.supplier_account}
+                        </div>
+                        <div className="text-[11px] text-muted-foreground mt-0.5">
+                          {s.supplier_location}
+                        </div>
+                      </div>
+                      <div className="text-sm font-semibold text-green-600">
+                        {s.distance_km?.toFixed(1)} km
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* GPS Status Indicators - Show when user has query */}
+          {q.trim().length > 0 && (
+            <>
+              {gpsLoading && (
+                <div className="px-3 py-2 bg-blue-50 border-t border-blue-200 flex items-center gap-2">
+                  <MapPin className="h-3 w-3 text-blue-600 animate-pulse" />
+                  <span className="text-xs text-blue-700">Getting your location for nearby results...</span>
+                </div>
+              )}
+
+              {gpsDenied && !gpsLoading && (
+                <div className="px-3 py-2 bg-amber-50 border-t border-amber-200 flex items-center gap-2">
+                  <MapPin className="h-3 w-3 text-amber-600" />
+                  <span className="text-xs text-amber-700">Location access denied. Using Kigali as default.</span>
+                </div>
+              )}
+
+              {userGPS && !gpsDenied && !gpsLoading && (
+                <div className="px-3 py-2 bg-green-50 border-t border-green-200 flex items-center gap-2">
+                  <MapPin className="h-3 w-3 text-green-600" />
+                  <span className="text-xs text-green-700">
+                    Showing nearby results based on your location
+                    {loadingNearbyProducts && <span className="ml-2 animate-pulse">• Searching...</span>}
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Nearby Products - Show when user has query and GPS */}
+          {!loading && !err && nearbyProducts && nearbyProducts.results.length > 0 && (
+            <div className="p-3 space-y-2 bg-gradient-to-br from-green-50 to-blue-50 border-t-2 border-green-200">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <MapPin className="h-4 w-4 text-green-600" />
+                  <h3 className="text-sm font-semibold text-green-800">
+                    Nearby Results for "<span className="text-green-700">{nearbyProducts.query}</span>"
+                  </h3>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary" className="bg-green-100 text-green-800 text-xs">
+                    📍 Within {nearbyProducts.radius_used_km} km
+                  </Badge>
+                  <span className="text-xs text-gray-600">{nearbyProducts.results.length} found</span>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                {nearbyProducts.results.map((product) => (
+                  <button
+                    key={product.item_code}
+                    className="w-full rounded-lg border-2 border-green-200 bg-white p-3 hover:border-green-400 hover:shadow-md transition-all cursor-pointer group text-left"
+                    onClick={() => {
+                      // Add to cart
+                      if (!addToCartFn) return
+
+                      const id = product.item_code
+                      const price = product.best_offer.sale_price
+
+                      addToCartFn({
+                        id,
+                        name: product.item_name,
+                        price,
+                        unit: "",
+                        selectedUnit: "",
+                        qty: 1,
+                        supplierId: product.best_offer.supplier_id,
+                        supplierName: product.best_offer.nickname,
+                        supplierLocation: "",
+                        image: "/placeholder.svg?height=300&width=300",
+                        momo: "",
+                      })
+
+                      toast({
+                        title: "Added to cart!",
+                        description: product.item_name,
+                        duration: 2000,
+                      })
+
+                      setOpen(false)
+                      setQ("")
+                    }}
+                  >
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <div className="font-medium text-gray-900 group-hover:text-green-700 transition-colors">
+                          {product.item_name}
+                        </div>
+                        <div className="text-sm text-gray-600 mt-1">
+                          {product.best_offer.nickname}
+                        </div>
+                        <div className="text-lg font-bold text-green-700 mt-1">
+                          {product.best_offer.sale_price.toLocaleString()} RWF
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end gap-1">
+                        <DistanceBadge distanceKm={product.best_offer.distance_km} />
+                        {product.best_offer.quantity && (
+                          <Badge variant="outline" className="text-xs">
+                            {product.best_offer.quantity} in stock
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+
+                    {product.other_sellers && product.other_sellers.length > 0 && (
+                      <div className="mt-2 pt-2 border-t border-gray-200">
+                        <div className="text-xs text-gray-500">
+                          +{product.other_sellers.length} other seller{product.other_sellers.length > 1 ? 's' : ''} nearby
+                          {product.other_sellers.slice(0, 2).map((seller, idx) => (
+                            <span key={idx} className="ml-2">
+                              • {seller.nickname} ({seller.distance_km.toFixed(1)} km)
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {!loading && !err && (products.length > 0 || suppliers.length > 0) && (
             <div className="p-3 space-y-3">
               {/* Search Stats */}
@@ -471,14 +819,27 @@ export function GlobalSearch({
                                 }}
                                 title="Click to add & go to cart"
                               >
-                                <div className="font-medium text-gray-900 group-hover:text-blue-700 text-sm">
-                                  {p.item_commercial_name}
-                                </div>
-                                <div className="text-xs text-gray-600 mt-0.5">
-                                  {p.item_packet || ""}
-                                </div>
-                                <div className="mt-1 text-sm font-semibold text-green-600">
-                                  {p.item_emballage || "Price N/A"}
+                                <div className="flex justify-between items-start gap-2">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="font-medium text-gray-900 group-hover:text-blue-700 text-sm line-clamp-2">
+                                      {p.item_commercial_name}
+                                    </div>
+                                    <div className="text-xs text-gray-600 mt-0.5 line-clamp-1">
+                                      {p.item_packet || ""}
+                                    </div>
+                                    <div className="mt-1 text-sm font-semibold text-green-600">
+                                      {p.item_emballage || "Price N/A"}
+                                    </div>
+                                  </div>
+                                  {p.calculated_distance_km !== undefined && p.calculated_distance_km < 100 && (
+                                    <div className="flex-shrink-0">
+                                      <div className="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                                        {p.calculated_distance_km < 1
+                                          ? `${Math.round(p.calculated_distance_km * 1000)} m`
+                                          : `${p.calculated_distance_km.toFixed(1)} km`}
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
                                 {p.finalScore && p.finalScore > 0 && (
                                   <div className="mt-1 text-[10px] text-gray-400">

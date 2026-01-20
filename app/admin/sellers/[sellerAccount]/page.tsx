@@ -2,8 +2,11 @@
 
 import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { ArrowLeft, Edit, Save, X } from 'lucide-react'
+import { ArrowLeft, Edit, Save, X, XCircle } from 'lucide-react'
 import { useAuthStore } from '@/lib/auth-store'
+import { REJECTION_REASONS } from '@/lib/rejection-reasons'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 
 interface SellerProfile {
   id: number
@@ -21,6 +24,7 @@ interface SellerProfile {
   photo: string
   rating: number
   discount: number
+  businessName?: string // Business name for sellers
 }
 
 interface SalesData {
@@ -60,8 +64,8 @@ export default function SellerDetailPage() {
       const res = await fetch('/api/admin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          action: 'getSellerDetails', 
+        body: JSON.stringify({
+          action: 'getSellerDetails',
           sellerAccount,
           adminEmail: user?.email || '',
           productPage,
@@ -69,7 +73,7 @@ export default function SellerDetailPage() {
         })
       })
       const data = await res.json()
-      
+
       if (data.ok && data.profile && Object.keys(data.profile).length > 0) {
         setProfile(data.profile)
         setSales(data.sales)
@@ -89,6 +93,56 @@ export default function SellerDetailPage() {
     }
   }
 
+  const [showRejectModal, setShowRejectModal] = useState(false)
+  const [rejectionReason, setRejectionReason] = useState('')
+  const [customReason, setCustomReason] = useState('')
+  const [rejectLoading, setRejectLoading] = useState(false)
+
+  const handleReject = async () => {
+    if (!rejectionReason) {
+      alert('Please select a rejection reason')
+      return
+    }
+    if (rejectionReason === 'other' && !customReason.trim()) {
+      alert('Please specify the rejection reason')
+      return
+    }
+
+    if (!confirm(`Are you sure you want to reject this seller application?`)) return
+
+    setRejectLoading(true)
+    try {
+      const finalReason = rejectionReason === 'other'
+        ? customReason
+        : REJECTION_REASONS.find(r => r.value === rejectionReason)?.label || rejectionReason
+
+      const res = await fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'rejectSeller',
+          sellerAccount,
+          rejectionReason: finalReason,
+          adminEmail: user?.email || ''
+        })
+      })
+      const data = await res.json()
+
+      if (data.ok) {
+        alert('Seller application rejected successfully')
+        setShowRejectModal(false)
+        router.push('/admin/sellers')
+      } else {
+        alert('Error: ' + (data.error || 'Failed to reject seller'))
+      }
+    } catch (error) {
+      console.error('Error rejecting seller:', error)
+      alert('Error rejecting seller')
+    } finally {
+      setRejectLoading(false)
+    }
+  }
+
   const handleSave = async () => {
     try {
       const res = await fetch('/api/admin', {
@@ -102,7 +156,7 @@ export default function SellerDetailPage() {
         })
       })
       const data = await res.json()
-      
+
       if (data.ok) {
         alert('Seller updated successfully')
         setEditing(false)
@@ -171,13 +225,24 @@ export default function SellerDetailPage() {
               </button>
             </div>
           ) : (
-            <button
-              onClick={() => setEditing(true)}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
-            >
-              <Edit size={16} />
-              Edit
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setEditing(true)}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+              >
+                <Edit size={16} />
+                Edit
+              </button>
+              {profile.status === 'PENDING' && (
+                <button
+                  onClick={() => setShowRejectModal(true)}
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2"
+                >
+                  <XCircle size={16} />
+                  Reject
+                </button>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -284,21 +349,67 @@ export default function SellerDetailPage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-              <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${
-                profile.status === 'LIVE' ? 'bg-green-100 text-green-800' :
-                profile.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' :
-                'bg-red-100 text-red-800'
-              }`}>
-                {profile.status}
-              </span>
+              {editing ? (
+                <select
+                  value={editData.status || ''}
+                  onChange={(e) => setEditData({ ...editData, status: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                >
+                  <option value="LIVE">LIVE</option>
+                  <option value="PENDING">PENDING</option>
+                  <option value="SLEEPING">SLEEPING</option>
+                </select>
+              ) : (
+                <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${profile.status === 'LIVE' ? 'bg-green-100 text-green-800' :
+                  profile.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' :
+                    'bg-red-100 text-red-800'
+                  }`}>
+                  {profile.status}
+                </span>
+              )}
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Certificate</label>
-              <p className="text-gray-900">{profile.certificate || 'N/A'}</p>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Certificate</label>
+              {editing ? (
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setEditData({ ...editData, certificate: editData.certificate === 'YES' ? 'NO' : 'YES' })}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${editData.certificate === 'YES' ? 'bg-green-600' : 'bg-gray-200'
+                      }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${editData.certificate === 'YES' ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                    />
+                  </button>
+                  <span className={`text-sm font-medium ${editData.certificate === 'YES' ? 'text-green-600' : 'text-gray-500'}`}>
+                    {editData.certificate === 'YES' ? '✓ Has Certificate' : '✗ No Certificate'}
+                  </span>
+                </div>
+              ) : (
+                <p className="text-gray-900">
+                  {profile.certificate === 'YES' || profile.certificate === 'NA' ? (
+                    <span className="text-green-600">✓ Has Certificate</span>
+                  ) : (
+                    <span className="text-red-600">✗ No Certificate</span>
+                  )}
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-              <p className="text-gray-900">{profile.description || 'N/A'}</p>
+              {editing ? (
+                <textarea
+                  value={editData.description || ''}
+                  onChange={(e) => setEditData({ ...editData, description: e.target.value })}
+                  placeholder="Add your description"
+                  rows={4}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+                />
+              ) : (
+                <p className="text-gray-900">{profile.description || 'N/A'}</p>
+              )}
             </div>
           </div>
         </div>
@@ -379,7 +490,7 @@ export default function SellerDetailPage() {
                 </tbody>
               </table>
             </div>
-            
+
             {/* Pagination */}
             {totalProducts > productPageSize && (
               <div className="mt-4 flex items-center justify-between border-t border-gray-200 pt-4">
@@ -410,6 +521,90 @@ export default function SellerDetailPage() {
           </>
         )}
       </div>
+
+      {/* Rejection Modal */}
+      {showRejectModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-md">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-red-600">
+                <XCircle size={24} />
+                Reject Seller Application
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Seller: {profile.firstName} {profile.lastName}
+                </label>
+                <p className="text-sm text-gray-600">Business: {profile.businessName || 'N/A'}</p>
+                <p className="text-sm text-gray-600">Email: {profile.email}</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Rejection Reason *
+                </label>
+                <select
+                  value={rejectionReason}
+                  onChange={(e) => setRejectionReason(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                >
+                  <option value="">Select a reason...</option>
+                  {REJECTION_REASONS.map((reason) => (
+                    <option key={reason.value} value={reason.value}>
+                      {reason.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {rejectionReason === 'other' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Specify Reason *
+                  </label>
+                  <textarea
+                    value={customReason}
+                    onChange={(e) => setCustomReason(e.target.value)}
+                    placeholder="Please explain the rejection reason..."
+                    rows={3}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                  />
+                </div>
+              )}
+
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                <p className="text-sm text-yellow-800">
+                  ⚠️ This action cannot be undone. The seller will be notified via email.
+                </p>
+              </div>
+
+              <div className="flex gap-2">
+                <Button
+                  onClick={handleReject}
+                  disabled={rejectLoading}
+                  className="flex-1 bg-red-600 hover:bg-red-700"
+                >
+                  {rejectLoading ? 'Rejecting...' : 'Confirm Rejection'}
+                </Button>
+                <Button
+                  onClick={() => {
+                    setShowRejectModal(false)
+                    setRejectionReason('')
+                    setCustomReason('')
+                  }}
+                  variant="outline"
+                  className="flex-1"
+                  disabled={rejectLoading}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   )
 }

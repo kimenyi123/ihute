@@ -17,6 +17,7 @@ import {
   X,
   LogOut,
   Wallet,
+  MapPin,
 } from 'lucide-react'
 import { useAuthStore } from '@/lib/auth-store'
 import { AdminGuard } from '@/components/auth/admin-guard'
@@ -32,6 +33,7 @@ const menuItems = [
   { href: '/admin/notifications', label: 'Notification Center', icon: Bell },
   { href: '/admin/analytics', label: 'Analytics & Reports', icon: BarChart3 },
   { href: '/admin/payment', label: 'Payment Dashboard', icon: Wallet },
+  { href: '/admin/gps', label: 'GPS Management', icon: MapPin },
 ]
 
 export default function AdminLayout({ children }: { children: ReactNode }) {

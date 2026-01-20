@@ -21,6 +21,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
     { name: "Orders", href: "/supplier/orders" },
     { name: "Expenses", href: "/supplier/expenses" },
     { name: "Add Product", href: "/supplier/products/add" },
+    { name: "Settings", href: "/supplier/settings/location" },
   ];
 
   const closeSidebar = useCallback(() => {

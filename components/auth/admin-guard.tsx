@@ -33,13 +33,11 @@ export function AdminGuard({ children }: AdminGuardProps) {
         const sessionValid = checkSession()
 
         if (!sessionValid || !isAuthenticated) {
-            console.log('🔒 No valid session, redirecting to login')
             router.push('/login')
             return
         }
 
         if (user?.role !== 'admin') {
-            console.log('⛔ Not authorized as admin, redirecting to home')
             router.push('/')
             return
         }

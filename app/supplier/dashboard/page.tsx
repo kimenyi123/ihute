@@ -22,12 +22,13 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
+  MapPin,
 } from "lucide-react";
 import Link from "next/link";
 
 function SupplierDashboard() {
   const router = useRouter();
-  const { user, isAuthenticated, logout } = useAuthStore();
+  const { user, isAuthenticated, hasHydrated, logout } = useAuthStore();
   const [supplierProducts, setSupplierProducts] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
@@ -38,6 +39,12 @@ function SupplierDashboard() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // CRITICAL: Wait for auth store to rehydrate from localStorage before checking authentication
+    if (!hasHydrated) {
+      return; // Don't redirect yet - store is still loading from localStorage
+    }
+
+    // Now that store has hydrated, check authentication
     if (!isAuthenticated || user?.role !== "supplier") {
       router.push("/login");
       return;
@@ -60,18 +67,11 @@ function SupplierDashboard() {
         return res.json();
       })
       .then((data) => {
-        console.log("=== API Response ===");
-        console.log("Full data:", data);
-        console.log("Products array:", data.products);
-        console.log("Count:", data.count);
-        console.log("Source:", data.source);
-
         if (!data.ok) {
           throw new Error(data.error || "API returned ok: false");
         }
 
         const products = data.products || [];
-        console.log(`Received ${products.length} products from ${data.source}`);
 
         // Helper function to parse Redis price strings like "1880.0RWF"
         const parsePrice = (value: any): number => {
@@ -87,8 +87,6 @@ function SupplierDashboard() {
 
         // Map products - handle both database and Redis formats
         const mappedProducts = products.map((p: any, index: number) => {
-          console.log(`Product ${index}:`, p);
-
           // Parse price from various sources
           const price = parsePrice(
             p.price ||
@@ -129,13 +127,8 @@ function SupplierDashboard() {
             sales: 0,
           };
 
-          console.log(`Mapped product ${index}:`, mapped);
           return mapped;
         });
-
-        console.log("=== All Mapped Products ===");
-        console.log(mappedProducts);
-        console.log(`Total: ${mappedProducts.length}`);
 
         // Don't filter by stock > 0, show ALL products
         setSupplierProducts(mappedProducts);
@@ -146,7 +139,7 @@ function SupplierDashboard() {
         setError(err.message);
         setLoading(false);
       });
-  }, [isAuthenticated, user, router]);
+  }, [isAuthenticated, user, router, hasHydrated]);
 
   const handleLogout = () => {
     logout();
@@ -255,10 +248,20 @@ function SupplierDashboard() {
               {user?.businessCategory || "Supplier Panel"} • Account: {user?.ishyigaAccount}
             </p>
           </div>
-          <Button variant="outline" onClick={handleLogout} className="gap-2">
-            <LogOut className="h-4 w-4" />
-            Logout
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => router.push("/supplier/settings/location")}
+              className="gap-2"
+            >
+              <MapPin className="h-4 w-4" />
+              Settings
+            </Button>
+            <Button variant="outline" onClick={handleLogout} className="gap-2">
+              <LogOut className="h-4 w-4" />
+              Logout
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -491,26 +494,24 @@ function SupplierDashboard() {
                             </td>
                             <td className="px-4 py-4 text-center">
                               <span
-                                className={`font-semibold ${
-                                  p.stock === 0
-                                    ? "text-red-600"
-                                    : p.stock <= 10
+                                className={`font-semibold ${p.stock === 0
+                                  ? "text-red-600"
+                                  : p.stock <= 10
                                     ? "text-yellow-600"
                                     : "text-slate-900"
-                                }`}
+                                  }`}
                               >
                                 {p.stock}
                               </span>
                             </td>
                             <td className="px-4 py-4 text-center">
                               <span
-                                className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
-                                  p.stock === 0
-                                    ? "bg-red-100 text-red-700"
-                                    : p.stock <= 10
+                                className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${p.stock === 0
+                                  ? "bg-red-100 text-red-700"
+                                  : p.stock <= 10
                                     ? "bg-yellow-100 text-yellow-700"
                                     : "bg-blue-100 text-blue-700"
-                                }`}
+                                  }`}
                               >
                                 {p.stock === 0 ? "Out of Stock" : p.stock <= 10 ? "Low Stock" : "Active"}
                               </span>
@@ -615,11 +616,10 @@ function SupplierDashboard() {
                               }
                               size="sm"
                               onClick={() => setCurrentPage(page)}
-                              className={`h-8 w-8 p-0 ${
-                                currentPage === page
-                                  ? "bg-blue-600 hover:bg-blue-700"
-                                  : ""
-                              }`}
+                              className={`h-8 w-8 p-0 ${currentPage === page
+                                ? "bg-blue-600 hover:bg-blue-700"
+                                : ""
+                                }`}
                             >
                               {page}
                             </Button>

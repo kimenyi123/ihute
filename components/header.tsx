@@ -105,13 +105,13 @@ export function Header() {
           </Link>
 
           {/* Global Search - Desktop */}
-          <div className="hidden lg:flex flex-1 max-w-md relative items-center gap-2">
+          <div className="hidden lg:flex flex-1 max-w-2xl relative items-center gap-2">
             <GlobalSearch placeholder={t("searchPlaceholder")} className="w-full" />
-            <LocationBadge />
           </div>
 
           {/* Actions */}
           <div className="flex items-center gap-1 md:gap-2">
+            <LocationBadge />
             <LanguageSelector />
 
             {isAuthenticated ? (
@@ -276,13 +276,10 @@ export function Header() {
           </div>
         </div>
 
-        {/* Mobile Search + Location */}
-        <div className="pb-3 space-y-2 lg:hidden">
+        {/* Mobile Search */}
+        <div className="pb-3 lg:hidden">
           <div className="relative w-full">
             <GlobalSearch placeholder={t("searchPlaceholder")} className="w-full" />
-          </div>
-          <div className="flex items-center justify-center">
-            <LocationBadge />
           </div>
         </div>
       </div>
