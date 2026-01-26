@@ -20,12 +20,12 @@ interface AdminGuardProps {
  */
 export function AdminGuard({ children }: AdminGuardProps) {
     const router = useRouter()
-    const { user, isAuthenticated, checkSession, _hasHydrated } = useAuthStore()
+    const { user, isAuthenticated, checkSession, hasHydrated } = useAuthStore()
     const [isLoading, setIsLoading] = useState(true)
 
     useEffect(() => {
         // Wait for localStorage to rehydrate
-        if (!_hasHydrated) {
+        if (!hasHydrated) {
             return
         }
 
@@ -42,18 +42,17 @@ export function AdminGuard({ children }: AdminGuardProps) {
             return
         }
 
-        // All checks passed, show content
+        // All checks passed, show content immediately
         setIsLoading(false)
-    }, [_hasHydrated, isAuthenticated, user, checkSession, router])
+    }, [hasHydrated, isAuthenticated, user, checkSession, router])
 
     // Show loading until rehydration completes and auth is verified
-    if (!_hasHydrated || isLoading) {
+    if (!hasHydrated || isLoading) {
         return (
             <div className="flex items-center justify-center min-h-screen bg-gray-50">
                 <div className="text-center">
                     <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-600 mx-auto"></div>
-                    <p className="mt-6 text-lg text-gray-600 font-medium">Loading admin panel...</p>
-                    <p className="mt-2 text-sm text-gray-500">Verifying authentication</p>
+                    <p className="mt-4 text-sm text-gray-600">Loading...</p>
                 </div>
             </div>
         )
