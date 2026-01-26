@@ -772,6 +772,80 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
             </Card>
           )}
 
+          {/* Payment Method Distribution */}
+          {summary && summary.channel_breakdown && Object.keys(summary.channel_breakdown).length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Activity className="h-5 w-5" />
+                  Payment Method Distribution
+                </CardTitle>
+                <CardDescription>Performance insights by payment channel</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {Object.entries(summary.channel_breakdown).map(([channel, data]: [string, any]) => {
+                    const total = data.count || 0;
+                    const totalAmount = data.total_amount || 0;
+                    // Calculate success rate (this would come from backend in real scenario)
+                    const percentOfTotal = summary.total_transactions > 0
+                      ? (total / summary.total_transactions) * 100
+                      : 0;
+
+                    return (
+                      <div key={channel} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
+                        <div className="flex items-center justify-between mb-3">
+                          <h4 className="font-semibold text-lg">{channel}</h4>
+                          <Badge variant="outline">{total} txns</Badge>
+                        </div>
+
+                        <div className="space-y-3">
+                          {/* Transaction count bar */}
+                          <div>
+                            <div className="flex justify-between text-xs text-gray-600 mb-1">
+                              <span>Market Share</span>
+                              <span>{percentOfTotal.toFixed(1)}%</span>
+                            </div>
+                            <div className="w-full bg-gray-200 rounded-full h-2">
+                              <div
+                                className="bg-blue-500 h-2 rounded-full"
+                                style={{ width: `${percentOfTotal}%` }}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Total amount */}
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-gray-600">Total Amount</span>
+                            <span className="font-semibold">
+                              {new Intl.NumberFormat('en-RW', {
+                                style: 'currency',
+                                currency: 'RWF',
+                                minimumFractionDigits: 0
+                              }).format(totalAmount)}
+                            </span>
+                          </div>
+
+                          {/* Average per transaction */}
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-gray-600">Avg per Transaction</span>
+                            <span className="text-sm">
+                              {new Intl.NumberFormat('en-RW', {
+                                style: 'currency',
+                                currency: 'RWF',
+                                minimumFractionDigits: 0
+                              }).format(total > 0 ? totalAmount / total : 0)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Filters and Actions */}
           <Card>
             <CardHeader>
