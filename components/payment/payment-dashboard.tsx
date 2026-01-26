@@ -89,15 +89,17 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
   // Filters - no date filter by default to show ALL transactions
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [channelFilter, setChannelFilter] = useState<string>('all');
-  // No default date filter - show all transactions
   const [fromDate, setFromDate] = useState<string>('');
   const [toDate, setToDate] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState<string>('');
+  const [minAmount, setMinAmount] = useState<string>('');
+  const [maxAmount, setMaxAmount] = useState<string>('');
+  const [sortBy, setSortBy] = useState<string>('date_desc');
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize] = useState(50);
+  const [pageSize, setPageSize] = useState(50);
   const [totalTransactions, setTotalTransactions] = useState(0);
   const [hasMore, setHasMore] = useState(false);
 
@@ -997,6 +999,76 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
                       className="h-9 pl-8"
                     />
                   </div>
+                </div>
+              </div>
+
+              {/* Advanced Filters Row */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+                {/* Min Amount */}
+                <div>
+                  <label className="text-xs font-medium text-gray-700 mb-1.5 block">
+                    Min Amount (RWF)
+                  </label>
+                  <Input
+                    type="number"
+                    placeholder="Min amount"
+                    value={minAmount}
+                    onChange={(e) => setMinAmount(e.target.value)}
+                    className="h-9"
+                    min="0"
+                  />
+                </div>
+
+                {/* Max Amount */}
+                <div>
+                  <label className="text-xs font-medium text-gray-700 mb-1.5 block">
+                    Max Amount (RWF)
+                  </label>
+                  <Input
+                    type="number"
+                    placeholder="Max amount"
+                    value={maxAmount}
+                    onChange={(e) => setMaxAmount(e.target.value)}
+                    className="h-9"
+                    min="0"
+                  />
+                </div>
+
+                {/* Sort By */}
+                <div>
+                  <label className="text-xs font-medium text-gray-700 mb-1.5 block">
+                    Sort By
+                  </label>
+                  <Select value={sortBy} onValueChange={setSortBy}>
+                    <SelectTrigger className="h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="date_desc">📅 Newest First</SelectItem>
+                      <SelectItem value="date_asc">📅 Oldest First</SelectItem>
+                      <SelectItem value="amount_desc">💰 Highest Amount</SelectItem>
+                      <SelectItem value="amount_asc">💰 Lowest Amount</SelectItem>
+                      <SelectItem value="status">📊 By Status</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Results per page */}
+                <div>
+                  <label className="text-xs font-medium text-gray-700 mb-1.5 block">
+                    Show Per Page
+                  </label>
+                  <Select value={pageSize.toString()} onValueChange={(val) => setPageSize(parseInt(val))}>
+                    <SelectTrigger className="h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="25">25</SelectItem>
+                      <SelectItem value="50">50</SelectItem>
+                      <SelectItem value="100">100</SelectItem>
+                      <SelectItem value="200">200</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
 
