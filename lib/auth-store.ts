@@ -25,6 +25,7 @@ interface AuthState {
   loginTime: number | null
   lastActivityTime: number | null
   sessionTimeout: number
+  sessionToken: string | null // Unique token to prevent cross-browser session sharing
 
   // ✅ one hydration flag + setter
   hasHydrated: boolean
@@ -39,10 +40,19 @@ interface AuthState {
 }
 
 const SESSION_TIMEOUTS: Record<UserRole, number> = {
-  admin: 15 * 60 * 1000,
+  admin: 30 * 60 * 1000, // 30 minutes for admin (increased from 15)
   staff: 24 * 60 * 60 * 1000,
   buyer: 24 * 60 * 60 * 1000,
   seller: 24 * 60 * 60 * 1000,
+}
+
+// Generate a unique session token based on browser info + random data
+function generateSessionToken(): string {
+  const timestamp = Date.now()
+  const random = Math.random().toString(36).substring(2)
+  const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : ''
+  const screen = typeof window !== 'undefined' ? `${window.screen.width}x${window.screen.height}` : ''
+  return btoa(`${timestamp}-${random}-${userAgent}-${screen}`).substring(0, 64)
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -53,6 +63,7 @@ export const useAuthStore = create<AuthState>()(
       loginTime: null,
       lastActivityTime: null,
       sessionTimeout: 24 * 60 * 60 * 1000,
+      sessionToken: null,
 
       // ✅ hydration flag
       hasHydrated: false,
@@ -61,6 +72,7 @@ export const useAuthStore = create<AuthState>()(
       login: (user) => {
         const now = Date.now()
         const timeout = SESSION_TIMEOUTS[user.role] ?? SESSION_TIMEOUTS.buyer
+        const token = generateSessionToken()
 
         set({
           user,
@@ -68,6 +80,7 @@ export const useAuthStore = create<AuthState>()(
           loginTime: now,
           lastActivityTime: now,
           sessionTimeout: timeout,
+          sessionToken: token,
         })
 
         if (typeof window !== "undefined") {
@@ -85,7 +98,7 @@ export const useAuthStore = create<AuthState>()(
           localStorage.removeItem("prefs-storage")
           sessionStorage.clear()
         }
-        set({ user: null, isAuthenticated: false, loginTime: null, lastActivityTime: null })
+        set({ user: null, isAuthenticated: false, loginTime: null, lastActivityTime: null, sessionToken: null })
       },
 
       updateUser: (updates) =>
@@ -98,6 +111,13 @@ export const useAuthStore = create<AuthState>()(
         if (!state.hasHydrated) return true
 
         if (!state.isAuthenticated || !state.lastActivityTime) return false
+
+        // 🔒 Validate session token - prevents cross-browser session sharing
+        if (!state.sessionToken) {
+          console.warn('Session token missing - logging out for security')
+          state.logout()
+          return false
+        }
 
         const now = Date.now()
         const sessionExpired = now - state.lastActivityTime > state.sessionTimeout
@@ -132,6 +152,7 @@ export const useAuthStore = create<AuthState>()(
         loginTime: s.loginTime,
         lastActivityTime: s.lastActivityTime,
         sessionTimeout: s.sessionTimeout,
+        sessionToken: s.sessionToken,
       }),
     }
   )
