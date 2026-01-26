@@ -118,6 +118,10 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
   const [showAlertModal, setShowAlertModal] = useState(false);
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
 
+  // Analytics charts
+  const [analyticsData, setAnalyticsData] = useState<any>(null);
+  const [showAnalytics, setShowAnalytics] = useState(false);
+
   useEffect(() => {
     loadDashboardData();
     // Auto-refresh every 30 seconds
@@ -132,13 +136,25 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
         loadTransactions(),
         loadSummary(),
         loadAlerts(),
-        loadHealth()
+        loadHealth(),
+        loadAnalytics()
       ]);
     } catch (error) {
       console.error('Error loading dashboard data:', error);
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  };
+
+  const loadAnalytics = async () => {
+    try {
+      const data = await paymentDashboardApi.getAnalyticsCharts({ days: 30 });
+      if (data?.data) {
+        setAnalyticsData(data.data);
+      }
+    } catch (error: any) {
+      console.error('Error loading analytics:', error);
     }
   };
 
@@ -637,6 +653,123 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
                 </CardContent>
               </Card>
             </div>
+          )}
+
+          {/* Analytics Charts */}
+          {analyticsData && (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <TrendingUp className="h-5 w-5" />
+                      Transaction Analytics
+                    </CardTitle>
+                    <CardDescription>Visual insights and trends</CardDescription>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowAnalytics(!showAnalytics)}
+                  >
+                    {showAnalytics ? 'Hide Charts' : 'Show Charts'}
+                  </Button>
+                </div>
+              </CardHeader>
+              {showAnalytics && (
+                <CardContent className="space-y-6">
+                  {/* Transaction Volume Trend */}
+                  {analyticsData.time_series && analyticsData.time_series.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-semibold mb-3">Transaction Volume (Last 30 Days)</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                        {analyticsData.time_series.slice(-14).map((point: any, idx: number) => (
+                          <div key={idx} className="p-3 border rounded-lg bg-gray-50">
+                            <div className="text-xs text-gray-500 mb-1">
+                              {point.date || point.week || point.month}
+                            </div>
+                            <div className="text-xl font-bold">{point.count}</div>
+                            <div className="text-xs text-gray-600">
+                              {new Intl.NumberFormat('en-RW', {
+                                style: 'currency',
+                                currency: 'RWF',
+                                minimumFractionDigits: 0
+                              }).format(point.amount)}
+                            </div>
+                            <div className="text-xs text-green-600 mt-1">
+                              {point.success_rate}% success
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Hourly Distribution */}
+                  {analyticsData.hourly_distribution && analyticsData.hourly_distribution.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-semibold mb-3">Peak Hours (Last 7 Days)</h4>
+                      <div className="grid grid-cols-6 md:grid-cols-12 gap-2">
+                        {Array.from({ length: 24 }, (_, hour) => {
+                          const data = analyticsData.hourly_distribution.find((h: any) => h.hour === hour);
+                          const count = data?.count || 0;
+                          const maxCount = Math.max(...analyticsData.hourly_distribution.map((h: any) => h.count));
+                          const height = count > 0 ? Math.max(20, (count / maxCount) * 100) : 10;
+                          return (
+                            <div key={hour} className="flex flex-col items-center">
+                              <div
+                                className="w-full bg-blue-500 rounded-t transition-all hover:bg-blue-600"
+                                style={{ height: `${height}px` }}
+                                title={`${hour}:00 - ${count} transactions`}
+                              />
+                              <div className="text-xs text-gray-500 mt-1">{hour}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <p className="text-xs text-gray-500 mt-2">Hours (24h format)</p>
+                    </div>
+                  )}
+
+                  {/* Channel Performance */}
+                  {analyticsData.channel_trends && analyticsData.channel_trends.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-semibold mb-3">Payment Channel Performance</h4>
+                      <div className="space-y-2">
+                        {Object.entries(
+                          analyticsData.channel_trends.reduce((acc: any, item: any) => {
+                            if (!acc[item.channel]) {
+                              acc[item.channel] = { count: 0, success_count: 0 };
+                            }
+                            acc[item.channel].count += item.count;
+                            acc[item.channel].success_count += Math.round((item.count * item.success_rate) / 100);
+                            return acc;
+                          }, {})
+                        ).map(([channel, data]: [string, any]) => {
+                          const successRate = data.count > 0 ? (data.success_count / data.count) * 100 : 0;
+                          return (
+                            <div key={channel} className="flex items-center gap-3">
+                              <div className="w-24 text-sm font-medium">{channel}</div>
+                              <div className="flex-1 bg-gray-200 rounded-full h-6 overflow-hidden">
+                                <div
+                                  className="bg-green-500 h-full flex items-center px-2 text-xs text-white font-medium"
+                                  style={{ width: `${successRate}%` }}
+                                >
+                                  {successRate > 10 && `${successRate.toFixed(1)}%`}
+                                </div>
+                              </div>
+                              <div className="text-sm text-gray-600 w-20 text-right">
+                                {data.success_count}/{data.count}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              )}
+            </Card>
           )}
 
           {/* Filters and Actions */}
