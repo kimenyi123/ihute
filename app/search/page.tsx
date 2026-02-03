@@ -8,7 +8,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { useCartStore } from "@/lib/cart-store"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { filterSuppliersByRelevance, filterProductsByRelevance } from "@/lib/search-utils"
+import { filterSuppliersByRelevance } from "@/lib/search-utils"
 import { getTranslations } from "@/lib/keyword-mapping"
 import { Languages, MapPin, Store } from "lucide-react"
 import { useTableCommandStore } from "@/lib/table-command-store"
@@ -107,12 +107,12 @@ export default function SearchPage() {
   // Supplier product search
   const [supplierSearch, setSupplierSearch] = useState("")
   const [debouncedSupplierSearch, setDebouncedSupplierSearch] = useState("")
-  
+
   // Table command store
-  const { 
-    activeSession: tableCommand, 
-    addToTableCart, 
-    tableCartItems 
+  const {
+    activeSession: tableCommand,
+    addToTableCart,
+    tableCartItems
   } = useTableCommandStore()
 
   // Keep drafts in sync with URL changes
@@ -121,37 +121,53 @@ export default function SearchPage() {
 
   const addToCartFn = useCartStore((s: any) => s.addOrInc ?? s.add)
 
-const addProductToCart = (p: Product) => {
-  if (!addToCartFn) {
-    console.warn("Cart store is missing addOrInc/add")
-    return
-  }
-  
-     const id = p.item_code || `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`
-  const unit = p.item_packet || ""
-  const price = extractNumericPrice(p.item_emballage)
-  const supplierId = p.supplier_account || "unknown"
-  const supplierName = p.supplier_name || p.supplier_account || "Supplier"
-  
-  // Check if we're in a table command context
-  if (tableCommand && tableCommand.locationId === p.supplier_account) {
-    // Add to table command cart (special handling for table orders)
-    if (addToTableCart) {
-      addToTableCart({
-        id,
-        name: p.item_commercial_name,
-        price,
-        unit,
-        selectedUnit: unit,
-        qty: 1,
-        supplierId,
-        supplierName,
-        supplierLocation: p.supplier_location,
-        image: p.image || "/placeholder.svg?height=300&width=300",
-        momo: p.momo || (p as any)?.seller_momo || "",
-      })
+  const addProductToCart = (p: Product) => {
+    if (!addToCartFn) {
+      console.warn("Cart store is missing addOrInc/add")
+      return
+    }
+
+    const id = p.item_code || `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`
+    const unit = p.item_packet || ""
+    const price = extractNumericPrice(p.item_emballage)
+    const supplierId = p.supplier_account || "unknown"
+    const supplierName = p.supplier_name || p.supplier_account || "Supplier"
+
+    // Check if we're in a table command context
+    if (tableCommand && tableCommand.locationId === p.supplier_account) {
+      // Add to table command cart (special handling for table orders)
+      if (addToTableCart) {
+        addToTableCart({
+          id,
+          name: p.item_commercial_name,
+          price,
+          unit,
+          selectedUnit: unit,
+          qty: 1,
+          supplierId,
+          supplierName,
+          supplierLocation: p.supplier_location,
+          image: p.image || "/placeholder.svg?height=300&width=300",
+          momo: p.momo || (p as any)?.seller_momo || "",
+        })
+      } else {
+        // Fallback to regular cart
+        addToCartFn({
+          id,
+          name: p.item_commercial_name,
+          price,
+          unit,
+          selectedUnit: unit,
+          qty: 1,
+          supplierId,
+          supplierName,
+          supplierLocation: p.supplier_location,
+          image: p.image || "/placeholder.svg?height=300&width=300",
+          momo: p.momo || (p as any)?.seller_momo || "",
+        })
+      }
     } else {
-      // Fallback to regular cart
+      // Regular order (not part of table command)
       addToCartFn({
         id,
         name: p.item_commercial_name,
@@ -166,34 +182,17 @@ const addProductToCart = (p: Product) => {
         momo: p.momo || (p as any)?.seller_momo || "",
       })
     }
-  } else {
-    // Regular order (not part of table command)
-    addToCartFn({
-      id,
-      name: p.item_commercial_name,
-      price,
-      unit,
-      selectedUnit: unit,
-      qty: 1,
-      supplierId,
-      supplierName,
-      supplierLocation: p.supplier_location,
-      image: p.image || "/placeholder.svg?height=300&width=300",
-      momo: p.momo || (p as any)?.seller_momo || "",
-    })
+
+    // Show success message instead of redirecting
+    alert(`Added "${p.item_commercial_name}" to your cart!`)
   }
-  
-  // Show success message instead of redirecting
-  alert(`Added "${p.item_commercial_name}" to your cart!`)
-}
 
   const onTileKey = (e: KeyboardEvent<HTMLDivElement>, p: Product) => {
-  if (e.key === "Enter" || e.key === " ") {
-    e.preventDefault()
-    addProductToCart(p)
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault()
+      addProductToCart(p)
+    }
   }
-}
-
 
   // Small helper to push URL with preserved params (and real clearing support)
   const pushWith = (updates: Record<string, string | undefined>) => {
@@ -255,7 +254,7 @@ const addProductToCart = (p: Product) => {
     return () => clearTimeout(t)
   }, [supplierSearch])
 
-  // Unified global search (LEFT) - Now with enhanced relevance filtering
+  // ====== MAIN FIX: Trust backend translation results ======
   useEffect(() => {
     let cancelled = false
     async function run() {
@@ -274,7 +273,7 @@ const addProductToCart = (p: Product) => {
         if (locationParam) {
           url.searchParams.set("location", locationParam)
         }
-        
+
         // Add location-aware parameters from enhanced location store
         const { useLocationStoreEnhanced } = await import("@/lib/location-store-enhanced")
         const userLocation = useLocationStoreEnhanced.getState().location
@@ -291,25 +290,21 @@ const addProductToCart = (p: Product) => {
           : { suppliersByName: [], suppliersByProduct: [], products: [], query: debouncedQ }
 
         if (!cancelled) {
-          // Apply enhanced relevance filtering on the client side
-          // Using stricter thresholds to avoid unrelated results
-          const filteredProducts = filterProductsByRelevance(
-            data.products || [],
-            debouncedQ,
-            25 // Strict threshold - only word boundary matches or better
-          )
+          // ✅ FIX: Trust backend - it already handles translation!
+          // No client-side filtering for products since backend does the work
+          const filteredProducts = data.products || []
 
-          // Filter suppliers by relevance while preserving their original match_type
+          // Keep light filtering for suppliers (optional - can be removed if backend handles it)
           const filteredSuppliersByName = filterSuppliersByRelevance(
             data.suppliersByName || [],
             debouncedQ,
-            15 // Lower threshold - show more supplier results
+            10 // Lower threshold for suppliers
           )
 
           const filteredSuppliersByProduct = filterSuppliersByRelevance(
             data.suppliersByProduct || [],
             debouncedQ,
-            15 // Lower threshold - show more supplier results
+            10 // Lower threshold for suppliers
           )
 
           setSearchResult({
@@ -323,12 +318,12 @@ const addProductToCart = (p: Product) => {
           const { trackSearch } = await import("@/lib/interaction-tracker")
           const { recordSearch } = await import("@/lib/search-intent-tracker")
           const totalResults = filteredProducts.length + filteredSuppliersByName.length + filteredSuppliersByProduct.length
-          
+
           // Track in interaction system
           trackSearch(debouncedQ, totalResults)
-          
+
           // Track in search intent system (for personalization and notifications)
-          recordSearch(debouncedQ, totalResults, "global").catch(err => 
+          recordSearch(debouncedQ, totalResults, "global").catch(err =>
             console.warn("[SearchIntent] Failed to record search:", err)
           )
         }
@@ -379,15 +374,15 @@ const addProductToCart = (p: Product) => {
     }
   }, [selectedShop])
 
-  // Filter shop products based on supplier search with relevance
+  // Filter shop products - simple text search (no strict filtering)
   const filteredShopProducts = useMemo(() => {
     if (!debouncedSupplierSearch) return shopProducts
-    
-    return filterProductsByRelevance(
-      shopProducts,
-      debouncedSupplierSearch,
-      5 // Lower threshold for within-supplier search
-    )
+
+    const searchLower = debouncedSupplierSearch.toLowerCase()
+    return shopProducts.filter(product => {
+      const productText = `${product.item_commercial_name} ${product.item_key_words || ''}`.toLowerCase()
+      return productText.includes(searchLower)
+    })
   }, [shopProducts, debouncedSupplierSearch])
 
   // Merge suppliers from both buckets (no dupes)
@@ -497,8 +492,8 @@ const addProductToCart = (p: Product) => {
           <h1 className="text-2xl font-semibold">Global Search</h1>
           <LocationBadge />
         </div>
-        
-        {/* Table Context Indicator - Added here */}
+
+        {/* Table Context Indicator */}
         {tableCommand && (
           <div className="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-lg">
             <div className="flex items-center justify-between">
@@ -516,7 +511,6 @@ const addProductToCart = (p: Product) => {
               <Button
                 size="sm"
                 variant="outline"
-                // onClick={() => router.push("/cart")}
               >
                 View My Cart ({tableCartItemCount} items)
               </Button>

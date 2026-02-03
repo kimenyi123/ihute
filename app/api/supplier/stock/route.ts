@@ -1,8 +1,8 @@
 // app/api/supplier/stock/route.ts
 import { NextRequest, NextResponse } from "next/server"
 
-const JAVA_BACKEND_BASE = process.env.JAVA_BACKEND_BASE || "https://ihute.rw"
-// const JAVA_BACKEND_BASE = process.env.JAVA_BACKEND_BASE || "http://localhost:8081"
+// const JAVA_BACKEND_BASE = process.env.JAVA_BACKEND_BASE || "https://ihute.rw"
+const JAVA_BACKEND_BASE = process.env.JAVA_BACKEND_BASE || "http://localhost:8081"
 const STOCK_SERVLET_URL = `${JAVA_BACKEND_BASE}/Trading/SupplierStock`
 
 export async function GET(req: NextRequest) {
@@ -24,9 +24,9 @@ export async function GET(req: NextRequest) {
 
     const resp = await fetch(`${STOCK_SERVLET_URL}?account=${encodeURIComponent(account)}`, {
       method: "GET",
-      headers: { 
+      headers: {
         "Content-Type": "application/json",
-        "Accept": "application/json" 
+        "Accept": "application/json"
       },
       signal: controller.signal,
       cache: "no-store",
@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
 
     // Handle different response formats
     let products: any[] = []
-    
+
     if (Array.isArray(data)) {
       products = data
     } else if (Array.isArray(data?.products)) {
@@ -56,7 +56,7 @@ export async function GET(req: NextRequest) {
 
     console.log(`[SUPPLIER-STOCK] Found ${products.length} products (source: ${data.source || 'unknown'})`)
 
-    return NextResponse.json({ 
+    return NextResponse.json({
       ok: true,
       products,
       count: products.length,
@@ -65,14 +65,14 @@ export async function GET(req: NextRequest) {
 
   } catch (e: any) {
     console.error("[SUPPLIER-STOCK] Error:", e)
-    
+
     if (e.name === 'AbortError') {
       return NextResponse.json(
         { ok: false, products: [], error: "Request timeout" },
         { status: 504 }
       )
     }
-    
+
     return NextResponse.json(
       { ok: false, products: [], error: e?.message },
       { status: 200 }
@@ -95,9 +95,9 @@ export async function POST(req: NextRequest) {
 
     const resp = await fetch(STOCK_SERVLET_URL, {
       method: "POST",
-      headers: { 
+      headers: {
         "Content-Type": "application/json",
-        "Accept": "application/json" 
+        "Accept": "application/json"
       },
       body: JSON.stringify({ ...body, action }),
       signal: controller.signal,

@@ -2,9 +2,11 @@
 import { NextRequest, NextResponse } from "next/server"
 
 const JAVA_API_BASE = process.env.JAVA_API_URL || "https://ihute.rw"
+// const JAVA_API_BASE = process.env.JAVA_API_URL || "http://localhost:3000"
 const UMUSADA_AUTH_BASE = "https://umusada-master.umusada.com/umusada-master-service"
 const UMUSADA_BANK_API = "https://bank-apis.umusada.com/api/v1"
 const BASE_URL = process.env.BASE_URL || "http://localhost:3000"
+const BASE_URL_TEST="http://localhost:8081"
 
 export async function POST(req: NextRequest) {
   try {
@@ -75,13 +77,13 @@ export async function POST(req: NextRequest) {
       }, { status: 404 })
     }
 
-    console.log(" Order Items Found:", detailsJson.items.length)
+    console.log("✓ Order Items Found:", detailsJson.items.length)
 
     // Extract TINs from order details if not provided
     const finalBuyerTIN = buyerTIN || detailsJson.order?.BUYER_TIN || ""
     const finalSupplierTIN = supplierTIN || detailsJson.order?.SELLER_TIN || ""
 
-    console.log(" Final TINs - Buyer:", finalBuyerTIN, "Supplier:", finalSupplierTIN)
+    console.log("✓ Final TINs - Buyer:", finalBuyerTIN, "Supplier:", finalSupplierTIN)
 
     // ================================
     // STEP 2: BUILD ITEMS TO CHECK
@@ -122,13 +124,13 @@ export async function POST(req: NextRequest) {
       }, { status: 400 })
     }
 
-    console.log(` Found ${itemsToCheck.length} items to verify stock`)
+    console.log(`✓ Found ${itemsToCheck.length} items to verify stock`)
 
     // ================================
     // STEP 3: FETCH STOCK FROM SELLER
     // ================================
-    console.log("\n Step 3: Checking stock availability from seller...")
-    console.log(" Using Seller Account:", sellerAccount)
+    console.log("\n📦 Step 3: Checking stock availability from seller...")
+    console.log("   Using Seller Account:", sellerAccount)
 
     const stockRes = await fetch(`${BASE_URL}/api/supplier/stock?account=${sellerAccount}`)
 
@@ -140,8 +142,6 @@ export async function POST(req: NextRequest) {
     }
 
     const stockData = await stockRes.json()
-    console.log("=== STOCK DATA ===")
-    console.log(JSON.stringify(stockData, null, 2))
 
     if (!stockData.ok || !stockData.products) {
       return NextResponse.json({
@@ -149,23 +149,18 @@ export async function POST(req: NextRequest) {
         error: "Invalid stock data from supplier"
       }, { status: 500 })
     }
-    console.log(` Available products in stock: ${stockData.products.length}`)
+    console.log(`✓ Available products in stock: ${stockData.products.length}`)
 
     // ================================
     // STEP 4: COMPARE REQUESTED VS STOCK
     // ================================
-    console.log("\n Step 4: Stock Comparison:")
+    console.log("\n🔍 Step 4: Stock Comparison:")
     const stockComparison = itemsToCheck.map(itemToCheck => {
       const stockItem = stockData.products.find((p: any) => {
         const stockCode = p.itemCode || p.ITEM_CODE
-        console.log("  Matching:", stockCode, "vs", itemToCheck.itemCode)
         return stockCode === itemToCheck.itemCode ||
                (itemToCheck.nikiCode && stockCode === itemToCheck.nikiCode)
       })
-
-      if (!stockItem) {
-        console.log("   No stock item found for", itemToCheck.itemName)
-      }
 
       const availableStock = stockItem ? Number(stockItem.stock ?? stockItem.STOCK ?? 0) : 0
       console.log(`  • ${itemToCheck.itemName} (${itemToCheck.itemCode}): Requested = ${itemToCheck.requestedQty}, Available = ${availableStock}`)
@@ -193,13 +188,13 @@ export async function POST(req: NextRequest) {
       }, { status: 400 })
     }
 
-    console.log(" All items have sufficient stock!")
+    console.log("✓ All items have sufficient stock!")
     const primaryItem = itemsToCheck[0]
 
     // ================================
     // STEP 5: UMUSADA LOGIN
     // ================================
-    console.log("\n Step 5: Authenticating with Umusada...")
+    console.log("\n🔐 Step 5: Authenticating with Umusada...")
     const username = "pm.serge@gmail.com"
     const password = "1234"
     const basicAuth = Buffer.from(`${username}:${password}`).toString('base64')
@@ -252,90 +247,80 @@ export async function POST(req: NextRequest) {
       }, { status: 401 })
     }
 
-    console.log(" Successfully authenticated with Umusada")
+    console.log("✓ Successfully authenticated with Umusada")
 
     // ================================
     // STEP 5.5: FETCH BUSINESS REGISTRATION INFO
     // ================================
-    console.log("\n Step 5.5: Fetching business registration details...");
+    console.log("\n Step 5.5: Fetching business registration details...")
 
-    // Validate buyer TIN exists before making API call
     if (!finalBuyerTIN) {
       return NextResponse.json({
         success: false,
         error: "Buyer TIN is required but not found in order data"
-      }, { status: 400 });
+      }, { status: 400 })
     }
 
-    let businessRegistrationCode = "";
-    let businessMsisdn = "";
-    let businessName = "";
-    let businessEmail = "";
-    let businessLocation = "";
-    let businessCategory = "";
+    let businessRegistrationCode = ""
+    let businessMsisdn = ""
+    let businessName = ""
+    let businessEmail = ""
+    let businessLocation = ""
+    let businessCategory = ""
 
     try {
-      console.log(` Calling: ${JAVA_API_BASE}/Trading/api/business?tin=${finalBuyerTIN}`);
-
-      const businessRes = await fetch(`${JAVA_API_BASE}/Trading/api/business?tin=${finalBuyerTIN}`);
+      const businessRes = await fetch(`${JAVA_API_BASE}/Trading/api/business?tin=${finalBuyerTIN}`)
 
       if (!businessRes.ok) {
         return NextResponse.json({
           success: false,
           error: `Failed to fetch business details (${businessRes.status})`
-        }, { status: 500 });
+        }, { status: 500 })
       }
 
-      const businessData = await businessRes.json();
-      console.log(" Business API Response:", JSON.stringify(businessData, null, 2));
+      const businessData = await businessRes.json()
 
       if (!businessData.success || !businessData.data) {
         return NextResponse.json({
           success: false,
           error: "Business not found or invalid response from business API"
-        }, { status: 404 });
+        }, { status: 404 })
       }
 
-      // Extract business details
-      const business = businessData.data;
-      businessRegistrationCode = business.registration_code;
-      businessMsisdn = business.phone_number;
-      businessName = business.name;
-      businessEmail = business.email;
-      businessLocation = business.location;
-      businessCategory = business.category;
+      const business = businessData.data
+      businessRegistrationCode = business.registration_code
+      businessMsisdn = business.phone_number
+      businessName = business.name
+      businessEmail = business.email
+      businessLocation = business.location
+      businessCategory = business.category
 
-      console.log(" Business Details Fetched:");
-      console.log("   Name:", businessName);
-      console.log("   TIN:", finalBuyerTIN);
-      console.log("   Registration Code:", businessRegistrationCode);
-      console.log("   Phone:", businessMsisdn);
-      console.log("   Email:", businessEmail);
-      console.log("   Location:", businessLocation);
-      console.log("   Category:", businessCategory);
+      console.log("✓ Business Details Fetched:")
+      console.log("   Name:", businessName)
+      console.log("   TIN:", finalBuyerTIN)
+      console.log("   Registration Code:", businessRegistrationCode)
 
-      // Validate required fields
       if (!businessRegistrationCode) {
         return NextResponse.json({
           success: false,
           error: "Business registration code not found in business data"
-        }, { status: 400 });
+        }, { status: 400 })
       }
 
       if (!businessMsisdn) {
         return NextResponse.json({
           success: false,
           error: "Business phone number not found in business data"
-        }, { status: 400 });
+        }, { status: 400 })
       }
 
     } catch (error) {
-      console.error(" Error fetching business details:", error);
+      console.error("Error fetching business details:", error)
       return NextResponse.json({
         success: false,
         error: "Failed to fetch business registration details",
         details: error instanceof Error ? error.message : "Unknown error"
-      }, { status: 500 });
+      }, { status: 500 })
     }
 
     // ================================
@@ -343,7 +328,6 @@ export async function POST(req: NextRequest) {
     // ================================
     console.log("\n Step 6: Submitting invoice to Umusada Bank API...")
 
-    // Validate invoice amount
     if (!invoiceAmount || invoiceAmount <= 0) {
       return NextResponse.json({
         success: false,
@@ -351,10 +335,8 @@ export async function POST(req: NextRequest) {
       }, { status: 400 })
     }
 
-    // Use order ID as messageId
     const messageId = orderId.toString()
 
-    // Build invoice payload with REAL data (NO hardcoded values)
     const invoicePayload = {
       messageId: messageId,
       financialInstitutionId: 1,
@@ -383,21 +365,56 @@ export async function POST(req: NextRequest) {
     console.log(" Response Status:", invoiceResp.status, invoiceResp.statusText)
 
     const invoiceResponseBody = await invoiceResp.text()
-    console.log(" Response Body:", invoiceResponseBody)
-
     let parsedData: any = invoiceResponseBody
 
     if (invoiceResp.headers.get("content-type")?.includes("application/json")) {
       try {
         parsedData = JSON.parse(invoiceResponseBody)
-        console.log(" Parsed Response:", JSON.stringify(parsedData, null, 2))
+        console.log("✓ Parsed Response:", JSON.stringify(parsedData, null, 2))
       } catch (e) {
         console.log("  Failed to parse JSON response")
       }
     }
 
     if (invoiceResp.ok) {
-      console.log(" Invoice submitted successfully!")
+      console.log("Invoice submitted successfully!")
+
+      // ================================
+      // STEP 7: UPDATE PAYMENT STATUS TO UMUSADA
+      // ================================
+      console.log("\nStep 7: Updating payment status to UMUSADA...")
+
+      let paymentStatusUpdated = false
+      try {
+        const statusUpdatePayload = {
+          orderId: orderId,
+          paymentStatus: "UMUSADA"
+        }
+
+        console.log(" Status Update Payload:", JSON.stringify(statusUpdatePayload, null, 2))
+
+        const statusUpdateRes = await fetch(`${JAVA_API_BASE}/Trading/OrderStatusServlet`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(statusUpdatePayload)
+        })
+
+        console.log(" Payment Status Update Response Status:", statusUpdateRes.status)
+
+        if (!statusUpdateRes.ok) {
+          const errorText = await statusUpdateRes.text()
+          console.log("   Failed to update payment status:", errorText)
+        } else {
+          const statusUpdateData = await statusUpdateRes.json()
+          console.log("Payment status updated successfully:", JSON.stringify(statusUpdateData, null, 2))
+          paymentStatusUpdated = true
+        }
+      } catch (statusError) {
+        console.error("   Error updating payment status (non-fatal):", statusError)
+      }
+
       return NextResponse.json({
         success: true,
         message: "Invoice financing request submitted successfully",
@@ -418,14 +435,12 @@ export async function POST(req: NextRequest) {
         stockComparison,
         sellerAccount,
         buyerAccount,
-        data: parsedData
+        data: parsedData,
+        paymentStatusUpdated: paymentStatusUpdated
       })
     } else {
       console.log(" Invoice submission failed")
-      console.log("   Status:", invoiceResp.status)
-      console.log("   Body:", invoiceResponseBody)
 
-      // Try to extract error message
       let errorMessage = invoiceResponseBody
       if (parsedData && typeof parsedData === 'object') {
         errorMessage = parsedData.message || parsedData.error || parsedData.errorMessage || JSON.stringify(parsedData)
@@ -439,7 +454,7 @@ export async function POST(req: NextRequest) {
     }
 
   } catch (error) {
-    console.error(" Error in loan request:", error)
+    console.error("Error in loan request:", error)
     return NextResponse.json({
       success: false,
       error: error instanceof Error ? error.message : "Unknown error"
