@@ -6,8 +6,8 @@ export const revalidate = 0
 
 // Backend endpoints to try
 const CANDIDATES = [
-  "https://ihute.rw/Trading/OrdersServlet",
-  "https://ihute.rw/Trading/Kaos/OrdersServlet",
+  "http://localhost:8081/Trading/OrdersServlet",
+  "http://localhost:8081/Trading/Kaos/OrdersServlet",
   process.env.JAVA_ORDERS_URL,
   process.env.JAVA_SERVLET_URL,
 ].filter(Boolean) as string[]
@@ -15,6 +15,7 @@ const CANDIDATES = [
 type LineIn = {
   name?: string
   item_name?: string
+  itemCode?: string
   qty?: number | string
   quantity?: number | string
   unitPrice?: number | string
@@ -49,10 +50,13 @@ export async function POST(req: Request) {
     const rawItems: LineIn[] = Array.isArray(bodyIn.items) ? bodyIn.items : []
     const items = rawItems.map((it, i) => ({
       name: String(it.name ?? it.item_name ?? `Item ${i + 1}`),
+      itemCode: String(it.itemCode ?? "").trim() || undefined,
       qty: Number(it.qty ?? it.quantity ?? 1),
       unitPrice: Number(it.unitPrice ?? it.price ?? 0),
       unit: String(it.unit ?? it.measurement ?? ""),
     }))
+
+    console.log("[orders/create] Request items (NIKI_CODE in logs only):", items.map((it) => ({ name: it.name, qty: it.qty, NIKI_CODE: it.itemCode, unitPrice: it.unitPrice })))
 
     const buyerEmail = String(bodyIn.buyerEmail ?? "")
     const sellerAccount = String(bodyIn.sellerAccount ?? "")

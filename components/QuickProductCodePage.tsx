@@ -115,7 +115,7 @@ export default function QuickProductCodePage() {
       price: price,
       unit: product.item_packet,
       image: product.image || "/placeholder.svg?height=300&width=300",
-      description: product.item_key_words,
+      description: undefined, // hide code from UI
       supplierId: product.supplier_account,
       supplierName: product.supplier_name,
       supplierLocation: product.supplier_location,

@@ -84,8 +84,7 @@ export function Header() {
 
   const handleLogout = () => {
     logout()
-    router.replace("/")
-    router.refresh()
+    window.location.href = "/"
   }
 
   return (
@@ -118,16 +117,21 @@ export function Header() {
                 {/* User Dropdown */}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="sm" className="hidden md:flex h-9">
-                      <User className="h-4 w-4 mr-2" />
-                      {user?.name}
+                    <Button variant="ghost" size="sm" className="flex h-9 gap-2" aria-label="Open account menu">
+                      <User className="h-4 w-4 shrink-0" />
+                      <span className="max-w-[120px] truncate">{user?.name}</span>
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-48">
-                    <DropdownMenuLabel>{user?.email}</DropdownMenuLabel>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuLabel className="font-normal">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-sm font-medium">{user?.name}</span>
+                        <span className="text-xs text-muted-foreground">{user?.email}</span>
+                      </div>
+                    </DropdownMenuLabel>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
-                      onClick={() =>
+                      onSelect={() =>
                         router.push(
                           user?.role === "supplier"
                             ? "/supplier/dashboard"
@@ -137,7 +141,14 @@ export function Header() {
                     >
                       My Account
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={handleLogout} className="text-red-600">
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onSelect={(e) => {
+                        e.preventDefault()
+                        handleLogout()
+                      }}
+                      className="text-red-600 focus:text-red-600 focus:bg-red-50"
+                    >
                       {t("logout")}
                     </DropdownMenuItem>
                   </DropdownMenuContent>

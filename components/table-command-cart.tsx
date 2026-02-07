@@ -122,6 +122,7 @@ export default function TableCommandCartFixed() {
             qty: item.qty,
             unitPrice: item.price,
             unit: item.unit || "pcs",
+            itemCode: item.itemCode ?? item.id,
           })),
           sellerAccount: activeSession.locationId,
           sellerName: activeSession.locationName,

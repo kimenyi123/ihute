@@ -10,10 +10,11 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { filterSuppliersByRelevance } from "@/lib/search-utils"
 import { getTranslations } from "@/lib/keyword-mapping"
-import { Languages, MapPin, Store } from "lucide-react"
+import { MapPin, Store } from "lucide-react"
 import { useTableCommandStore } from "@/lib/table-command-store"
 import { useLocationStoreEnhanced } from "@/lib/location-store-enhanced"
 import { LocationBadge } from "@/components/location-badge"
+import { ProductCard } from "@/components/product-card"
 
 type Shop = {
   supplier_account: string
@@ -75,6 +76,93 @@ function extractNumericPrice(value: any): number {
   const n = String(value ?? "").replace(/[^\d.,-]/g, "").replace(",", ".")
   const parsed = parseFloat(n)
   return Number.isFinite(parsed) ? parsed : 0
+}
+
+function toCardProduct(p: Product) {
+  return {
+    id: p.item_code || p.item_key_words || `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`,
+    name: p.item_commercial_name || "Product",
+    description: undefined, // hide code (item_key_words) from UI
+    price: extractNumericPrice(p.item_emballage),
+    unit: "", // item_packet is quantity, not a unit label
+    inStock: true,
+    rating: 4,
+    supplierId: p.supplier_account,
+    supplierName: p.supplier_name || p.supplier_account || "Supplier",
+    supplierLocation: p.supplier_location,
+    momo: p.momo,
+    image: p.image || "/placeholder.svg?height=300&width=300",
+  }
+}
+
+/** Normalize supplier products from API. Backend/Redis may return: object with "data" array (Redis: { key, data: [flat products] }), array (flat or with nested .items), or object with .sellers/.products. Flatten to Product[] so names and prices display. */
+function normalizeSupplierProductsResponse(
+  data: any,
+  supplierAccount: string,
+  supplierName: string
+): Product[] {
+  if (!data) return []
+  const supplier_account = supplierAccount
+  const supplier_name = supplierName
+
+  // Redis shape: { key: "supplier_ALG000017701", data: [ product1, product2, ... ] } — flat array in .data
+  if (typeof data === "object" && Array.isArray(data.data)) {
+    return normalizeSupplierProductsResponse(data.data, supplierAccount, supplierName)
+  }
+
+  if (Array.isArray(data)) {
+    const flat: Product[] = []
+    for (const p of data) {
+      const items = (p as any).items
+      if (Array.isArray(items) && items.length > 0) {
+        for (const item of items) {
+          flat.push({
+            item_code: item.item_key_words ?? item.item_code ?? "",
+            item_commercial_name: item.item_commercial_name ?? item.item_name ?? "Product",
+            item_packet: item.item_packet,
+            item_emballage: item.item_emballage ?? item.price ?? "",
+            item_key_words: item.item_key_words,
+            supplier_account,
+            supplier_name,
+            supplier_location: (p as any).supplier_location ?? undefined,
+            type: (p as any).type ?? "product",
+            image: item.image,
+            momo: item.momo ?? (p as any).momo,
+          })
+        }
+      } else {
+        flat.push({
+          item_code: (p as any).item_key_words ?? (p as any).item_code ?? "",
+          item_commercial_name: (p as any).item_commercial_name ?? (p as any).item_name ?? "Product",
+          item_packet: (p as any).item_packet,
+          item_emballage: (p as any).item_emballage ?? (p as any).price ?? "",
+          item_key_words: (p as any).item_key_words,
+          supplier_account: (p as any).supplier_account ?? supplier_account,
+          supplier_name: (p as any).supplier_name ?? supplier_name,
+          supplier_location: (p as any).supplier_location,
+          type: (p as any).type ?? "product",
+          image: (p as any).image,
+          momo: (p as any).momo,
+        })
+      }
+    }
+    return flat
+  }
+
+  if (typeof data === "object" && Array.isArray(data.sellers)) {
+    const seller = data.sellers.find(
+      (s: any) => (s.ISHYIGA_ACCOUNT ?? s.seller_account) === supplierAccount
+    ) ?? data.sellers[0]
+    if (!seller) return []
+    const rawProducts = seller.products ?? []
+    return normalizeSupplierProductsResponse(
+      rawProducts,
+      seller.ISHYIGA_ACCOUNT ?? seller.seller_account ?? supplierAccount,
+      seller.OWNER ?? seller.SELLER_NAMES ?? seller.seller_name ?? supplierName
+    )
+  }
+
+  return Array.isArray(data.products) ? normalizeSupplierProductsResponse(data.products, supplierAccount, supplierName) : []
 }
 
 export default function SearchPage() {
@@ -360,7 +448,12 @@ export default function SearchPage() {
           selectedShop.supplier_account,
         )}&limit=100&Currency=RWF`
         const res = await fetch(url, { cache: "no-store" })
-        const data: Product[] = res.ok ? await res.json() : []
+        const raw = res.ok ? await res.json() : null
+        const data = normalizeSupplierProductsResponse(
+          raw,
+          selectedShop.supplier_account,
+          selectedShop.supplier_name,
+        )
         if (!cancelled) setShopProducts(Array.isArray(data) ? data : [])
       } catch {
         if (!cancelled) setShopProducts([])
@@ -533,20 +626,7 @@ export default function SearchPage() {
         </div>
 
         {/* Translation Hint */}
-        {translations && (
-          <div className="mb-3 flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-xs">
-            <Languages className="h-4 w-4 text-blue-600 flex-shrink-0" />
-            <div className="flex-1">
-              <span className="text-slate-700">Also searching for: </span>
-              <span className="font-semibold text-blue-700">
-                {translations.english.slice(0, 3).join(", ")}
-                {translations.kinyarwanda.length > 0 && translations.kinyarwanda[0].toLowerCase() !== debouncedQ.toLowerCase() && (
-                  <> • {translations.kinyarwanda.slice(0, 2).join(", ")}</>
-                )}
-              </span>
-            </div>
-          </div>
-        )}
+        {/* Translation hint removed (AI icon row) */}
 
         {/* Compact Filter Bar */}
         <div className="mb-6 flex flex-col gap-3 rounded-xl border p-3 bg-white">
@@ -686,16 +766,9 @@ export default function SearchPage() {
           return null
         })()}
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column (scrollable) */}
-          <div
-            className="lg:col-span-2 space-y-6 lg:sticky lg:top-4 lg:pr-2"
-            style={{
-              maxHeight: "calc(100vh - 7rem)",
-              overflowY: "auto",
-              WebkitOverflowScrolling: "touch",
-            }}
-          >
+        <div className="max-w-5xl mx-auto">
+          {/* Main content (single column; no right sidebar) */}
+          <div className="space-y-6">
             {/* Sector Spotlight */}
             {sectorParam && (
               <section className="bg-white rounded-xl border p-4">
@@ -768,6 +841,56 @@ export default function SearchPage() {
                     </div>
                   ))}
                 </div>
+              </section>
+            )}
+
+            {/* Supplier products in main area when supplier selected */}
+            {selectedShop && (
+              <section className="bg-white rounded-xl border p-4">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                  <h2 className="font-semibold text-lg">
+                    Products from <span className="text-blue-700">{selectedShop.supplier_name}</span>
+                  </h2>
+                  <div className="flex items-center gap-2 flex-1 sm:max-w-xs">
+                    <input
+                      value={supplierSearch}
+                      onChange={(e) => setSupplierSearch(e.target.value)}
+                      placeholder={`Search in ${selectedShop.supplier_name}...`}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      aria-label="Search products from this supplier"
+                    />
+                  </div>
+                </div>
+                {loadingProducts ? (
+                  <div className="py-8 text-center text-gray-500 text-sm">Loading products…</div>
+                ) : filteredShopProducts.length > 0 ? (
+                  <>
+                    <p className="text-sm text-gray-500 mb-3">
+                      {filteredShopProducts.length} product{filteredShopProducts.length !== 1 ? "s" : ""}
+                      {debouncedSupplierSearch ? ` matching "${debouncedSupplierSearch}"` : ""}
+                    </p>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                  {filteredShopProducts.map((p) => (
+                    <div
+                      key={p.item_code + (p.supplier_account || "")}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => addProductToCart(p)}
+                      onKeyDown={(e) => onTileKey(e, p)}
+                      title="Click to add to cart"
+                    >
+                      <ProductCard product={toCardProduct(p)} />
+                    </div>
+                  ))}
+                </div>
+                  </>
+                ) : (
+                  <div className="text-center py-6 text-gray-500">
+                    {debouncedSupplierSearch
+                      ? `No products matching "${debouncedSupplierSearch}"`
+                      : "No products available from this supplier"}
+                  </div>
+                )}
               </section>
             )}
 
@@ -865,93 +988,17 @@ export default function SearchPage() {
               </section>
             )}
 
+            {/* Hint when search has results but no supplier selected */}
+            {!selectedShop && !!debouncedQ && allSuppliers.length > 0 && (
+              <div className="text-sm text-gray-600 bg-blue-50 dark:bg-blue-950/30 p-3 rounded-lg border border-blue-200 dark:border-blue-800">
+                Select a supplier from the list above to see and search their products here.
+              </div>
+            )}
+
             {/* No Results */}
             {searchResult && allSuppliers.length === 0 && searchResult.products.length === 0 && (
               <div className="text-center py-8 text-gray-500">No results found for "{debouncedQ}"</div>
             )}
-          </div>
-
-          {/* Right Column - Selected Shop Products */}
-          <div className="lg:col-span-1">
-            <div className="bg-white rounded-xl border p-4 sticky top-4">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="font-semibold text-lg">
-                  {selectedShop ? (
-                    <>
-                      Products from <span className="text-blue-600">{selectedShop.supplier_name}</span>
-                    </>
-                  ) : (
-                    "Select a supplier to view products"
-                  )}
-                </h2>
-                {loadingProducts && <span className="text-sm opacity-60 animate-pulse">Loading...</span>}
-              </div>
-
-              {selectedShop && (
-                <>
-                  {/* Supplier Product Search */}
-                  <div className="mb-4">
-                    <input
-                      value={supplierSearch}
-                      onChange={(e) => setSupplierSearch(e.target.value)}
-                      placeholder={`Search in ${selectedShop.supplier_name}...`}
-                      className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    {debouncedSupplierSearch && (
-                      <div className="mt-1 text-xs text-gray-500">
-                        Found {filteredShopProducts.length} product{filteredShopProducts.length !== 1 ? 's' : ''}
-                      </div>
-                    )}
-                  </div>
-
-                  <div
-                    className="space-y-3 pr-1"
-                    style={{ maxHeight: "70vh", overflowY: "auto", WebkitOverflowScrolling: "touch" }}
-                  >
-                    {filteredShopProducts.length > 0 ? (
-                      filteredShopProducts.map((product) => (
-                        <div
-                          key={product.item_code}
-                          className="rounded-lg border p-3 hover:border-blue-300 transition-colors cursor-pointer group"
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => addProductToCart(product)}
-                          onKeyDown={(e) => onTileKey(e, product)}
-                          title="Click to add to cart"
-                        >
-                          <div className="font-medium text-gray-900 group-hover:text-blue-700">
-                            {product.item_commercial_name}
-                          </div>
-                          <div className="text-sm text-gray-600 mt-1">{product.item_packet || ""}</div>
-                          <div className="mt-2 text-base font-semibold text-green-600">
-                            {product.item_emballage || "Price not available"}
-                          </div>
-                          {product.momo && <div className="mt-2 text-xs text-gray-500">Seller MoMo: {product.momo}</div>}
-                          <div className="mt-3 text-xs text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
-                            Click to add to cart →
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      !loadingProducts && (
-                        <div className="text-center py-4 text-gray-500">
-                          {debouncedSupplierSearch 
-                            ? `No products found matching "${debouncedSupplierSearch}"`
-                            : "No products available from this supplier"
-                          }
-                        </div>
-                      )
-                    )}
-                  </div>
-                </>
-              )}
-
-              {!selectedShop && !!debouncedQ && (
-                <div className="text-sm text-gray-600 bg-blue-50 p-3 rounded-lg border border-blue-200">
-                  💡 Select a supplier from the list to see their available products
-                </div>
-              )}
-            </div>
           </div>
         </div>
       </main>

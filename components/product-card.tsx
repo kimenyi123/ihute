@@ -108,9 +108,11 @@ export function ProductCard({ product }: { product: Product }) {
           <h3 className="text-sm font-semibold leading-tight line-clamp-2">{name}</h3>
         </div>
 
-        <p className="text-xs text-muted-foreground line-clamp-2">
-          {description || "Quality product"}
-        </p>
+        {description && description !== id && (
+          <p className="text-xs text-muted-foreground line-clamp-2">
+            {description}
+          </p>
+        )}
 
         <div className="text-sm">
           <div className="font-semibold">
@@ -131,7 +133,7 @@ export function ProductCard({ product }: { product: Product }) {
           onClick={() => {
             // Track click
             trackClick("product", id, name)
-            
+
             addItem(
               {
                 id,

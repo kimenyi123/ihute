@@ -1,9 +1,9 @@
 // app/api/seller-orders/route.ts
 import { NextResponse } from "next/server"
 
+// Use SellerOrdersServlet (listSellerOrders implemented there). Set JAVA_SELLER_ORDERS_URL if your context path differs.
 const JAVA_BACKEND_URL =
-  process.env.JAVA_SELLER_ORDERS_URL || "https://ihute.rw/Trading/OrdersServlet"
-//  process.env.JAVA_SELLER_ORDERS_URL || "http://localhost:8080/Trading/OrdersServlet"
+  process.env.JAVA_SELLER_ORDERS_URL || "https://ihute.rw/Trading/SellerOrdersServlet"
 function tryParseJson(raw: string) {
   try { return JSON.parse(raw) } catch {}
   let s = raw.replace(/\uFEFF/g, "").trim()
@@ -42,13 +42,17 @@ function normalizeOrders(input: any): any[] {
 }
 
 export async function POST(req: Request) {
+  const reqId = `seller-orders-${Date.now()}`
   try {
     const body = await req.json().catch(() => ({} as any))
     const sellerAccount = String(body?.sellerAccount ?? "").trim()
     const page = Math.max(1, Number(body?.page ?? 1))
     const pageSize = Math.min(100, Math.max(1, Number(body?.pageSize ?? 20)))
 
+    console.log(`[${reqId}] POST /api/seller-orders — sellerAccount=${sellerAccount || "(empty)"} page=${page} pageSize=${pageSize}`)
+
     if (!sellerAccount) {
+      console.warn(`[${reqId}] 400 sellerAccount required`)
       return NextResponse.json({ ok: false, error: "sellerAccount required" }, { status: 400 })
     }
 
@@ -58,7 +62,8 @@ export async function POST(req: Request) {
       page: String(page),
       pageSize: String(pageSize),
     }).toString()
-console.log("🚀 POST - Calling servlet at:", JAVA_BACKEND_URL)
+
+    console.log(`[${reqId}] Calling backend appiiii: ${JAVA_BACKEND_URL}`)
     const res = await fetch(JAVA_BACKEND_URL, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
@@ -70,20 +75,21 @@ console.log("🚀 POST - Calling servlet at:", JAVA_BACKEND_URL)
     let data: any
     try { data = tryParseJson(raw) }
     catch {
-      console.error("❌ list: bad JSON from servlet, snippet:", raw.slice(0, 400))
+      console.error(`[${reqId}] ❌ Backend returned invalid JSON, snippet:`, raw.slice(0, 400))
       return NextResponse.json({ ok: false, error: "Backend returned invalid JSON" }, { status: 502 })
     }
 
     if (!res.ok || data?.ok === false) {
-      console.error("❌ list: servlet error:", data?.error, "HTTP:", res.status, "snippet:", raw.slice(0, 400))
+      console.error(`[${reqId}] ❌ Backend error:`, data?.error, "HTTP:", res.status, "snippet:", raw.slice(0, 400))
       return NextResponse.json({ ok: false, error: data?.error || `HTTP ${res.status}` }, { status: 502 })
     }
 
     const orders = normalizeOrders(data)
     const total = Number(data?.total ?? 0)
+    console.log(`[${reqId}] ✅ 200 OK — orders=${orders.length} total=${total}`)
     return NextResponse.json({ ok: true, orders, total, page, pageSize }, { status: 200 })
   } catch (e: any) {
-    console.error("❌ list: unexpected error:", e?.message)
+    console.error(`[${reqId}] ❌ Unexpected error:`, e?.message)
     return NextResponse.json({ ok: false, error: e?.message || "unknown error" }, { status: 500 })
   }
 }
