@@ -58,7 +58,7 @@ export function NotificationPrompt() {
       // Check if service worker is registered
       let registration: ServiceWorkerRegistration | null = null
       try {
-        registration = await navigator.serviceWorker.getRegistration()
+        registration = (await navigator.serviceWorker.getRegistration()) ?? null
         if (!registration) {
           console.log("[Notifications] Service worker not registered, registering now...")
           registration = await navigator.serviceWorker.register("/sw.js")

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Heart } from 'lucide-react';
 import { useCartStore } from "@/lib/cart-store";
 import { useFavoritesStore } from "@/lib/favorites-store";
@@ -9,9 +9,27 @@ import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import Image from "next/image";
 
+type QuickProductItem = {
+  item_emballage?: string;
+  item_commercial_name?: string;
+  item_code?: string;
+  item_packet?: string;
+  supplier_account?: string;
+  supplier_name?: string;
+  supplier_location?: string;
+  image?: string;
+  momo?: string;
+};
+
+type QuickProductResult = {
+  products?: QuickProductItem[];
+  totalProducts?: number;
+  totalSuppliers?: number;
+};
+
 export default function QuickProductCodePage() {
   const [loading, setLoading] = useState(true);
-  const [results, setResults] = useState(null);
+  const [results, setResults] = useState<QuickProductResult | null>(null);
   const [error, setError] = useState('');
   const [searchCode, setSearchCode] = useState('');
 
@@ -35,7 +53,7 @@ export default function QuickProductCodePage() {
     performSearch(codeFromUrl);
   }, []);
 
-  const performSearch = async (code) => {
+  const performSearch = async (code: string) => {
     setLoading(true);
     setError('');
     setResults(null);
@@ -45,38 +63,38 @@ export default function QuickProductCodePage() {
       const data = await response.json();
 
       if (data.ok && data.products && data.products.length > 0) {
-        setResults(data);
+        setResults(data as QuickProductResult);
       } else {
         setError(`No products found for code "${code}"`);
       }
-    } catch (err) {
-      setError(`Failed to search: ${err.message}`);
+    } catch (err: unknown) {
+      setError(`Failed to search: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setLoading(false);
     }
   };
 
-  const getPrice = (product) => {
+  const getPrice = (product: QuickProductItem) => {
     const priceStr = product.item_emballage || '0';
     const numericPrice = parseFloat(priceStr.replace(/[^0-9.]/g, ''));
     return isNaN(numericPrice) ? 0 : numericPrice;
   };
 
-  const getCurrency = (product) => {
+  const getCurrency = (product: QuickProductItem) => {
     const priceStr = product.item_emballage || '';
     const match = priceStr.match(/[A-Z]{3}/);
     return match ? match[0] : 'RWF';
   };
 
-  const handleAddToCart = (product) => {
+  const handleAddToCart = (product: QuickProductItem) => {
     const price = getPrice(product);
     const unit = product.item_packet || 'Unit';
-    const productId = `${product.supplier_account}_${product.item_code}`;
+    const productId = `${product.supplier_account ?? ""}_${product.item_code ?? ""}`;
 
     addItem(
       {
         id: productId,
-        name: product.item_commercial_name,
+        name: product.item_commercial_name ?? "Product",
         price: price,
         unit: unit,
         image: product.image || "/placeholder.svg?height=300&width=300",
@@ -91,7 +109,7 @@ export default function QuickProductCodePage() {
 
     toast({
       title: "Added to cart!",
-      description: product.item_commercial_name,
+      description: product.item_commercial_name ?? "Product",
       duration: 2000,
     });
 
@@ -100,21 +118,21 @@ export default function QuickProductCodePage() {
     }, 500);
   };
 
-  const handleToggleFavorite = (e, product) => {
+  const handleToggleFavorite = (e: React.MouseEvent, product: QuickProductItem) => {
     e.preventDefault();
     e.stopPropagation();
 
     const price = getPrice(product);
-    const productId = `${product.supplier_account}_${product.item_code}`;
+    const productId = `${product.supplier_account ?? ""}_${product.item_code ?? ""}`;
     const wasFav = isFavorite(productId);
 
     toggleFavorite({
       id: productId,
-      name: product.item_commercial_name,
+      name: product.item_commercial_name ?? "Product",
       price: price,
       unit: product.item_packet,
       image: product.image || "/placeholder.svg?height=300&width=300",
-      description: undefined, // hide code from UI
+      description: undefined,
       supplierId: product.supplier_account,
       supplierName: product.supplier_name,
       supplierLocation: product.supplier_location,
@@ -123,7 +141,7 @@ export default function QuickProductCodePage() {
 
     toast({
       title: wasFav ? "Removed from favorites" : "Added to favorites!",
-      description: product.item_commercial_name,
+      description: product.item_commercial_name ?? "Product",
       duration: 1500,
     });
   };
@@ -174,8 +192,8 @@ export default function QuickProductCodePage() {
         {/* Products Grid */}
         {results?.products && results.products.length > 0 && (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-6">
-            {results.products.map((product, idx) => {
-              const productId = `${product.supplier_account}_${product.item_code}`;
+            {results.products.map((product: QuickProductItem, idx: number) => {
+              const productId = `${product.supplier_account ?? ""}_${product.item_code ?? ""}`;
               const fav = isFavorite(productId);
 
               return (
@@ -188,7 +206,7 @@ export default function QuickProductCodePage() {
                     <Image
                       fill
                       src={product.image || "/placeholder.svg?height=300&width=300"}
-                      alt={product.item_commercial_name}
+                      alt={product.item_commercial_name ?? "Product"}
                       className="object-cover"
                     />
 
