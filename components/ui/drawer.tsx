@@ -5,34 +5,28 @@ import { Drawer as DrawerPrimitive } from 'vaul'
 
 import { cn } from '@/lib/utils'
 
-function Drawer({
-  ...props
-}: React.ComponentProps<typeof DrawerPrimitive.Root>) {
+type DrawerPrimitiveProps = Record<string, unknown> & { children?: React.ReactNode }
+
+function Drawer(props: DrawerPrimitiveProps) {
   return <DrawerPrimitive.Root data-slot="drawer" {...props} />
 }
 
-function DrawerTrigger({
-  ...props
-}: React.ComponentProps<typeof DrawerPrimitive.Trigger>) {
+function DrawerTrigger(props: DrawerPrimitiveProps) {
   return <DrawerPrimitive.Trigger data-slot="drawer-trigger" {...props} />
 }
 
-function DrawerPortal({
-  ...props
-}: React.ComponentProps<typeof DrawerPrimitive.Portal>) {
+function DrawerPortal(props: DrawerPrimitiveProps) {
   return <DrawerPrimitive.Portal data-slot="drawer-portal" {...props} />
 }
 
-function DrawerClose({
-  ...props
-}: React.ComponentProps<typeof DrawerPrimitive.Close>) {
+function DrawerClose(props: DrawerPrimitiveProps) {
   return <DrawerPrimitive.Close data-slot="drawer-close" {...props} />
 }
 
 function DrawerOverlay({
   className,
   ...props
-}: React.ComponentProps<typeof DrawerPrimitive.Overlay>) {
+}: DrawerPrimitiveProps & { className?: string }) {
   return (
     <DrawerPrimitive.Overlay
       data-slot="drawer-overlay"
@@ -49,7 +43,7 @@ function DrawerContent({
   className,
   children,
   ...props
-}: React.ComponentProps<typeof DrawerPrimitive.Content>) {
+}: DrawerPrimitiveProps & { className?: string; children?: React.ReactNode }) {
   return (
     <DrawerPortal data-slot="drawer-portal">
       <DrawerOverlay />
@@ -98,7 +92,7 @@ function DrawerFooter({ className, ...props }: React.ComponentProps<'div'>) {
 function DrawerTitle({
   className,
   ...props
-}: React.ComponentProps<typeof DrawerPrimitive.Title>) {
+}: DrawerPrimitiveProps & { className?: string }) {
   return (
     <DrawerPrimitive.Title
       data-slot="drawer-title"
@@ -111,7 +105,7 @@ function DrawerTitle({
 function DrawerDescription({
   className,
   ...props
-}: React.ComponentProps<typeof DrawerPrimitive.Description>) {
+}: DrawerPrimitiveProps & { className?: string }) {
   return (
     <DrawerPrimitive.Description
       data-slot="drawer-description"

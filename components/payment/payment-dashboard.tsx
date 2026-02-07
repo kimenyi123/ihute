@@ -36,14 +36,14 @@ import {
 import { WebhookMonitor } from './webhook-monitor';
 
 import { paymentDashboardApi } from '@/lib/payment-dashboard-api';
-import type { Transaction, SummaryStats, Alert, HealthStatus } from '@/lib/payment-dashboard-api';
+import type { Transaction, SummaryStats, Alert as AlertItem, HealthStatus } from '@/lib/payment-dashboard-api';
 
 // Types imported from payment-dashboard-api.ts
 
 export function PaymentDashboard() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [summary, setSummary] = useState<SummaryStats | null>(null);
-  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);

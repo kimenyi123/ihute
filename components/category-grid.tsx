@@ -5,6 +5,7 @@ import Link from "next/link"
 import Image from "next/image"
 import { Card, CardContent } from "@/components/ui/card"
 import { useTranslation } from "@/hooks/use-translation"
+import type { TranslationKey } from "@/lib/translations"
 
 interface Category {
   id?: number
@@ -170,17 +171,17 @@ export function CategoryGrid() {
                       <div className={`mb-2 rounded-xl overflow-hidden ${category.colorClass || "bg-gray-500/10"} w-full aspect-square relative`}>
                         <Image
                           src={category.imageUrl || "/placeholder.svg"}
-                          alt={t(category.nameKey)}
+                          alt={t(category.nameKey as TranslationKey)}
                           fill
                           className="object-cover"
                         />
                       </div>
                       <h3 className="text-xs md:text-sm font-semibold text-foreground group-hover:text-primary line-clamp-2">
-                        {t(category.nameKey)}
+                        {t(category.nameKey as TranslationKey)}
                       </h3>
                       {category.descKey && (
                         <p className="mt-1 text-[10px] md:text-xs text-muted-foreground line-clamp-1 hidden sm:block">
-                          {t(category.descKey)}
+                          {t(category.descKey as TranslationKey)}
                         </p>
                       )}
                     </CardContent>

@@ -30,17 +30,18 @@ export async function POST(request: Request) {
 
   } catch (error) {
     console.error('Error proxying to Java API:', error);
+    const message = error instanceof Error ? error.message : String(error);
     return Response.json(
       {
         success: false,
-        message: 'Failed to connect to backend: ' + error.message
+        message: 'Failed to connect to backend: ' + message
       },
       { status: 500 }
     );
   }
 }
 
-export async function OPTIONS(request) {
+export async function OPTIONS(_request: Request) {
   return new Response(null, {
     status: 200,
     headers: {

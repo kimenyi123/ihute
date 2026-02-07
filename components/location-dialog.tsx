@@ -73,7 +73,7 @@ export function LocationDialog({ open, onOpenChange }: LocationDialogProps) {
         const suppliersWithStock = result.suppliers.filter(
           (s: Supplier) => s.productCount && s.productCount > 0
         )
-        const sorted = suppliersWithStock.sort((a, b) => a.distance - b.distance)
+        const sorted = suppliersWithStock.sort((a: Supplier, b: Supplier) => a.distance - b.distance)
         setNearestSuppliers(sorted.slice(0, 20))
 
         if (sorted.length === 0) {

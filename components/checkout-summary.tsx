@@ -29,7 +29,7 @@ export function CheckoutSummary({ isProcessing, showReview }: CheckoutSummaryPro
         <div className="space-y-3 max-h-64 overflow-y-auto">
           {items.map((item) => {
             // ✅ Calculate line total: price × quantity
-            const lineTotal = item.price * item.quantity
+            const lineTotal = item.price * (item.qty ?? 0)
 
             return (
               <div key={`${item.id}-${item.selectedUnit}`} className="flex gap-3">
@@ -45,7 +45,7 @@ export function CheckoutSummary({ isProcessing, showReview }: CheckoutSummaryPro
                   <p className="text-sm font-medium truncate">{item.name}</p>
                   <p className="text-xs text-muted-foreground">
                     {/* ✅ Use quantity property */}
-                    {item.quantity} × {item.selectedUnit || item.unit || "pcs"}
+                    {item.qty ?? 0} × {item.selectedUnit || item.unit || "pcs"}
                   </p>
                   <p className="text-sm font-semibold text-primary">
                     {/* ✅ Use calculated lineTotal */}
