@@ -173,7 +173,7 @@ ${items}
 💳 Payment: ${formatPaymentMethod(order.PAYMENT_NAME)}
 📱 My Phone: ${order.BUYER_PHONE}
 
-🔗 Order Details: https://ihute.rw/orders/${orderId}
+🔗 Order Details: ${(process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw").replace(/\/Trading\/?$/, "")}/orders/${orderId}
     `.trim()
 
     const phone = order.SELLER_PHONE?.replace(/\D/g, "")

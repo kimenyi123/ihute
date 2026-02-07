@@ -1,12 +1,12 @@
 // app/api/request-loan-with-details/route.ts
 import { NextRequest, NextResponse } from "next/server"
 
-const JAVA_API_BASE = process.env.JAVA_API_URL || "https://ihute.rw"
-// const JAVA_API_BASE = process.env.JAVA_API_URL || "http://localhost:3000"
-const UMUSADA_AUTH_BASE = "https://umusada-master.umusada.com/umusada-master-service"
-const UMUSADA_BANK_API = "https://bank-apis.umusada.com/api/v1"
-const BASE_URL = process.env.BASE_URL || "http://localhost:3000"
-const BASE_URL_TEST="http://localhost:8081"
+import { getBackendBase } from "@/lib/backend-config"
+
+const JAVA_API_BASE = process.env.JAVA_API_URL || getBackendBase().replace(/\/Trading\/?$/, "") || "https://ihute.rw"
+const UMUSADA_AUTH_BASE = process.env.UMUSADA_AUTH_BASE || "https://umusada-master.umusada.com/umusada-master-service"
+const UMUSADA_BANK_API = process.env.UMUSADA_BANK_API || "https://bank-apis.umusada.com/api/v1"
+const BASE_URL = process.env.BASE_URL || process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"
 
 export async function POST(req: NextRequest) {
   try {

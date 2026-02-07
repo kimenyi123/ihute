@@ -1,9 +1,6 @@
 // app/api/seller-orders/route.ts
 import { NextResponse } from "next/server"
-
-// Use SellerOrdersServlet (listSellerOrders implemented there). Set JAVA_SELLER_ORDERS_URL if your context path differs.
-const JAVA_BACKEND_URL =
-  process.env.JAVA_SELLER_ORDERS_URL || "https://ihute.rw/Trading/SellerOrdersServlet"
+import { getSellerOrdersUrl } from "@/lib/backend-config"
 function tryParseJson(raw: string) {
   try { return JSON.parse(raw) } catch {}
   let s = raw.replace(/\uFEFF/g, "").trim()
@@ -63,8 +60,9 @@ export async function POST(req: Request) {
       pageSize: String(pageSize),
     }).toString()
 
-    console.log(`[${reqId}] Calling backend appiiii: ${JAVA_BACKEND_URL}`)
-    const res = await fetch(JAVA_BACKEND_URL, {
+    const backendUrl = getSellerOrdersUrl()
+    console.log(`[${reqId}] Calling backend: ${backendUrl}`)
+    const res = await fetch(backendUrl, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
       body: form,
@@ -112,7 +110,7 @@ export async function GET(req: Request) {
       pageSize: String(pageSize),
     })
 
-    const res = await fetch(`${JAVA_BACKEND_URL}?${qs}`, {
+    const res = await fetch(`${getSellerOrdersUrl()}?${qs}`, {
       method: "GET",
       headers: { Accept: "application/json" },
       cache: "no-store",

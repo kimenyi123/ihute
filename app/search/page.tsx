@@ -57,7 +57,7 @@ type SectorSeller = {
   products: Product[]
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || ""
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || process.env.NEXT_PUBLIC_API_URL || ""
 const SECTOR_OPTIONS = [
   "pharmacy",
   "supermarket",

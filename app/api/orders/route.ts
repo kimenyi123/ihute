@@ -1,15 +1,9 @@
 // app/api/orders/route.ts
 import { NextResponse } from "next/server"
-
-// Backend configuration
-// const JAVA_BACKEND_BASE = (process.env.JAVA_BACKEND_BASE || "https://ihute.rw/Trading").replace(/\/+$/, "")
-const JAVA_BACKEND_BASE = (process.env.JAVA_BACKEND_BASE || "https://ihute.rw/Trading").replace(/\/+$/, "")
-const FETCH_SUGGESTIONS_SERVLET = `https://ihute.rw/Trading/Kaos/fetchSuggestions`
-// const ORDERS_SERVLET = `${JAVA_BACKEND_BASE}/Kaos/OrdersServlet`
-const ORDERS_SERVLET = `https://ihute.rw/Trading/Kaos/OrdersServlet`
+import { getOrdersUrl, getFetchSuggestionsUrl, getProxyTimeoutMs } from "@/lib/backend-config"
 
 const DEBUG = process.env.DEBUG_ORDERS === 'true'
-const TIMEOUT_MS = Number(process.env.PROXY_TIMEOUT_MS ?? 12000)
+const TIMEOUT_MS = getProxyTimeoutMs()
 
 /**
  * Smart routing: Determines which servlet to use based on request
@@ -21,7 +15,7 @@ function determineServlet(body: any): { url: string; payload: any; mode: string 
   if (action) {
     console.log('🎯 Mode: ACTION-BASED → OrdersServlet')
     return {
-      url: ORDERS_SERVLET,
+      url: getOrdersUrl(),
       payload: body, // Send entire body
       mode: 'action-based'
     }
@@ -31,7 +25,7 @@ function determineServlet(body: any): { url: string; payload: any; mode: string 
   if (email && !action) {
     console.log('🎯 Mode: LEGACY → fetchSuggestions')
     return {
-      url: FETCH_SUGGESTIONS_SERVLET,
+      url: getFetchSuggestionsUrl(),
       payload: { email }, // Only send email
       mode: 'legacy'
     }

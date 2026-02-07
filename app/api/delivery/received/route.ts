@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server"
-const JAVA_DELIVERY_URL = process.env.JAVA_DELIVERY_URL || "https://ihute.rw/Trading/DeliveryServlet" // e.g. https://your-java-host/Kaos/delivery
+import { getDeliveryUrl } from "@/lib/backend-config"
+
+const JAVA_DELIVERY_URL = getDeliveryUrl()
 
 export async function POST(req: Request) {
   try {

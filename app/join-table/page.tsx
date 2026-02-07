@@ -53,7 +53,7 @@ export default function JoinTablePage() {
       const locationId = parts[1]
 
       // Verify table exists and is active
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/Trading"
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw/Trading"
       const url = new URL(`${API_BASE}/OrdersServlet`)
       url.searchParams.set("action", "checkTableStatus")
       url.searchParams.set("tableName", tableName)
@@ -96,7 +96,7 @@ export default function JoinTablePage() {
 
   const getSellerInfo = async (sellerAccount: string) => {
     try {
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/Trading"
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw/Trading"
       const url = new URL(`${API_BASE}/OrdersServlet`)
       url.searchParams.set("action", "getSellerInfo")
       url.searchParams.set("sellerAccount", sellerAccount)

@@ -110,9 +110,10 @@ function extractCurrency(value: any): string {
   return withoutNumbers || "";
 }
 
-/** Single item code from API (item_key_words). Used as cart item id/itemCode until create order. */
+/** Single item code from API (item_key_words, ITEM_CODE, item_code). Used as cart item id/itemCode. */
 function getItemCode(product: ShopWithMeProduct): string {
-  return (product.item_key_words ?? "").trim() || "";
+  const p = product as Record<string, unknown>;
+  return String(p.item_key_words ?? p.ITEM_CODE ?? p.item_code ?? "").trim() || "";
 }
 
 /** API can return products as categories with nested items[]. Flatten to one product per item. item_packet = quantity (available stock). */
@@ -128,21 +129,21 @@ function normalizeSellersProducts(sellers: ShopWithMeSeller[]): ShopWithMeSeller
           const stockNum = typeof packet === "number" ? packet : parseInt(String(packet ?? ""), 10);
           const stock = Number.isFinite(stockNum) ? stockNum : 0;
           const currency = extractCurrency(item.item_emballage) || (item as ShopWithMeProduct).currency;
-          const famille = (p as any).famille ?? (item as ShopWithMeProduct).famille;
+          const fam = (p as Record<string, unknown>).famille ?? (p as Record<string, unknown>).FAMILLE ?? (item as Record<string, unknown>).famille ?? (item as Record<string, unknown>).FAMILLE;
           flatProducts.push({
             ...item,
             OWNER: item.OWNER ?? (p as ShopWithMeProduct).OWNER ?? seller.OWNER,
             stock,
             in_stock: stock > 0,
             currency: currency || undefined,
-            famille: famille || undefined,
+            famille: fam != null ? String(fam) : undefined,
           });
         }
       } else {
         const flatP = p as ShopWithMeProduct;
         const currency = extractCurrency(flatP.item_emballage) || flatP.currency;
-        const famille = (p as any).famille ?? flatP.famille;
-        flatProducts.push({ ...flatP, currency: currency || flatP.currency, famille: famille || flatP.famille });
+        const fam = (p as Record<string, unknown>).famille ?? (p as Record<string, unknown>).FAMILLE ?? flatP.famille;
+        flatProducts.push({ ...flatP, currency: currency || flatP.currency, famille: fam != null ? String(fam) : flatP.famille });
       }
     }
     const in_stock_products = flatProducts.filter((pr) => pr.in_stock !== false && (pr.stock ?? 0) > 0).length;
@@ -227,6 +228,9 @@ export default function ShopWithMePage() {
   const addressFromQuery = searchParams?.get("address") || "";
   const tableFromQuery = searchParams?.get("table") || "";
 
+  // When only nickname is set (no table/customer/address), treat as normal shop: add to cart and checkout as usual.
+  const hasTableContext = !!(tableFromQuery.trim() || customerFromQuery.trim() || addressFromQuery.trim());
+
   const nicknameFromUrl = nicknameFromPath || nicknameFromQuery;
 
   const [nickname, setNickname] = useState("");
@@ -244,19 +248,24 @@ export default function ShopWithMePage() {
   const cartItems = useCartStore((s) => s.items);
   const cartItemCount = cartItems.reduce((sum, item) => sum + item.qty, 0);
   const setTableInfo = useCartStore((s) => s.setTableInfo);
+  const clearTableInfo = useCartStore((s) => s.clearTableInfo);
 
+  // When URL has nickname (e.g. ?nickname=burrows or /shop-with-me/burrows), fetch that shop. Params can be dynamic: table, customer, address.
   useEffect(() => {
     if (nicknameFromUrl && nicknameFromUrl.trim()) {
-      searchShop(nicknameFromUrl);
+      searchShop(nicknameFromUrl.trim());
     }
+  }, [nicknameFromUrl]);
+
+  // Pre-fill customer/table from URL (table=table%204, customer=..., address=...)
+  useEffect(() => {
     if (customerFromQuery?.trim()) setCustomerName(customerFromQuery.trim());
     if (addressFromQuery?.trim()) setCustomerAddress(addressFromQuery.trim());
-    // Table param: use for table/location; only fill name if customer not already set (QR bar/resto flow)
     if (tableFromQuery?.trim()) {
       if (!customerFromQuery?.trim()) setCustomerName(tableFromQuery.trim());
       if (!addressFromQuery?.trim()) setCustomerAddress(tableFromQuery.trim());
     }
-  }, []);
+  }, [customerFromQuery, addressFromQuery, tableFromQuery]);
 
   async function searchShop(searchNickname: string) {
     if (!searchNickname.trim()) {
@@ -357,6 +366,12 @@ export default function ShopWithMePage() {
   useEffect(() => {
     if (!currentSeller) return;
 
+    // No table/customer/address in URL → normal shop; clear table info so cart/checkout behave normally.
+    if (!tableFromQuery.trim() && !customerFromQuery.trim() && !addressFromQuery.trim()) {
+      clearTableInfo();
+      return;
+    }
+
     let name = customerFromQuery.trim();
     let address = addressFromQuery.trim();
     const table = tableFromQuery.trim();
@@ -379,7 +394,7 @@ export default function ShopWithMePage() {
       shopName: currentSeller.OWNER || currentSeller.SELLER_NAMES || currentSeller.NICKNAME || "",
       shopId: currentSeller.ISHYIGA_ACCOUNT || "",
     });
-  }, [customerFromQuery, addressFromQuery, tableFromQuery, currentSeller, setTableInfo]);
+  }, [customerFromQuery, addressFromQuery, tableFromQuery, currentSeller, setTableInfo, clearTableInfo]);
 
   useEffect(() => {
     if (!currentSeller?.products) {
@@ -390,7 +405,8 @@ export default function ShopWithMePage() {
     const categoryMap = new Map<string, ShopWithMeProduct[]>();
 
     currentSeller.products.forEach((product) => {
-      const category = (product.famille && product.famille.trim()) ? product.famille.trim() : categorizeProduct(product);
+      const fam = (product as Record<string, unknown>).famille ?? (product as Record<string, unknown>).FAMILLE;
+      const category = (fam && String(fam).trim()) ? String(fam).trim() : categorizeProduct(product);
       if (!categoryMap.has(category)) {
         categoryMap.set(category, []);
       }
@@ -595,7 +611,7 @@ export default function ShopWithMePage() {
                 </p>
               </div>
 
-              {(isDeliveryShop || isBarOrRestaurant) && (
+              {hasTableContext && (isDeliveryShop || isBarOrRestaurant) && (
                 <div className="flex items-center gap-2 self-start sm:self-auto">
                   {customerName && customerAddress ? (
                     <Badge variant="secondary" className="text-xs sm:text-sm py-1.5 sm:py-2 px-3 sm:px-4 max-w-full truncate">
@@ -689,6 +705,7 @@ export default function ShopWithMePage() {
                               supplierId={currentSeller.ISHYIGA_ACCOUNT || ""}
                               isDeliveryShop={isDeliveryShop}
                               isBarOrRestaurant={isBarOrRestaurant}
+                              hasTableContext={hasTableContext}
                               customerName={customerName}
                               customerAddress={customerAddress}
                               onCustomerInfoRequired={() => setShowCustomerDialog(true)}
@@ -781,6 +798,7 @@ function ProductCard({
   supplierId,
   isDeliveryShop,
   isBarOrRestaurant,
+  hasTableContext,
   customerName,
   customerAddress,
   onCustomerInfoRequired,
@@ -790,6 +808,8 @@ function ProductCard({
   supplierId: string;
   isDeliveryShop: boolean;
   isBarOrRestaurant?: boolean;
+  /** When false (only nickname in URL), normal shop: add to cart and checkout without table info. */
+  hasTableContext?: boolean;
   customerName: string;
   customerAddress: string;
   onCustomerInfoRequired: () => void;
@@ -801,10 +821,12 @@ function ProductCard({
   const isFavorite = useFavoritesStore((s) => s.isFavorite);
 
   const itemCode = getItemCode(product);
-  const productName = product.item_commercial_name || product.item_name || "Product";
-  const price = extractNumericPrice(product.price ?? product.item_emballage);
-  const packetNum = typeof product.item_packet === "number" ? product.item_packet : parseInt(String(product.item_packet ?? ""), 10);
-  const isOutOfStock = (Number.isFinite(packetNum) && packetNum <= 0);
+  const p = product as Record<string, unknown>;
+  // API returns normalized format: item_commercial_name, item_emballage, item_key_words, item_state, famille, item_packet
+  // Items from Redis/shop-with-me are considered available (cached before sent to Redis as stock).
+  const productName = String(p.item_commercial_name ?? p.item_name ?? p.ITEM_NAME ?? p.ITEM_COMMERCIAL_NAME ?? "").trim() || "Product";
+  const priceRaw = p.item_emballage ?? p.price ?? p.UNITY_PRICE ?? p.SALE_PRICE_INCLUSIVE;
+  const price = extractNumericPrice(priceRaw);
   const fav = isFavorite(itemCode);
 
   useEffect(() => {
@@ -815,9 +837,8 @@ function ProductCard({
   }, [itemCode, productName, supplierId]);
 
   const handleAddToCart = () => {
-    if (isOutOfStock) return;
-
-    const needsInfo = isDeliveryShop || isBarOrRestaurant;
+    // Only require table/customer info when we're in table context (table/customer/address in URL).
+    const needsInfo = hasTableContext && (isDeliveryShop || isBarOrRestaurant);
     if (needsInfo && (!customerName || !customerAddress)) {
       onCustomerInfoRequired();
       toast({
@@ -908,14 +929,6 @@ function ProductCard({
         >
           <Heart className={cn("h-4 w-4", fav && "fill-current")} />
         </button>
-
-        {isOutOfStock && (
-          <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-            <Badge variant="destructive" className="bg-red-600">
-              Out of Stock
-            </Badge>
-          </div>
-        )}
       </div>
 
       <CardContent className="p-3 flex flex-col gap-2">
@@ -936,9 +949,8 @@ function ProductCard({
           size="sm"
           className="mt-1 w-full bg-[#1e3a5f] hover:bg-[#2c4f7c]"
           onClick={handleAddToCart}
-          disabled={isOutOfStock}
         >
-          {(isDeliveryShop || isBarOrRestaurant) && (!customerName || !customerAddress)
+          {hasTableContext && (isDeliveryShop || isBarOrRestaurant) && (!customerName || !customerAddress)
             ? isBarOrRestaurant
               ? "Set Table Info"
               : "Add Info to Order"

@@ -74,9 +74,10 @@ export default function OrderSuccessPage() {
     return null
   }
 
-  const trackingUrl = typeof window !== 'undefined'
+  const siteBase = (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw").replace(/\/Trading\/?$/, "")
+  const trackingUrl = typeof window !== "undefined"
     ? `${window.location.origin}/track-order/${orderId}`
-    : `https://ihute.rw/track-order/${orderId}`
+    : `${siteBase}/track-order/${orderId}`
 
   // Build WhatsApp message with product details - memoized to recalculate when orderDetails changes
   const { whatsappMessage, whatsappHref } = useMemo(() => {

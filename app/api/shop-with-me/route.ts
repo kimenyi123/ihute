@@ -1,12 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getShopWithMeUrl } from '@/lib/backend-config';
 
+/**
+ * Shop-with-me API: forwards to Java backend with nickname only.
+ * Frontend URLs can be dynamic, e.g.:
+ *   /shop-with-me?nickname=burrows&table=table%204
+ *   /shop-with-me/burrows?table=table%204
+ * Backend is called with nickname only: .../shop_with_me?nickname=burrows
+ */
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const nickname = searchParams.get('nickname');
 
   console.log('[API shop-with-me] Received request for nickname:', nickname);
 
-  if (!nickname) {
+  if (!nickname || !nickname.trim()) {
     return NextResponse.json(
       { ok: false, error: 'Nickname is required' },
       { status: 400 }
@@ -14,7 +22,9 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const backendUrl = `http://localhost:8081/Trading/shop_with_me?nickname=${encodeURIComponent(nickname)}`;
+    const base = getShopWithMeUrl().replace(/\?.*$/, '').replace(/\/+$/, '');
+    const normalizedNickname = nickname.trim();
+    const backendUrl = `${base}?nickname=${encodeURIComponent(normalizedNickname)}`;
     console.log('[API shop-with-me] Fetching from backend:', backendUrl);
 
     const response = await fetch(backendUrl, {

@@ -41,8 +41,7 @@ export default function QuickProductCodePage() {
     setResults(null);
 
     try {
-      const url = `https://ihute.rw/Trading/Kaos/fetchSuggestions?quick_product_code=${encodeURIComponent(code)}&Currency=RWF`;
-      const response = await fetch(url);
+      const response = await fetch(`/api/fetchSuggestions?quick_product_code=${encodeURIComponent(code)}&Currency=RWF`);
       const data = await response.json();
 
       if (data.ok && data.products && data.products.length > 0) {

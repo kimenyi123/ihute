@@ -374,7 +374,7 @@ function SupplierDashboard() {
               <div className="flex items-center gap-2">
                 <Share2 className="h-6 w-6 text-blue-600 shrink-0" />
                 <div>
-                  <CardTitle className="text-xl">Shop With Me QR Code</CardTitle>
+                  <CardTitle className="text-xl">QR Code</CardTitle>
                   <CardDescription className="mt-1">
                     {shopWithMeQROpen
                       ? "Customers scan this to browse your products. Collapse when not needed."
@@ -401,7 +401,7 @@ function SupplierDashboard() {
                   <Label htmlFor="shop-nickname">Your shop nickname *</Label>
                   <Input
                     id="shop-nickname"
-                    placeholder="e.g. Mediasoldepot"
+                    placeholder="known as"
                     value={shopNickname}
                     onChange={(e) => setShopNickname(e.target.value)}
                     className="max-w-xs"
@@ -414,7 +414,7 @@ function SupplierDashboard() {
                     onCheckedChange={(checked) => setIsBarOrRestaurant(!!checked)}
                   />
                   <Label htmlFor="bar-restaurant" className="cursor-pointer">
-                    My business is Bar or Restaurant
+                    Bar or Restaurant
                   </Label>
                 </div>
               </div>

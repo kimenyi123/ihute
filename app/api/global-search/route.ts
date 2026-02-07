@@ -1,10 +1,11 @@
-// app/api/fetchSuggestions/route.ts
+// app/api/global-search/route.ts
 import type { NextRequest } from "next/server"
+import { getBackendBase } from "@/lib/backend-config"
 
 function withTrailingSlash(u: string) { return u.endsWith("/") ? u : u + "/" }
 
 async function forward(req: NextRequest) {
-  const backendBase = withTrailingSlash(process.env.JAVA_BACKEND_BASE ?? "https://ihute.rw/Trading")
+  const backendBase = withTrailingSlash(getBackendBase())
   const incoming = new URL(req.url)
   const target = new URL("/fetchSuggestions", backendBase)
 
