@@ -60,29 +60,6 @@ function ensureCur(v: unknown): string {
 function stripTrailingPriceParen(name: string): string {
   return String(name).replace(/\s*\((?:\d[\d.,\s]*)(?:RWF|Frw|RF)\)\s*$/i, "").trim()
 }
-// function formatPaidAt(v: unknown): string {
-//   if (v == null) return ""
-//   const s = String(v).trim()
-  
-//   // Handle new payment method names
-//   const map: Record<string, string> = {
-//     "PAID_MTN_MOMO": "MTN MoMo",
-//     "PAID_CARD": "Card Payment",
-//     "PAY_ON_DELIVERY": "Pay on delivery",
-//     "MTN_MOMO": "MTN MoMo",
-//     "MOMO": "Mobile Money",
-//     "CARD": "Card Payment"
-//   }
-  
-//   const normalized = map[s.toUpperCase()]
-//   if (normalized) return normalized
-  
-//   // Legacy formatting
-//   return s.replace(/\bMtn\b/i, "MTN")
-//     .replace(/\bMTN\s*(?=\d)/i, "MTN ")
-//     .replace(/\s+/g, " ")
-//     .trim()
-// }
 function formatPaidAt(v: unknown): string {
   if (v == null) return ""
   return formatPaymentMethod(String(v))
@@ -129,6 +106,8 @@ export function CartSummary() {
   const clear            = useCartStore((s) => s.clear)
   const getPaymentStatus = useCartStore((s) => s.getPaymentStatus)
   const setPaymentStatus = useCartStore((s) => s.setPaymentStatus)
+  // ✅ Get tableInfo from cart store
+  const tableInfo = useCartStore((s) => s.tableInfo)
 
   const [busy, setBusy] = useState<string | null>(null)
   const [orderIds, setOrderIds] = useState<Record<string, string>>({})
@@ -147,12 +126,35 @@ export function CartSummary() {
   // Table command mode
   const { isInTableCommand, activeSession, lockTableCommand, canCloseTable, closeTableCommand, createTableCommand, updateTableShareData } = useTableCommandStore()
 
-  // Pre-fill name from table command session if available
+  // ✅ UPDATED: Pre-fill name from table command session if available
   useEffect(() => {
-    if (isInTableCommand() && activeSession?.userName && !isAuthenticated) {
-      setAnonymousName(activeSession.userName)
+    if (isInTableCommand() && activeSession && !isAuthenticated) {
+      // Priority 1: Use userName if available
+      if (activeSession.userName) {
+        setAnonymousName(activeSession.userName)
+      }
+      // Priority 2: Use tableName if no userName
+      else if (activeSession.tableName && !anonymousName) {
+        setAnonymousName(activeSession.tableName)
+      }
     }
-  }, [isInTableCommand, activeSession, isAuthenticated])
+  }, [isInTableCommand, activeSession, isAuthenticated, anonymousName])
+
+  // ✅ FIXED: Pre-fill from tableInfo (customer info from shop-with-me)
+  useEffect(() => {
+    if (checkoutMode === "anonymous" && tableInfo) {
+      // Pre-fill customer name if available
+      if (tableInfo.customerName && !anonymousName) {
+        setAnonymousName(tableInfo.customerName)
+      }
+
+      // Pre-fill delivery location if available
+      if (tableInfo.customerAddress && !deliveryLocation) {
+        setDeliveryLocation(tableInfo.customerAddress)
+      }
+    }
+  }, [checkoutMode, tableInfo])
+
   const [tableCommandDialogOpen, setTableCommandDialogOpen] = useState(false)
   const [tableCommandSeller, setTableCommandSeller] = useState<{ id: string; name: string } | null>(null)
   const [showCloseTableDialog, setShowCloseTableDialog] = useState(false)
@@ -230,7 +232,7 @@ export function CartSummary() {
         paidAt: isPaid ? "MTN MoMo" : (hasUssdTarget ? "Pending (MoMo)" : "Pay on delivery"),
         reference: orderId ? `ORDER ${orderId}` : undefined,
         myPhone,
-        link: orderId ? `https://ihute.rw/orders/${orderId}` : undefined,
+        link: orderId ? `${(process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw").replace(/\/Trading\/?$/, "")}/orders/${orderId}` : undefined,
       })
       const href = phone ? waHrefFor(phone, message) : ""
       return { supplierId: g.supplierId, phone, message, href }
@@ -246,16 +248,17 @@ export function CartSummary() {
     )
   }
 
-  // Unified order creator for MoMo & COD
-
   // Open payment method selection
   const openPaymentMethod = (supplierId: string) => {
     if (!requireLogin()) return
     const g = groups.find(x => x.supplierId === supplierId)
     if (!g) return
 
-    // Check if this is a bar/restaurant and offer table command mode
-    const isBar = isBarOrRestaurant(g.supplierName) || isBarOrRestaurant(g.supplierLocation || "")
+    // Bar/resto: from name/location keywords OR from shop-with-me (DEPARTMENT / PREFERRED_CATEGORIES) — enables table command + autofill
+    const isBar =
+      g.isBarResto === true ||
+      isBarOrRestaurant(g.supplierName) ||
+      isBarOrRestaurant(g.supplierLocation || "")
 
     // If it's a bar/restaurant and user is not already in a table command for this location
     if (isBar && !isInTableCommand()) {
@@ -293,7 +296,7 @@ export function CartSummary() {
     if (paymentMethod === "cod") {
       setPaymentMethodOpen(false)
       setCodForSeller(selectedSeller)
-      setDeliveryLocation(checkoutMode === "anonymous" ? "" : user?.location || "")
+      setDeliveryLocation(checkoutMode === "anonymous" ? (tableInfo?.customerAddress || "") : user?.location || "")
       setContactPhone(checkoutMode === "anonymous" ? anonymousPhone : user?.phone || "")
       setCodOpen(true)
       setSelectedSeller(null)
@@ -306,199 +309,197 @@ export function CartSummary() {
     }
   }
 
-// Unified order creator for MoMo & COD
-const placeOrder = async (
-  g: ReturnType<typeof getGroupsBySeller>[number],
-  opts: { 
-    paymentName: "PAID_MTN_MOMO" | "PAY_ON_DELIVERY"; 
-    buyerPhone?: string; 
-    buyerLocation?: string; 
-    reference?: string;
-    paymentId?: string; // ✅ ADD PAYMENT ID OPTION
-  }
-) => {
-  if (!requireLogin()) return
-  try {
-    setBusy(g.supplierId)
-    setPaymentStatus(g.supplierId, "pending")
+  // Unified order creator for MoMo & COD
+  const placeOrder = async (
+    g: ReturnType<typeof getGroupsBySeller>[number],
+    opts: {
+      paymentName: "PAID_MTN_MOMO" | "PAY_ON_DELIVERY";
+      buyerPhone?: string;
+      buyerLocation?: string;
+      reference?: string;
+      paymentId?: string;
+    }
+  ) => {
+    if (!requireLogin()) return
+    try {
+      setBusy(g.supplierId)
+      setPaymentStatus(g.supplierId, "pending")
 
-    const items = g.items.map(it => ({
-      name: it.name,
-      qty: it.qty,
-      unitPrice: it.price,
-      unit: it.unit ?? ""
-    }))
+      const items = g.items.map(it => ({
+        name: it.name,
+        qty: it.qty,
+        unitPrice: it.price,
+        unit: it.unit ?? "",
+        itemCode: it.itemCode ?? it.id,
+      }))
 
-    // ✅ GENERATE PAYMENT ID BASED ON PAYMENT METHOD
-    const paymentId = opts.paymentId || `${opts.paymentName}_${Date.now()}`
+      const paymentId = opts.paymentId || `${opts.paymentName}_${Date.now()}`
 
-    console.log("Placing order with payment:", {
-      paymentName: opts.paymentName,
-      paymentId: paymentId,
-      supplierId: g.supplierId
-    })
-
-    const res = await fetch("/api/orders/create", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        buyerEmail: checkoutMode === "anonymous" ? `guest_${Date.now()}@ihute.rw` : user?.email,
-        buyerPhone: opts.buyerPhone || (checkoutMode === "anonymous" ? anonymousPhone : user?.phone || ""),
-        buyerLocation: opts.buyerLocation || (checkoutMode === "anonymous" ? deliveryLocation : user?.location || "NA"),
-        buyerName: checkoutMode === "anonymous" ? anonymousName : user?.name,
-        sellerAccount: g.supplierId,
+      console.log("[cart/order] Placing order:", {
+        paymentName: opts.paymentName,
+        paymentId,
+        supplierId: g.supplierId,
         sellerName: g.supplierName,
-        sellerPhone: g.phone || "", // ✅ INCLUDE SELLER PHONE
-        paymentName: opts.paymentName, // ✅ SEND PAYMENT NAME
-        paymentId: paymentId, // ✅ SEND PAYMENT ID
-        reference: opts.reference || "",
-        currency: "RWF",
-        items,
-        // Table command information
-        isTableCommand: isInTableCommand(),
-        tableName: activeSession?.tableName,
-        tableLocation: activeSession?.locationName,
-      }),
-    })
+        items: items.map((it) => ({ name: it.name, qty: it.qty, NIKI_CODE: it.itemCode, unitPrice: it.unitPrice })),
+      })
 
-    const json = await res.json()
+      const res = await fetch("/api/orders/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          buyerEmail: checkoutMode === "anonymous" ? `guest_${Date.now()}@ihute.rw` : user?.email,
+          buyerPhone: opts.buyerPhone || (checkoutMode === "anonymous" ? anonymousPhone : user?.phone || ""),
+          buyerLocation: opts.buyerLocation || (checkoutMode === "anonymous" ? deliveryLocation : user?.location || "NA"),
+          buyerName: checkoutMode === "anonymous" ? anonymousName : user?.name,
+          sellerAccount: g.supplierId,
+          sellerName: g.supplierName,
+          sellerPhone: g.phone || "",
+          paymentName: opts.paymentName,
+          paymentId: paymentId,
+          reference: opts.reference || "",
+          currency: "RWF",
+          items,
+          // Table command information
+          isTableCommand: isInTableCommand(),
+          tableName: activeSession?.tableName,
+          tableLocation: activeSession?.locationName,
+        }),
+      })
 
-    console.log("Order creation response:", json)
+      const json = await res.json()
 
-    if (res.ok && json?.ok) {
-      const orderId = json.orderId ? String(json.orderId) : null
-      const sellerTel = json.sellerTel ? String(json.sellerTel) : null
+      console.log("Order creation response:", json)
 
-      if (orderId) setOrderIds(m => ({ ...m, [g.supplierId]: orderId }))
-      if (sellerTel) setOrderPhones(m => ({ ...m, [g.supplierId]: sellerTel }))
+      if (res.ok && json?.ok) {
+        const orderId = json.orderId ? String(json.orderId) : null
+        const sellerTel = json.sellerTel ? String(json.sellerTel) : null
 
-      // Track successful purchase for all items in this seller group (best-effort)
-      try {
-        g.items.forEach(it => {
-          trackClick("product", it.id, it.name)
-        })
-      } catch {
-        // ignore tracking errors
-      }
+        if (orderId) setOrderIds(m => ({ ...m, [g.supplierId]: orderId }))
+        if (sellerTel) setOrderPhones(m => ({ ...m, [g.supplierId]: sellerTel }))
 
-      // ✅ LOG SUCCESSFUL PAYMENT METHOD
-      console.log(`✅ Order created with payment method: ${opts.paymentName}`)
+        // Track successful purchase for all items in this seller group (best-effort)
+        try {
+          g.items.forEach(it => {
+            trackClick("product", it.id, it.name)
+          })
+        } catch {
+          // ignore tracking errors
+        }
 
-      // ✅ HANDLE TABLE COMMAND CREATION WITH SHARE DATA
-      if (json.tableCommand && json.tableCommand.shareableLink) {
-        // If we're not already in a table command session, create one with share data
-        if (!isInTableCommand()) {
-          createTableCommand(
-            json.tableCommand.tableName,
-            g.supplierId,
-            json.tableCommand.tableLocation,
-            checkoutMode === "anonymous" ? anonymousName : user?.name || "Guest",
-            checkoutMode === "anonymous" ? `guest_${Date.now()}@ihute.rw` : user?.email || "",
-            {
+        console.log(`✅ Order created with payment method: ${opts.paymentName}`)
+
+        // Handle table command creation with share data
+        if (json.tableCommand && json.tableCommand.shareableLink) {
+          // If we're not already in a table command session, create one with share data
+          if (!isInTableCommand()) {
+            createTableCommand(
+              json.tableCommand.tableName,
+              g.supplierId,
+              json.tableCommand.tableLocation,
+              checkoutMode === "anonymous" ? anonymousName : user?.name || "Guest",
+              checkoutMode === "anonymous" ? `guest_${Date.now()}@ihute.rw` : user?.email || "",
+              {
+                shareableLink: json.tableCommand.shareableLink,
+                shareableToken: json.tableCommand.shareableToken,
+                qrCodeUrl: json.tableCommand.qrCodeUrl,
+              }
+            )
+          } else if (activeSession && activeSession.isCreator) {
+            // Update existing session with share data
+            updateTableShareData({
               shareableLink: json.tableCommand.shareableLink,
               shareableToken: json.tableCommand.shareableToken,
               qrCodeUrl: json.tableCommand.qrCodeUrl,
-            }
-          )
-        } else if (activeSession && activeSession.isCreator) {
-          // Update existing session with share data
-          updateTableShareData({
+            })
+          }
+
+          // Show share modal
+          setShareModalData({
+            tableName: json.tableCommand.tableName,
+            tableLocation: json.tableCommand.tableLocation,
             shareableLink: json.tableCommand.shareableLink,
-            shareableToken: json.tableCommand.shareableToken,
             qrCodeUrl: json.tableCommand.qrCodeUrl,
+            shareableToken: json.tableCommand.shareableToken,
           })
+          setShareModalOpen(true)
+          // Don't redirect - user needs to see the share modal
+          return
         }
 
-        // Show share modal
-        setShareModalData({
-          tableName: json.tableCommand.tableName,
-          tableLocation: json.tableCommand.tableLocation,
-          shareableLink: json.tableCommand.shareableLink,
-          qrCodeUrl: json.tableCommand.qrCodeUrl,
-          shareableToken: json.tableCommand.shareableToken,
-        })
-        setShareModalOpen(true)
-        // Don't redirect - user needs to see the share modal
-        return
+        if (opts.paymentName === "PAID_MTN_MOMO" && orderId) {
+          pollPayment(orderId, g.supplierId)
+        }
+
+        // Lock table command if in table mode
+        if (isInTableCommand() && activeSession?.isCreator) {
+          // Just show a success toast or alert
+          alert(`Order #${orderId} added to table "${activeSession.tableName}". Add more items or send the complete table order.`)
+          // Don't redirect - user needs to stay to use "Send Complete Table Order" button
+          return
+        }
+
+        // Clear cart (but table session persists in its own store)
+        clear()
+
+        // Redirect to order success page with WhatsApp details
+        if (orderId) {
+          const params = new URLSearchParams({
+            orderId,
+            sellerName: g.supplierName,
+            sellerPhone: sellerTel || "",
+            buyerPhone: checkoutMode === "anonymous" ? anonymousPhone : (user?.phone || ""),
+            total: String(g.subtotal),
+            paymentMethod: opts.paymentName
+          })
+          router.push(`/order-success?${params.toString()}`)
+        } else if (checkoutMode === "login" || isAuthenticated) {
+          router.push("/orders")
+        } else {
+          router.push("/")
+        }
+        router.refresh()
+      } else {
+        setPaymentStatus(g.supplierId, "failed")
+        alert(`Failed to create order: ${json?.error || "Unknown error"}`)
       }
-
-     if (opts.paymentName === "PAID_MTN_MOMO" && orderId) {
-      pollPayment(orderId, g.supplierId)
-    }
-
-      // Lock table command if in table mode
-     if (isInTableCommand() && activeSession?.isCreator) {
-  // Just show a success toast or alert
-  alert(`Order #${orderId} added to table "${activeSession.tableName}". Add more items or send the complete table order.`)
-  // Don't redirect - user needs to stay to use "Send Complete Table Order" button
-  return
-}
-
-
-      // Clear cart (but table session persists in its own store)
-      clear()
-
-      // Redirect to order success page with WhatsApp details
-  if (orderId) {
-  const params = new URLSearchParams({
-    orderId,
-    sellerName: g.supplierName,
-    sellerPhone: sellerTel || "",
-    buyerPhone: checkoutMode === "anonymous" ? anonymousPhone : (user?.phone || ""),
-    total: String(g.subtotal),
-    paymentMethod: opts.paymentName
-  })
-  router.push(`/order-success?${params.toString()}`)
-} else if (checkoutMode === "login" || isAuthenticated) {
-  router.push("/orders")
-} else {
-  router.push("/")
-}
-router.refresh()
-    } else {
+    } catch (error) {
+      console.error("Order creation error:", error)
       setPaymentStatus(g.supplierId, "failed")
-      alert(`Failed to create order: ${json?.error || "Unknown error"}`)
+      alert("Failed to create order. Please try again.")
+    } finally {
+      setBusy(null)
     }
-  } catch (error) {
-    console.error("Order creation error:", error)
-    setPaymentStatus(g.supplierId, "failed")
-    alert("Failed to create order. Please try again.")
-  } finally {
-    setBusy(null)
   }
-}
 
-// ✅ UPDATED: confirmPayment function with payment ID
-const confirmPayment = (g: ReturnType<typeof getGroupsBySeller>[number]) =>
-  placeOrder(g, { 
-    paymentName: "PAID_MTN_MOMO",
-    reference: `MOMO_${Date.now()}`,
-    paymentId: `MOMO_${Date.now()}` // ✅ INCLUDE PAYMENT ID
-  })
+  const confirmPayment = (g: ReturnType<typeof getGroupsBySeller>[number]) =>
+    placeOrder(g, {
+      paymentName: "PAID_MTN_MOMO",
+      reference: `MOMO_${Date.now()}`,
+      paymentId: `MOMO_${Date.now()}`
+    })
 
-// ✅ UPDATED: submitCOD function with payment ID
-const submitCOD = async () => {
-  if (!codForSeller) return
-  const g = groups.find(x => x.supplierId === codForSeller)
-  if (!g) { setCodOpen(false); return }
+  const submitCOD = async () => {
+    if (!codForSeller) return
+    const g = groups.find(x => x.supplierId === codForSeller)
+    if (!g) { setCodOpen(false); return }
 
-  // Check if Pangolin's Burrows - use table/location instead of delivery input
-  const isPangolins = g.supplierName?.toUpperCase().includes("PANGOLIN")
-  const location = isPangolins
-    ? (isInTableCommand() ? `Table: ${activeSession?.tableName}` : g.supplierLocation || "In-person pickup")
-    : deliveryLocation
+    // Check if Pangolin's Burrows - use table/location instead of delivery input
+    const isPangolins = g.supplierName?.toUpperCase().includes("PANGOLIN")
+    const location = isPangolins
+      ? (isInTableCommand() ? `Table: ${activeSession?.tableName}` : g.supplierLocation || "In-person pickup")
+      : deliveryLocation
 
-  await placeOrder(g, {
-    paymentName: "PAY_ON_DELIVERY",
-    buyerPhone: contactPhone,
-    buyerLocation: location,
-    reference: `COD_${Date.now()}`,
-    paymentId: `COD_${Date.now()}` // ✅ INCLUDE PAYMENT ID
-  })
+    await placeOrder(g, {
+      paymentName: "PAY_ON_DELIVERY",
+      buyerPhone: contactPhone,
+      buyerLocation: location,
+      reference: `COD_${Date.now()}`,
+      paymentId: `COD_${Date.now()}`
+    })
 
-  setCodOpen(false)
-  setCodForSeller(null)
-}
+    setCodOpen(false)
+    setCodForSeller(null)
+  }
 
   const confirmMoMoPayment = async () => {
     if (!momoForSeller) return
@@ -606,13 +607,43 @@ const submitCOD = async () => {
         </Card>
       </div>
 
-      {/* Payment method selection dialog */}
+      {/* ✅ UPDATED: Payment method selection dialog with customer info pre-filled */}
       <Dialog open={paymentMethodOpen} onOpenChange={setPaymentMethodOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Choose Payment Method</DialogTitle>
             <DialogDescription>Select how you'd like to pay for this order</DialogDescription>
           </DialogHeader>
+
+          {/* ✅ Customer Info Banner (from shop-with-me) */}
+          {tableInfo && tableInfo.customerName && (
+            <div className="rounded-lg bg-blue-50 border border-blue-200 p-3">
+              <div className="flex items-center gap-2">
+                <Users className="h-4 w-4 text-blue-600" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium">Delivery Info</p>
+                  <p className="text-xs text-muted-foreground">
+                    {tableInfo.customerName} - {tableInfo.customerAddress}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ✅ Table Info Banner */}
+          {isInTableCommand() && activeSession && (
+            <div className="rounded-lg bg-primary/5 border border-primary/20 p-3">
+              <div className="flex items-center gap-2">
+                <Users className="h-4 w-4 text-primary" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium">Table Order</p>
+                  <p className="text-xs text-muted-foreground">
+                    {activeSession.locationName} - Table {activeSession.tableName}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Checkout Mode Selection */}
           {!isAuthenticated && (
@@ -637,7 +668,7 @@ const submitCOD = async () => {
             </div>
           )}
 
-          {/* Anonymous user info collection */}
+          {/* ✅ UPDATED: Anonymous user info collection with pre-fill from shop-with-me */}
           {checkoutMode === "anonymous" && (
             <div className="space-y-3 pb-4 border-b">
               <div className="space-y-1">
@@ -646,7 +677,13 @@ const submitCOD = async () => {
                   value={anonymousName}
                   onChange={(e) => setAnonymousName(e.target.value)}
                   placeholder="Enter your full name"
+                  className={tableInfo?.customerName ? "bg-muted" : ""}
                 />
+                {tableInfo?.customerName && (
+                  <p className="text-xs text-muted-foreground">
+                    Pre-filled from shop information
+                  </p>
+                )}
               </div>
               <div className="space-y-1">
                 <Label className="text-sm font-medium">Phone Number *</Label>
@@ -662,6 +699,7 @@ const submitCOD = async () => {
             </div>
           )}
 
+          {/* Payment method selection */}
           <RadioGroup value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as "momo" | "cod")}>
             <div className="space-y-3">
               {selectedSeller && (() => {
@@ -670,7 +708,7 @@ const submitCOD = async () => {
 
                 return (
                   <>
-                    <div 
+                    <div
                       className={`flex items-center space-x-3 border rounded-lg p-4 cursor-pointer hover:bg-accent ${!hasUssdTarget ? 'opacity-50' : ''}`}
                       onClick={() => hasUssdTarget && setPaymentMethod("momo")}
                     >
@@ -691,8 +729,12 @@ const submitCOD = async () => {
                       <Label htmlFor="cod" className="flex items-center gap-2 cursor-pointer flex-1">
                         <Truck className="h-5 w-5 text-blue-600" />
                         <div>
-                          <div className="font-medium">Cash on Delivery</div>
-                          <div className="text-sm text-muted-foreground">Pay when you receive your order</div>
+                          <div className="font-medium">
+                            {isInTableCommand() ? "Pay at Table" : "Cash on Delivery"}
+                          </div>
+                          <div className="text-sm text-muted-foreground">
+                            {isInTableCommand() ? "Pay when order arrives at your table" : "Pay when you receive your order"}
+                          </div>
                         </div>
                       </Label>
                     </div>
@@ -710,155 +752,160 @@ const submitCOD = async () => {
       </Dialog>
 
       {/* COD dialog */}
+      <Dialog open={codOpen} onOpenChange={setCodOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {(() => {
+                const g = codForSeller ? groups.find(x => x.supplierId === codForSeller) : null
+                const isPangolins = g?.supplierName?.toUpperCase().includes("PANGOLIN")
+                return isPangolins ? "Confirm Order" : "Review Order & Delivery Details"
+              })()}
+            </DialogTitle>
+            <DialogDescription>
+              {(() => {
+                const g = codForSeller ? groups.find(x => x.supplierId === codForSeller) : null
+                const isPangolins = g?.supplierName?.toUpperCase().includes("PANGOLIN")
+                return isPangolins
+                  ? "Review your order details and confirm."
+                  : "Review your order and provide delivery details. Pay when you receive your order."
+              })()}
+            </DialogDescription>
+          </DialogHeader>
 
-{/* COD dialog */}
-<Dialog open={codOpen} onOpenChange={setCodOpen}>
-  <DialogContent className="max-w-2xl">
-    <DialogHeader>
-      <DialogTitle>
-        {(() => {
-          const g = codForSeller ? groups.find(x => x.supplierId === codForSeller) : null
-          const isPangolins = g?.supplierName?.toUpperCase().includes("PANGOLIN")
-          return isPangolins ? "Confirm Order" : "Review Order & Delivery Details"
-        })()}
-      </DialogTitle>
-      <DialogDescription>
-        {(() => {
-          const g = codForSeller ? groups.find(x => x.supplierId === codForSeller) : null
-          const isPangolins = g?.supplierName?.toUpperCase().includes("PANGOLIN")
-          return isPangolins
-            ? "Review your order details and confirm."
-            : "Review your order and provide delivery details. Pay when you receive your order."
-        })()}
-      </DialogDescription>
-    </DialogHeader>
-    
-    <div className="space-y-4">
-      {/* Customer Information */}
-      <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-3">
-        <h4 className="font-medium text-sm text-muted-foreground">CUSTOMER INFORMATION</h4>
-        {checkoutMode === "anonymous" && (
-          <>
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Name:</span>
-              <span className="font-medium">{anonymousName}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Phone:</span>
-              <span className="font-medium">{anonymousPhone}</span>
-            </div>
-          </>
-        )}
-        {isAuthenticated && (
-          <>
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Name:</span>
-              <span className="font-medium">{user?.name}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Phone:</span>
-              <span className="font-medium">{user?.phone}</span>
-            </div>
-          </>
-        )}
-        {isInTableCommand() && activeSession && (
-          <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">Table:</span>
-            <span className="font-medium font-mono">{activeSession.tableName}</span>
-          </div>
-        )}
-      </div>
-
-      {/* Order Items - ALWAYS SHOW FOR ALL SELLERS */}
-      {codForSeller && (() => {
-        const g = groups.find(x => x.supplierId === codForSeller)
-        if (!g) return null
-
-        return (
-          <div className="border rounded-lg">
-            <div className="bg-slate-50 border-b p-3">
-              <h4 className="font-medium text-sm">ORDER ITEMS</h4>
-            </div>
-            <div className="max-h-60 overflow-y-auto">
-              {g.items.map((item, index) => (
-                <div key={index} className="flex justify-between items-center p-3 border-b last:border-b-0">
-                  <div className="flex-1">
-                    <div className="font-medium text-sm">{item.name}</div>
-                    {item.unit && (
-                      <div className="text-xs text-muted-foreground">Unit: {item.unit}</div>
-                    )}
+          <div className="space-y-4">
+            {/* Customer Information */}
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-3">
+              <h4 className="font-medium text-sm text-muted-foreground">CUSTOMER INFORMATION</h4>
+              {checkoutMode === "anonymous" && (
+                <>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Name:</span>
+                    <span className="font-medium">{anonymousName}</span>
                   </div>
-                  <div className="flex items-center gap-4">
-                    <div className="text-sm text-muted-foreground">
-                      {item.qty} × {item.price?.toLocaleString()} {CUR}
-                    </div>
-                    <div className="font-medium text-sm w-20 text-right">
-                      {((item.price || 0) * (item.qty || 0)).toLocaleString()} {CUR}
-                    </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Phone:</span>
+                    <span className="font-medium">{anonymousPhone}</span>
                   </div>
-                </div>
-              ))}
-            </div>
-            <div className="bg-slate-50 border-t p-3">
-              <div className="flex justify-between items-center">
-                <span className="font-medium">Total:</span>
-                <span className="font-bold text-lg">{g.subtotal.toLocaleString()} {CUR}</span>
-              </div>
-            </div>
-          </div>
-        )
-      })()}
-
-      {/* Delivery location - only for non-Pangolins AND non-table-command orders */}
-      {(() => {
-        const g = codForSeller ? groups.find(x => x.supplierId === codForSeller) : null
-        const isPangolins = g?.supplierName?.toUpperCase().includes("PANGOLIN")
-        
-        // Show delivery location for non-Pangolins AND when not in table command mode
-        if (!isPangolins && !isInTableCommand()) {
-          return (
-            <div className="space-y-3">
-              <div className="space-y-1">
-                <label className="text-sm font-medium">Delivery location *</label>
-                <Input
-                  value={deliveryLocation}
-                  onChange={(e) => setDeliveryLocation(e.target.value)}
-                  placeholder="e.g., Kigali, Kacyiru, Plot 12"
-                />
-              </div>
-              {checkoutMode !== "anonymous" && (
-                <div className="space-y-1">
-                  <label className="text-sm font-medium">Contact phone</label>
-                  <Input
-                    value={contactPhone}
-                    onChange={(e) => setContactPhone(e.target.value)}
-                    placeholder="+2507…"
-                  />
+                </>
+              )}
+              {isAuthenticated && (
+                <>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Name:</span>
+                    <span className="font-medium">{user?.name}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Phone:</span>
+                    <span className="font-medium">{user?.phone}</span>
+                  </div>
+                </>
+              )}
+              {isInTableCommand() && activeSession && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Table:</span>
+                  <span className="font-medium font-mono">{activeSession.tableName}</span>
                 </div>
               )}
             </div>
-          )
-        }
-      })()}
-    </div>
 
-    <DialogFooter className="gap-2">
-      <Button variant="outline" onClick={() => setCodOpen(false)}>Cancel</Button>
-      <Button
-        onClick={submitCOD}
-        disabled={(() => {
-          const g = codForSeller ? groups.find(x => x.supplierId === codForSeller) : null
-          const isPangolins = g?.supplierName?.toUpperCase().includes("PANGOLIN")
-          // Require delivery location only for non-Pangolins AND when not in table command
-          return !isPangolins && !isInTableCommand() && !deliveryLocation
-        })()}
-      >
-        <Truck className="h-4 w-4 mr-2" />
-        Place order
-      </Button>
-    </DialogFooter>
-  </DialogContent>
-</Dialog>
+            {/* Order Items - ALWAYS SHOW FOR ALL SELLERS */}
+            {codForSeller && (() => {
+              const g = groups.find(x => x.supplierId === codForSeller)
+              if (!g) return null
+
+              return (
+                <div className="border rounded-lg">
+                  <div className="bg-slate-50 border-b p-3">
+                    <h4 className="font-medium text-sm">ORDER ITEMS</h4>
+                  </div>
+                  <div className="max-h-60 overflow-y-auto">
+                    {g.items.map((item, index) => (
+                      <div key={index} className="flex justify-between items-center p-3 border-b last:border-b-0">
+                        <div className="flex-1">
+                          <div className="font-medium text-sm">{item.name}</div>
+                          {item.unit && (
+                            <div className="text-xs text-muted-foreground">Unit: {item.unit}</div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <div className="text-sm text-muted-foreground">
+                            {item.qty} × {item.price?.toLocaleString()} {CUR}
+                          </div>
+                          <div className="font-medium text-sm w-20 text-right">
+                            {((item.price || 0) * (item.qty || 0)).toLocaleString()} {CUR}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="bg-slate-50 border-t p-3">
+                    <div className="flex justify-between items-center">
+                      <span className="font-medium">Total:</span>
+                      <span className="font-bold text-lg">{g.subtotal.toLocaleString()} {CUR}</span>
+                    </div>
+                  </div>
+                </div>
+              )
+            })()}
+
+            {/* Delivery location - only for non-Pangolins AND non-table-command orders */}
+            {(() => {
+              const g = codForSeller ? groups.find(x => x.supplierId === codForSeller) : null
+              const isPangolins = g?.supplierName?.toUpperCase().includes("PANGOLIN")
+
+              // Show delivery location for non-Pangolins AND when not in table command mode
+              if (!isPangolins && !isInTableCommand()) {
+                return (
+                  <div className="space-y-3">
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">Delivery location *</label>
+                      <Input
+                        value={deliveryLocation}
+                        onChange={(e) => setDeliveryLocation(e.target.value)}
+                        placeholder="e.g., Kigali, Kacyiru, Plot 12"
+                        className={tableInfo?.customerAddress ? "bg-muted" : ""}
+                      />
+                      {tableInfo?.customerAddress && (
+                        <p className="text-xs text-muted-foreground">
+                          Pre-filled from shop information
+                        </p>
+                      )}
+                    </div>
+                    {checkoutMode !== "anonymous" && (
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium">Contact phone</label>
+                        <Input
+                          value={contactPhone}
+                          onChange={(e) => setContactPhone(e.target.value)}
+                          placeholder="+2507…"
+                        />
+                      </div>
+                    )}
+                  </div>
+                )
+              }
+            })()}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setCodOpen(false)}>Cancel</Button>
+            <Button
+              onClick={submitCOD}
+              disabled={(() => {
+                const g = codForSeller ? groups.find(x => x.supplierId === codForSeller) : null
+                const isPangolins = g?.supplierName?.toUpperCase().includes("PANGOLIN")
+                // Require delivery location only for non-Pangolins AND when not in table command
+                return !isPangolins && !isInTableCommand() && !deliveryLocation
+              })()}
+            >
+              <Truck className="h-4 w-4 mr-2" />
+              Place order
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* MoMo payment dialog */}
       <Dialog open={momoOpen} onOpenChange={setMomoOpen}>
         <DialogContent className="max-w-md">
@@ -866,7 +913,7 @@ const submitCOD = async () => {
             <DialogTitle>Pay with MTN Mobile Money</DialogTitle>
             <DialogDescription>Complete payment to confirm your order</DialogDescription>
           </DialogHeader>
-          
+
           {momoForSeller && (() => {
             const g = groups.find(x => x.supplierId === momoForSeller)
             if (!g) return null
@@ -875,7 +922,7 @@ const submitCOD = async () => {
             const hasUssdTarget = momoTarget.length > 0
             const payload = `*182*8*1*${momoTarget}*${g.subtotal}#`
             const telHref = `tel:${encodeURIComponent(payload)}`
-            
+
             return (
               <div className="space-y-4">
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 space-y-2">
@@ -948,7 +995,7 @@ const submitCOD = async () => {
             <Button variant="outline" onClick={() => { setMomoOpen(false); setMomoForSeller(null) }}>
               Cancel
             </Button>
-            <Button 
+            <Button
               onClick={confirmMoMoPayment}
               disabled={busy === momoForSeller}
               className="bg-green-600 hover:bg-green-700"
@@ -991,6 +1038,8 @@ const submitCOD = async () => {
           }}
           locationId={tableCommandSeller.id}
           locationName={tableCommandSeller.name}
+          initialTableName={(tableInfo?.customerAddress || tableInfo?.tableNumber || "").trim()}
+          initialUserName={(tableInfo?.customerName || "").trim()}
         />
       )}
 

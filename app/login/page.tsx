@@ -37,6 +37,14 @@ function toUserRole(r?: string): UserRole {
 }
 
 function normalizeToStoreUser(payload: ApiLoginOK): User {
+  const raw = payload as any
+  const ishyiga =
+    payload.ishyiga ??
+    raw.ISHYIGA_ACCOUNT ??
+    raw.ishyigaAccount ??
+    raw.user?.ISHYIGA_ACCOUNT ??
+    raw.user?.ishyigaAccount ??
+    undefined
   return {
     id: payload.user.email,
     email: payload.user.email,
@@ -44,7 +52,7 @@ function normalizeToStoreUser(payload: ApiLoginOK): User {
     role: toUserRole(payload.role),
     phone: payload.user.tel || "",
     location: payload.user.location || "",
-    ishyigaAccount: payload.ishyiga || undefined,
+    ishyigaAccount: ishyiga || undefined,
     businessName: payload.user.owner || undefined,
   }
 }

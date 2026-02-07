@@ -30,6 +30,9 @@ export type Order = {
   buyerId?: string
   buyerName?: string
   isGuest?: boolean
+  supplierStatus?: string
+  buyerTIN?: string
+  SUPPLIER_TIN?: string
 }
 
 type OrdersState = {

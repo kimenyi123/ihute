@@ -29,7 +29,7 @@ type BackendResponse = {
   error?: string
 }
 
-const JAVA_BASE_URL = process.env.JAVA_BASE_URL || 'https://ihute.rw/Trading'
+import { getFetchSuggestionsUrl } from "@/lib/backend-config"
 
 /**
  * Global Supplier Search API
@@ -75,7 +75,7 @@ export async function POST(request: Request) {
     })
 
     // Call Java backend with dynamic geocoding
-    const javaResponse = await fetch(`${JAVA_BASE_URL}/fetchSuggestions`, {
+    const javaResponse = await fetch(getFetchSuggestionsUrl(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

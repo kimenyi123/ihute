@@ -41,8 +41,7 @@ export default function QuickProductCodePage() {
     setResults(null);
 
     try {
-      const url = `http://localhost:8081/Trading/Kaos/fetchSuggestions?quick_product_code=${encodeURIComponent(code)}&Currency=RWF`;
-      const response = await fetch(url);
+      const response = await fetch(`/api/fetchSuggestions?quick_product_code=${encodeURIComponent(code)}&Currency=RWF`);
       const data = await response.json();
 
       if (data.ok && data.products && data.products.length > 0) {
@@ -115,7 +114,7 @@ export default function QuickProductCodePage() {
       price: price,
       unit: product.item_packet,
       image: product.image || "/placeholder.svg?height=300&width=300",
-      description: product.item_key_words,
+      description: undefined, // hide code from UI
       supplierId: product.supplier_account,
       supplierName: product.supplier_name,
       supplierLocation: product.supplier_location,

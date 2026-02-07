@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const JAVA_BACKEND_BASE = process.env.JAVA_BACKEND_BASE || 'http://localhost:8080/Trading';
+import { getBackendBase } from "@/lib/backend-config"
 
 /**
  * Notifications API Route
@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
 
     console.log(`[notifications] Action: ${action}`, params);
 
-    const backendUrl = `${JAVA_BACKEND_BASE}/NotificationServlet`;
+    const backendUrl = `${getBackendBase()}/NotificationServlet`;
     const backendParams = new URLSearchParams();
     
     // Add action
@@ -96,7 +96,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const backendUrl = `${JAVA_BACKEND_BASE}/NotificationServlet`;
+    const backendUrl = `${getBackendBase()}/NotificationServlet`;
     const backendParams = new URLSearchParams();
     
     // Copy all params

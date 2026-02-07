@@ -1,14 +1,12 @@
 // app/api/fetchSuggestions/route.ts
 import type { NextRequest } from "next/server"
+import { getFetchSuggestionsUrl, getProxyTimeoutMs } from "@/lib/backend-config"
 
-const DEFAULT_TIMEOUT_MS = Number(process.env.PROXY_TIMEOUT_MS ?? 30000) // Reduced to 30s
+const DEFAULT_TIMEOUT_MS = Math.max(30000, getProxyTimeoutMs())
 
 async function forward(req: NextRequest) {
-//   const backendBase = process.env.JAVA_BACKEND_BASE ?? "https://ihute.rw/Trading"
-   const backendBase = process.env.JAVA_BACKEND_BASE ?? "https://ihute.rw/Trading"
-//  const backendBase = process.env.JAVA_BACKEND_BASE ?? "http://localhost:8081/Trading"
   const incoming = new URL(req.url)
-  const target = new URL(`${backendBase}/Kaos/fetchSuggestions`)
+  const target = new URL(getFetchSuggestionsUrl())
 
   // Copy query params
   incoming.searchParams.forEach((v, k) => target.searchParams.append(k, v))

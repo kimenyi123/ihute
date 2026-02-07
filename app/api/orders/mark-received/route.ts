@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server"
-const JAVA_ORDERS_URL = process.env.JAVA_ORDERS_URL || "https://ihute.rw/Trading/OrdersServlet" // e.g. https://your-java-host/Kaos/orders
+import { getOrdersUrl } from "@/lib/backend-config"
+
+const JAVA_ORDERS_URL = getOrdersUrl()
 
 export async function POST(req: Request) {
   try {

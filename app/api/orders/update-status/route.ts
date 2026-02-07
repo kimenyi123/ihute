@@ -1,9 +1,9 @@
 // app/api/orders/update-status/route.ts
 import { NextResponse } from "next/server"
 
-// Localhost configuration
-const JAVA_BACKEND_BASE = "https://ihute.rw"
-const ORDER_STATUS_URL = `${JAVA_BACKEND_BASE}/Trading/OrderStatusServlet`
+import { getOrderStatusUrl } from "@/lib/backend-config"
+
+const ORDER_STATUS_URL = getOrderStatusUrl()
 
 export async function GET() {
   return NextResponse.json({

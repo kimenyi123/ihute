@@ -3,7 +3,7 @@
  */
 
 // Get base URL and normalize it (remove trailing slashes)
-let API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || 'https://ihute.rw').trim();
+const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_SITE_URL || "https://ihute.rw").trim();
 if (API_BASE_URL.endsWith('/')) {
   API_BASE_URL = API_BASE_URL.slice(0, -1);
 }

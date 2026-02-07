@@ -133,34 +133,43 @@ export default function SupplierOrdersPage() {
   useEffect(() => { if (!isAuthenticated) router.push("/login") }, [isAuthenticated, router])
 
   const loadOrders = useCallback(async () => {
-    if (!user?.ishyigaAccount) return
+    const sellerAccount = user?.ishyigaAccount?.trim()
+    if (!sellerAccount) {
+      setErr("No supplier account found. Please log out and log in again so your supplier account (ishyigaAccount) is loaded.")
+      setLoading(false)
+      return
+    }
     setLoading(true)
     setErr(null)
 
+    const payload = { action: "listSellerOrders", sellerAccount }
+    console.log("[Supplier Orders] 📤 Fetching orders — sellerAccount:", sellerAccount)
     try {
       const res = await fetch("/api/seller-orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "listSellerOrders", sellerAccount: user.ishyigaAccount }),
+        body: JSON.stringify(payload),
         cache: "no-store"
       })
       const json = await res.json()
+      console.log("[Supplier Orders] 📥 Response — ok:", res.ok, "status:", res.status, "orders count:", (json.orders ?? json.data ?? []).length, "error:", json?.error ?? null)
       if (!res.ok) throw new Error(json?.error || "Failed to load orders")
 
-      const mapped: Order[] = (json.orders || []).map((t: any) => ({
-        id: String(t.ID_ORDER ?? ""),
-        sellerId: String(t.SELLER_ISHYIGA_ACCOUNT ?? ""),
-        sellerName: t.SELLER_NAMES || t.SELLER_OWNER || "Supplier",
+      const rawOrders = json.orders ?? json.data ?? []
+      const mapped: Order[] = (Array.isArray(rawOrders) ? rawOrders : []).map((t: any) => ({
+        id: String(t.ID_ORDER ?? t.id_order ?? t.id ?? ""),
+        sellerId: String(t.SELLER_ISHYIGA_ACCOUNT ?? t.seller_ishyiga_account ?? ""),
+        sellerName: t.SELLER_NAMES ?? t.SELLER_OWNER ?? t.seller_names ?? "Supplier",
         items: [],
         itemsCount: undefined,
-        subtotal: Number(t.AMOUNT ?? 0),
-        status: t.ORDER_STATUS?.toLowerCase() || "open",
-        supplierStatus: t.ORDER_STATUS?.toLowerCase() || "open",
-        createdAt: t.CREATED_AT || new Date().toISOString(),
-        buyerTIN: t.BUYER_TIN ?? "",
-        SUPPLIER_TIN: t.SELLER_TIN ?? "",
-        buyerName: t.BUYER_NAME?.trim() || t.BUYER_OWNER_NAME?.trim() || t.BUYER_OWNER?.trim() || t.BUYER_ISHYIGA_ACCOUNT || "Guest Buyer",
-        paymentStatus: /(pay[_\s-]*on[_\s-]*delivery|cod)/i.test(t.PAYMENT_NAME || "") ? "unpaid" : "paid"
+        subtotal: Number(t.AMOUNT ?? t.amount ?? 0),
+        status: (t.ORDER_STATUS ?? t.order_status ?? "open")?.toLowerCase() || "open",
+        supplierStatus: (t.ORDER_STATUS ?? t.order_status ?? "open")?.toLowerCase() || "open",
+        createdAt: t.CREATED_AT ?? t.created_at ?? t.heure ?? new Date().toISOString(),
+        buyerTIN: t.BUYER_TIN ?? t.buyer_tin ?? "",
+        SUPPLIER_TIN: t.SELLER_TIN ?? t.seller_tin ?? "",
+        buyerName: (t.BUYER_NAME ?? t.BUYER_OWNER_NAME ?? t.BUYER_OWNER ?? t.BUYER_ISHYIGA_ACCOUNT ?? t.buyer_name ?? "").toString().trim() || "Guest Buyer",
+        paymentStatus: /(pay[_\s-]*on[_\s-]*delivery|cod)/i.test(String(t.PAYMENT_NAME ?? t.payment_name ?? "")) ? "unpaid" : "paid"
       }))
 
       setOrders(mapped)
@@ -172,21 +181,39 @@ export default function SupplierOrdersPage() {
     }
   }, [user?.ishyigaAccount, setOrders])
 
-  useEffect(() => { loadOrders() }, [loadOrders])
   useEffect(() => {
+    if (!isAuthenticated || !user) return
+    if (user.ishyigaAccount) {
+      setErr(null)
+      loadOrders()
+    } else {
+      setErr("No supplier account found. Please log out and log in again so your supplier account is loaded.")
+    }
+  }, [isAuthenticated, user, user?.ishyigaAccount, loadOrders])
+
+  useEffect(() => {
+    if (!user?.ishyigaAccount) return
     const timer = setInterval(() => loadOrders(), 30000)
     return () => clearInterval(timer)
-  }, [loadOrders])
+  }, [loadOrders, user?.ishyigaAccount])
 
-  const totalPages = useMemo(() => Math.ceil(orders.length / pageSize), [orders.length, pageSize])
+  const totalPages = useMemo(() => Math.max(1, Math.ceil(orders.length / pageSize)), [orders.length, pageSize])
   const pagedOrders = useMemo(() => orders.slice((page - 1) * pageSize, page * pageSize), [orders, page, pageSize])
-const supplierOrderLink = (orderId: number | string) => `/supplier/orders/${orderId}`
+  const supplierOrderLink = (orderId: number | string) => `/supplier/orders/${orderId}`
   return (
     <div className="min-h-screen bg-slate-50">
       <Header />
 
       <main className="container mx-auto px-4 py-8">
-        <h1 className="text-2xl font-bold mb-4">My Orders</h1>
+        <div className="flex items-center justify-between gap-4 mb-4 flex-wrap">
+          <h1 className="text-2xl font-bold">My Orders</h1>
+          {user?.ishyigaAccount && (
+            <Button variant="outline" size="sm" onClick={() => loadOrders()} disabled={loading} className="gap-2">
+              <RotateCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+              Refresh
+            </Button>
+          )}
+        </div>
 
         {err && <div className="mb-4 p-2 bg-red-50 border border-red-300 rounded text-sm">{err}</div>}
         {loading && <div className="mb-4 p-2 text-sm">Loading...</div>}
@@ -205,31 +232,39 @@ const supplierOrderLink = (orderId: number | string) => `/supplier/orders/${orde
               </TableRow>
             </TableHeader>
             <TableBody>
-              {pagedOrders.map(order => (
-                <TableRow key={order.id}>
-                  <TableCell>{order.id}</TableCell>
-                  <TableCell>{order.buyerName}</TableCell>
-                  <TableCell>{new Date(order.createdAt).toLocaleDateString()}</TableCell>
-                  <TableCell>{order.subtotal.toLocaleString()} RWF</TableCell>
-                  <TableCell>{order.paymentStatus}</TableCell>
-                  <TableCell>
-                    <InlineStatusPicker order={order} orders={orders} setOrders={setOrders} />
-                  </TableCell>
-                  <TableCell className="text-center flex gap-2 justify-center">
-                    <Button
-                      size="sm"
-                      className={`bg-blue-600 hover:bg-blue-700 text-white ${!["open", "processing"].includes(order.supplierStatus || "") ? "opacity-50 cursor-not-allowed" : ""}`}
-                      onClick={() => requestLoan(order, user?.ishyigaAccount || "")}
-                      disabled={!["open", "processing"].includes(order.supplierStatus || "")}
-                    >
-                      Financing
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => router.push(supplierOrderLink(order.id))}>
-                      View
-                    </Button>
+              {!loading && !err && pagedOrders.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                    No orders yet. Orders from customers will appear here.
                   </TableCell>
                 </TableRow>
-              ))}
+              ) : (
+                pagedOrders.map(order => (
+                  <TableRow key={order.id}>
+                    <TableCell>{order.id}</TableCell>
+                    <TableCell>{order.buyerName}</TableCell>
+                    <TableCell>{new Date(order.createdAt).toLocaleDateString()}</TableCell>
+                    <TableCell>{order.subtotal.toLocaleString()} RWF</TableCell>
+                    <TableCell>{order.paymentStatus}</TableCell>
+                    <TableCell>
+                      <InlineStatusPicker order={order} orders={orders} setOrders={setOrders} />
+                    </TableCell>
+                    <TableCell className="text-center flex gap-2 justify-center">
+                      <Button
+                        size="sm"
+                        className={`bg-blue-600 hover:bg-blue-700 text-white ${!["open", "processing"].includes(order.supplierStatus || "") ? "opacity-50 cursor-not-allowed" : ""}`}
+                        onClick={() => requestLoan(order, user?.ishyigaAccount || "")}
+                        disabled={!["open", "processing"].includes(order.supplierStatus || "")}
+                      >
+                        Financing
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => router.push(supplierOrderLink(order.id))}>
+                        View
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
             </TableBody>
           </Table>
         </div>

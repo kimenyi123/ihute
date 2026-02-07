@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/auth-store";
@@ -11,6 +12,9 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Plus,
   Package,
@@ -22,8 +26,12 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
+  Share2,
+  Copy,
 } from "lucide-react";
 import Link from "next/link";
+
+const QRCode = dynamic(() => import("react-qr-code"), { ssr: false });
 
 function SupplierDashboard() {
   const router = useRouter();
@@ -36,6 +44,26 @@ function SupplierDashboard() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Shop With Me QR (collapsible so it doesn't interrupt the main dashboard)
+  const [shopWithMeQROpen, setShopWithMeQROpen] = useState(false);
+  const [shopNickname, setShopNickname] = useState("");
+  const [isBarOrRestaurant, setIsBarOrRestaurant] = useState(false);
+  const [tableNameOrNumber, setTableNameOrNumber] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
+
+  useEffect(() => {
+    if (typeof window !== "undefined") setBaseUrl(window.location.origin);
+  }, []);
+
+  const shopWithMeLink = shopNickname.trim()
+    ? `${baseUrl}/shop-with-me?nickname=${encodeURIComponent(shopNickname.trim().toLowerCase())}${isBarOrRestaurant && tableNameOrNumber.trim() ? `&table=${encodeURIComponent(tableNameOrNumber.trim())}` : ""}`
+    : "";
+
+  const copyShopWithMeLink = () => {
+    if (!shopWithMeLink) return;
+    navigator.clipboard.writeText(shopWithMeLink).then(() => alert("Link copied to clipboard"));
+  };
 
   useEffect(() => {
     if (!isAuthenticated || user?.role !== "supplier") {
@@ -335,6 +363,90 @@ function SupplierDashboard() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Shop With Me QR Code — collapsible so original dashboard stays primary */}
+        <Card className="bg-white shadow-md mb-8">
+          <CardHeader
+            className="border-b bg-slate-50 cursor-pointer hover:bg-slate-100 transition-colors select-none"
+            onClick={() => setShopWithMeQROpen((o) => !o)}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Share2 className="h-6 w-6 text-blue-600 shrink-0" />
+                <div>
+                  <CardTitle className="text-xl">QR Code</CardTitle>
+                  <CardDescription className="mt-1">
+                    {shopWithMeQROpen
+                      ? "Customers scan this to browse your products. Collapse when not needed."
+                      : "Generate a link and QR so customers can browse your shop. Click to expand."}
+                  </CardDescription>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {shopNickname.trim() && shopWithMeLink && (
+                  <span className="text-xs text-slate-500 font-mono truncate max-w-[140px]" title={shopWithMeLink}>
+                    {shopNickname}
+                  </span>
+                )}
+                <ChevronRight
+                  className={`h-5 w-5 text-slate-500 transition-transform ${shopWithMeQROpen ? "rotate-90" : ""}`}
+                />
+              </div>
+            </div>
+          </CardHeader>
+          {shopWithMeQROpen && (
+            <CardContent className="p-6 space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="shop-nickname">Your shop nickname *</Label>
+                  <Input
+                    id="shop-nickname"
+                    placeholder="known as"
+                    value={shopNickname}
+                    onChange={(e) => setShopNickname(e.target.value)}
+                    className="max-w-xs"
+                  />
+                </div>
+                <div className="flex items-center space-x-2 pt-6">
+                  <Checkbox
+                    id="bar-restaurant"
+                    checked={isBarOrRestaurant}
+                    onCheckedChange={(checked) => setIsBarOrRestaurant(!!checked)}
+                  />
+                  <Label htmlFor="bar-restaurant" className="cursor-pointer">
+                    Bar or Restaurant
+                  </Label>
+                </div>
+              </div>
+              {isBarOrRestaurant && (
+                <div className="space-y-2 max-w-xs">
+                  <Label htmlFor="table-name">Default table name or number (optional)</Label>
+                  <Input
+                    id="table-name"
+                    placeholder="e.g. Table 5"
+                    value={tableNameOrNumber}
+                    onChange={(e) => setTableNameOrNumber(e.target.value)}
+                  />
+                </div>
+              )}
+              {shopWithMeLink && (
+                <div className="flex flex-col sm:flex-row gap-4 items-start pt-4 border-t">
+                  <div className="bg-slate-50 p-4 rounded-lg">
+                    <QRCode value={shopWithMeLink} size={180} />
+                  </div>
+                  <div className="flex-1 min-w-0 space-y-2">
+                    <Label className="text-slate-600">Link</Label>
+                    <p className="text-sm text-slate-700 break-all font-mono">{shopWithMeLink}</p>
+                    <Button variant="outline" size="sm" onClick={copyShopWithMeLink} className="gap-2">
+                      <Copy className="h-4 w-4" />
+                      Copy link
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          )}
+        </Card>
 
         {/* Product Management Card */}
         <Card className="bg-white shadow-md">

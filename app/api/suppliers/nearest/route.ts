@@ -4,7 +4,7 @@ export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 export const revalidate = 0
 
-const JAVA_BASE_URL = process.env.JAVA_BASE_URL || "https://ihute.rw/Trading"
+import { getFetchSuggestionsUrl } from "@/lib/backend-config"
 
 /**
  * ENHANCED Find Nearest Suppliers API
@@ -72,7 +72,7 @@ export async function POST(req: Request) {
     })
 
     // Call Java backend with enhanced method
-    const url = new URL(`${JAVA_BASE_URL}/Kaos/fetchSuggestions`)
+    const url = new URL(getFetchSuggestionsUrl())
     url.searchParams.set("action", "getNearestSuppliers")
     url.searchParams.set("latitude", lat.toString())
     url.searchParams.set("longitude", lon.toString())

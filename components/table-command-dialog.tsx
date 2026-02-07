@@ -30,6 +30,9 @@ type TableCommandDialogProps = {
   locationId: string
   locationName: string
   onIndividualOrder?: () => void
+  /** Pre-fill from Shop With Me QR / bar-resto flow (table + guest name) */
+  initialTableName?: string
+  initialUserName?: string
 }
 
 export function TableCommandDialog({
@@ -38,6 +41,8 @@ export function TableCommandDialog({
   locationId,
   locationName,
   onIndividualOrder,
+  initialTableName = "",
+  initialUserName = "",
 }: TableCommandDialogProps) {
   const { user, isAuthenticated } = useAuthStore()
   const { createTableCommand, joinTableCommand } = useTableCommandStore()
@@ -45,6 +50,14 @@ export function TableCommandDialog({
   const [mode, setMode] = useState<"create" | "join" | "individual">("create")
   const [tableName, setTableName] = useState("")
   const [userName, setUserName] = useState(user?.name || "")
+
+  // Autofill Table Name and Your Name when opened from Shop With Me QR (bar/resto)
+  useEffect(() => {
+    if (open) {
+      if (initialTableName?.trim()) setTableName(initialTableName.trim())
+      if (initialUserName?.trim()) setUserName(initialUserName.trim())
+    }
+  }, [open, initialTableName, initialUserName])
   const [error, setError] = useState("")
   const [activeTables, setActiveTables] = useState<TableInfo[]>([])
   const [loadingTables, setLoadingTables] = useState(false)

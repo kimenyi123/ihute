@@ -50,15 +50,16 @@ export const useAuthStore = create<AuthState>()(
       },
 
       logout: () => {
-        // Clear extra app storages
+        set({ user: null, isAuthenticated: false, loginTime: null })
         if (typeof window !== "undefined") {
+          localStorage.removeItem("auth-storage")
           localStorage.removeItem("cart-storage")
           localStorage.removeItem("favorites-storage")
           localStorage.removeItem("orders-storage")
           localStorage.removeItem("prefs-storage")
+          localStorage.removeItem("table-command-storage")
           sessionStorage.clear()
         }
-        set({ user: null, isAuthenticated: false, loginTime: null })
       },
 
       updateUser: (updates) =>

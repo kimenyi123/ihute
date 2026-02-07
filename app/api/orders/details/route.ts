@@ -1,12 +1,10 @@
 // app/api/orders/details/route.ts
 import { NextResponse } from "next/server"
 
-const ORDERS_ENDPOINT =
-  (process.env.JAVA_ORDERS_URL ||
-    process.env.JAVA_SERVLET_URL ||
-    "https://ihute.rw/Trading/OrdersServlet").replace(/\/+$/, "")
+import { getOrdersUrl, getBackendBase } from "@/lib/backend-config"
 
-const BACKEND_BASE = (process.env.JAVA_BACKEND_BASE || "https://ihute.rw/Trading").replace(/\/+$/, "")
+const ORDERS_ENDPOINT = getOrdersUrl().replace(/\/+$/, "")
+const BACKEND_BASE = getBackendBase().replace(/\/+$/, "")
 
 type Jsonish = Record<string, any> | null
 

@@ -1,20 +1,14 @@
 import { NextResponse } from "next/server"
+import { getOrdersUrl } from "@/lib/backend-config"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 export const revalidate = 0
 
-// Backend endpoints to try
-const CANDIDATES = [
-  "https://ihute.rw/Trading/OrdersServlet",
-  "https://ihute.rw/Trading/Kaos/OrdersServlet",
-  process.env.JAVA_ORDERS_URL,
-  process.env.JAVA_SERVLET_URL,
-].filter(Boolean) as string[]
-
 type LineIn = {
   name?: string
   item_name?: string
+  itemCode?: string
   qty?: number | string
   quantity?: number | string
   unitPrice?: number | string
@@ -30,11 +24,7 @@ export async function GET() {
   return NextResponse.json({
     ok: true,
     route: "/api/orders/create",
-    candidates: CANDIDATES,
-    env: {
-      JAVA_ORDERS_URL: process.env.JAVA_ORDERS_URL || "not set",
-      JAVA_SERVLET_URL: process.env.JAVA_SERVLET_URL || "not set",
-    },
+    ordersUrl: getOrdersUrl(),
   })
 }
 
@@ -49,10 +39,13 @@ export async function POST(req: Request) {
     const rawItems: LineIn[] = Array.isArray(bodyIn.items) ? bodyIn.items : []
     const items = rawItems.map((it, i) => ({
       name: String(it.name ?? it.item_name ?? `Item ${i + 1}`),
+      itemCode: String(it.itemCode ?? "").trim() || undefined,
       qty: Number(it.qty ?? it.quantity ?? 1),
       unitPrice: Number(it.unitPrice ?? it.price ?? 0),
       unit: String(it.unit ?? it.measurement ?? ""),
     }))
+
+    console.log("[orders/create] Request items (NIKI_CODE in logs only):", items.map((it) => ({ name: it.name, qty: it.qty, NIKI_CODE: it.itemCode, unitPrice: it.unitPrice })))
 
     const buyerEmail = String(bodyIn.buyerEmail ?? "")
     const sellerAccount = String(bodyIn.sellerAccount ?? "")
@@ -112,10 +105,9 @@ export async function POST(req: Request) {
       | { status?: number; raw?: string; url?: string }
       | undefined
     let lastBackendError: string | undefined
+    const url = getOrdersUrl()
 
-    /* -------- try each backend -------- */
-    for (const url of CANDIDATES) {
-      try {
+    try {
         let res: Response
         let text = ""
         let json: any = null
@@ -205,13 +197,11 @@ export async function POST(req: Request) {
           url,
         }
       } catch (e: any) {
-        console.log("[orders/create] ❌ Exception:", e?.message)
-        lastErr = { status: 0, raw: e?.message, url }
-        continue
-      }
+      console.log("[orders/create] ❌ Exception:", e?.message)
+      lastErr = { status: 0, raw: e?.message, url }
     }
 
-    /* -------- all backends failed -------- */
+    /* -------- backend failed -------- */
     return NextResponse.json(
       {
         ok: false,
@@ -219,9 +209,8 @@ export async function POST(req: Request) {
           lastBackendError ||
           "Could not connect to order processing service",
         last: lastErr,
-        candidates: CANDIDATES,
-        hint:
-          "Check if Java backend is running. Verify JAVA_ORDERS_URL and JAVA_SERVLET_URL in .env.local",
+        ordersUrl: url,
+        hint: "Check Java backend. Set JAVA_ORDERS_URL or NEXT_PUBLIC_API_URL in .env / .env.local",
       },
       { status: 502 }
     )

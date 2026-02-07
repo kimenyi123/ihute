@@ -1,12 +1,11 @@
 // app/api/seller-orders/details/route.ts
 import { NextResponse } from "next/server"
+import { getOrdersUrl } from "@/lib/backend-config"
 
-const PRIMARY_URL =
-  process.env.JAVA_ORDERS_URL || "https://ihute.rw/Trading/OrdersServlet"
+const PRIMARY_URL = getOrdersUrl()
 
 const FALLBACK_URLS = [
   process.env.JAVA_ORDERS_ALT_URL,
-  "https://ihute.rw/Trading/Kaos/OrdersServlet",
 ].filter(Boolean) as string[]
 
 function safeParse(raw: string) {

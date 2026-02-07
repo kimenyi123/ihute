@@ -5,16 +5,12 @@ export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 export const revalidate = 0
 
-// Prefer env; fallback covers both /OrdersServlet and /Kaos/OrdersServlet styles
-const JAVA_URL =
-  (process.env.JAVA_ORDERS_URL ||
-   process.env.JAVA_SERVLET_URL ||
-   // try Kaos/OrdersServlet first since many apps map Kaos servlets that way:
-   "https://ihute.rw/Trading/Kaos/OrdersServlet")
+import { getOrdersUrl } from "@/lib/backend-config"
 
-// Simple GET probe: visit http://localhost:3000/api/orders/create to confirm not-404
+const JAVA_URL = getOrdersUrl()
+
 export async function GET() {
-  return NextResponse.json({ ok: true, route: "/api/orders/create", java: JAVA_URL })
+  return NextResponse.json({ ok: true, route: "/api/orders/rate", java: JAVA_URL })
 }
 
 type LineIn = {

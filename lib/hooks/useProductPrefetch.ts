@@ -27,7 +27,7 @@ export function useProductPrefetch({
     if (!enabled || codes.length === 0) return;
 
     const timer = setTimeout(async () => {
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || (typeof window !== "undefined" ? window.location.origin : "https://ihute.rw");
 
       console.log(`[Prefetch] 🚀 Starting prefetch for ${codes.length} products...`);
 
