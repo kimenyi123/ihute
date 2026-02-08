@@ -156,133 +156,103 @@ export function Header() {
 
                 {/* Supplier Orders */}
                 {user?.role === "supplier" && (
-                  <Link href="/supplier/orders">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="relative h-9 w-9"
-                      title="My Orders (Seller)"
-                    >
+                  <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Orders (Seller)">
+                    <Link href="/supplier/orders">
                       <PackageSearch className="h-5 w-5" />
                       {sellerCount > 0 && (
                         <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-amber-600 text-xs font-bold text-white">
                           {sellerCount}
                         </span>
                       )}
-                    </Button>
-                  </Link>
+                    </Link>
+                  </Button>
                 )}
 
                 {/* Customer Orders */}
                 {user?.role !== "supplier" && (
                   <>
-                    <Link href="/orders">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="relative h-9 w-9"
-                        title="My Orders"
-                      >
+                    <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Orders">
+                      <Link href="/orders">
                         <Truck className="h-5 w-5" />
                         {pendingCount > 0 && (
                           <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">
                             {pendingCount}
                           </span>
                         )}
-                      </Button>
-                    </Link>
+                      </Link>
+                    </Button>
 
                     {/* Deliveries */}
-                    <Link href="/deliveries">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="relative h-9 w-9"
-                        title="My Deliveries"
-                      >
+                    <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Deliveries">
+                      <Link href="/deliveries">
                         <PackageCheck className="h-5 w-5" />
-                      </Button>
-                    </Link>
+                      </Link>
+                    </Button>
 
                     {/* Table Commands */}
-                    <Link href="/tables">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="relative h-9 w-9"
-                        title="Table Commands"
-                      >
+                    <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Table Commands">
+                      <Link href="/tables">
                         <Users className="h-5 w-5" />
-                      </Button>
-                    </Link>
+                      </Link>
+                    </Button>
                   </>
                 )}
 
                 {/* Payment Dashboard - Admin/Staff only */}
                 {(user?.role === "admin" || user?.role === "staff") && (
-                  <Link href="/payment/dashboard">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="relative h-9 w-9"
-                      title="Payment Dashboard"
-                    >
+                  <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Payment Dashboard">
+                    <Link href="/payment/dashboard">
                       <BarChart3 className="h-5 w-5" />
-                    </Button>
-                  </Link>
+                    </Link>
+                  </Button>
                 )}
               </>
             ) : (
-              <Link href="/login">
-                <Button variant="ghost" size="sm" className="h-9">
+              <Button asChild variant="ghost" size="sm" className="h-9">
+                <Link href="/login">
                   <User className="h-4 w-4 md:mr-2" />
                   <span className="hidden md:inline">{t("login")}</span>
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             )}
 
             {/* Favorites */}
-            <Link href="/favorites">
-              <Button variant="ghost" size="icon" className="relative h-9 w-9" title="Favorites">
+            <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Favorites">
+              <Link href="/favorites">
                 <Heart className="h-5 w-5" />
                 {favoritesCount > 0 && (
                   <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs font-bold text-white">
                     {favoritesCount}
                   </span>
                 )}
-              </Button>
-            </Link>
+              </Link>
+            </Button>
             {/* Reorder */}
-            <Link href="/reorder">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="relative h-9 w-9"
-                title="Reorder Items"
-              >
+            <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Reorder Items">
+              <Link href="/reorder">
                 <RotateCcw className="h-5 w-5" />
-              </Button>
-            </Link>
+              </Link>
+            </Button>
 
 
             {/* Ratings */}
-            <Link href="/ratings">
-              <Button variant="ghost" size="icon" className="relative h-9 w-9" title="My Ratings">
+            <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Ratings">
+              <Link href="/ratings">
                 <Star className="h-5 w-5" />
-              </Button>
-            </Link>
+              </Link>
+            </Button>
 
             {/* Cart */}
-            <Link href="/cart">
-              <Button variant="ghost" size="icon" className="relative h-9 w-9" title="Cart">
+            <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Cart">
+              <Link href="/cart">
                 <ShoppingCart className="h-5 w-5" />
                 {totalItems > 0 && (
                   <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-green-600 text-xs font-bold text-white">
                     {totalItems}
                   </span>
                 )}
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
         </div>
 

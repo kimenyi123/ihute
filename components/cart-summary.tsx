@@ -99,6 +99,10 @@ function waHrefFor(phone: string, text: string) {
 
 // ---------- component ----------
 export function CartSummary() {
+  return <CartSummaryBody />
+}
+
+function CartSummaryBody() {
   const router = useRouter()
   const { isAuthenticated, user } = useAuthStore()
   const getGroupsBySeller = useCartStore((s) => s.getGroupsBySeller)
@@ -510,8 +514,8 @@ export function CartSummary() {
     setMomoForSeller(null)
   }
 
-  return (
-    <>
+  const renderContent = () => (
+    <div className="cart-summary-root">
       <div className="space-y-4">
         {groups.map((g) => {
           const status = getPaymentStatus(g.supplierId)
@@ -1083,6 +1087,7 @@ export function CartSummary() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </>
+    </div>
   )
+  return renderContent()
 }

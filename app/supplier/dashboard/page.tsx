@@ -460,18 +460,18 @@ function SupplierDashboard() {
               </div>
 
               <div className="flex gap-2">
-                <Link href="/supplier/products/bulk-upload">
-                  <Button variant="outline" className="gap-2">
+                <Button asChild variant="outline" className="gap-2">
+                  <Link href="/supplier/products/bulk-upload">
                     <Package className="h-4 w-4" />
                     Bulk Upload
-                  </Button>
-                </Link>
-                <Link href="/supplier/products/add">
-                  <Button className="gap-2 bg-blue-600 hover:bg-blue-700">
+                  </Link>
+                </Button>
+                <Button asChild className="gap-2 bg-blue-600 hover:bg-blue-700">
+                  <Link href="/supplier/products/add">
                     <Plus className="h-4 w-4" />
                     Add Product
-                  </Button>
-                </Link>
+                  </Link>
+                </Button>
               </div>
             </div>
           </CardHeader>
@@ -534,9 +534,9 @@ function SupplierDashboard() {
                     : "No products found"}
                 </p>
                 {supplierProducts.length === 0 && (
-                  <Link href="/supplier/products/add">
-                    <Button className="mt-4">Add Your First Product</Button>
-                  </Link>
+                  <Button asChild className="mt-4">
+                    <Link href="/supplier/products/add">Add Your First Product</Link>
+                  </Button>
                 )}
               </div>
             ) : (
@@ -640,17 +640,16 @@ function SupplierDashboard() {
                             </td>
                             <td className="px-4 py-4">
                               <div className="flex items-center justify-center gap-2">
-                                <Link
-                                  href={`/supplier/products/edit/${displayCode}`}
+                                <Button
+                                  asChild
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-8 w-8 p-0 hover:bg-blue-50 hover:text-blue-600"
                                 >
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    className="h-8 w-8 p-0 hover:bg-blue-50 hover:text-blue-600"
-                                  >
+                                  <Link href={`/supplier/products/edit/${displayCode}`}>
                                     <Edit className="h-4 w-4" />
-                                  </Button>
-                                </Link>
+                                  </Link>
+                                </Button>
                                 <Button
                                   size="sm"
                                   variant="ghost"
