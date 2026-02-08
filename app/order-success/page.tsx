@@ -254,7 +254,6 @@ export default function OrderSuccessPage() {
                       className="w-full bg-[#25D366] hover:bg-[#20b05a] text-white"
                       asChild
                     >
-                    <Button asChild variant="outline" size="sm">
                       <a href={whatsappHref} target="_blank" rel="noopener noreferrer">
                         <MessageCircle className="h-4 w-4 mr-2" />
                         Contact Seller on WhatsApp
