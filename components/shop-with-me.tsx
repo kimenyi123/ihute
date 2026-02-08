@@ -878,7 +878,11 @@ function ProductCard({
       1
     );
 
-    router.push("/cart");
+    toast({
+      title: "Added to cart",
+      description: productName,
+      duration: 2000,
+    });
   };
 
   const handleToggleFavorite = (e: React.MouseEvent) => {

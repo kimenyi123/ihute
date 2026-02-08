@@ -7,6 +7,7 @@ import { Suspense } from "react"
 import { SessionProvider } from "@/components/session-provider"
 import { ServiceWorkerRegister } from "@/components/service-worker-register"
 import { NotificationPrompt } from "@/components/notification-prompt"
+import { Toaster } from "@/components/ui/toaster"
 import "./globals.css"
 
 export const metadata: Metadata = {
@@ -30,6 +31,7 @@ export default function RootLayout({
         <SessionProvider>
           <Suspense fallback={null}>{children}</Suspense>
         </SessionProvider>
+        <Toaster />
         <ServiceWorkerRegister />
         <NotificationPrompt />
         <Analytics />

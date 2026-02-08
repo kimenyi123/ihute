@@ -42,8 +42,7 @@ export function Header() {
   const router = useRouter()
   const { t } = useTranslation()
 
-  const getTotalItems = useCartStore((s) => s.getTotalItems)
-  const totalItems = getTotalItems()
+  const totalItems = useCartStore((s) => s.getTotalItems())
   const favoritesCount = useFavoritesStore((s) => s.favorites.length)
 
   const user = useAuthStore((s) => s.user)

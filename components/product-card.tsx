@@ -27,12 +27,19 @@ type Product = {
   image?: string
 }
 
-export function ProductCard({ product }: { product: Product }) {
+export function ProductCard({
+  product,
+  navigateAfterAdd = false,
+}: {
+  product: Product
+  /** If true, "Buy" navigates to /cart after adding. If false, only adds to cart and shows a toast so user can keep adding. */
+  navigateAfterAdd?: boolean
+}) {
   const router = useRouter()
   const addItem = useCartStore((s) => s.addItem)
   const toggleFavorite = useFavoritesStore((s) => s.toggleFavorite)
   const isFavorite = useFavoritesStore((s) => s.isFavorite)
-  const { toast } = useToast()                              // 👈 add
+  const { toast } = useToast()
 
   const {
     id,
@@ -131,9 +138,7 @@ export function ProductCard({ product }: { product: Product }) {
           size="sm"
           className="mt-1"
           onClick={() => {
-            // Track click
             trackClick("product", id, name)
-
             addItem(
               {
                 id,
@@ -149,7 +154,15 @@ export function ProductCard({ product }: { product: Product }) {
               },
               1
             )
-            router.push("/cart")
+            if (navigateAfterAdd) {
+              router.push("/cart")
+            } else {
+              toast({
+                title: "Added to cart",
+                description: name,
+                duration: 2000,
+              })
+            }
           }}
         >
           Buy
