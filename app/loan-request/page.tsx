@@ -49,9 +49,9 @@ export default function LoanRequestPage() {
           <CreditCard className="h-16 w-16 mx-auto mb-4 text-slate-400" />
           <h2 className="text-2xl font-bold mb-2">Login Required</h2>
           <p className="text-slate-600 mb-6">Please login to request a loan</p>
-          <Link href="/login">
-            <Button>Login</Button>
-          </Link>
+          <Button asChild>
+            <Link href="/login">Login</Link>
+          </Button>
         </main>
         <Footer />
       </div>
@@ -62,12 +62,12 @@ export default function LoanRequestPage() {
     <div className="min-h-screen bg-slate-50">
       <Header />
       <main className="container mx-auto px-4 py-8 max-w-2xl">
-        <Link href="/">
-          <Button variant="ghost" className="mb-6">
+        <Button variant="ghost" className="mb-6" asChild>
+          <Link href="/">
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back to Home
-          </Button>
-        </Link>
+          </Link>
+        </Button>
 
         <Card>
           <CardHeader>

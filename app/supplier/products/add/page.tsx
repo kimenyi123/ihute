@@ -87,12 +87,12 @@ export default function AddProductPage() {
       </header>
 
       <div className="container mx-auto px-4 py-8 max-w-2xl">
-        <Link href="/supplier/dashboard">
-          <Button variant="ghost" className="mb-6">
+        <Button variant="ghost" className="mb-6" asChild>
+          <Link href="/supplier/dashboard">
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back to Dashboard
-          </Button>
-        </Link>
+          </Link>
+        </Button>
 
         <Card>
           <CardHeader>
