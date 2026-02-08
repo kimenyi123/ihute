@@ -30,6 +30,8 @@ export async function GET() {
 
 /* =========================
    POST – create order
+   Backend contract: do NOT validate "item exists" (e.g. lookup by itemCode).
+   Frontend only allows adding to cart items that exist (have quantity).
 ========================= */
 export async function POST(req: Request) {
   try {

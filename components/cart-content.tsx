@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input"
 import { ShoppingBag, ArrowLeft, Search } from "lucide-react"
 import Link from "next/link"
 import { useState } from "react"
-import { GlobalSearch } from "@/components/global-search"
+import { CartAlsoBuy } from "@/components/cart-also-buy"
 
 export function CartContent() {
   const items = useCartStore((state) => state.items)
@@ -70,6 +70,7 @@ export function CartContent() {
               No products found matching “{searchQuery}”
             </div>
           )}
+          <CartAlsoBuy cartItems={items} />
         </div>
 
         <div className="lg:col-span-1">

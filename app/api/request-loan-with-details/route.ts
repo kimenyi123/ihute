@@ -72,9 +72,11 @@ export async function POST(req: NextRequest) {
       }, { status: 500 })
     }
 
-    let detailsJson: { ok?: boolean; items?: unknown[]; order?: { BUYER_TIN?: string; SELLER_TIN?: string } }
+    type OrderDetailItem = { ITEM_CODE?: string; niki_code?: string; quantity?: number; QUANTITY?: number; ITEM_NAME?: string; [key: string]: unknown }
+    type OrderDetailsJson = { ok?: boolean; items?: OrderDetailItem[]; order?: { BUYER_TIN?: string; SELLER_TIN?: string } }
+    let detailsJson: OrderDetailsJson
     try {
-      detailsJson = JSON.parse(responseText)
+      detailsJson = JSON.parse(responseText) as OrderDetailsJson
     } catch (e) {
       console.error("[request-loan] Invalid JSON from order details:", e)
       return NextResponse.json({
