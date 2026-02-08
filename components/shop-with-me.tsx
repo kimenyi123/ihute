@@ -110,10 +110,10 @@ function extractCurrency(value: any): string {
   return withoutNumbers || "";
 }
 
-/** Single item code from API (item_key_words, ITEM_CODE, item_code). Used as cart item id/itemCode. */
+/** Single item code from API. Prefer ITEM_CODE (backend catalog) so order creation finds the item; fallback to item_code then item_key_words. */
 function getItemCode(product: ShopWithMeProduct): string {
   const p = product as Record<string, unknown>;
-  return String(p.item_key_words ?? p.ITEM_CODE ?? p.item_code ?? "").trim() || "";
+  return String(p.ITEM_CODE ?? p.item_code ?? p.item_key_words ?? "").trim() || "";
 }
 
 /** API can return products as categories with nested items[]. Flatten to one product per item. item_packet = quantity (available stock). */
@@ -909,14 +909,6 @@ function ProductCard({
   return (
     <Card className="group h-full overflow-hidden transition-all hover:shadow-lg border rounded-lg">
       <div className="relative w-full aspect-square bg-muted">
-        <Image
-          fill
-          src={product.image || "/placeholder.svg?height=300&width=300"}
-          alt={productName}
-          className="object-cover"
-          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 20vw"
-        />
-
         <button
           aria-label={fav ? "Remove from favorites" : "Add to favorites"}
           onClick={handleToggleFavorite}
