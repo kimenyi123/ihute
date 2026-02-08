@@ -35,6 +35,11 @@ export function getSupplierUrl(): string {
   return process.env.JAVA_SUPPLIER_URL || `${getBackendBase()}/SupplierServlet`
 }
 
+/** Supplier stock (for request-loan stock check). */
+export function getSupplierStockUrl(): string {
+  return process.env.JAVA_SUPPLIER_STOCK_URL || `${getBackendBase()}/SupplierStock`
+}
+
 export function getDeliveryUrl(): string {
   return process.env.JAVA_DELIVERY_URL || `${getBackendBase()}/DeliveryServlet`
 }

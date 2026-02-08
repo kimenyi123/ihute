@@ -1,18 +1,18 @@
 // app/api/request-loan-with-details/route.ts
 import { NextRequest, NextResponse } from "next/server"
 
-import { getBackendBase } from "@/lib/backend-config"
+import { getBackendBase, getSellerOrdersUrl, getOrderStatusUrl, getSupplierStockUrl } from "@/lib/backend-config"
 
 const JAVA_API_BASE = process.env.JAVA_API_URL || getBackendBase().replace(/\/Trading\/?$/, "") || "https://ihute.rw"
 const UMUSADA_AUTH_BASE = process.env.UMUSADA_AUTH_BASE || "https://umusada-master.umusada.com/umusada-master-service"
 const UMUSADA_BANK_API = process.env.UMUSADA_BANK_API || "https://bank-apis.umusada.com/api/v1"
-const BASE_URL = process.env.BASE_URL || process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"
 
 export async function POST(req: NextRequest) {
   try {
     const { orderId, buyerAccount, sellerAccount, buyerTIN, supplierTIN, invoiceAmount } = await req.json()
 
     console.log("=== BUYER LOAN REQUEST WITH STOCK CHECK ===")
+    console.log("Backend base:", getBackendBase(), "| SellerOrders:", getSellerOrdersUrl())
     console.log("Order ID:", orderId)
     console.log("Buyer Account:", buyerAccount)
     console.log("Seller Account:", sellerAccount)
@@ -44,36 +44,50 @@ export async function POST(req: NextRequest) {
     formData.append("buyerAccount", buyerAccount)
     formData.append("orderId", orderId)
 
-    const detailsRes = await fetch(`${JAVA_API_BASE}/Trading/SellerOrdersServlet`, {
+    const sellerOrdersUrl = getSellerOrdersUrl()
+    console.log("   URL:", sellerOrdersUrl)
+    const detailsRes = await fetch(sellerOrdersUrl, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: formData.toString(),
     })
 
+    const responseText = await detailsRes.text()
     if (!detailsRes.ok) {
-      const errorText = await detailsRes.text()
+      console.error("[request-loan] Order details fetch failed:", detailsRes.status, responseText.slice(0, 500))
       return NextResponse.json({
         success: false,
         error: "Failed to fetch order details",
-        details: errorText
+        details: responseText.slice(0, 500)
       }, { status: 500 })
     }
 
     const contentType = detailsRes.headers.get("content-type")
     if (!contentType?.includes("application/json")) {
-      const text = await detailsRes.text()
+      console.error("[request-loan] Backend returned non-JSON:", responseText.slice(0, 500))
       return NextResponse.json({
         success: false,
         error: "Java API returned HTML instead of JSON",
-        details: text
+        details: responseText.slice(0, 500)
       }, { status: 500 })
     }
 
-    const detailsJson = await detailsRes.json()
+    let detailsJson: { ok?: boolean; items?: unknown[]; order?: { BUYER_TIN?: string; SELLER_TIN?: string } }
+    try {
+      detailsJson = JSON.parse(responseText)
+    } catch (e) {
+      console.error("[request-loan] Invalid JSON from order details:", e)
+      return NextResponse.json({
+        success: false,
+        error: "Invalid JSON from order details API",
+        details: responseText.slice(0, 500)
+      }, { status: 500 })
+    }
     if (!detailsJson.ok || !detailsJson.items || detailsJson.items.length === 0) {
       return NextResponse.json({
         success: false,
-        error: "No items found for this order"
+        error: "No items found for this order",
+        details: detailsJson
       }, { status: 404 })
     }
 
@@ -127,36 +141,58 @@ export async function POST(req: NextRequest) {
     console.log(`✓ Found ${itemsToCheck.length} items to verify stock`)
 
     // ================================
-    // STEP 3: FETCH STOCK FROM SELLER
+    // STEP 3: FETCH STOCK FROM SELLER (call Java backend directly so it works with Trading_beta)
     // ================================
     console.log("\n📦 Step 3: Checking stock availability from seller...")
     console.log("   Using Seller Account:", sellerAccount)
 
-    const stockRes = await fetch(`${BASE_URL}/api/supplier/stock?account=${sellerAccount}`)
+    const stockUrl = `${getSupplierStockUrl()}?account=${encodeURIComponent(sellerAccount)}`
+    console.log("   URL:", stockUrl)
+    const stockRes = await fetch(stockUrl, {
+      method: "GET",
+      headers: { "Accept": "application/json" },
+      cache: "no-store",
+    })
 
+    const stockText = await stockRes.text()
     if (!stockRes.ok) {
+      console.error("[request-loan] Step 3 stock fetch failed:", stockRes.status, stockText.slice(0, 300))
       return NextResponse.json({
         success: false,
-        error: "Failed to fetch supplier stock"
+        error: "Failed to fetch supplier stock",
+        url: stockUrl,
+        details: stockText.slice(0, 500),
       }, { status: 500 })
     }
 
-    const stockData = await stockRes.json()
-
-    if (!stockData.ok || !stockData.products) {
+    let stockData: { ok?: boolean; products?: unknown[] }
+    try {
+      stockData = JSON.parse(stockText)
+    } catch {
+      console.error("[request-loan] Step 3 invalid JSON from stock:", stockText.slice(0, 300))
       return NextResponse.json({
         success: false,
-        error: "Invalid stock data from supplier"
+        error: "Invalid stock response from backend",
       }, { status: 500 })
     }
-    console.log(`✓ Available products in stock: ${stockData.products.length}`)
+
+    const products = Array.isArray(stockData?.products)
+      ? stockData.products
+      : Array.isArray(stockData) ? stockData : []
+    if (products.length === 0 && !Array.isArray(stockData?.products) && !Array.isArray(stockData)) {
+      return NextResponse.json({
+        success: false,
+        error: "Invalid stock data from supplier (no products array)",
+      }, { status: 500 })
+    }
+    console.log(`✓ Available products in stock: ${products.length}`)
 
     // ================================
     // STEP 4: COMPARE REQUESTED VS STOCK
     // ================================
     console.log("\n🔍 Step 4: Stock Comparison:")
     const stockComparison = itemsToCheck.map(itemToCheck => {
-      const stockItem = stockData.products.find((p: any) => {
+      const stockItem = products.find((p: any) => {
         const stockCode = p.itemCode || p.ITEM_CODE
         return stockCode === itemToCheck.itemCode ||
                (itemToCheck.nikiCode && stockCode === itemToCheck.nikiCode)
@@ -269,7 +305,7 @@ export async function POST(req: NextRequest) {
     let businessCategory = ""
 
     try {
-      const businessRes = await fetch(`${JAVA_API_BASE}/Trading/api/business?tin=${finalBuyerTIN}`)
+      const businessRes = await fetch(`${getBackendBase()}/api/business?tin=${finalBuyerTIN}`)
 
       if (!businessRes.ok) {
         return NextResponse.json({
@@ -393,7 +429,7 @@ export async function POST(req: NextRequest) {
 
         console.log(" Status Update Payload:", JSON.stringify(statusUpdatePayload, null, 2))
 
-        const statusUpdateRes = await fetch(`${JAVA_API_BASE}/Trading/OrderStatusServlet`, {
+        const statusUpdateRes = await fetch(getOrderStatusUrl(), {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
@@ -442,13 +478,20 @@ export async function POST(req: NextRequest) {
       console.log(" Invoice submission failed")
 
       let errorMessage = invoiceResponseBody
-      if (parsedData && typeof parsedData === 'object') {
+      const isDuplicate =
+        parsedData && typeof parsedData === "object" &&
+        (String(parsedData.message || "").toLowerCase().includes("duplicate") ||
+         String(parsedData.error || "").toLowerCase().includes("duplicate"))
+      if (parsedData && typeof parsedData === "object") {
         errorMessage = parsedData.message || parsedData.error || parsedData.errorMessage || JSON.stringify(parsedData)
       }
 
       return NextResponse.json({
         success: false,
-        error: `Invoice submission failed (${invoiceResp.status}): ${errorMessage}`,
+        error: isDuplicate
+          ? "This order was already submitted for financing. Duplicate invoice not allowed."
+          : `Invoice submission failed (${invoiceResp.status}): ${errorMessage}`,
+        code: isDuplicate ? "DUPLICATE_INVOICE" : undefined,
         details: parsedData
       }, { status: invoiceResp.status })
     }
