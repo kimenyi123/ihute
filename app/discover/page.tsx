@@ -259,12 +259,12 @@ export default function DiscoverPage() {
         {/* Header */}
         <div className="mb-6">
           <div className="flex items-start justify-between mb-4">
-            <Link href="/">
-              <Button variant="ghost" size="sm">
+            <Button variant="ghost" size="sm" asChild>
+              <Link href="/">
                 <ArrowLeft className="h-4 w-4 mr-2" />
                 Back to Home
-              </Button>
-            </Link>
+              </Link>
+            </Button>
             <Button 
               variant="outline" 
               size="sm" 
@@ -305,11 +305,11 @@ export default function DiscoverPage() {
               <p className="text-sm text-muted-foreground mb-6">
                 Visit the homepage to explore products, search for items, or browse categories.
               </p>
-              <Link href="/">
-                <Button>
+              <Button asChild>
+                <Link href="/">
                   Explore Products
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             </div>
           </div>
         ) : (

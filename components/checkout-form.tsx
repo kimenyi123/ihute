@@ -101,12 +101,12 @@ export function CheckoutForm() {
       <div className="flex flex-col items-center justify-center py-16 text-center">
         <h2 className="text-2xl font-bold text-foreground mb-2">No items in cart</h2>
         <p className="text-muted-foreground mb-6">Add some products before checking out</p>
-        <Link href="/">
-          <Button className="gap-2">
+        <Button className="gap-2" asChild>
+          <Link href="/">
             <ArrowLeft className="h-4 w-4" />
             Continue Shopping
-          </Button>
-        </Link>
+          </Link>
+        </Button>
       </div>
     )
   }
