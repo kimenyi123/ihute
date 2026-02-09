@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/auth-store";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { MapPin, Navigation, Save, History, ArrowLeft, Loader2, Search } from "lucide-react";import dynamic from "next/dynamic";
+import { MapPin, Navigation, Save, History, ArrowLeft, Loader2, Search } from "lucide-react";
+import dynamic from "next/dynamic";
 
 // Dynamically import Leaflet components (client-side only)
 const MapContainer = dynamic(() => import('react-leaflet').then(mod => mod.MapContainer), { ssr: false });
@@ -22,6 +23,17 @@ interface LocationData {
     notes: string;
     address: string;
     nickname: string;
+    locationSource?: string;
+    // Profile fields
+    owner?: string;
+    preferredCategories?: string;
+    momo?: string;
+    preferredPay?: string;
+    locProvince?: string;
+    locDistrict?: string;
+    locCell?: string;
+    preferredSellerNickname?: string;
+    ratingStar?: number;
 }
 
 interface LocationHistoryEntry {
@@ -88,7 +100,7 @@ if (typeof window !== 'undefined') {
 function SupplierLocationSettings() {
     const router = useRouter();
     const { user, isAuthenticated, hasHydrated } = useAuthStore();
-    const ENABLE_NEARBY_LANDMARKS = false; 
+    const ENABLE_NEARBY_LANDMARKS = false;
 
     const [location, setLocation] = useState<LocationData | null>(null);
     const [selectedLat, setSelectedLat] = useState<number>(-1.9441);
@@ -99,6 +111,20 @@ function SupplierLocationSettings() {
     const [addressSearch, setAddressSearch] = useState<string>("");
     const [searchResults, setSearchResults] = useState<any[]>([]);
 
+    // Profile fields
+    const [owner, setOwner] = useState<string>("");
+    const [preferredCategories, setPreferredCategories] = useState<string>("");
+    const [momo, setMomo] = useState<string>("");
+    const [preferredPay, setPreferredPay] = useState<string>("");
+    const [locProvince, setLocProvince] = useState<string>("");
+    const [locDistrict, setLocDistrict] = useState<string>("");
+    const [locCell, setLocCell] = useState<string>("");
+    const [preferredSellerNickname, setPreferredSellerNickname] = useState<string>("");
+    const [ratingStar, setRatingStar] = useState<number>(0);
+    const [nickname, setNickname] = useState<string>("");
+    
+    const [categories, setCategories] = useState<any[]>([]);
+
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [gettingLocation, setGettingLocation] = useState(false);
@@ -108,16 +134,16 @@ function SupplierLocationSettings() {
     const [error, setError] = useState<string | null>(null);
 
     // Fetch nearby landmarks when coordinates change
-   useEffect(() => {
-    if (!ENABLE_NEARBY_LANDMARKS) return;
-    if (selectedLat && selectedLng) {
-        fetchNearbyLandmarks(selectedLat, selectedLng);
-    }
-}, [selectedLat, selectedLng]);
+    useEffect(() => {
+        if (!ENABLE_NEARBY_LANDMARKS) return;
+        if (selectedLat && selectedLng) {
+            fetchNearbyLandmarks(selectedLat, selectedLng);
+        }
+    }, [selectedLat, selectedLng]);
 
 
     const fetchNearbyLandmarks = async (lat: number, lng: number) => {
-        if (!ENABLE_NEARBY_LANDMARKS) return; 
+        if (!ENABLE_NEARBY_LANDMARKS) return;
         setFetchingLandmarks(true);
 
         try {
@@ -274,6 +300,7 @@ out body 15;
 
         fetchLocation();
         fetchHistory();
+        fetchCategories();
     }, [isAuthenticated, user, router, hasHydrated]);
 
     const fetchLocation = async () => {
@@ -283,6 +310,8 @@ out body 15;
             const res = await fetch(`/api/supplier/location?action=getLocation&account=${user.ishyigaAccount}`);
             const data = await res.json();
 
+            console.log('[LOCATION] Fetched data:', data);
+
             if (data.ok && data.location) {
                 setLocation(data.location);
                 if (data.location.latitude && data.location.longitude) {
@@ -291,6 +320,27 @@ out body 15;
                 }
                 setNotes(data.location.notes || "");
                 setAccuracy(data.location.accuracy || 0);
+
+                // Populate profile fields
+                console.log('[LOCATION] Setting owner:', data.location.owner);
+                console.log('[LOCATION] Setting rating:', data.location.ratingStar);
+
+                setOwner(data.location.owner || "");
+                setNickname(data.location.nickname || "");
+                setPreferredCategories(data.location.preferredCategories || "");
+                setMomo(data.location.momo || "");
+                setPreferredPay(data.location.preferredPay || "");
+                setLocProvince(data.location.locProvince || "");
+                setLocDistrict(data.location.locDistrict || "");
+                setLocCell(data.location.locCell || "");
+                setPreferredSellerNickname(data.location.preferredSellerNickname || "");
+
+                // Ensure ratingStar is a number
+                const rating = Number(data.location.ratingStar) || 0;
+                console.log('[LOCATION] Setting ratingStar state to:', rating, 'type:', typeof rating);
+                setRatingStar(rating);
+            } else {
+                console.error('[LOCATION] Invalid response:', data);
             }
             setLoading(false);
         } catch (err) {
@@ -312,6 +362,18 @@ out body 15;
             }
         } catch (err) {
             console.error("Error fetching history:", err);
+        }
+    };
+
+    const fetchCategories = async () => {
+        try {
+            const res = await fetch('/api/categories');
+            const data = await res.json();
+            if (Array.isArray(data)) {
+                setCategories(data);
+            }
+        } catch (err) {
+            console.error("Error fetching categories:", err);
         }
     };
 
@@ -367,7 +429,17 @@ out body 15;
                     longitude: selectedLng,
                     accuracy: accuracy,
                     notes: notes,
-                    address: addressSearch || location?.address || ""
+                    address: addressSearch || location?.address || "",
+                    // Include profile fields for convenience (optional)
+                    owner,
+                    preferredCategories,
+                    momo,
+                    preferredPay,
+                    locProvince,
+                    locDistrict,
+                    locCell,
+                    preferredSellerNickname,
+                    nickname
                 })
             });
 
@@ -382,6 +454,46 @@ out body 15;
             }
         } catch (err) {
             setError("Failed to save location");
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleSaveProfile = async () => {
+        if (!user?.ishyigaAccount) return;
+
+        setSaving(true);
+        setError(null);
+
+        try {
+            const res = await fetch("/api/supplier/location", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    action: "updateProfile",
+                    account: user.ishyigaAccount,
+                    owner,
+                    preferredCategories,
+                    momo,
+                    preferredPay,
+                    locProvince,
+                    locDistrict,
+                    locCell,
+                    preferredSellerNickname,
+                    nickname
+                })
+            });
+
+            const data = await res.json();
+
+            if (data.ok) {
+                alert("✅ Profile saved successfully!");
+                fetchLocation();
+            } else {
+                setError(data.error || "Failed to save profile");
+            }
+        } catch (err) {
+            setError("Failed to save profile");
         } finally {
             setSaving(false);
         }
@@ -566,6 +678,43 @@ out body 15;
 
                     {/* Sidebar: Info, Landmarks & History */}
                     <div className="space-y-6">
+                        {/* Rating Display */}
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="text-lg">Your Rating</CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                               
+                                {ratingStar > 0 ? (
+                                    <div className="flex items-center gap-2">
+                                        <div className="flex">
+                                            {[1, 2, 3, 4, 5].map((star) => (
+                                                <span
+                                                    key={star}
+                                                    className={`text-2xl ${star <= Math.round(ratingStar) ? 'text-yellow-500' : 'text-gray-300'
+                                                        }`}
+                                                >
+                                                    ★
+                                                </span>
+                                            ))}
+                                        </div>
+                                        <span className="text-xl font-bold text-slate-900">
+                                            {ratingStar.toFixed(1)}
+                                        </span>
+                                    </div>
+                                ) : (
+                                    <div className="text-center py-2">
+                                        <div className="flex justify-center mb-2">
+                                            {[1, 2, 3, 4, 5].map((star) => (
+                                                <span key={star} className="text-2xl text-gray-300">★</span>
+                                            ))}
+                                        </div>
+                                        <p className="text-sm text-slate-600">No ratings yet</p>
+                                    </div>
+                                )}
+                            </CardContent>
+                        </Card>
+
                         {/* Current Location Info */}
                         <Card>
                             <CardHeader>
@@ -610,6 +759,136 @@ out body 15;
                                         rows={3}
                                         placeholder="Optional notes about this location..."
                                     />
+                                </div>
+                            </CardContent>
+                        </Card>
+
+                        {/* Profile Settings */}
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="text-lg">Business Profile</CardTitle>
+                            </CardHeader>
+                            <CardContent className="space-y-3">
+                                <div>
+                                    <label className="text-xs font-medium text-slate-600 flex items-center justify-between">
+                                        <span>Business Name (OWNER)</span>
+                                        {loading && <span className="text-xs text-blue-600">Loading...</span>}
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={owner}
+                                        onChange={(e) => setOwner(e.target.value)}
+                                        className="w-full mt-1 px-3 py-2 border rounded-lg text-sm"
+                                        placeholder={loading ? "Loading..." : "Enter business name"}
+                                        disabled={loading}
+                                    />
+                                    {!loading && !owner && (
+                                        <p className="text-xs text-amber-600 mt-1">
+                                            ⚠️ No business name saved yet
+                                        </p>
+                                    )}
+                                </div>
+                                <div>
+                                    <label className="text-xs font-medium text-slate-600">Preferred Categories</label>
+                                    <select
+                                        value={preferredCategories}
+                                        onChange={(e) => setPreferredCategories(e.target.value)}
+                                        className="w-full mt-1 px-3 py-2 border rounded-lg text-sm"
+                                    >
+                                        <option value="">Select category</option>
+                                        {categories.map((cat) => (
+                                            <option key={cat.id} value={cat.id}>
+                                                {cat.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="text-xs font-medium text-slate-600">Mobile Money Number</label>
+                                    <input
+                                        type="tel"
+                                        value={momo}
+                                        onChange={(e) => setMomo(e.target.value)}
+                                        className="w-full mt-1 px-3 py-2 border rounded-lg text-sm"
+                                        placeholder="07xxxxxxxx"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-xs font-medium text-slate-600">Preferred Payment Method</label>
+                                    <select
+                                        value={preferredPay}
+                                        onChange={(e) => setPreferredPay(e.target.value)}
+                                        className="w-full mt-1 px-3 py-2 border rounded-lg text-sm"
+                                    >
+                                        <option value="">Select method</option>
+                                        <option value="MOMO">Mobile Money</option>
+                                        <option value="BANK">Bank Transfer</option>
+                                        <option value="CASH">Cash</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="text-xs font-medium text-slate-600">Province</label>
+                                    <input
+                                        type="text"
+                                        value={locProvince}
+                                        onChange={(e) => setLocProvince(e.target.value)}
+                                        className="w-full mt-1 px-3 py-2 border rounded-lg text-sm"
+                                        placeholder="e.g., Kigali City"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-xs font-medium text-slate-600">District</label>
+                                    <input
+                                        type="text"
+                                        value={locDistrict}
+                                        onChange={(e) => setLocDistrict(e.target.value)}
+                                        className="w-full mt-1 px-3 py-2 border rounded-lg text-sm"
+                                        placeholder="e.g., Gasabo"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-xs font-medium text-slate-600">Cell/Sector</label>
+                                    <input
+                                        type="text"
+                                        value={locCell}
+                                        onChange={(e) => setLocCell(e.target.value)}
+                                        className="w-full mt-1 px-3 py-2 border rounded-lg text-sm"
+                                        placeholder="e.g., Kimironko"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-xs font-medium text-slate-600">Seller Nickname</label>
+                                    <input
+                                        type="text"
+                                        value={preferredSellerNickname}
+                                        onChange={(e) => setPreferredSellerNickname(e.target.value)}
+                                        className="w-full mt-1 px-3 py-2 border rounded-lg text-sm"
+                                        placeholder="Display name"
+                                    />
+                                </div>
+
+                                {/* Save Profile Button */}
+                                <div className="pt-2">
+                                    <Button
+                                        onClick={handleSaveProfile}
+                                        disabled={saving}
+                                        className="w-full bg-green-600 hover:bg-green-700"
+                                    >
+                                        {saving ? (
+                                            <>
+                                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                                Saving Profile...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Save className="h-4 w-4 mr-2" />
+                                                Save Profile
+                                            </>
+                                        )}
+                                    </Button>
+                                    <p className="text-xs text-gray-500 mt-2 text-center">
+                                        Save business profile without changing location
+                                    </p>
                                 </div>
                             </CardContent>
                         </Card>

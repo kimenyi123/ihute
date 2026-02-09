@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/auth-store";
+import { useSupplierLocationHeartbeat } from "@/hooks/useSupplierLocationHeartbeat";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -23,12 +24,25 @@ import {
   ChevronLeft,
   ChevronRight,
   MapPin,
+  Radio,
 } from "lucide-react";
 import Link from "next/link";
+import { GPSStatusCard } from "@/components/supplier/GPSStatusCard";
 
 function SupplierDashboard() {
   const router = useRouter();
   const { user, isAuthenticated, hasHydrated, logout } = useAuthStore();
+
+  // GPS State - controlled by admin config + seller override
+  const [gpsEnabled, setGpsEnabled] = useState(false);
+  const [gpsConfigLoaded, setGpsConfigLoaded] = useState(false);
+
+  // GPS tracking hook - starts monitoring location when GPS is enabled
+  const { status: gpsStatus, isOnline, queueSize } = useSupplierLocationHeartbeat({
+    enabled: gpsEnabled,
+    debug: false, // Set to true to see GPS logs in console
+  });
+
   const [supplierProducts, setSupplierProducts] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
@@ -37,6 +51,7 @@ function SupplierDashboard() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [hasMounted, setHasMounted] = useState(false);
 
   useEffect(() => {
     // CRITICAL: Wait for auth store to rehydrate from localStorage before checking authentication
@@ -44,8 +59,14 @@ function SupplierDashboard() {
       return; // Don't redirect yet - store is still loading from localStorage
     }
 
-    // Now that store has hydrated, check authentication
-    if (!isAuthenticated || user?.role !== "supplier") {
+    // Mark as mounted only after hydration is complete
+    if (!hasMounted) {
+      setHasMounted(true);
+    }
+
+    // Only check auth on initial mount AFTER hydration, not on every re-render
+    // This prevents logout loops during page navigation
+    if (hasMounted && (!isAuthenticated || user?.role !== "supplier")) {
       router.push("/login");
       return;
     }
@@ -53,6 +74,45 @@ function SupplierDashboard() {
     if (!user?.ishyigaAccount) {
       setError("No ishyigaAccount found for user");
       setLoading(false);
+      return;
+    }
+
+    // Fetch GPS config to determine if GPS should be enabled for this seller
+    const fetchGPSConfig = async () => {
+      try {
+        const response = await fetch("/api/supplier/gps-status", {
+          credentials: "include",
+        });
+        const data = await response.json();
+
+        if (data.ok) {
+          console.log('[GPS-CONFIG] GPS enabled:', data.gpsEnabled);
+          setGpsEnabled(data.gpsEnabled);
+          setGpsConfigLoaded(true);
+        } else {
+          console.warn('[GPS-CONFIG] Failed to fetch GPS config:', data.error);
+          // Default to disabled if config fetch fails
+          setGpsEnabled(false);
+          setGpsConfigLoaded(true);
+        }
+      } catch (error) {
+        console.error('[GPS-CONFIG] Error fetching GPS config:', error);
+        // Default to disabled on error
+        setGpsEnabled(false);
+        setGpsConfigLoaded(true);
+      }
+    };
+
+    // Add delay to ensure cookies are set, then fetch GPS config
+    const gpsTimer = setTimeout(() => {
+      fetchGPSConfig();
+    }, 500);
+
+    return () => clearTimeout(gpsTimer);
+  }, [hasHydrated, hasMounted, isAuthenticated, user, router]);
+
+  useEffect(() => {
+    if (!user?.ishyigaAccount) {
       return;
     }
 
@@ -244,11 +304,76 @@ function SupplierDashboard() {
             <h1 className="text-2xl font-bold text-slate-900">
               {user?.businessName || "Supplier Dashboard"}
             </h1>
-            <p className="text-sm text-slate-600">
-              {user?.businessCategory || "Supplier Panel"} • Account: {user?.ishyigaAccount}
-            </p>
+            <div className="flex items-center gap-2">
+              <p className="text-sm text-slate-600">
+                {user?.businessCategory || "Supplier Panel"} • Account: {user?.ishyigaAccount}
+              </p>
+              {gpsStatus === "watching" && (
+                <div className="flex items-center gap-1 text-xs text-green-600">
+                  <Radio className="h-3 w-3 animate-pulse" />
+                  <span>GPS Active</span>
+                </div>
+              )}
+              {gpsStatus === "denied" && (
+                <div className="flex items-center gap-1 text-xs text-amber-600">
+                  <AlertTriangle className="h-3 w-3" />
+                  <span>GPS Disabled</span>
+                </div>
+              )}
+            </div>
           </div>
           <div className="flex gap-2">
+            {/* GPS Tracking Dropdown */}
+            <div className="relative group">
+              <Button
+                variant="outline"
+                className="gap-2"
+              >
+                <Radio className="h-4 w-4" />
+                GPS Tracking
+              </Button>
+              <div className="absolute right-0 mt-2 w-56 bg-white border rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+                <div className="p-2 space-y-1">
+                  <Link
+                    href="/supplier/gps/live"
+                    className="flex items-center gap-2 px-3 py-2 rounded hover:bg-slate-50 text-sm"
+                  >
+                    <Radio className="h-4 w-4 text-green-600" />
+                    <span>Live Location</span>
+                  </Link>
+                  <Link
+                    href="/supplier/gps/history"
+                    className="flex items-center gap-2 px-3 py-2 rounded hover:bg-slate-50 text-sm"
+                  >
+                    <MapPin className="h-4 w-4 text-blue-600" />
+                    <span>Route History</span>
+                  </Link>
+                  <Link
+                    href="/supplier/gps/zones"
+                    className="flex items-center gap-2 px-3 py-2 rounded hover:bg-slate-50 text-sm"
+                  >
+                    <TrendingUp className="h-4 w-4 text-purple-600" />
+                    <span>Activity Zones</span>
+                  </Link>
+                  <Link
+                    href="/supplier/gps/coverage"
+                    className="flex items-center gap-2 px-3 py-2 rounded hover:bg-slate-50 text-sm"
+                  >
+                    <Package className="h-4 w-4 text-orange-600" />
+                    <span>Coverage Area</span>
+                  </Link>
+                  <div className="border-t my-1"></div>
+                  <Link
+                    href="/supplier/gps/settings"
+                    className="flex items-center gap-2 px-3 py-2 rounded hover:bg-slate-50 text-sm"
+                  >
+                    <Edit className="h-4 w-4 text-slate-600" />
+                    <span>GPS Settings</span>
+                  </Link>
+                </div>
+              </div>
+            </div>
+
             <Button
               variant="outline"
               onClick={() => router.push("/supplier/settings/location")}
@@ -268,8 +393,9 @@ function SupplierDashboard() {
       <div className="container mx-auto px-6 py-8">
 
 
+
         {/* Stats Section */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
           <Card className="bg-white shadow-md hover:shadow-lg transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-slate-600">
@@ -337,6 +463,15 @@ function SupplierDashboard() {
               <p className="text-xs text-slate-500 mt-1">Items with 0 stock</p>
             </CardContent>
           </Card>
+
+          {/* GPS Status Card */}
+          <div className="md:col-span-2 lg:col-span-1">
+            <GPSStatusCard
+              status={gpsStatus}
+              isOnline={isOnline}
+              queueSize={queueSize}
+            />
+          </div>
         </div>
 
         {/* Product Management Card */}

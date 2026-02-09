@@ -2,116 +2,92 @@
 "use client"
 
 import { useMemo, useEffect, useState } from "react"
+import Image from "next/image"
+import Link from "next/link"
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
-import { ProductCard } from "@/components/product-card"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { useFavoritesStore } from "@/lib/favorites-store"
 import { useAuthStore } from "@/lib/auth-store"
-import { getSessionId } from "@/lib/interaction-tracker"
-import { Heart, Store, Sparkles, Clock } from "lucide-react"
-
-type RecommendedProduct = {
-  id: string
-  name: string
-  description?: string
-  price: number
-  unit?: string
-  image?: string
-  supplierId?: string
-  supplierName?: string
-  supplierLocation?: string
-  momo?: string
-  inStock?: boolean
-  rating?: number
-}
+import { useCartStore } from "@/lib/cart-store"
+import { fetchFavorites, flattenFavoriteGroups, removeFavoriteApi, trackFavoriteEvent } from "@/lib/favorites-api"
+import { Heart, Store, MapPin, Star, ShieldCheck, Clock } from "lucide-react"
 
 export default function FavoritesPage() {
-  // subscribe only to the pieces we need
   const favorites = useFavoritesStore((s) => s.favorites)
   const getGroupsBySeller = useFavoritesStore((s) => s.getGroupsBySeller)
-  const { user } = useAuthStore()
+  const setFavorites = useFavoritesStore((s) => s.setFavorites)
+  const removeFavorite = useFavoritesStore((s) => s.removeFavorite)
+  const addToCart = useCartStore((s) => s.addItem)
+  const { user, isAuthenticated } = useAuthStore()
 
-  // compute groups outside the selector to avoid the "getSnapshot" loop
+  const [loading, setLoading] = useState(false)
+
   const groups = useMemo(() => getGroupsBySeller(), [getGroupsBySeller, favorites])
-
   const total = favorites.length
 
-  // Recommendations state
-  const [similarItems, setSimilarItems] = useState<RecommendedProduct[]>([])
-  const [previouslyViewed, setPreviouslyViewed] = useState<RecommendedProduct[]>([])
-  const [loadingRecommendations, setLoadingRecommendations] = useState(false)
-
-  // Load recommendations
   useEffect(() => {
-    if (total > 0) {
-      loadRecommendations()
+    if (!isAuthenticated) return
+    let active = true
+    setLoading(true)
+    fetchFavorites()
+      .then((data) => {
+        if (!active) return
+        setFavorites(flattenFavoriteGroups(data))
+      })
+      .catch((err) => console.warn("[Favorites] Refresh failed:", err))
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
     }
-  }, [total, user])
+  }, [isAuthenticated, setFavorites])
 
-  async function loadRecommendations() {
-    setLoadingRecommendations(true)
+  const handleRemove = async (productId: string, supplierId?: string) => {
+    if (!supplierId) return
     try {
-      const userId = user?.email || null
-      const sessionId = getSessionId()
-
-      // Get similar items based on favorites
-      if (favorites.length > 0) {
-        const favoriteIds = favorites.map(f => f.id)
-        const firstFavorite = favorites[0]
-
-        // Get similar items
-        const similarRes = await fetch("/api/personalization/recommendations", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "getSimilarItems",
-            userId,
-            sessionId,
-            entityId: firstFavorite.id,
-            entityType: "product",
-            limit: 12,
-          }),
-        })
-
-        if (similarRes.ok) {
-          const similarData = await similarRes.json()
-          if (similarData.ok && similarData.similar) {
-            // Fetch product details (placeholder - implement based on your API)
-            const products = await fetchProductDetails(
-              similarData.similar.map((s: any) => s.id).filter((id: string) => !favoriteIds.includes(id))
-            )
-            setSimilarItems(products)
-          }
-        }
-
-        // Get previously viewed but not favorited
-        const viewedRes = await fetch(
-          `/api/personalization/recommendations?action=getRecommendations&limit=12${userId ? `&userId=${userId}` : `&sessionId=${sessionId}`}`
-        )
-
-        if (viewedRes.ok) {
-          const viewedData = await viewedRes.json()
-          if (viewedData.ok && viewedData.products) {
-            const products = await fetchProductDetails(
-              viewedData.products.filter((id: string) => !favoriteIds.includes(id))
-            )
-            setPreviouslyViewed(products)
-          }
-        }
+      if (isAuthenticated && user) {
+        await removeFavoriteApi({ productId, supplierId })
       }
-    } catch (error) {
-      console.error("Error loading recommendations:", error)
-    } finally {
-      setLoadingRecommendations(false)
+      removeFavorite(productId, supplierId)
+    } catch (err) {
+      console.warn("[Favorites] Remove failed:", err)
     }
   }
 
-  async function fetchProductDetails(productIds: string[]): Promise<RecommendedProduct[]> {
-    if (productIds.length === 0) return []
-    
-    // Placeholder - implement based on your product API
-    // This should fetch actual product details from your backend
-    return []
+  const handleAddToCart = async (item: (typeof favorites)[number]) => {
+    addToCart(
+      {
+        id: item.id,
+        name: item.name,
+        price: item.price,
+        unit: item.unit,
+        image: item.image,
+        supplierId: item.supplierId || "unknown",
+        supplierName: item.supplierName || "Supplier",
+        supplierLocation: item.supplierLocation,
+        momo: item.momo,
+        selectedUnit: item.unit,
+      },
+      1
+    )
+    try {
+      await trackFavoriteEvent({
+        eventType: "favorite_to_cart",
+        productId: item.id,
+        supplierId: item.supplierId,
+      })
+    } catch {
+      // best-effort
+    }
+  }
+
+  const handleAddAllFromSupplier = async (items: (typeof favorites)[number][]) => {
+    for (const item of items) {
+      await handleAddToCart(item)
+    }
   }
 
   return (
@@ -132,94 +108,118 @@ export default function FavoritesPage() {
         {total === 0 ? (
           <div className="text-center py-16">
             <Heart className="h-16 w-16 text-slate-300 mx-auto mb-4" />
-            <h2 className="text-xl font-semibold text-slate-600 mb-2">
-              No favorites yet
-            </h2>
-            <p className="text-slate-500">
-              Tap the heart on any product to save it here.
-            </p>
+            <h2 className="text-xl font-semibold text-slate-600 mb-2">No favorites yet</h2>
+            <p className="text-slate-500">Tap the heart on any product to save it here.</p>
           </div>
         ) : (
           <div className="space-y-10">
-            {/* Your Favorites */}
             {groups.map((g) => (
-              <section key={g.supplierId}>
-                <div className="mb-3 flex items-center gap-2">
-                  <Store className="h-5 w-5 text-muted-foreground" />
-                  <h2 className="text-lg font-semibold">
-                    {g.supplierName}
-                    {g.supplierLocation ? ` — ${g.supplierLocation}` : ""}
-                  </h2>
-                  <span className="text-sm text-muted-foreground">
-                    ({g.items.length} {g.items.length === 1 ? "item" : "items"})
-                  </span>
+              <section key={g.supplierId} className="space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Store className="h-5 w-5 text-muted-foreground" />
+                    <div>
+                      <h2 className="text-lg font-semibold">
+                        {g.supplierName}
+                        {g.supplierLocation ? ` — ${g.supplierLocation}` : ""}
+                      </h2>
+                      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                        {g.supplierDistanceKm !== undefined && (
+                          <span className="inline-flex items-center gap-1">
+                            <MapPin className="h-3.5 w-3.5" />
+                            {g.supplierDistanceKm.toFixed(1)} km
+                          </span>
+                        )}
+                        {g.supplierRating !== undefined && (
+                          <span className="inline-flex items-center gap-1">
+                            <Star className="h-3.5 w-3.5" />
+                            {g.supplierRating.toFixed(1)}
+                          </span>
+                        )}
+                        {g.deliveryEtaMin !== undefined && (
+                          <span className="inline-flex items-center gap-1">
+                            <Clock className="h-3.5 w-3.5" />
+                            {g.deliveryEtaMin} min ETA
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {g.supplierBadge && (
+                      <Badge variant="secondary" className="gap-1">
+                        <ShieldCheck className="h-3.5 w-3.5" />
+                        {g.supplierBadge}
+                      </Badge>
+                    )}
+                    <Button variant="outline" size="sm" onClick={() => handleAddAllFromSupplier(g.items)}>
+                      Add all to cart
+                    </Button>
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-                  {g.items.map((p) => (
-                    <ProductCard
-                      key={p.id}
-                      product={{
-                        id: p.id,
-                        name: p.name,
-                        description: p.description,
-                        price: p.price,
-                        unit: p.unit,
-                        image: p.image,
-                        supplierId: p.supplierId,
-                        supplierName: p.supplierName,
-                        supplierLocation: p.supplierLocation,
-                        momo: p.momo,
-                        inStock: true,
-                        rating: 4,
-                      }}
-                    />
-                  ))}
+                <div className="space-y-3">
+                  {g.items.map((p) => {
+                    const inStock = p.inStock !== false
+                    return (
+                      <div
+                        key={`${p.id}-${p.supplierId || "unknown"}`}
+                        className="flex flex-col gap-3 rounded-lg border bg-card p-3 sm:flex-row sm:items-center"
+                      >
+                        <div className="relative h-20 w-20 flex-none overflow-hidden rounded-md bg-muted">
+                          <Image
+                            fill
+                            src={p.image || "/placeholder.svg?height=160&width=160"}
+                            alt={p.name}
+                            className="object-cover"
+                          />
+                        </div>
+
+                        <div className="flex-1">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <h3 className="text-sm font-semibold">{p.name}</h3>
+                              {p.description && <p className="text-xs text-muted-foreground line-clamp-2">{p.description}</p>}
+                            </div>
+                            <div className="text-sm font-semibold">
+                              {p.price.toLocaleString()}{" "}
+                              <span className="text-muted-foreground">{p.unit ? ` / ${p.unit}` : ""}</span>
+                            </div>
+                          </div>
+                          <div className="mt-2 flex items-center gap-2 text-xs">
+                            <Badge variant={inStock ? "secondary" : "destructive"}>
+                              {inStock ? "In stock" : "Out of stock"}
+                            </Badge>
+                            {p.deliveryEtaMin !== undefined && (
+                              <span className="text-muted-foreground">{p.deliveryEtaMin} min delivery ETA</span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button size="sm" onClick={() => handleAddToCart(p)} disabled={!inStock}>
+                            Add to cart
+                          </Button>
+                          <Button variant="outline" size="sm" asChild>
+                            <Link href={`/products/${p.id}`}>View product</Link>
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => handleRemove(p.id, p.supplierId)}>
+                            Remove
+                          </Button>
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
               </section>
             ))}
+          </div>
+        )}
 
-            {/* Similar Items */}
-            {similarItems.length > 0 && (
-              <section>
-                <div className="mb-3 flex items-center gap-2">
-                  <Sparkles className="h-5 w-5 text-muted-foreground" />
-                  <h2 className="text-lg font-semibold">You Might Also Like</h2>
-                  <span className="text-sm text-muted-foreground">
-                    Similar to your favorites
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-                  {similarItems.map((product) => (
-                    <ProductCard key={product.id} product={product} />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Previously Viewed */}
-            {previouslyViewed.length > 0 && (
-              <section>
-                <div className="mb-3 flex items-center gap-2">
-                  <Clock className="h-5 w-5 text-muted-foreground" />
-                  <h2 className="text-lg font-semibold">Previously Viewed</h2>
-                  <span className="text-sm text-muted-foreground">
-                    Items you've browsed but haven't favorited yet
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-                  {previouslyViewed.map((product) => (
-                    <ProductCard key={product.id} product={product} />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {loadingRecommendations && (
-              <div className="text-center py-8 text-muted-foreground">
-                Loading recommendations...
-              </div>
-            )}
+        {loading && (
+          <div className="text-center py-8 text-muted-foreground">
+            Refreshing favorites...
           </div>
         )}
       </main>

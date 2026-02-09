@@ -129,6 +129,7 @@ export default function SupplierOrdersPage() {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
+  const [orderTypeFilter, setOrderTypeFilter] = useState<"ALL" | "B2C" | "B2B">("ALL")
 
   useEffect(() => { if (!isAuthenticated) router.push("/login") }, [isAuthenticated, router])
 
@@ -178,15 +179,64 @@ export default function SupplierOrdersPage() {
     return () => clearInterval(timer)
   }, [loadOrders])
 
-  const totalPages = useMemo(() => Math.ceil(orders.length / pageSize), [orders.length, pageSize])
-  const pagedOrders = useMemo(() => orders.slice((page - 1) * pageSize, page * pageSize), [orders, page, pageSize])
+  // Filter orders by type
+  const filteredOrders = useMemo(() => {
+    if (orderTypeFilter === "ALL") return orders;
+    // Assume B2B orders have status starting with "B2B_" or can add orderType field
+    if (orderTypeFilter === "B2B") {
+      return orders.filter(o => o.status.toUpperCase().startsWith("B2B_"));
+    }
+    return orders.filter(o => !o.status.toUpperCase().startsWith("B2B_"));
+  }, [orders, orderTypeFilter]);
+
+  const totalPages = useMemo(() => Math.ceil(filteredOrders.length / pageSize), [filteredOrders.length, pageSize])
+  const pagedOrders = useMemo(() => filteredOrders.slice((page - 1) * pageSize, page * pageSize), [filteredOrders, page, pageSize])
 const supplierOrderLink = (orderId: number | string) => `/supplier/orders/${orderId}`
   return (
     <div className="min-h-screen bg-slate-50">
       <Header />
 
       <main className="container mx-auto px-4 py-8">
-        <h1 className="text-2xl font-bold mb-4">My Orders</h1>
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-2xl font-bold">My Orders</h1>
+          
+          {/* Order Type Filter */}
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-slate-600">Filter:</span>
+            <div className="flex gap-1">
+              <Button
+                size="sm"
+                variant={orderTypeFilter === "ALL" ? "default" : "outline"}
+                onClick={() => {
+                  setOrderTypeFilter("ALL");
+                  setPage(1);
+                }}
+              >
+                All Orders
+              </Button>
+              <Button
+                size="sm"
+                variant={orderTypeFilter === "B2C" ? "default" : "outline"}
+                onClick={() => {
+                  setOrderTypeFilter("B2C");
+                  setPage(1);
+                }}
+              >
+                B2C (Buyers)
+              </Button>
+              <Button
+                size="sm"
+                variant={orderTypeFilter === "B2B" ? "default" : "outline"}
+                onClick={() => {
+                  setOrderTypeFilter("B2B");
+                  setPage(1);
+                }}
+              >
+                B2B (Sellers)
+              </Button>
+            </div>
+          </div>
+        </div>
 
         {err && <div className="mb-4 p-2 bg-red-50 border border-red-300 rounded text-sm">{err}</div>}
         {loading && <div className="mb-4 p-2 text-sm">Loading...</div>}

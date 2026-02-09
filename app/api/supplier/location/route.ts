@@ -1,8 +1,9 @@
 // app/api/supplier/location/route.ts
 import { NextRequest, NextResponse } from "next/server"
 
-const JAVA_BACKEND_BASE = process.env.JAVA_BACKEND_BASE || "https://ihute.rw"
-const LOCATION_SERVLET_URL = `${JAVA_BACKEND_BASE}/Kaos/SupplierLocationServlet`
+// Use localhost as fallback for local development (production sets via env var)
+const JAVA_BACKEND_BASE = process.env.JAVA_BACKEND_BASE || "http://localhost:8080/Trading"
+const LOCATION_SERVLET_URL = `${JAVA_BACKEND_BASE}/SupplierLocationServlet`
 
 export async function GET(req: NextRequest) {
     try {

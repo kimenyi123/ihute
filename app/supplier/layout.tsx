@@ -12,13 +12,14 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
-  const { user, isAuthenticated } = useAuthStore();
+  const { user, isAuthenticated, hasHydrated } = useAuthStore();
   const logout = useAuthStore((state) => state.logout);
 
   const menu = [
     { name: "Dashboard", href: "/supplier/dashboard" },
     // { name: "My Products", href: "/supplier/products" },
     { name: "Orders", href: "/supplier/orders" },
+    { name: "B2B Procurement / Kurangura byinshi", href: "/supplier/b2b" },
     { name: "Expenses", href: "/supplier/expenses" },
     { name: "Add Product", href: "/supplier/products/add" },
     { name: "Settings", href: "/supplier/settings/location" },
@@ -43,11 +44,14 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
   }, [sidebarOpen, closeSidebar]);
 
   // Optional: basic protection to ensure only suppliers see these routes
+  // CRITICAL: Only check after hydration to prevent logout loops
   useEffect(() => {
+    if (!hasHydrated) return; // Wait for store to load from localStorage
+
     if (!isAuthenticated || user?.role !== "supplier") {
       router.replace("/login");
     }
-  }, [isAuthenticated, user, router]);
+  }, [hasHydrated, isAuthenticated, user, router]);
 
   return (
     <div className="min-h-screen bg-slate-50">

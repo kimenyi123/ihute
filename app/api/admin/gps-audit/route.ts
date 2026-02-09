@@ -1,14 +1,18 @@
-import { NextResponse } from "next/server"
+import { NextRequest, NextResponse } from "next/server"
 
-export async function GET() {
+export async function GET(req: NextRequest) {
     try {
         const backendUrl = process.env.JAVA_BACKEND_BASE || "http://localhost:8080/Trading"
+        const cookies = req.headers.get('cookie') || '';
 
-        const response = await fetch(`${backendUrl}/Kaos/AdminGPSServlet?action=audit`, {
+        const response = await fetch(`${backendUrl}/GPSAuditServlet`, {
             method: "GET",
             headers: {
                 "Content-Type": "application/json",
+                "Cookie": cookies
             },
+            credentials: 'include',
+            cache: 'no-store'
         })
 
         if (!response.ok) {

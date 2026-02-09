@@ -5,7 +5,7 @@ import { create } from "zustand"
 import { persist, createJSONStorage } from "zustand/middleware"
 import { mergeSessionToUser } from "./interaction-tracker"
 
-export type UserRole = "buyer" | "seller" | "admin" | "staff"
+export type UserRole = "buyer" | "seller" | "supplier" | "admin" | "staff" | "customer"
 
 export interface User {
   id: string
@@ -44,6 +44,8 @@ const SESSION_TIMEOUTS: Record<UserRole, number> = {
   staff: 24 * 60 * 60 * 1000,
   buyer: 24 * 60 * 60 * 1000,
   seller: 24 * 60 * 60 * 1000,
+  supplier: 24 * 60 * 60 * 1000,
+  customer: 24 * 60 * 60 * 1000,
 }
 
 // Generate a unique session token based on browser info + random data
@@ -93,7 +95,7 @@ export const useAuthStore = create<AuthState>()(
       logout: () => {
         if (typeof window !== "undefined") {
           localStorage.removeItem("cart-storage")
-          localStorage.removeItem("favorites-storage")
+          localStorage.removeItem("ihute-favorites-storage")
           localStorage.removeItem("orders-storage")
           localStorage.removeItem("prefs-storage")
           sessionStorage.clear()

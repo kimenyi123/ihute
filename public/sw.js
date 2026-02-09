@@ -179,6 +179,11 @@ self.addEventListener('sync', (event) => {
   if (event.tag === 'sync-search-history') {
     event.waitUntil(syncSearchHistory());
   }
+
+  // GPS queue sync
+  if (event.tag === 'sync-gps-updates') {
+    event.waitUntil(syncGPSUpdates());
+  }
 });
 
 async function syncSearchHistory() {
@@ -198,6 +203,112 @@ async function syncSearchHistory() {
   } catch (error) {
     console.error('[SW] Error syncing search history:', error);
   }
+}
+
+/**
+ * Sync GPS updates from IndexedDB
+ */
+async function syncGPSUpdates() {
+  console.log('[SW] Starting GPS sync...');
+
+  try {
+    // Open IndexedDB
+    const db = await openGPSDatabase();
+    const pending = await getPendingGPSUpdates(db);
+
+    console.log(`[SW] Found ${pending.length} pending GPS updates`);
+
+    for (const update of pending) {
+      try {
+        const response = await fetch('/api/supplier/location/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            lat: update.lat,
+            lng: update.lng,
+            accuracy: update.accuracy,
+            speed: update.speed,
+            heading: update.heading,
+            source: update.source + '_bg_sync',
+          }),
+          credentials: 'include',
+        });
+
+        if (response.ok) {
+          await markGPSAsSynced(db, update.id);
+          console.log('[SW] Synced GPS update:', update.id);
+        } else {
+          console.warn('[SW] Failed to sync GPS update:', update.id, response.status);
+        }
+      } catch (error) {
+        console.error('[SW] Error syncing GPS update:', update.id, error);
+      }
+    }
+
+    console.log('[SW] GPS sync complete');
+  } catch (error) {
+    console.error('[SW] GPS sync failed:', error);
+    throw error;
+  }
+}
+
+/**
+ * Open GPS Queue IndexedDB
+ */
+function openGPSDatabase() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open('GPSQueueDB', 1);
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+
+    request.onupgradeneeded = (event) => {
+      const db = event.target.result;
+      if (!db.objectStoreNames.contains('gpsQueue')) {
+        const store = db.createObjectStore('gpsQueue', { keyPath: 'id', autoIncrement: true });
+        store.createIndex('timestamp', 'timestamp');
+        store.createIndex('synced', 'synced');
+      }
+    };
+  });
+}
+
+/**
+ * Get pending GPS updates from IndexedDB
+ */
+function getPendingGPSUpdates(db) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(['gpsQueue'], 'readonly');
+    const store = transaction.objectStore('gpsQueue');
+    const index = store.index('synced');
+    const request = index.getAll(false);
+
+    request.onsuccess = () => {
+      const updates = request.result.filter(item => item.retries < 5);
+      resolve(updates);
+    };
+    request.onerror = () => reject(request.error);
+  });
+}
+
+/**
+ * Mark GPS update as synced
+ */
+function markGPSAsSynced(db, id) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(['gpsQueue'], 'readwrite');
+    const store = transaction.objectStore('gpsQueue');
+    const request = store.get(id);
+
+    request.onsuccess = () => {
+      const update = request.result;
+      update.synced = true;
+      const updateRequest = store.put(update);
+      updateRequest.onsuccess = () => resolve();
+      updateRequest.onerror = () => reject(updateRequest.error);
+    };
+    request.onerror = () => reject(request.error);
+  });
 }
 
 

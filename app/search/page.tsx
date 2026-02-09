@@ -17,6 +17,7 @@ import { LocationBadge } from "@/components/location-badge"
 import { useGeolocation } from "@/hooks/use-geolocation"
 import { searchNearbyProducts, NearbyProduct } from "@/lib/location-search-api"
 import { DistanceBadge } from "@/components/distance-badge"
+import { RatingBadge } from "@/components/RatingBadge"
 
 type Shop = {
   supplier_account: string
@@ -25,6 +26,8 @@ type Shop = {
   type: string
   match_type?: string
   product_count?: number
+  rating_star?: number
+  total_ratings?: number
 }
 
 type Product = {
@@ -90,6 +93,8 @@ export default function SearchPage() {
   const supplierNameParam = searchParams.get("supplierName")
   const locationParam = searchParams.get("location") || ""
   const sectorParam = searchParams.get("sector") || ""
+  const minRatingParam = searchParams.get("minRating") || ""
+  const sortByParam = searchParams.get("sortBy") || ""
 
   const [q, setQ] = useState(initialQ)
   const [debouncedQ, setDebouncedQ] = useState("")
@@ -102,6 +107,8 @@ export default function SearchPage() {
   // Compact filter bar (draft inputs)
   const [locationDraft, setLocationDraft] = useState(locationParam)
   const [sectorDraft, setSectorDraft] = useState(sectorParam)
+  const [minRating, setMinRating] = useState(minRatingParam)
+  const [sortBy, setSortBy] = useState(sortByParam)
 
   // Sector spotlight data
   const [sectorSellers, setSectorSellers] = useState<SectorSeller[]>([])
@@ -792,6 +799,70 @@ export default function SearchPage() {
               )}
             </div>
 
+            {/* Rating Filter */}
+            <div className="flex items-center gap-2 bg-gray-50 rounded-full px-3 py-1.5 border">
+              <span className="text-sm">⭐</span>
+              <select
+                aria-label="Minimum rating"
+                className="bg-transparent outline-none text-sm w-32"
+                value={minRating}
+                onChange={(e) => {
+                  const val = e.target.value
+                  setMinRating(val)
+                  pushWith({ minRating: val })
+                }}
+              >
+                <option value="">All Ratings</option>
+                <option value="4">4+ Stars</option>
+                <option value="3">3+ Stars</option>
+                <option value="2">2+ Stars</option>
+              </select>
+              {minRating && (
+                <button
+                  className="text-xs text-gray-500 hover:text-gray-800"
+                  onClick={() => {
+                    setMinRating("")
+                    pushWith({ minRating: "" })
+                  }}
+                  title="Clear rating filter"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            {/* Sort By */}
+            <div className="flex items-center gap-2 bg-gray-50 rounded-full px-3 py-1.5 border">
+              <span className="text-sm">🔽</span>
+              <select
+                aria-label="Sort by"
+                className="bg-transparent outline-none text-sm w-40"
+                value={sortBy}
+                onChange={(e) => {
+                  const val = e.target.value
+                  setSortBy(val)
+                  pushWith({ sortBy: val })
+                }}
+              >
+                <option value="">Relevance</option>
+                <option value="rating_desc">Highest Rated</option>
+                <option value="rating_asc">Lowest Rated</option>
+                <option value="reviews_desc">Most Reviewed</option>
+              </select>
+              {sortBy && (
+                <button
+                  className="text-xs text-gray-500 hover:text-gray-800"
+                  onClick={() => {
+                    setSortBy("")
+                    pushWith({ sortBy: "" })
+                  }}
+                  title="Clear sort"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
             {/* Quick location chips */}
             <div className="flex items-center gap-1 flex-wrap">
               {QUICK_LOCATIONS.map((city) => (
@@ -1128,6 +1199,16 @@ export default function SearchPage() {
                               {supplier.product_count} matching products
                             </div>
                           )}
+                          {supplier.rating_star && supplier.total_ratings ? (
+                            <div className="mt-2">
+                              <RatingBadge
+                                rating={supplier.rating_star}
+                                totalRatings={supplier.total_ratings}
+                                size="sm"
+                                variant="compact"
+                              />
+                            </div>
+                          ) : null}
                         </div>
                         <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />

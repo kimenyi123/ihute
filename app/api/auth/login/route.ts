@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 
 const JAVA_AUTH_URL = process.env.JAVA_AUTH_URL || ""
 // Disable verbose logging to avoid exposing sensitive info
-const isAuthDebugEnabled = false
+const isAuthDebugEnabled = true
 
 const debugLog = (...args: any[]) => {
   if (isAuthDebugEnabled) {
@@ -81,7 +81,50 @@ export async function POST(req: Request) {
     }
 
     debugLog(`[RID ${rid}] SUCCESS: Login OK`)
-    return NextResponse.json({ ...json, rid })
+
+    // CRITICAL: Forward session cookies from Java backend to client
+    const response = NextResponse.json({ ...json, rid })
+
+    // Get ALL Set-Cookie headers from Java backend
+    // Note: headers.get() only returns first header, use getSetCookie() for all
+    const javaSetCookies = res.headers.getSetCookie ? res.headers.getSetCookie() : []
+
+    console.log(`[LOGIN DEBUG] Java Set-Cookie headers count:`, javaSetCookies.length)
+    console.log(`[LOGIN DEBUG] Java Set-Cookie headers:`, javaSetCookies)
+
+    if (javaSetCookies.length > 0) {
+      // CRITICAL FIX: Java backend sets cookies with Path=/Trading
+      // But frontend needs cookies available at ALL paths (especially /api/*)
+      // Rewrite Path=/Trading to Path=/ so browser sends cookie to all routes
+      // Also add SameSite=Lax to ensure cookie is sent with same-site requests
+      javaSetCookies.forEach(cookie => {
+        console.log(`[LOGIN DEBUG] Original cookie:`, cookie.substring(0, 80))
+
+        // Rewrite Path=/Trading to Path=/ and add SameSite=Lax if not present
+        let rewrittenCookie = cookie.replace(/Path=\/Trading/gi, 'Path=/')
+
+        // Add SameSite=Lax if not already present (needed for cookies to work in modern browsers)
+        if (!rewrittenCookie.toLowerCase().includes('samesite=')) {
+          rewrittenCookie += '; SameSite=Lax'
+        }
+
+        console.log(`[LOGIN DEBUG] Rewritten cookie:`, rewrittenCookie.substring(0, 100))
+        response.headers.append('Set-Cookie', rewrittenCookie)
+      })
+    } else {
+      // Fallback: try old method
+      const setCookieHeader = res.headers.get('set-cookie')
+      console.log(`[LOGIN DEBUG] Fallback Set-Cookie header:`, setCookieHeader)
+      if (setCookieHeader) {
+        // Also rewrite path in fallback
+        const rewrittenCookie = setCookieHeader.replace(/Path=\/Trading/gi, 'Path=/')
+        response.headers.set('Set-Cookie', rewrittenCookie)
+      } else {
+        console.warn(`[LOGIN DEBUG] WARNING: No Set-Cookie header from Java backend!`)
+      }
+    }
+
+    return response
   } catch (e: any) {
     debugError(`[RID ${rid}] EXCEPTION in login route:`)
     if (isAuthDebugEnabled) {

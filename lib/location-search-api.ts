@@ -1,7 +1,9 @@
 // API service for location-based searches
 
-// Use full path since NEXT_PUBLIC_API_URL doesn't include /Kaos
-const API_BASE_URL = 'http://localhost:8080/Trading/Kaos';
+// Use environment variable for backend URL (client-side needs NEXT_PUBLIC_ prefix)
+// Full path includes /Kaos for fetchSuggestions servlet
+const BACKEND_BASE = process.env.NEXT_PUBLIC_JAVA_BACKEND_BASE || 'http://localhost:8080/Trading';
+const API_BASE_URL = `${BACKEND_BASE}/Kaos`;
 
 export interface NearbySupplier {
     supplier_id: string;

@@ -5,10 +5,8 @@ import Image from "next/image"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { useCartStore } from "@/lib/cart-store"
-import { useFavoritesStore } from "@/lib/favorites-store"
+import { FavoriteButton } from "@/components/favorite-button"
 import { trackProductView, trackClick } from "@/lib/interaction-tracker"
-import { Heart } from "lucide-react"
-import { cn } from "@/lib/utils"
 import { useToast } from "@/components/ui/use-toast"
 
 type Product = {
@@ -28,8 +26,6 @@ type Product = {
 
 export function ProductCard({ product }: { product: Product }) {
   const addItem = useCartStore((s) => s.addItem)
-  const toggleFavorite = useFavoritesStore((s) => s.toggleFavorite)
-  const isFavorite = useFavoritesStore((s) => s.isFavorite)
   const { toast } = useToast()
 
   const {
@@ -44,8 +40,6 @@ export function ProductCard({ product }: { product: Product }) {
     momo,
     image,
   } = product
-
-  const fav = isFavorite(id)
 
   // Track product view when component mounts
   useEffect(() => {
@@ -66,39 +60,21 @@ export function ProductCard({ product }: { product: Product }) {
         />
 
         {/* Heart overlay */}
-        <button
-          aria-label={fav ? "Remove from favorites" : "Add to favorites"}
-          onClick={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-            const wasFav = isFavorite(id)
-            toggleFavorite({
-              id,
-              name,
-              price,
-              unit,
-              image,
-              description,
-              supplierId,
-              supplierName,
-              supplierLocation,
-              momo,
-            })
-            toast({
-              title: wasFav ? "Removed from favorites" : "Added to favorites!",
-              description: name,
-              duration: 1500,
-            })
+        <FavoriteButton
+          className="absolute right-2 top-2"
+          item={{
+            id,
+            name,
+            price,
+            unit,
+            image,
+            description,
+            supplierId,
+            supplierName,
+            supplierLocation,
+            momo,
           }}
-          className={cn(
-            "absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white/90 backdrop-blur transition",
-            "hover:bg-white",
-            fav ? "text-red-600" : "text-muted-foreground"
-          )}
-          title={fav ? "Remove from favorites" : "Add to favorites"}
-        >
-          <Heart className={cn("h-4 w-4", fav && "fill-current")} />
-        </button>
+        />
       </div>
 
       <CardContent className="p-3 flex flex-col gap-2">

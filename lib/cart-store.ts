@@ -4,6 +4,9 @@ import { create } from "zustand"
 import { persist, createJSONStorage } from "zustand/middleware"
 import { trackClick, trackInteraction } from "./interaction-tracker"
 
+// Use environment variable for backend URL (client-side needs NEXT_PUBLIC_ prefix)
+const BACKEND_URL = process.env.NEXT_PUBLIC_JAVA_BACKEND_BASE || "http://localhost:8080/Trading"
+
 export type CartItem = {
   id: string
   name: string
@@ -125,7 +128,7 @@ export const useCartStore = create<CartState>()(
 
             console.log('[Abandoned Cart] Calling trackCartActivity for:', userEmail)
 
-            fetch('http://localhost:8080/Trading/OrdersServlet?action=trackCartActivity', {
+            fetch(`${BACKEND_URL}/OrdersServlet?action=trackCartActivity`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
               body: new URLSearchParams({

@@ -59,6 +59,17 @@ interface GPSStats {
     duplicate_locations?: number
 }
 
+interface GPSConfig {
+    globalGPSEnabled: boolean
+    maxUpdatesPerWeek: number
+    businessHoursStart: string
+    businessHoursEnd: string
+    minIntervalMinutes: number
+    maxAccuracyMeters: number
+    updatedBy: string
+    updatedAt: string
+}
+
 export default function GPSManagementPage() {
     const [issues, setIssues] = useState<GPSIssue[]>([])
     const [stats, setStats] = useState<GPSStats | null>(null)
@@ -72,6 +83,12 @@ export default function GPSManagementPage() {
     const itemsPerPage = 20
     const [sortBy, setSortBy] = useState<"default" | "distance">("default")
     const [showMapView, setShowMapView] = useState(false)
+    
+    // GPS Configuration State
+    const [gpsConfig, setGpsConfig] = useState<GPSConfig | null>(null)
+    const [configLoading, setConfigLoading] = useState(true)
+    const [configSaving, setConfigSaving] = useState(false)
+    const [showConfigPanel, setShowConfigPanel] = useState(true)
 
     // Kigali center coordinates for distance calculation
     const KIGALI_CENTER = { lat: -1.9536, lng: 30.0606 }
@@ -89,10 +106,11 @@ export default function GPSManagementPage() {
         }
     }, [])
 
-    // Fetch GPS issues
+    // Fetch GPS issues and config
     useEffect(() => {
         fetchGPSIssues()
         fetchGPSStats()
+        fetchGPSConfig()
     }, [])
 
     // Calculate filtered issues and pagination early (needed by useEffect)
@@ -207,6 +225,77 @@ export default function GPSManagementPage() {
             setStats(data)
         } catch (error) {
             console.error("Failed to fetch GPS stats:", error)
+        }
+    }
+
+    const fetchGPSConfig = async () => {
+        setConfigLoading(true)
+        try {
+            const response = await fetch("/api/admin/gps-config?action=getConfig")
+            const data = await response.json()
+            if (data.ok && data.config) {
+                setGpsConfig(data.config)
+            }
+        } catch (error) {
+            console.error("Failed to fetch GPS config:", error)
+        } finally {
+            setConfigLoading(false)
+        }
+    }
+
+    const handleSaveGPSConfig = async () => {
+        if (!gpsConfig) return
+
+        setConfigSaving(true)
+        try {
+            const response = await fetch("/api/admin/gps-config", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    action: "updateConfig",
+                    ...gpsConfig,
+                    updatedBy: "admin" // TODO: Get from session
+                })
+            })
+
+            const data = await response.json()
+            if (data.ok) {
+                alert("✅ GPS configuration saved successfully!")
+                fetchGPSConfig()
+            } else {
+                alert("❌ Failed to save GPS configuration: " + data.error)
+            }
+        } catch (error) {
+            console.error("Failed to save GPS config:", error)
+            alert("❌ Error saving GPS configuration")
+        } finally {
+            setConfigSaving(false)
+        }
+    }
+
+    const handleSetSellerOverride = async (sellerId: string, override: string) => {
+        try {
+            const response = await fetch("/api/admin/gps-config", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    action: "setSellerOverride",
+                    sellerId,
+                    gpsOverride: override
+                })
+            })
+
+            const data = await response.json()
+            if (data.ok) {
+                alert(`✅ GPS override set to ${override} for seller ${sellerId}`)
+                setSelectedSupplier(null)
+                fetchGPSIssues()
+            } else {
+                alert("❌ Failed to set override: " + data.error)
+            }
+        } catch (error) {
+            console.error("Failed to set seller override:", error)
+            alert("❌ Error setting seller override")
         }
     }
 
@@ -446,6 +535,145 @@ export default function GPSManagementPage() {
                     <span className="sm:hidden">GPS Management</span>
                 </h1>
                 <p className="text-sm sm:text-base text-gray-600 mt-2">Audit and fix supplier GPS coordinates</p>
+            </div>
+
+            {/* GPS Configuration Panel */}
+            <div className="bg-white rounded-lg border shadow-sm mb-4 md:mb-6">
+                <div 
+                    className="px-4 py-3 border-b flex items-center justify-between cursor-pointer hover:bg-gray-50"
+                    onClick={() => setShowConfigPanel(!showConfigPanel)}
+                >
+                    <div className="flex items-center gap-2">
+                        <div className={`h-3 w-3 rounded-full ${gpsConfig?.globalGPSEnabled ? 'bg-green-500' : 'bg-gray-400'}`}></div>
+                        <h2 className="text-lg font-semibold">GPS Configuration</h2>
+                        <span className="text-sm text-gray-500">
+                            {gpsConfig?.globalGPSEnabled ? '(Enabled)' : '(Disabled)'}
+                        </span>
+                    </div>
+                    <button className="text-blue-600 text-sm font-medium">
+                        {showConfigPanel ? 'Hide' : 'Show'} Settings
+                    </button>
+                </div>
+
+                {showConfigPanel && gpsConfig && (
+                    <div className="p-4 md:p-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            {/* Global GPS Toggle */}
+                            <div className="md:col-span-2 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <h3 className="font-semibold text-lg">Global GPS Tracking</h3>
+                                        <p className="text-sm text-gray-600 mt-1">
+                                            Enable or disable GPS tracking for all sellers (unless overridden)
+                                        </p>
+                                    </div>
+                                    <label className="relative inline-flex items-center cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={gpsConfig.globalGPSEnabled}
+                                            onChange={(e) => setGpsConfig({ ...gpsConfig, globalGPSEnabled: e.target.checked })}
+                                            className="sr-only peer"
+                                        />
+                                        <div className="w-14 h-7 bg-gray-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:start-[4px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-green-600"></div>
+                                    </label>
+                                </div>
+                            </div>
+
+                            {/* Max Updates Per Week */}
+                            <div>
+                                <label className="block text-sm font-medium mb-2">
+                                    Max Updates Per Week
+                                </label>
+                                <input
+                                    type="number"
+                                    value={gpsConfig.maxUpdatesPerWeek}
+                                    onChange={(e) => setGpsConfig({ ...gpsConfig, maxUpdatesPerWeek: parseInt(e.target.value) })}
+                                    className="w-full px-3 py-2 border rounded-lg"
+                                    min="1"
+                                    max="28"
+                                />
+                                <p className="text-xs text-gray-500 mt-1">Default: 3-4 total per week</p>
+                            </div>
+
+                            {/* Min Interval Minutes */}
+                            <div>
+                                <label className="block text-sm font-medium mb-2">
+                                    Min Interval (Minutes)
+                                </label>
+                                <input
+                                    type="number"
+                                    value={gpsConfig.minIntervalMinutes}
+                                    onChange={(e) => setGpsConfig({ ...gpsConfig, minIntervalMinutes: parseInt(e.target.value) })}
+                                    className="w-full px-3 py-2 border rounded-lg"
+                                    min="1"
+                                    max="1440"
+                                />
+                                <p className="text-xs text-gray-500 mt-1">Minimum minutes between updates</p>
+                            </div>
+
+                            {/* Business Hours Start */}
+                            <div>
+                                <label className="block text-sm font-medium mb-2">
+                                    Business Hours Start
+                                </label>
+                                <input
+                                    type="time"
+                                    value={gpsConfig.businessHoursStart}
+                                    onChange={(e) => setGpsConfig({ ...gpsConfig, businessHoursStart: e.target.value })}
+                                    className="w-full px-3 py-2 border rounded-lg"
+                                />
+                            </div>
+
+                            {/* Business Hours End */}
+                            <div>
+                                <label className="block text-sm font-medium mb-2">
+                                    Business Hours End
+                                </label>
+                                <input
+                                    type="time"
+                                    value={gpsConfig.businessHoursEnd}
+                                    onChange={(e) => setGpsConfig({ ...gpsConfig, businessHoursEnd: e.target.value })}
+                                    className="w-full px-3 py-2 border rounded-lg"
+                                />
+                            </div>
+
+                            {/* Max Accuracy Meters */}
+                            <div className="md:col-span-2">
+                                <label className="block text-sm font-medium mb-2">
+                                    Max Acceptable Accuracy (Meters)
+                                </label>
+                                <input
+                                    type="number"
+                                    value={gpsConfig.maxAccuracyMeters}
+                                    onChange={(e) => setGpsConfig({ ...gpsConfig, maxAccuracyMeters: parseFloat(e.target.value) })}
+                                    className="w-full px-3 py-2 border rounded-lg"
+                                    min="10"
+                                    max="500"
+                                    step="10"
+                                />
+                                <p className="text-xs text-gray-500 mt-1">
+                                    GPS locations with accuracy worse than this will only be logged as observations, not update HQ location
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Save Button */}
+                        <div className="mt-6 flex gap-3">
+                            <button
+                                onClick={handleSaveGPSConfig}
+                                disabled={configSaving}
+                                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium"
+                            >
+                                {configSaving ? 'Saving...' : 'Save Configuration'}
+                            </button>
+                            {gpsConfig.updatedAt && (
+                                <div className="flex items-center text-sm text-gray-500">
+                                    Last updated: {new Date(gpsConfig.updatedAt).toLocaleString()}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Stats Cards */}
@@ -924,6 +1152,23 @@ export default function GPSManagementPage() {
                                 }}
                             >
                                 <div className="space-y-4">
+                                    {/* GPS Override Control */}
+                                    <div className="bg-purple-50 border border-purple-200 p-4 rounded">
+                                        <h4 className="font-semibold mb-2 text-sm">🎚️ GPS Tracking Override</h4>
+                                        <select
+                                            className="w-full px-3 py-2 border rounded-lg text-sm"
+                                            defaultValue="INHERIT"
+                                            onChange={(e) => handleSetSellerOverride(selectedSupplier.ISHYIGA_ACCOUNT, e.target.value)}
+                                        >
+                                            <option value="INHERIT">Inherit from global ({gpsConfig?.globalGPSEnabled ? 'Enabled' : 'Disabled'})</option>
+                                            <option value="FORCE_ON">Force ON (always track this seller)</option>
+                                            <option value="FORCE_OFF">Force OFF (never track this seller)</option>
+                                        </select>
+                                        <p className="text-xs text-gray-600 mt-2">
+                                            Override the global GPS setting for this specific seller
+                                        </p>
+                                    </div>
+
                                     {/* Info Banner */}
                                     <div className="bg-blue-50 border border-blue-200 p-3 rounded text-sm">
                                         <p className="font-medium text-blue-900">💡 Two Ways to Add Location:</p>
