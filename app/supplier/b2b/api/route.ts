@@ -32,17 +32,21 @@ function forwardSetCookie(javaResp: Response, nextResp: NextResponse) {
 
 /**
  * Reads request body safely.
- * - If JSON: returns parsed object or {}
- * - If empty: returns {}
+ * - If JSON: returns parsed object
+ * - If empty: returns null
+ * - If parse fails: logs warning and returns null
  * - Never throws "Unexpected end of JSON input"
  */
 async function safeReadJson(req: NextRequest): Promise<any> {
   try {
     const text = await req.text();
-    if (!text || !text.trim()) return {};
+    if (!text || !text.trim()) {
+      return null;
+    }
     return JSON.parse(text);
-  } catch {
-    return {};
+  } catch (error) {
+    console.warn('[B2B-API] JSON parse failed, proceeding with null body:', error);
+    return null;
   }
 }
 
@@ -208,6 +212,18 @@ export async function GET(req: NextRequest) {
   }
 }
 
+// Actions that should not have a request body
+const emptyBodyActions = [
+  'updateLine',
+  'removeLine',
+  'submitDraft',
+  'buyerAcceptChanges',
+  'startNegotiation',
+  'acceptOffer',
+  'rejectNegotiation',
+  'finalizeNegotiation'
+];
+
 /**
  * POST handler for B2B write operations
  * Examples: importExcel, updateLine, submitDraft, updateSupplierDecision, buyerAcceptChanges, removeLine
@@ -234,6 +250,7 @@ export async function POST(req: NextRequest) {
     const cookieHeader = req.headers.get("cookie") || "";
     const contentType = req.headers.get("content-type") || "";
     const isMultipart = contentType.includes("multipart/form-data");
+    const isEmptyBodyAction = emptyBodyActions.includes(action);
 
     console.log(`[B2B-API] POST action: ${action}`);
     console.log(`[B2B-API] POST -> ${url}`);
@@ -242,6 +259,7 @@ export async function POST(req: NextRequest) {
       cookieHeader ? "YES - " + cookieHeader.substring(0, 120) : "NONE"
     );
     console.log(`[B2B-API] POST content-type: ${contentType}`);
+    console.log(`[B2B-API] POST empty-body action: ${isEmptyBodyAction}`);
 
     let javaResp: Response;
 
@@ -260,11 +278,25 @@ export async function POST(req: NextRequest) {
         signal: controller.signal,
         cache: "no-store",
       });
+    } else if (isEmptyBodyAction) {
+      // For empty-body actions: do not parse or send a body
+      javaResp = await fetch(url, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          Cookie: cookieHeader,
+        },
+        // No body parameter
+        signal: controller.signal,
+        cache: "no-store",
+      });
     } else {
-      // For JSON or empty-body requests (updateLine, submitDraft, removeLine, buyerAcceptChanges)
+      // For JSON requests (makeOffer, updateSupplierDecision, etc.)
       // Use safeReadJson() so empty body doesn't crash.
       const bodyObj = await safeReadJson(req);
-      const bodyStr = JSON.stringify(bodyObj ?? {});
+      
+      // If bodyObj is null (empty or parse failed), send empty object
+      const bodyStr = bodyObj !== null ? JSON.stringify(bodyObj) : JSON.stringify({});
 
       javaResp = await fetch(url, {
         method: "POST",

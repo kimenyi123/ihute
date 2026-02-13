@@ -19,7 +19,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
     { name: "Dashboard", href: "/supplier/dashboard" },
     // { name: "My Products", href: "/supplier/products" },
     { name: "Orders", href: "/supplier/orders" },
-    { name: "B2B Procurement / Kurangura byinshi", href: "/supplier/b2b" },
+    // { name: "B2B Procurement / Kurangura byinshi", href: "/supplier/b2b" },
     { name: "Expenses", href: "/supplier/expenses" },
     { name: "Add Product", href: "/supplier/products/add" },
     { name: "Settings", href: "/supplier/settings/location" },
@@ -43,15 +43,16 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [sidebarOpen, closeSidebar]);
 
-  // Optional: basic protection to ensure only suppliers see these routes
-  // CRITICAL: Only check after hydration to prevent logout loops
+  // Enhanced session protection with automatic redirect
   useEffect(() => {
     if (!hasHydrated) return; // Wait for store to load from localStorage
 
     if (!isAuthenticated || user?.role !== "supplier") {
+      // Clear any existing auth state and redirect
+      logout();
       router.replace("/login");
     }
-  }, [hasHydrated, isAuthenticated, user, router]);
+  }, [hasHydrated, isAuthenticated, user, router, logout]);
 
   return (
     <div className="min-h-screen bg-slate-50">

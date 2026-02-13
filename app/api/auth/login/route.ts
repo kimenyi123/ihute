@@ -26,7 +26,7 @@ export async function POST(req: Request) {
 
     const { email, password } = await req.json()
     // Only log non-sensitive metadata in development
-    debugLog(`[RID ${rid}] Received login request (email length=${String(email || "").length}, passwordLength=${password?.length || 0})`)
+    // debugLog(`[RID ${rid}] Received login request (email length=${String(email || "").length}, passwordLength=${password?.length || 0})`)
 
     if (!JAVA_AUTH_URL) {
       debugError(`[RID ${rid}] FATAL: Missing JAVA_AUTH_URL environment variable`)

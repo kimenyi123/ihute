@@ -526,6 +526,164 @@ export async function submitQuickBuy(items: QuickBuyItem[]): Promise<{
   return data;
 }
 
+// ============================================================
+// NEGOTIATION API FUNCTIONS (Task 6.3)
+// ============================================================
+
+export interface Negotiation {
+  id: number;
+  orderId: number;
+  status: "OPEN" | "AGREED" | "REJECTED" | "EXPIRED";
+  currentOfferId: number | null;
+  startedAt: string;
+  updatedAt: string;
+  expiresAt: string;
+  roundsCount: number;
+  buyerAcceptedOfferId: number | null;
+  sellerAcceptedOfferId: number | null;
+}
+
+export interface Offer {
+  id: number;
+  negotiationId: number;
+  createdByAccount: string;
+  createdByRole: "BUYER" | "SELLER";
+  note: string | null;
+  createdAt: string;
+  lines: OfferLine[];
+}
+
+export interface OfferLine {
+  id: number;
+  offerId: number;
+  orderLineId: number;
+  proposedQty: number;
+  proposedUnitPrice: number;
+  proposedSupplierStockId: number | null;
+  lineNote: string | null;
+}
+
+export interface LineUpdateForOffer {
+  lineId: number;
+  qty: number;
+  unitPrice: number;
+  supplierStockId?: number;
+  note?: string;
+}
+
+export interface NegotiationResponse {
+  ok: boolean;
+  negotiation: Negotiation;
+  message: string;
+}
+
+export interface GetNegotiationResponse {
+  ok: boolean;
+  negotiation: Negotiation;
+  currentOffer: Offer | null;
+  history: Offer[];
+}
+
+export interface MakeOfferResponse {
+  ok: boolean;
+  offerId: number;
+  message: string;
+}
+
+/**
+ * Start negotiation on an order
+ * POST with no body
+ */
+export async function startNegotiation(orderId: number): Promise<NegotiationResponse> {
+  const data = await apiFetch(
+    `/supplier/b2b/api?action=startNegotiation&orderId=${orderId}`,
+    { method: "POST" }
+  );
+  return data as NegotiationResponse;
+}
+
+/**
+ * Get negotiation details including header, current offer, and history
+ * GET request
+ */
+export async function getNegotiation(orderId: number): Promise<GetNegotiationResponse> {
+  const data = await apiFetch(
+    `/supplier/b2b/api?action=getNegotiation&orderId=${orderId}`
+  );
+  return data as GetNegotiationResponse;
+}
+
+/**
+ * Make or counter an offer in a negotiation
+ * POST with JSON body
+ */
+export async function makeOffer(params: {
+  negotiationId: number;
+  lineUpdates: LineUpdateForOffer[];
+  note?: string;
+  isCounter?: boolean;
+}): Promise<MakeOfferResponse> {
+  const data = await apiFetch(`/supplier/b2b/api?action=makeOffer`, {
+    method: "POST",
+    body: JSON.stringify({
+      negotiationId: params.negotiationId,
+      lineUpdates: params.lineUpdates,
+      note: params.note || null,
+      isCounter: params.isCounter || false,
+    }),
+  });
+  return data as MakeOfferResponse;
+}
+
+/**
+ * Accept the current offer in a negotiation
+ * POST with no body
+ */
+export async function acceptOffer(negotiationId: number): Promise<NegotiationResponse> {
+  const data = await apiFetch(
+    `/supplier/b2b/api?action=acceptOffer&negotiationId=${negotiationId}`,
+    { method: "POST" }
+  );
+  return data as NegotiationResponse;
+}
+
+/**
+ * Reject a negotiation
+ * POST with no body
+ */
+export async function rejectNegotiation(negotiationId: number): Promise<{
+  ok: boolean;
+  message: string;
+  negotiationId: number;
+  orderId: number;
+  status: string;
+}> {
+  const data = await apiFetch(
+    `/supplier/b2b/api?action=rejectNegotiation&negotiationId=${negotiationId}`,
+    { method: "POST" }
+  );
+  return data;
+}
+
+/**
+ * Finalize an agreed negotiation (SELLER-ONLY)
+ * POST with no body
+ */
+export async function finalizeNegotiation(negotiationId: number): Promise<{
+  ok: boolean;
+  message: string;
+  negotiationId: number;
+  orderId: number;
+  orderTotal: number;
+  status: string;
+}> {
+  const data = await apiFetch(
+    `/supplier/b2b/api?action=finalizeNegotiation&negotiationId=${negotiationId}`,
+    { method: "POST" }
+  );
+  return data;
+}
+
 export default {
   searchB2B,
   downloadTemplate,
@@ -543,4 +701,11 @@ export default {
   getInvoiceHtmlUrl,
   getInvoiceHtml,
   submitQuickBuy,
+  // Negotiation functions
+  startNegotiation,
+  getNegotiation,
+  makeOffer,
+  acceptOffer,
+  rejectNegotiation,
+  finalizeNegotiation,
 };
