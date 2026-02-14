@@ -4,7 +4,9 @@ export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 export const revalidate = 0
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/Trading"
+import { getBackendBase } from "@/lib/backend-config"
+
+const BACKEND_URL = getBackendBase()
 
 export async function POST(req: Request) {
   try {

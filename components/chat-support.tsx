@@ -348,16 +348,17 @@ export function ChatSupport() {
                           )}
 
                           {/* Link to full search */}
-                          <Link href="/search">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="w-full text-xs"
-                            >
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="w-full text-xs"
+                            asChild
+                          >
+                            <Link href="/search">
                               <Search className="h-3 w-3 mr-1" />
                               View all results
-                            </Button>
-                          </Link>
+                            </Link>
+                          </Button>
                         </div>
                       )}
                     </motion.div>

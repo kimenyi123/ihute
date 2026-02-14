@@ -4,7 +4,7 @@ export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 export const revalidate = 60 // Cache for 60 seconds
 
-const JAVA_BASE_URL = process.env.JAVA_BASE_URL || "https://ihute.rw/Trading"
+import { getFetchSuggestionsUrl } from "@/lib/backend-config"
 
 /**
  * Get Platform Statistics
@@ -17,7 +17,7 @@ export async function GET() {
 
     // Fetch statistics from backend
     // Using OrdersServlet for now - you can create StatsServlet later
-    const url = new URL(`${JAVA_BASE_URL}/Kaos/fetchSuggestions`)
+    const url = new URL(getFetchSuggestionsUrl())
     url.searchParams.set("action", "getPlatformStats")
 
     console.log("[stats] Calling backend:", url.toString())

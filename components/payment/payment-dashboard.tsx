@@ -39,7 +39,7 @@ import {
 import { WebhookMonitor } from './webhook-monitor';
 
 import { paymentDashboardApi } from '@/lib/payment-dashboard-api';
-import type { Transaction, SummaryStats, Alert, HealthStatus } from '@/lib/payment-dashboard-api';
+import type { Transaction, SummaryStats, Alert as AlertItem, HealthStatus } from '@/lib/payment-dashboard-api';
 
 // Types
 interface PaymentDashboardFilters {
@@ -81,7 +81,7 @@ const formatUTCTimestamp = (timestamp: string | null | undefined): string => {
 export default function PaymentDashboard({ initialFilters }: PaymentDashboardProps) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [summary, setSummary] = useState<SummaryStats | null>(null);
-  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -500,12 +500,12 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
           <AlertDescription>
             Unable to connect to the payment API. Please check:
             <ul className="list-disc list-inside mt-2 space-y-1">
-              <li>Backend server is running at {process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'}</li>
+              <li>Backend server is running at {process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw"}</li>
               <li>API URL is correctly configured in .env.local: NEXT_PUBLIC_API_URL</li>
               <li>Endpoints should be accessible at:
                 <ul className="list-disc list-inside ml-4 mt-1">
-                  <li>{process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'}/Trading/api/payment/reports/transactions</li>
-                  <li>OR {process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'}/api/payment/reports/transactions</li>
+                  <li>{process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw"}/Trading/api/payment/reports/transactions</li>
+                  <li>OR {process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw"}/api/payment/reports/transactions</li>
                 </ul>
               </li>
               <li>Check browser console (F12) for detailed error messages</li>

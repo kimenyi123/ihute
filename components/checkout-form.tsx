@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useCartStore } from "@/lib/cart-store"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -35,7 +35,7 @@ type CheckoutFormData = z.infer<typeof checkoutSchema>
 
 export function CheckoutForm() {
   const router = useRouter()
-  const { items, getTotalPrice, clearCart } = useCartStore()
+  const { items, getTotalPrice, clearCart, getTableInfo } = useCartStore()
   const [isProcessing, setIsProcessing] = useState(false)
   const [showReview, setShowReview] = useState(false)
   const [showMap, setShowMap] = useState(false)
@@ -55,17 +55,58 @@ export function CheckoutForm() {
 
   const paymentMethod = watch("paymentMethod")
 
+  // ✅ Pre-fill customer info from cart store tableInfo
+  useEffect(() => {
+    const tableInfo = getTableInfo()
+    console.log("[CheckoutForm] tableInfo from cart store:", tableInfo)
+
+    // 1️⃣ Preferred: use explicit fields when available
+    if (tableInfo?.customerName || tableInfo?.customerAddress) {
+      if (tableInfo.customerName) {
+        console.log("[CheckoutForm] Using customerName:", tableInfo.customerName)
+        setValue("fullName", tableInfo.customerName)
+      }
+      if (tableInfo.customerAddress) {
+        console.log("[CheckoutForm] Using customerAddress:", tableInfo.customerAddress)
+        setValue("address", tableInfo.customerAddress)
+      }
+      return
+    }
+
+    // 2️⃣ Backwards compatibility: parse tableNumber "Name | Address"
+    if (tableInfo?.tableNumber) {
+      console.log("[CheckoutForm] Found tableNumber:", tableInfo.tableNumber)
+
+      const parts = tableInfo.tableNumber.split("|").map((p) => p.trim())
+      console.log("[CheckoutForm] Parsed into parts:", parts)
+
+      if (parts.length >= 2) {
+        const [name, address] = parts
+        console.log("[CheckoutForm] Setting fullName:", name)
+        console.log("[CheckoutForm] Setting address:", address)
+
+        setValue("fullName", name)
+        setValue("address", address)
+      } else if (parts.length === 1 && parts[0]) {
+        console.log("[CheckoutForm] Only one part found, using as fullName:", parts[0])
+        setValue("fullName", parts[0])
+      }
+    } else {
+      console.log("[CheckoutForm] No tableInfo or tableNumber found")
+    }
+  }, [getTableInfo, setValue])
+
   if (items.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center">
         <h2 className="text-2xl font-bold text-foreground mb-2">No items in cart</h2>
         <p className="text-muted-foreground mb-6">Add some products before checking out</p>
-        <Link href="/">
-          <Button className="gap-2">
+        <Button className="gap-2" asChild>
+          <Link href="/">
             <ArrowLeft className="h-4 w-4" />
             Continue Shopping
-          </Button>
-        </Link>
+          </Link>
+        </Button>
       </div>
     )
   }
@@ -88,57 +129,51 @@ export function CheckoutForm() {
 
     setIsProcessing(true)
     try {
-      // ✅ UPDATED: Use correct endpoint and proper payload structure
       const res = await fetch("/api/orders/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          // Buyer information
           buyerEmail: data.email,
           buyerName: data.fullName,
           buyerPhone: data.phone,
           buyerLocation: `${data.address}, ${data.city}`,
-          
-          // Seller information (from first cart item)
+
           sellerAccount: items[0]?.supplierId || "",
           sellerName: items[0]?.supplierName || "",
-          sellerPhone: "", // Optional: add if available in cart
-          
-          // ✅ Payment information - KEY FIX
-          paymentName: data.paymentMethod === "momo" 
+          sellerPhone: "",
+
+          paymentName: data.paymentMethod === "momo"
             ? "PAID_MTN_MOMO"
-            : data.paymentMethod === "card" 
+            : data.paymentMethod === "card"
               ? "PAID_CARD"
               : "PAY_ON_DELIVERY",
           paymentId: `TXN-${Date.now()}`,
           reference: data.notes || `ORDER-${Date.now()}`,
           currency: "RWF",
-          
-          // Items from cart
+
           items: items.map((it) => ({
             name: it.name,
             qty: it.qty,
             unitPrice: it.price,
             unit: it.unit || "pcs",
+            itemCode: it.itemCode ?? it.id,
           })),
-          
-          // Optional: subtotal (will be calculated if not provided)
+
           subtotal: getTotalPrice(),
         }),
       })
 
       const json = await res.json()
-      
+
       if (!res.ok || !json?.ok) {
         throw new Error(json?.error || "Order creation failed")
       }
 
       console.log("✅ Order created successfully:", json)
-      
-      // Clear cart and redirect to order tracking page
+
       clearCart()
       router.push(`/track-order/${json.orderId}`)
-      
+
     } catch (e: any) {
       console.error("❌ Order creation error:", e)
       alert(e?.message || "Failed to create order. Please try again.")

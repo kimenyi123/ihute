@@ -100,11 +100,11 @@ export default function MyProductsPage() {
         let filtered = mappedProducts
 
         if (categoryFilter !== "all") {
-          filtered = filtered.filter((p) => p.category === categoryFilter)
+          filtered = filtered.filter((p: { category?: string }) => p.category === categoryFilter)
         }
 
         if (statusFilter !== "all") {
-          filtered = filtered.filter((p) => p.status === statusFilter)
+          filtered = filtered.filter((p: { status?: string }) => p.status === statusFilter)
         }
 
         setProducts(filtered)

@@ -22,14 +22,26 @@ export type Order = {
   items: OrderItem[]
   itemsCount?: number
   subtotal: number
-  status: "pending" | "processing" | "in-transit" | "delivered" | "cancelled"
+  status: "pending" | "processing" | "in-transit" | "delivered" | "cancelled" | "open" | "invoice"
   paymentStatus: "paid" | "pending" | "failed" | "unpaid"
   createdAt: string
 
   // ✨ Supplier view fields
   buyerId?: string
   buyerName?: string
+  buyerOwner?: string
+  buyerAccount?: string
+  sellerAccount?: string
   isGuest?: boolean
+  supplierStatus?: string
+  buyerTIN?: string
+  SUPPLIER_TIN?: string
+  /** Raw order status from API (e.g. "open") for financing checks */
+  orderStatus?: string
+  /** Amount from API when subtotal is from a different source */
+  amount?: number
+  /** Seller display name (orders list page) */
+  seller?: string
 }
 
 type OrdersState = {

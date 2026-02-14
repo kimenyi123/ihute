@@ -23,11 +23,11 @@ export function CTASection() {
               <p className="text-slate-600 text-sm mb-4">
                 Reach thousands of customers and grow your business with our platform
               </p>
-              <Link href="/register?type=supplier">
-                <Button className="w-full bg-orange-600 hover:bg-orange-700" size="lg">
+              <Button className="w-full bg-orange-600 hover:bg-orange-700" size="lg" asChild>
+                <Link href="/register?type=supplier">
                   Register as Supplier
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             </CardContent>
           </Card>
 
@@ -40,11 +40,11 @@ export function CTASection() {
               <p className="text-slate-600 text-sm mb-4">
                 Shop from local businesses and get products delivered to your door
               </p>
-              <Link href="/register?type=customer">
-                <Button className="w-full bg-green-600 hover:bg-green-700" size="lg">
+              <Button className="w-full bg-green-600 hover:bg-green-700" size="lg" asChild>
+                <Link href="/register?type=customer">
                   Register as Customer
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             </CardContent>
           </Card>
         </div>

@@ -1,9 +1,9 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/auth-store";
-import { useSupplierLocationHeartbeat } from "@/hooks/useSupplierLocationHeartbeat";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -12,6 +12,9 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Plus,
   Package,
@@ -23,26 +26,16 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
-  MapPin,
-  Radio,
+  Share2,
+  Copy,
 } from "lucide-react";
 import Link from "next/link";
-import { GPSStatusCard } from "@/components/supplier/GPSStatusCard";
+
+const QRCode = dynamic(() => import("react-qr-code"), { ssr: false });
 
 function SupplierDashboard() {
   const router = useRouter();
-  const { user, isAuthenticated, hasHydrated, logout } = useAuthStore();
-
-  // GPS State - controlled by admin config + seller override
-  const [gpsEnabled, setGpsEnabled] = useState(false);
-  const [gpsConfigLoaded, setGpsConfigLoaded] = useState(false);
-
-  // GPS tracking hook - starts monitoring location when GPS is enabled
-  const { status: gpsStatus, isOnline, queueSize } = useSupplierLocationHeartbeat({
-    enabled: gpsEnabled,
-    debug: false, // Set to true to see GPS logs in console
-  });
-
+  const { user, isAuthenticated, logout } = useAuthStore();
   const [supplierProducts, setSupplierProducts] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
@@ -51,22 +44,29 @@ function SupplierDashboard() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [hasMounted, setHasMounted] = useState(false);
+
+  // Shop With Me QR (collapsible so it doesn't interrupt the main dashboard)
+  const [shopWithMeQROpen, setShopWithMeQROpen] = useState(false);
+  const [shopNickname, setShopNickname] = useState("");
+  const [isBarOrRestaurant, setIsBarOrRestaurant] = useState(false);
+  const [tableNameOrNumber, setTableNameOrNumber] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
 
   useEffect(() => {
-    // CRITICAL: Wait for auth store to rehydrate from localStorage before checking authentication
-    if (!hasHydrated) {
-      return; // Don't redirect yet - store is still loading from localStorage
-    }
+    if (typeof window !== "undefined") setBaseUrl(window.location.origin);
+  }, []);
 
-    // Mark as mounted only after hydration is complete
-    if (!hasMounted) {
-      setHasMounted(true);
-    }
+  const shopWithMeLink = shopNickname.trim()
+    ? `${baseUrl}/shop-with-me?nickname=${encodeURIComponent(shopNickname.trim().toLowerCase())}${isBarOrRestaurant && tableNameOrNumber.trim() ? `&table=${encodeURIComponent(tableNameOrNumber.trim())}` : ""}`
+    : "";
 
-    // Only check auth on initial mount AFTER hydration, not on every re-render
-    // This prevents logout loops during page navigation
-    if (hasMounted && (!isAuthenticated || user?.role !== "supplier")) {
+  const copyShopWithMeLink = () => {
+    if (!shopWithMeLink) return;
+    navigator.clipboard.writeText(shopWithMeLink).then(() => alert("Link copied to clipboard"));
+  };
+
+  useEffect(() => {
+    if (!isAuthenticated || user?.role !== "supplier") {
       router.push("/login");
       return;
     }
@@ -74,45 +74,6 @@ function SupplierDashboard() {
     if (!user?.ishyigaAccount) {
       setError("No ishyigaAccount found for user");
       setLoading(false);
-      return;
-    }
-
-    // Fetch GPS config to determine if GPS should be enabled for this seller
-    const fetchGPSConfig = async () => {
-      try {
-        const response = await fetch("/api/supplier/gps-status", {
-          credentials: "include",
-        });
-        const data = await response.json();
-
-        if (data.ok) {
-          console.log('[GPS-CONFIG] GPS enabled:', data.gpsEnabled);
-          setGpsEnabled(data.gpsEnabled);
-          setGpsConfigLoaded(true);
-        } else {
-          console.warn('[GPS-CONFIG] Failed to fetch GPS config:', data.error);
-          // Default to disabled if config fetch fails
-          setGpsEnabled(false);
-          setGpsConfigLoaded(true);
-        }
-      } catch (error) {
-        console.error('[GPS-CONFIG] Error fetching GPS config:', error);
-        // Default to disabled on error
-        setGpsEnabled(false);
-        setGpsConfigLoaded(true);
-      }
-    };
-
-    // Add delay to ensure cookies are set, then fetch GPS config
-    const gpsTimer = setTimeout(() => {
-      fetchGPSConfig();
-    }, 500);
-
-    return () => clearTimeout(gpsTimer);
-  }, [hasHydrated, hasMounted, isAuthenticated, user, router]);
-
-  useEffect(() => {
-    if (!user?.ishyigaAccount) {
       return;
     }
 
@@ -127,11 +88,18 @@ function SupplierDashboard() {
         return res.json();
       })
       .then((data) => {
+        console.log("=== API Response ===");
+        console.log("Full data:", data);
+        console.log("Products array:", data.products);
+        console.log("Count:", data.count);
+        console.log("Source:", data.source);
+
         if (!data.ok) {
           throw new Error(data.error || "API returned ok: false");
         }
 
         const products = data.products || [];
+        console.log(`Received ${products.length} products from ${data.source}`);
 
         // Helper function to parse Redis price strings like "1880.0RWF"
         const parsePrice = (value: any): number => {
@@ -147,6 +115,8 @@ function SupplierDashboard() {
 
         // Map products - handle both database and Redis formats
         const mappedProducts = products.map((p: any, index: number) => {
+          console.log(`Product ${index}:`, p);
+
           // Parse price from various sources
           const price = parsePrice(
             p.price ||
@@ -187,8 +157,13 @@ function SupplierDashboard() {
             sales: 0,
           };
 
+          console.log(`Mapped product ${index}:`, mapped);
           return mapped;
         });
+
+        console.log("=== All Mapped Products ===");
+        console.log(mappedProducts);
+        console.log(`Total: ${mappedProducts.length}`);
 
         // Don't filter by stock > 0, show ALL products
         setSupplierProducts(mappedProducts);
@@ -199,7 +174,7 @@ function SupplierDashboard() {
         setError(err.message);
         setLoading(false);
       });
-  }, [isAuthenticated, user, router, hasHydrated]);
+  }, [isAuthenticated, user, router]);
 
   const handleLogout = () => {
     logout();
@@ -304,98 +279,22 @@ function SupplierDashboard() {
             <h1 className="text-2xl font-bold text-slate-900">
               {user?.businessName || "Supplier Dashboard"}
             </h1>
-            <div className="flex items-center gap-2">
-              <p className="text-sm text-slate-600">
-                {user?.businessCategory || "Supplier Panel"} • Account: {user?.ishyigaAccount}
-              </p>
-              {gpsStatus === "watching" && (
-                <div className="flex items-center gap-1 text-xs text-green-600">
-                  <Radio className="h-3 w-3 animate-pulse" />
-                  <span>GPS Active</span>
-                </div>
-              )}
-              {gpsStatus === "denied" && (
-                <div className="flex items-center gap-1 text-xs text-amber-600">
-                  <AlertTriangle className="h-3 w-3" />
-                  <span>GPS Disabled</span>
-                </div>
-              )}
-            </div>
+            <p className="text-sm text-slate-600">
+              {user?.businessCategory || "Supplier Panel"} • Account: {user?.ishyigaAccount}
+            </p>
           </div>
-          <div className="flex gap-2">
-            {/* GPS Tracking Dropdown */}
-            <div className="relative group">
-              <Button
-                variant="outline"
-                className="gap-2"
-              >
-                <Radio className="h-4 w-4" />
-                GPS Tracking
-              </Button>
-              <div className="absolute right-0 mt-2 w-56 bg-white border rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
-                <div className="p-2 space-y-1">
-                  <Link
-                    href="/supplier/gps/live"
-                    className="flex items-center gap-2 px-3 py-2 rounded hover:bg-slate-50 text-sm"
-                  >
-                    <Radio className="h-4 w-4 text-green-600" />
-                    <span>Live Location</span>
-                  </Link>
-                  <Link
-                    href="/supplier/gps/history"
-                    className="flex items-center gap-2 px-3 py-2 rounded hover:bg-slate-50 text-sm"
-                  >
-                    <MapPin className="h-4 w-4 text-blue-600" />
-                    <span>Route History</span>
-                  </Link>
-                  <Link
-                    href="/supplier/gps/zones"
-                    className="flex items-center gap-2 px-3 py-2 rounded hover:bg-slate-50 text-sm"
-                  >
-                    <TrendingUp className="h-4 w-4 text-purple-600" />
-                    <span>Activity Zones</span>
-                  </Link>
-                  <Link
-                    href="/supplier/gps/coverage"
-                    className="flex items-center gap-2 px-3 py-2 rounded hover:bg-slate-50 text-sm"
-                  >
-                    <Package className="h-4 w-4 text-orange-600" />
-                    <span>Coverage Area</span>
-                  </Link>
-                  <div className="border-t my-1"></div>
-                  <Link
-                    href="/supplier/gps/settings"
-                    className="flex items-center gap-2 px-3 py-2 rounded hover:bg-slate-50 text-sm"
-                  >
-                    <Edit className="h-4 w-4 text-slate-600" />
-                    <span>GPS Settings</span>
-                  </Link>
-                </div>
-              </div>
-            </div>
-
-            <Button
-              variant="outline"
-              onClick={() => router.push("/supplier/settings/location")}
-              className="gap-2"
-            >
-              <MapPin className="h-4 w-4" />
-              Settings
-            </Button>
-            <Button variant="outline" onClick={handleLogout} className="gap-2">
-              <LogOut className="h-4 w-4" />
-              Logout
-            </Button>
-          </div>
+          <Button variant="outline" onClick={handleLogout} className="gap-2">
+            <LogOut className="h-4 w-4" />
+            Logout
+          </Button>
         </div>
       </header>
 
       <div className="container mx-auto px-6 py-8">
 
 
-
         {/* Stats Section */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <Card className="bg-white shadow-md hover:shadow-lg transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-slate-600">
@@ -463,16 +362,91 @@ function SupplierDashboard() {
               <p className="text-xs text-slate-500 mt-1">Items with 0 stock</p>
             </CardContent>
           </Card>
-
-          {/* GPS Status Card */}
-          <div className="md:col-span-2 lg:col-span-1">
-            <GPSStatusCard
-              status={gpsStatus}
-              isOnline={isOnline}
-              queueSize={queueSize}
-            />
-          </div>
         </div>
+
+        {/* Shop With Me QR Code — collapsible so original dashboard stays primary */}
+        <Card className="bg-white shadow-md mb-8">
+          <CardHeader
+            className="border-b bg-slate-50 cursor-pointer hover:bg-slate-100 transition-colors select-none"
+            onClick={() => setShopWithMeQROpen((o) => !o)}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Share2 className="h-6 w-6 text-blue-600 shrink-0" />
+                <div>
+                  <CardTitle className="text-xl">QR Code</CardTitle>
+                  <CardDescription className="mt-1">
+                    {shopWithMeQROpen
+                      ? "Customers scan this to browse your products. Collapse when not needed."
+                      : "Generate a link and QR so customers can browse your shop. Click to expand."}
+                  </CardDescription>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {shopNickname.trim() && shopWithMeLink && (
+                  <span className="text-xs text-slate-500 font-mono truncate max-w-[140px]" title={shopWithMeLink}>
+                    {shopNickname}
+                  </span>
+                )}
+                <ChevronRight
+                  className={`h-5 w-5 text-slate-500 transition-transform ${shopWithMeQROpen ? "rotate-90" : ""}`}
+                />
+              </div>
+            </div>
+          </CardHeader>
+          {shopWithMeQROpen && (
+            <CardContent className="p-6 space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="shop-nickname">Your shop nickname *</Label>
+                  <Input
+                    id="shop-nickname"
+                    placeholder="known as"
+                    value={shopNickname}
+                    onChange={(e) => setShopNickname(e.target.value)}
+                    className="max-w-xs"
+                  />
+                </div>
+                <div className="flex items-center space-x-2 pt-6">
+                  <Checkbox
+                    id="bar-restaurant"
+                    checked={isBarOrRestaurant}
+                    onCheckedChange={(checked) => setIsBarOrRestaurant(!!checked)}
+                  />
+                  <Label htmlFor="bar-restaurant" className="cursor-pointer">
+                    Bar or Restaurant
+                  </Label>
+                </div>
+              </div>
+              {isBarOrRestaurant && (
+                <div className="space-y-2 max-w-xs">
+                  <Label htmlFor="table-name">Default table name or number (optional)</Label>
+                  <Input
+                    id="table-name"
+                    placeholder="e.g. Table 5"
+                    value={tableNameOrNumber}
+                    onChange={(e) => setTableNameOrNumber(e.target.value)}
+                  />
+                </div>
+              )}
+              {shopWithMeLink && (
+                <div className="flex flex-col sm:flex-row gap-4 items-start pt-4 border-t">
+                  <div className="bg-slate-50 p-4 rounded-lg">
+                    <QRCode value={shopWithMeLink} size={180} />
+                  </div>
+                  <div className="flex-1 min-w-0 space-y-2">
+                    <Label className="text-slate-600">Link</Label>
+                    <p className="text-sm text-slate-700 break-all font-mono">{shopWithMeLink}</p>
+                    <Button variant="outline" size="sm" onClick={copyShopWithMeLink} className="gap-2">
+                      <Copy className="h-4 w-4" />
+                      Copy link
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          )}
+        </Card>
 
         {/* Product Management Card */}
         <Card className="bg-white shadow-md">
@@ -486,18 +460,18 @@ function SupplierDashboard() {
               </div>
 
               <div className="flex gap-2">
-                <Link href="/supplier/products/bulk-upload">
-                  <Button variant="outline" className="gap-2">
+                <Button asChild variant="outline" className="gap-2">
+                  <Link href="/supplier/products/bulk-upload">
                     <Package className="h-4 w-4" />
                     Bulk Upload
-                  </Button>
-                </Link>
-                <Link href="/supplier/products/add">
-                  <Button className="gap-2 bg-blue-600 hover:bg-blue-700">
+                  </Link>
+                </Button>
+                <Button asChild className="gap-2 bg-blue-600 hover:bg-blue-700">
+                  <Link href="/supplier/products/add">
                     <Plus className="h-4 w-4" />
                     Add Product
-                  </Button>
-                </Link>
+                  </Link>
+                </Button>
               </div>
             </div>
           </CardHeader>
@@ -560,9 +534,9 @@ function SupplierDashboard() {
                     : "No products found"}
                 </p>
                 {supplierProducts.length === 0 && (
-                  <Link href="/supplier/products/add">
-                    <Button className="mt-4">Add Your First Product</Button>
-                  </Link>
+                  <Button asChild className="mt-4">
+                    <Link href="/supplier/products/add">Add Your First Product</Link>
+                  </Button>
                 )}
               </div>
             ) : (
@@ -629,24 +603,26 @@ function SupplierDashboard() {
                             </td>
                             <td className="px-4 py-4 text-center">
                               <span
-                                className={`font-semibold ${p.stock === 0
-                                  ? "text-red-600"
-                                  : p.stock <= 10
+                                className={`font-semibold ${
+                                  p.stock === 0
+                                    ? "text-red-600"
+                                    : p.stock <= 10
                                     ? "text-yellow-600"
                                     : "text-slate-900"
-                                  }`}
+                                }`}
                               >
                                 {p.stock}
                               </span>
                             </td>
                             <td className="px-4 py-4 text-center">
                               <span
-                                className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${p.stock === 0
-                                  ? "bg-red-100 text-red-700"
-                                  : p.stock <= 10
+                                className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
+                                  p.stock === 0
+                                    ? "bg-red-100 text-red-700"
+                                    : p.stock <= 10
                                     ? "bg-yellow-100 text-yellow-700"
                                     : "bg-blue-100 text-blue-700"
-                                  }`}
+                                }`}
                               >
                                 {p.stock === 0 ? "Out of Stock" : p.stock <= 10 ? "Low Stock" : "Active"}
                               </span>
@@ -664,17 +640,16 @@ function SupplierDashboard() {
                             </td>
                             <td className="px-4 py-4">
                               <div className="flex items-center justify-center gap-2">
-                                <Link
-                                  href={`/supplier/products/edit/${displayCode}`}
+                                <Button
+                                  asChild
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-8 w-8 p-0 hover:bg-blue-50 hover:text-blue-600"
                                 >
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    className="h-8 w-8 p-0 hover:bg-blue-50 hover:text-blue-600"
-                                  >
+                                  <Link href={`/supplier/products/edit/${displayCode}`}>
                                     <Edit className="h-4 w-4" />
-                                  </Button>
-                                </Link>
+                                  </Link>
+                                </Button>
                                 <Button
                                   size="sm"
                                   variant="ghost"
@@ -751,10 +726,11 @@ function SupplierDashboard() {
                               }
                               size="sm"
                               onClick={() => setCurrentPage(page)}
-                              className={`h-8 w-8 p-0 ${currentPage === page
-                                ? "bg-blue-600 hover:bg-blue-700"
-                                : ""
-                                }`}
+                              className={`h-8 w-8 p-0 ${
+                                currentPage === page
+                                  ? "bg-blue-600 hover:bg-blue-700"
+                                  : ""
+                              }`}
                             >
                               {page}
                             </Button>

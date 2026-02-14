@@ -1,8 +1,9 @@
 // app/api/personalization/recommendations/route.ts
 import { NextResponse } from "next/server"
 
-const JAVA_BACKEND_URL = 
-  process.env.JAVA_BACKEND_BASE || "https://ihute.rw/Trading"
+import { getBackendBase } from "@/lib/backend-config"
+
+const JAVA_BACKEND_URL = getBackendBase()
 
 export async function GET(req: Request) {
   try {

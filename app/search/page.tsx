@@ -8,16 +8,13 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { useCartStore } from "@/lib/cart-store"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { filterSuppliersByRelevance, filterProductsByRelevance } from "@/lib/search-utils"
+import { filterSuppliersByRelevance } from "@/lib/search-utils"
 import { getTranslations } from "@/lib/keyword-mapping"
-import { Languages, MapPin, Store } from "lucide-react"
+import { MapPin, Store } from "lucide-react"
 import { useTableCommandStore } from "@/lib/table-command-store"
 import { useLocationStoreEnhanced } from "@/lib/location-store-enhanced"
 import { LocationBadge } from "@/components/location-badge"
-import { useGeolocation } from "@/hooks/use-geolocation"
-import { searchNearbyProducts, NearbyProduct } from "@/lib/location-search-api"
-import { DistanceBadge } from "@/components/distance-badge"
-import { RatingBadge } from "@/components/RatingBadge"
+import { ProductCard } from "@/components/product-card"
 
 type Shop = {
   supplier_account: string
@@ -26,8 +23,6 @@ type Shop = {
   type: string
   match_type?: string
   product_count?: number
-  rating_star?: number
-  total_ratings?: number
 }
 
 type Product = {
@@ -62,7 +57,7 @@ type SectorSeller = {
   products: Product[]
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || ""
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || process.env.NEXT_PUBLIC_API_URL || ""
 const SECTOR_OPTIONS = [
   "pharmacy",
   "supermarket",
@@ -83,6 +78,93 @@ function extractNumericPrice(value: any): number {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+function toCardProduct(p: Product) {
+  return {
+    id: p.item_code || p.item_key_words || `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`,
+    name: p.item_commercial_name || "Product",
+    description: undefined, // hide code (item_key_words) from UI
+    price: extractNumericPrice(p.item_emballage),
+    unit: "", // item_packet is quantity, not a unit label
+    inStock: true,
+    rating: 4,
+    supplierId: p.supplier_account,
+    supplierName: p.supplier_name || p.supplier_account || "Supplier",
+    supplierLocation: p.supplier_location,
+    momo: p.momo,
+    image: p.image || "/placeholder.svg?height=300&width=300",
+  }
+}
+
+/** Normalize supplier products from API. Backend/Redis may return: object with "data" array (Redis: { key, data: [flat products] }), array (flat or with nested .items), or object with .sellers/.products. Flatten to Product[] so names and prices display. */
+function normalizeSupplierProductsResponse(
+  data: any,
+  supplierAccount: string,
+  supplierName: string
+): Product[] {
+  if (!data) return []
+  const supplier_account = supplierAccount
+  const supplier_name = supplierName
+
+  // Redis shape: { key: "supplier_ALG000017701", data: [ product1, product2, ... ] } — flat array in .data
+  if (typeof data === "object" && Array.isArray(data.data)) {
+    return normalizeSupplierProductsResponse(data.data, supplierAccount, supplierName)
+  }
+
+  if (Array.isArray(data)) {
+    const flat: Product[] = []
+    for (const p of data) {
+      const items = (p as any).items
+      if (Array.isArray(items) && items.length > 0) {
+        for (const item of items) {
+          flat.push({
+            item_code: item.item_key_words ?? item.item_code ?? "",
+            item_commercial_name: item.item_commercial_name ?? item.item_name ?? "Product",
+            item_packet: item.item_packet,
+            item_emballage: item.item_emballage ?? item.price ?? "",
+            item_key_words: item.item_key_words,
+            supplier_account,
+            supplier_name,
+            supplier_location: (p as any).supplier_location ?? undefined,
+            type: (p as any).type ?? "product",
+            image: item.image,
+            momo: item.momo ?? (p as any).momo,
+          })
+        }
+      } else {
+        flat.push({
+          item_code: (p as any).item_key_words ?? (p as any).item_code ?? "",
+          item_commercial_name: (p as any).item_commercial_name ?? (p as any).item_name ?? "Product",
+          item_packet: (p as any).item_packet,
+          item_emballage: (p as any).item_emballage ?? (p as any).price ?? "",
+          item_key_words: (p as any).item_key_words,
+          supplier_account: (p as any).supplier_account ?? supplier_account,
+          supplier_name: (p as any).supplier_name ?? supplier_name,
+          supplier_location: (p as any).supplier_location,
+          type: (p as any).type ?? "product",
+          image: (p as any).image,
+          momo: (p as any).momo,
+        })
+      }
+    }
+    return flat
+  }
+
+  if (typeof data === "object" && Array.isArray(data.sellers)) {
+    const seller = data.sellers.find(
+      (s: any) => (s.ISHYIGA_ACCOUNT ?? s.seller_account) === supplierAccount
+    ) ?? data.sellers[0]
+    if (!seller) return []
+    const rawProducts = seller.products ?? []
+    return normalizeSupplierProductsResponse(
+      rawProducts,
+      seller.ISHYIGA_ACCOUNT ?? seller.seller_account ?? supplierAccount,
+      seller.OWNER ?? seller.SELLER_NAMES ?? seller.seller_name ?? supplierName
+    )
+  }
+
+  return Array.isArray(data.products) ? normalizeSupplierProductsResponse(data.products, supplierAccount, supplierName) : []
+}
+
 export default function SearchPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -93,8 +175,6 @@ export default function SearchPage() {
   const supplierNameParam = searchParams.get("supplierName")
   const locationParam = searchParams.get("location") || ""
   const sectorParam = searchParams.get("sector") || ""
-  const minRatingParam = searchParams.get("minRating") || ""
-  const sortByParam = searchParams.get("sortBy") || ""
 
   const [q, setQ] = useState(initialQ)
   const [debouncedQ, setDebouncedQ] = useState("")
@@ -107,8 +187,6 @@ export default function SearchPage() {
   // Compact filter bar (draft inputs)
   const [locationDraft, setLocationDraft] = useState(locationParam)
   const [sectorDraft, setSectorDraft] = useState(sectorParam)
-  const [minRating, setMinRating] = useState(minRatingParam)
-  const [sortBy, setSortBy] = useState(sortByParam)
 
   // Sector spotlight data
   const [sectorSellers, setSectorSellers] = useState<SectorSeller[]>([])
@@ -124,14 +202,6 @@ export default function SearchPage() {
     addToTableCart,
     tableCartItems
   } = useTableCommandStore()
-
-  // 🔥 NEW: Geolocation and nearby search
-  const { location: userGPS, loading: gpsLoading, denied: gpsDenied } = useGeolocation()
-  const [nearbyResults, setNearbyResults] = useState<{ results: NearbyProduct[]; query: string; radius_used_km: number } | null>(null)
-  const [loadingNearby, setLoadingNearby] = useState(false)
-
-  // Supplier GPS coordinates map for distance calculation
-  const [supplierGPSMap, setSupplierGPSMap] = useState<Map<string, { lat: number; lng: number }>>(new Map())
 
   // Keep drafts in sync with URL changes
   useEffect(() => setLocationDraft(locationParam), [locationParam])
@@ -212,7 +282,6 @@ export default function SearchPage() {
     }
   }
 
-
   // Small helper to push URL with preserved params (and real clearing support)
   const pushWith = (updates: Record<string, string | undefined>) => {
     const params = new URLSearchParams()
@@ -273,51 +342,7 @@ export default function SearchPage() {
     return () => clearTimeout(t)
   }, [supplierSearch])
 
-  // Fetch supplier GPS coordinates for distance calculation
-  useEffect(() => {
-    const fetchSupplierGPS = async () => {
-      try {
-        const response = await fetch('/api/admin/gps-audit', { cache: 'no-store' })
-        if (!response.ok) return
-
-        const data = await response.json()
-        const suppliers = data.issues || []
-
-        // Build GPS map for quick lookup
-        const gpsMap = new Map<string, { lat: number; lng: number }>()
-        suppliers.forEach((s: any) => {
-          if (s.ISHYIGA_ACCOUNT && s.supplier_latitude && s.supplier_longitude) {
-            gpsMap.set(s.ISHYIGA_ACCOUNT, {
-              lat: s.supplier_latitude,
-              lng: s.supplier_longitude
-            })
-          }
-        })
-
-        setSupplierGPSMap(gpsMap)
-        console.log(`[SearchPage] Loaded GPS data for ${gpsMap.size} suppliers`)
-      } catch (error) {
-        console.error('[SearchPage] Failed to fetch GPS data:', error)
-      }
-    }
-
-    fetchSupplierGPS()
-  }, [])
-
-  // Helper function to calculate distance using Haversine formula
-  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
-    const R = 6371 // Earth's radius in km
-    const dLat = (lat2 - lat1) * Math.PI / 180
-    const dLon = (lon2 - lon1) * Math.PI / 180
-    const a =
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-      Math.sin(dLon / 2) * Math.sin(dLon / 2)
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-    return R * c
-  }
-
-  // Unified global search (LEFT) - Now with enhanced relevance filtering
+  // ====== MAIN FIX: Trust backend translation results ======
   useEffect(() => {
     let cancelled = false
     async function run() {
@@ -353,25 +378,21 @@ export default function SearchPage() {
           : { suppliersByName: [], suppliersByProduct: [], products: [], query: debouncedQ }
 
         if (!cancelled) {
-          // Apply enhanced relevance filtering on the client side
-          // Using stricter thresholds to avoid unrelated results
-          const filteredProducts = filterProductsByRelevance(
-            data.products || [],
-            debouncedQ,
-            25 // Strict threshold - only word boundary matches or better
-          )
+          // ✅ FIX: Trust backend - it already handles translation!
+          // No client-side filtering for products since backend does the work
+          const filteredProducts = data.products || []
 
-          // Filter suppliers by relevance while preserving their original match_type
+          // Keep light filtering for suppliers (optional - can be removed if backend handles it)
           const filteredSuppliersByName = filterSuppliersByRelevance(
             data.suppliersByName || [],
             debouncedQ,
-            15 // Lower threshold - show more supplier results
+            10 // Lower threshold for suppliers
           )
 
           const filteredSuppliersByProduct = filterSuppliersByRelevance(
             data.suppliersByProduct || [],
             debouncedQ,
-            15 // Lower threshold - show more supplier results
+            10 // Lower threshold for suppliers
           )
 
           setSearchResult({
@@ -413,37 +434,6 @@ export default function SearchPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedQ, selectedShop?.supplier_account, locationParam])
 
-  // 🔥 NEW: Nearby product search with geolocation
-  useEffect(() => {
-    let cancelled = false
-    async function run() {
-      // Only search nearby if we have a query, GPS location, and no specific supplier selected
-      if (!debouncedQ || debouncedQ.length < 2 || !userGPS || selectedShop) {
-        setNearbyResults(null)
-        return
-      }
-
-      setLoadingNearby(true)
-      try {
-        const data = await searchNearbyProducts(debouncedQ, userGPS.lat, userGPS.lng, 10)
-        if (!cancelled) {
-          setNearbyResults(data)
-        }
-      } catch (error) {
-        console.error("Nearby search error:", error)
-        if (!cancelled) {
-          setNearbyResults(null)
-        }
-      } finally {
-        if (!cancelled) setLoadingNearby(false)
-      }
-    }
-    run()
-    return () => {
-      cancelled = true
-    }
-  }, [debouncedQ, userGPS, selectedShop])
-
   // Seller catalogue (RIGHT)
   useEffect(() => {
     let cancelled = false
@@ -458,7 +448,12 @@ export default function SearchPage() {
           selectedShop.supplier_account,
         )}&limit=100&Currency=RWF`
         const res = await fetch(url, { cache: "no-store" })
-        const data: Product[] = res.ok ? await res.json() : []
+        const raw = res.ok ? await res.json() : null
+        const data = normalizeSupplierProductsResponse(
+          raw,
+          selectedShop.supplier_account,
+          selectedShop.supplier_name,
+        )
         if (!cancelled) setShopProducts(Array.isArray(data) ? data : [])
       } catch {
         if (!cancelled) setShopProducts([])
@@ -472,15 +467,15 @@ export default function SearchPage() {
     }
   }, [selectedShop])
 
-  // Filter shop products based on supplier search with relevance
+  // Filter shop products - simple text search (no strict filtering)
   const filteredShopProducts = useMemo(() => {
     if (!debouncedSupplierSearch) return shopProducts
 
-    return filterProductsByRelevance(
-      shopProducts,
-      debouncedSupplierSearch,
-      5 // Lower threshold for within-supplier search
-    )
+    const searchLower = debouncedSupplierSearch.toLowerCase()
+    return shopProducts.filter(product => {
+      const productText = `${product.item_commercial_name} ${product.item_key_words || ''}`.toLowerCase()
+      return productText.includes(searchLower)
+    })
   }, [shopProducts, debouncedSupplierSearch])
 
   // Merge suppliers from both buckets (no dupes)
@@ -582,67 +577,6 @@ export default function SearchPage() {
   // Calculate total items in table cart
   const tableCartItemCount = tableCartItems.reduce((total, item) => total + item.qty, 0)
 
-  // Enrich products with distance and sort by RELEVANCE first, then proximity
-  const productsWithDistance = useMemo(() => {
-    if (!searchResult?.products || !userGPS || !supplierGPSMap.size) {
-      return searchResult?.products || []
-    }
-
-    // Add distance and text relevance to each product
-    const searchTerm = debouncedQ.toLowerCase().trim()
-
-    const enriched = searchResult.products.map(p => {
-      const supplierId = p.supplier_account
-      const productName = (p.item_commercial_name || '').toLowerCase()
-
-      // Calculate text relevance boost
-      let textScore = p.relevance_score || p.finalScore || 0
-      if (searchTerm && productName.includes(searchTerm)) {
-        const exactMatch = productName === searchTerm
-        const startsWithMatch = productName.startsWith(searchTerm)
-        if (exactMatch) {
-          textScore += 1000
-        } else if (startsWithMatch) {
-          textScore += 500
-        } else {
-          textScore += 100
-        }
-      }
-
-      // Calculate distance
-      let distance: number | undefined = undefined
-      if (supplierId && userGPS && supplierGPSMap.size) {
-        const supplierGPS = supplierGPSMap.get(supplierId)
-        if (supplierGPS) {
-          distance = calculateDistance(
-            userGPS.lat,
-            userGPS.lng,
-            supplierGPS.lat,
-            supplierGPS.lng
-          )
-        }
-      }
-
-      return { ...p, calculated_distance_km: distance, text_score: textScore }
-    })
-
-    // Sort by RELEVANCE (finalScore) first, then by distance
-    return enriched.sort((a, b) => {
-      // Primary sort: relevance score (higher is better)
-      const scoreA = a.relevance_score || a.finalScore || 0
-      const scoreB = b.relevance_score || b.finalScore || 0
-
-      if (scoreB !== scoreA) {
-        return scoreB - scoreA // High score first
-      }
-
-      // Secondary sort: distance (lower is better) 
-      const distA = a.calculated_distance_km ?? Infinity
-      const distB = b.calculated_distance_km ?? Infinity
-      return distA - distB
-    })
-  }, [searchResult?.products, userGPS, supplierGPSMap])
-
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
@@ -652,7 +586,7 @@ export default function SearchPage() {
           <LocationBadge />
         </div>
 
-        {/* Table Context Indicator - Added here */}
+        {/* Table Context Indicator */}
         {tableCommand && (
           <div className="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-lg">
             <div className="flex items-center justify-between">
@@ -670,7 +604,6 @@ export default function SearchPage() {
               <Button
                 size="sm"
                 variant="outline"
-              // onClick={() => router.push("/cart")}
               >
                 View My Cart ({tableCartItemCount} items)
               </Button>
@@ -678,39 +611,6 @@ export default function SearchPage() {
             <p className="text-xs text-purple-600 mt-1">
               Your items will be grouped with others at this table. Only you can see your own items.
             </p>
-          </div>
-        )}
-
-        {/* 🔥 NEW: GPS Status Indicator */}
-        {gpsLoading && (
-          <div className="mb-3 p-2 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-2">
-            <MapPin className="h-4 w-4 text-blue-600 animate-pulse" />
-            <span className="text-sm text-blue-700">Getting your location for nearby results...</span>
-          </div>
-        )}
-
-        {gpsDenied && !gpsLoading && (
-          <div className="mb-3 p-2 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-2">
-            <MapPin className="h-4 w-4 text-amber-600" />
-            <span className="text-sm text-amber-700">
-              Location access denied. Using Kigali as default.
-              <button
-                className="ml-2 underline hover:text-amber-900"
-                onClick={() => window.location.reload()}
-              >
-                Enable location
-              </button>
-            </span>
-          </div>
-        )}
-
-        {userGPS && !gpsDenied && !gpsLoading && debouncedQ && (
-          <div className="mb-3 p-2 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2">
-            <MapPin className="h-4 w-4 text-green-600" />
-            <span className="text-sm text-green-700">
-              Showing nearby results based on your location
-              {loadingNearby && <span className="ml-2 animate-pulse">• Searching...</span>}
-            </span>
           </div>
         )}
 
@@ -726,20 +626,7 @@ export default function SearchPage() {
         </div>
 
         {/* Translation Hint */}
-        {translations && (
-          <div className="mb-3 flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-xs">
-            <Languages className="h-4 w-4 text-blue-600 flex-shrink-0" />
-            <div className="flex-1">
-              <span className="text-slate-700">Also searching for: </span>
-              <span className="font-semibold text-blue-700">
-                {translations.english.slice(0, 3).join(", ")}
-                {translations.kinyarwanda.length > 0 && translations.kinyarwanda[0].toLowerCase() !== debouncedQ.toLowerCase() && (
-                  <> • {translations.kinyarwanda.slice(0, 2).join(", ")}</>
-                )}
-              </span>
-            </div>
-          </div>
-        )}
+        {/* Translation hint removed (AI icon row) */}
 
         {/* Compact Filter Bar */}
         <div className="mb-6 flex flex-col gap-3 rounded-xl border p-3 bg-white">
@@ -799,77 +686,14 @@ export default function SearchPage() {
               )}
             </div>
 
-            {/* Rating Filter */}
-            <div className="flex items-center gap-2 bg-gray-50 rounded-full px-3 py-1.5 border">
-              <span className="text-sm">⭐</span>
-              <select
-                aria-label="Minimum rating"
-                className="bg-transparent outline-none text-sm w-32"
-                value={minRating}
-                onChange={(e) => {
-                  const val = e.target.value
-                  setMinRating(val)
-                  pushWith({ minRating: val })
-                }}
-              >
-                <option value="">All Ratings</option>
-                <option value="4">4+ Stars</option>
-                <option value="3">3+ Stars</option>
-                <option value="2">2+ Stars</option>
-              </select>
-              {minRating && (
-                <button
-                  className="text-xs text-gray-500 hover:text-gray-800"
-                  onClick={() => {
-                    setMinRating("")
-                    pushWith({ minRating: "" })
-                  }}
-                  title="Clear rating filter"
-                >
-                  ✕
-                </button>
-              )}
-            </div>
-
-            {/* Sort By */}
-            <div className="flex items-center gap-2 bg-gray-50 rounded-full px-3 py-1.5 border">
-              <span className="text-sm">🔽</span>
-              <select
-                aria-label="Sort by"
-                className="bg-transparent outline-none text-sm w-40"
-                value={sortBy}
-                onChange={(e) => {
-                  const val = e.target.value
-                  setSortBy(val)
-                  pushWith({ sortBy: val })
-                }}
-              >
-                <option value="">Relevance</option>
-                <option value="rating_desc">Highest Rated</option>
-                <option value="rating_asc">Lowest Rated</option>
-                <option value="reviews_desc">Most Reviewed</option>
-              </select>
-              {sortBy && (
-                <button
-                  className="text-xs text-gray-500 hover:text-gray-800"
-                  onClick={() => {
-                    setSortBy("")
-                    pushWith({ sortBy: "" })
-                  }}
-                  title="Clear sort"
-                >
-                  ✕
-                </button>
-              )}
-            </div>
-
             {/* Quick location chips */}
             <div className="flex items-center gap-1 flex-wrap">
               {QUICK_LOCATIONS.map((city) => (
                 <button
                   key={city}
-                  className={`text-xs px-3 py-1 rounded-full border ${locationParam === city ? "bg-blue-600 text-white border-blue-600" : "hover:bg-gray-100"
-                    }`}
+                  className={`text-xs px-3 py-1 rounded-full border ${
+                    locationParam === city ? "bg-blue-600 text-white border-blue-600" : "hover:bg-gray-100"
+                  }`}
                   onClick={() => {
                     setLocationDraft(city)
                     pushWith({ location: city })
@@ -942,16 +766,9 @@ export default function SearchPage() {
           return null
         })()}
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column (scrollable) */}
-          <div
-            className="lg:col-span-2 space-y-6 lg:sticky lg:top-4 lg:pr-2"
-            style={{
-              maxHeight: "calc(100vh - 7rem)",
-              overflowY: "auto",
-              WebkitOverflowScrolling: "touch",
-            }}
-          >
+        <div className="max-w-5xl mx-auto">
+          {/* Main content (single column; no right sidebar) */}
+          <div className="space-y-6">
             {/* Sector Spotlight */}
             {sectorParam && (
               <section className="bg-white rounded-xl border p-4">
@@ -1027,80 +844,53 @@ export default function SearchPage() {
               </section>
             )}
 
-            {/* 🔥 NEW: Nearby Products Section */}
-            {nearbyResults && nearbyResults.results.length > 0 && (
-              <section className="bg-gradient-to-br from-green-50 to-blue-50 rounded-xl border-2 border-green-200 p-4 shadow-sm">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <MapPin className="h-5 w-5 text-green-600" />
-                    <h2 className="font-semibold text-lg">
-                      Nearby Results for "<span className="text-green-700">{nearbyResults.query}</span>"
-                    </h2>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Badge variant="secondary" className="bg-green-100 text-green-800">
-                      📍 Within {nearbyResults.radius_used_km} km
-                    </Badge>
-                    <span className="text-sm font-normal text-gray-600">
-                      {nearbyResults.results.length} found
-                    </span>
+            {/* Supplier products in main area when supplier selected */}
+            {selectedShop && (
+              <section className="bg-white rounded-xl border p-4">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                  <h2 className="font-semibold text-lg">
+                    Products from <span className="text-blue-700">{selectedShop.supplier_name}</span>
+                  </h2>
+                  <div className="flex items-center gap-2 flex-1 sm:max-w-xs">
+                    <input
+                      value={supplierSearch}
+                      onChange={(e) => setSupplierSearch(e.target.value)}
+                      placeholder={`Search in ${selectedShop.supplier_name}...`}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      aria-label="Search products from this supplier"
+                    />
                   </div>
                 </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {nearbyResults.results.map((product) => (
+                {loadingProducts ? (
+                  <div className="py-8 text-center text-gray-500 text-sm">Loading products…</div>
+                ) : filteredShopProducts.length > 0 ? (
+                  <>
+                    <p className="text-sm text-gray-500 mb-3">
+                      {filteredShopProducts.length} product{filteredShopProducts.length !== 1 ? "s" : ""}
+                      {debouncedSupplierSearch ? ` matching "${debouncedSupplierSearch}"` : ""}
+                    </p>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                  {filteredShopProducts.map((p) => (
                     <div
-                      key={product.item_code}
-                      className="rounded-lg border-2 border-green-200 bg-white p-3 hover:border-green-400 hover:shadow-md transition-all cursor-pointer group"
-                      onClick={() =>
-                        addProductToCart({
-                          item_code: product.item_code,
-                          item_commercial_name: product.item_name,
-                          item_packet: "",
-                          item_emballage: product.best_offer.sale_price.toString(),
-                          supplier_account: product.best_offer.supplier_id,
-                          supplier_name: product.best_offer.nickname,
-                          type: "product",
-                        })
-                      }
+                      key={p.item_code + (p.supplier_account || "")}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => addProductToCart(p)}
+                      onKeyDown={(e) => onTileKey(e, p)}
+                      title="Click to add to cart"
                     >
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <div className="font-medium text-gray-900 group-hover:text-green-700 transition-colors">
-                            {product.item_name}
-                          </div>
-                          <div className="text-sm text-gray-600 mt-1">
-                            {product.best_offer.nickname}
-                          </div>
-                          <div className="text-lg font-bold text-green-700 mt-1">
-                            {product.best_offer.sale_price.toLocaleString()} RWF
-                          </div>
-                        </div>
-                        <div className="flex flex-col items-end gap-1">
-                          <DistanceBadge distanceKm={product.best_offer.distance_km} />
-                          {product.best_offer.quantity && (
-                            <Badge variant="outline" className="text-xs">
-                              {product.best_offer.quantity} in stock
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-
-                      {product.other_sellers && product.other_sellers.length > 0 && (
-                        <div className="mt-2 pt-2 border-t border-gray-200">
-                          <div className="text-xs text-gray-500">
-                            +{product.other_sellers.length} other seller{product.other_sellers.length > 1 ? 's' : ''} nearby
-                            {product.other_sellers.slice(0, 2).map((seller, idx) => (
-                              <span key={idx} className="ml-2">
-                                • {seller.nickname} ({seller.distance_km.toFixed(1)} km)
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
+                      <ProductCard product={toCardProduct(p)} />
                     </div>
                   ))}
                 </div>
+                  </>
+                ) : (
+                  <div className="text-center py-6 text-gray-500">
+                    {debouncedSupplierSearch
+                      ? `No products matching "${debouncedSupplierSearch}"`
+                      : "No products available from this supplier"}
+                  </div>
+                )}
               </section>
             )}
 
@@ -1115,13 +905,13 @@ export default function SearchPage() {
                     {selectedShop && <Badge variant="outline">🔍 Supplier only</Badge>}
                     {locationParam && <Badge variant="secondary">📍 {locationParam}</Badge>}
                     <span className="text-sm font-normal text-gray-500">
-                      {productsWithDistance.length} found
+                      {searchResult.products.length} found
                     </span>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {productsWithDistance.map((product: any) => (
+                  {searchResult.products.map((product) => (
                     <div
                       key={product.item_code + (product.supplier_account || "")}
                       className="rounded-lg border p-3 hover:border-blue-300 transition-colors cursor-pointer group"
@@ -1131,25 +921,12 @@ export default function SearchPage() {
                       onKeyDown={(e) => onTileKey(e, product)}
                       title="Click to add to cart"
                     >
-                      <div className="flex justify-between items-start gap-2">
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium text-gray-900 group-hover:text-blue-700 line-clamp-2">
-                            {product.item_commercial_name}
-                          </div>
-                          <div className="text-sm text-gray-600 mt-1 line-clamp-1">{product.item_packet || "No description"}</div>
-                          <div className="mt-2 text-base font-semibold text-green-600">
-                            {product.item_emballage || "Price not available"}
-                          </div>
-                        </div>
-                        {product.calculated_distance_km !== undefined && product.calculated_distance_km < 100 && (
-                          <div className="flex-shrink-0">
-                            <div className="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded">
-                              {product.calculated_distance_km < 1
-                                ? `${Math.round(product.calculated_distance_km * 1000)} m`
-                                : `${product.calculated_distance_km.toFixed(1)} km`}
-                            </div>
-                          </div>
-                        )}
+                      <div className="font-medium text-gray-900 group-hover:text-blue-700">
+                        {product.item_commercial_name}
+                      </div>
+                      <div className="text-sm text-gray-600 mt-1">{product.item_packet || "No description"}</div>
+                      <div className="mt-2 text-base font-semibold text-green-600">
+                        {product.item_emballage || "Price not available"}
                       </div>
                       {product.supplier_name && (
                         <div className="mt-2 text-xs text-gray-500">
@@ -1181,10 +958,11 @@ export default function SearchPage() {
                   {allSuppliers.map((supplier) => (
                     <div
                       key={supplier.supplier_account}
-                      className={`p-3 rounded-lg border cursor-pointer transition-all ${selectedShop?.supplier_account === supplier.supplier_account
-                        ? "border-blue-500 bg-blue-50"
-                        : "border-gray-200 hover:border-blue-300 hover:bg-gray-50"
-                        }`}
+                      className={`p-3 rounded-lg border cursor-pointer transition-all ${
+                        selectedShop?.supplier_account === supplier.supplier_account
+                          ? "border-blue-500 bg-blue-50"
+                          : "border-gray-200 hover:border-blue-300 hover:bg-gray-50"
+                      }`}
                       onClick={() => handleSelectShop(supplier)}
                       title="Click to preview this supplier's products"
                     >
@@ -1199,16 +977,6 @@ export default function SearchPage() {
                               {supplier.product_count} matching products
                             </div>
                           )}
-                          {supplier.rating_star && supplier.total_ratings ? (
-                            <div className="mt-2">
-                              <RatingBadge
-                                rating={supplier.rating_star}
-                                totalRatings={supplier.total_ratings}
-                                size="sm"
-                                variant="compact"
-                              />
-                            </div>
-                          ) : null}
                         </div>
                         <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -1220,93 +988,17 @@ export default function SearchPage() {
               </section>
             )}
 
+            {/* Hint when search has results but no supplier selected */}
+            {!selectedShop && !!debouncedQ && allSuppliers.length > 0 && (
+              <div className="text-sm text-gray-600 bg-blue-50 dark:bg-blue-950/30 p-3 rounded-lg border border-blue-200 dark:border-blue-800">
+                Select a supplier from the list above to see and search their products here.
+              </div>
+            )}
+
             {/* No Results */}
             {searchResult && allSuppliers.length === 0 && searchResult.products.length === 0 && (
               <div className="text-center py-8 text-gray-500">No results found for "{debouncedQ}"</div>
             )}
-          </div>
-
-          {/* Right Column - Selected Shop Products */}
-          <div className="lg:col-span-1">
-            <div className="bg-white rounded-xl border p-4 sticky top-4">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="font-semibold text-lg">
-                  {selectedShop ? (
-                    <>
-                      Products from <span className="text-blue-600">{selectedShop.supplier_name}</span>
-                    </>
-                  ) : (
-                    "Select a supplier to view products"
-                  )}
-                </h2>
-                {loadingProducts && <span className="text-sm opacity-60 animate-pulse">Loading...</span>}
-              </div>
-
-              {selectedShop && (
-                <>
-                  {/* Supplier Product Search */}
-                  <div className="mb-4">
-                    <input
-                      value={supplierSearch}
-                      onChange={(e) => setSupplierSearch(e.target.value)}
-                      placeholder={`Search in ${selectedShop.supplier_name}...`}
-                      className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    {debouncedSupplierSearch && (
-                      <div className="mt-1 text-xs text-gray-500">
-                        Found {filteredShopProducts.length} product{filteredShopProducts.length !== 1 ? 's' : ''}
-                      </div>
-                    )}
-                  </div>
-
-                  <div
-                    className="space-y-3 pr-1"
-                    style={{ maxHeight: "70vh", overflowY: "auto", WebkitOverflowScrolling: "touch" }}
-                  >
-                    {filteredShopProducts.length > 0 ? (
-                      filteredShopProducts.map((product) => (
-                        <div
-                          key={product.item_code + (product.supplier_account || selectedShop?.supplier_account || "")}
-                          className="rounded-lg border p-3 hover:border-blue-300 transition-colors cursor-pointer group"
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => addProductToCart(product)}
-                          onKeyDown={(e) => onTileKey(e, product)}
-                          title="Click to add to cart"
-                        >
-                          <div className="font-medium text-gray-900 group-hover:text-blue-700">
-                            {product.item_commercial_name}
-                          </div>
-                          <div className="text-sm text-gray-600 mt-1">{product.item_packet || ""}</div>
-                          <div className="mt-2 text-base font-semibold text-green-600">
-                            {product.item_emballage || "Price not available"}
-                          </div>
-                          {product.momo && <div className="mt-2 text-xs text-gray-500">Seller MoMo: {product.momo}</div>}
-                          <div className="mt-3 text-xs text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
-                            Click to add to cart →
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      !loadingProducts && (
-                        <div className="text-center py-4 text-gray-500">
-                          {debouncedSupplierSearch
-                            ? `No products found matching "${debouncedSupplierSearch}"`
-                            : "No products available from this supplier"
-                          }
-                        </div>
-                      )
-                    )}
-                  </div>
-                </>
-              )}
-
-              {!selectedShop && !!debouncedQ && (
-                <div className="text-sm text-gray-600 bg-blue-50 p-3 rounded-lg border border-blue-200">
-                  💡 Select a supplier from the list to see their available products
-                </div>
-              )}
-            </div>
           </div>
         </div>
       </main>

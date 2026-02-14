@@ -2,7 +2,6 @@
 
 import { Button } from "@/components/ui/button"
 import { useAuthStore } from "@/lib/auth-store"
-import { useRouter } from "next/navigation"
 import { LogOut } from "lucide-react"
 
 interface LogoutButtonProps {
@@ -23,11 +22,10 @@ export function LogoutButton({
   children
 }: LogoutButtonProps) {
   const logout = useAuthStore((state) => state.logout)
-  const router = useRouter()
 
   const handleLogout = () => {
     logout()
-    router.push("/")
+    window.location.href = "/"
   }
 
   return (

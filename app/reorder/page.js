@@ -799,7 +799,7 @@ export default function ReorderPage() {
       paidAt: paymentMethod === 'momo' ? 'MTN MoMo' : 'Cash on Delivery',
       reference: `REORDER-${newOrderId}`,
       myPhone: buyerPhone || '',
-      link: `https://ihute.rw/orders/${newOrderId}`,
+      link: `${(process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw").replace(/\/Trading\/?$/, "")}/orders/${newOrderId}`,
       products: selectedOrder.products || [],
       deliveryLocation: formatDeliveryLocation(selectedOrder.delivery?.location || '')
     });

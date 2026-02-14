@@ -5,9 +5,12 @@ import Image from "next/image"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { useCartStore } from "@/lib/cart-store"
-import { FavoriteButton } from "@/components/favorite-button"
+import { useFavoritesStore } from "@/lib/favorites-store"
 import { trackProductView, trackClick } from "@/lib/interaction-tracker"
-import { useToast } from "@/components/ui/use-toast"
+import { Heart } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { cn } from "@/lib/utils"
+import { useToast } from "@/components/ui/use-toast"   // 👈 add
 
 type Product = {
   id: string
@@ -24,8 +27,18 @@ type Product = {
   image?: string
 }
 
-export function ProductCard({ product }: { product: Product }) {
+export function ProductCard({
+  product,
+  navigateAfterAdd = false,
+}: {
+  product: Product
+  /** If true, "Buy" navigates to /cart after adding. If false, only adds to cart and shows a toast so user can keep adding. */
+  navigateAfterAdd?: boolean
+}) {
+  const router = useRouter()
   const addItem = useCartStore((s) => s.addItem)
+  const toggleFavorite = useFavoritesStore((s) => s.toggleFavorite)
+  const isFavorite = useFavoritesStore((s) => s.isFavorite)
   const { toast } = useToast()
 
   const {
@@ -40,6 +53,8 @@ export function ProductCard({ product }: { product: Product }) {
     momo,
     image,
   } = product
+
+  const fav = isFavorite(id)
 
   // Track product view when component mounts
   useEffect(() => {
@@ -60,21 +75,39 @@ export function ProductCard({ product }: { product: Product }) {
         />
 
         {/* Heart overlay */}
-        <FavoriteButton
-          className="absolute right-2 top-2"
-          item={{
-            id,
-            name,
-            price,
-            unit,
-            image,
-            description,
-            supplierId,
-            supplierName,
-            supplierLocation,
-            momo,
+        <button
+          aria-label={fav ? "Remove from favorites" : "Add to favorites"}
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            const wasFav = isFavorite(id)
+            toggleFavorite({
+              id,
+              name,
+              price,
+              unit,
+              image,
+              description,
+              supplierId,
+              supplierName,
+              supplierLocation,
+              momo,
+            })
+            toast({
+              title: wasFav ? "Removed from favorites" : "Added to favorites!",
+              description: name,
+              duration: 1500,
+            })
           }}
-        />
+          className={cn(
+            "absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white/90 backdrop-blur transition",
+            "hover:bg-white",
+            fav ? "text-red-600" : "text-muted-foreground"
+          )}
+          title={fav ? "Remove from favorites" : "Add to favorites"}
+        >
+          <Heart className={cn("h-4 w-4", fav && "fill-current")} />
+        </button>
       </div>
 
       <CardContent className="p-3 flex flex-col gap-2">
@@ -82,9 +115,11 @@ export function ProductCard({ product }: { product: Product }) {
           <h3 className="text-sm font-semibold leading-tight line-clamp-2">{name}</h3>
         </div>
 
-        <p className="text-xs text-muted-foreground line-clamp-2">
-          {description || "Quality product"}
-        </p>
+        {description && description !== id && (
+          <p className="text-xs text-muted-foreground line-clamp-2">
+            {description}
+          </p>
+        )}
 
         <div className="text-sm">
           <div className="font-semibold">
@@ -103,9 +138,7 @@ export function ProductCard({ product }: { product: Product }) {
           size="sm"
           className="mt-1"
           onClick={() => {
-            // Track click
             trackClick("product", id, name)
-            
             addItem(
               {
                 id,
@@ -121,13 +154,15 @@ export function ProductCard({ product }: { product: Product }) {
               },
               1
             )
-            
-            // Show success toast instead of redirecting
-            toast({
-              title: "Added to cart!",
-              description: name,
-              duration: 2000,
-            })
+            if (navigateAfterAdd) {
+              router.push("/cart")
+            } else {
+              toast({
+                title: "Added to cart",
+                description: name,
+                duration: 2000,
+              })
+            }
           }}
         >
           Buy

@@ -28,24 +28,24 @@ export function CheckoutSummary({ isProcessing, showReview }: CheckoutSummaryPro
         {/* Items List */}
         <div className="space-y-3 max-h-64 overflow-y-auto">
           {items.map((item) => {
-            // ✅ Calculate line total: price × qty
-            const lineTotal = item.price * item.qty
-            
+            // ✅ Calculate line total: price × quantity
+            const lineTotal = item.price * (item.qty ?? 0)
+
             return (
               <div key={`${item.id}-${item.selectedUnit}`} className="flex gap-3">
                 <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-muted">
-                  <Image 
-                    src={item.image || "/placeholder.svg"} 
-                    alt={item.name} 
-                    fill 
-                    className="object-cover" 
+                  <Image
+                    src={item.image || "/placeholder.svg"}
+                    alt={item.name}
+                    fill
+                    className="object-cover"
                   />
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{item.name}</p>
                   <p className="text-xs text-muted-foreground">
-                    {/* ✅ Use qty instead of quantity */}
-                    {item.qty} × {item.selectedUnit || item.unit || "pcs"}
+                    {/* ✅ Use quantity property */}
+                    {item.qty ?? 0} × {item.selectedUnit || item.unit || "pcs"}
                   </p>
                   <p className="text-sm font-semibold text-primary">
                     {/* ✅ Use calculated lineTotal */}

@@ -4,7 +4,9 @@ export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 export const revalidate = 0
 
-const JAVA_ORDERS_URL = process.env.JAVA_ORDERS_URL || "https://ihute.rw/Trading/OrdersServlet"
+import { getOrdersUrl } from "@/lib/backend-config"
+
+const JAVA_ORDERS_URL = getOrdersUrl()
 
 /**
  * Send Table Order - Lock the table and notify supplier

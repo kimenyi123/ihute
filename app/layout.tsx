@@ -31,6 +31,7 @@ export default function RootLayout({
         <SessionProvider>
           <Suspense fallback={null}>{children}</Suspense>
         </SessionProvider>
+        <Toaster />
         <ServiceWorkerRegister />
         <NotificationPrompt />
         <Toaster />

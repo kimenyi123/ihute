@@ -1,10 +1,12 @@
-// app/api/reorder/route.js
-// This proxies requests from Next.js to  Java backend
+// app/api/reorder/route.ts
+// This proxies requests from Next.js to Java backend
 
-export async function POST(request) {
+import { getBackendBase } from "@/lib/backend-config";
+
+export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const JAVA_API_URL = process.env.JAVA_API_URL || 'https://ihute.rw';
+    const JAVA_API_URL = process.env.JAVA_API_URL || getBackendBase().replace(/\/Trading\/?$/, "") || "https://ihute.rw";
 
     console.log('Proxying request to:', `${JAVA_API_URL}/Trading/re_order`);
     console.log('Request body:', body);
@@ -28,17 +30,18 @@ export async function POST(request) {
 
   } catch (error) {
     console.error('Error proxying to Java API:', error);
+    const message = error instanceof Error ? error.message : String(error);
     return Response.json(
       {
         success: false,
-        message: 'Failed to connect to backend: ' + error.message
+        message: 'Failed to connect to backend: ' + message
       },
       { status: 500 }
     );
   }
 }
 
-export async function OPTIONS(request) {
+export async function OPTIONS(_request: Request) {
   return new Response(null, {
     status: 200,
     headers: {

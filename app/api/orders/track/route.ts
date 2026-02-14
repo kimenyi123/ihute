@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 
 const RID_HEADER = "x-request-id"
-// const JAVA_ORDERS_URL = process.env.NEXT_PUBLIC_ORDERS_URL || "https://ihute.rw/Trading/Kaos/OrdersServlet"
-const JAVA_ORDERS_URL = process.env.NEXT_PUBLIC_ORDERS_URL || "http://localhost:8081/Trading/Kaos/OrdersServlet"
+import { getOrdersUrl } from "@/lib/backend-config"
 
 function rid() {
   return Math.random().toString(36).slice(2, 12)
@@ -142,7 +141,7 @@ export async function POST(req: NextRequest) {
 
     try {
       // Try new endpoint first
-      const url = new URL(JAVA_ORDERS_URL)
+      const url = new URL(getOrdersUrl())
       url.searchParams.set("action", "getOrderDetails")
       url.searchParams.set("orderId", orderId)
 
@@ -173,7 +172,7 @@ export async function POST(req: NextRequest) {
 
     // Fallback to existing buyerOrderDetails endpoint
     if (!data || usingFallback) {
-      const url = new URL(JAVA_ORDERS_URL)
+      const url = new URL(getOrdersUrl())
       url.searchParams.set("action", "buyerOrderDetails")
       url.searchParams.set("orderId", orderId)
 

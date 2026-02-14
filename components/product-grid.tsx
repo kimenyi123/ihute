@@ -317,7 +317,7 @@ export function ProductGrid({
       return {
         id: `${categoryId}-${idx}`,
         name: p.item_commercial_name || "Product",
-        description: p.item_key_words || "Quality product",
+        description: undefined, // hide code (item_key_words) from UI
         price: extractNumericPrice(p.item_emballage),
         unit: p.item_packet,
         inStock: true,

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const BACKEND_URL = process.env.JAVA_BACKEND_BASE || "http://localhost:8080/Trading";
+import { getBackendBase } from "@/lib/backend-config"
 
 export async function POST(req: NextRequest) {
   try {
@@ -14,9 +14,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const backendUrl = `${BACKEND_URL}/SearchIntentServlet`;
+    const backendUrl = `${getBackendBase()}/SearchIntentServlet`;
     const backendParams = new URLSearchParams();
-
+    
     // Add all params
     Object.entries(params).forEach(([key, value]) => {
       if (value !== null && value !== undefined && value !== '') {
@@ -64,9 +64,9 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const backendUrl = `${BACKEND_URL}/SearchIntentServlet`;
+    const backendUrl = `${getBackendBase()}/SearchIntentServlet`;
     const backendParams = new URLSearchParams();
-
+    
     // Copy all params
     searchParams.forEach((value, key) => {
       backendParams.append(key, value);

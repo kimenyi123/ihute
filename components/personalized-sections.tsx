@@ -217,7 +217,7 @@ export function PersonalizedSections() {
             allProducts.push({
               id: productId,
               name: p.ITEM_NAME || p.item_commercial_name || p.name || productName,
-              description: p.DESCRIPTION_KEYWORD || p.item_key_words || "",
+              description: undefined, // hide code from UI
               price: isNaN(price) ? 0 : price,
               unit: p.UNIT || p.item_packet || "",
               image: p.IMAGE_URL || p.image || undefined,

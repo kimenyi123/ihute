@@ -42,9 +42,7 @@ export function Header() {
   const router = useRouter()
   const { t } = useTranslation()
 
-  // Subscribe reactively to cart items so counter updates automatically
-  const items = useCartStore((s) => s.items)
-  const totalItems = items.reduce((acc, item) => acc + item.qty, 0)
+  const totalItems = useCartStore((s) => s.getTotalItems())
   const favoritesCount = useFavoritesStore((s) => s.favorites.length)
 
   const user = useAuthStore((s) => s.user)
@@ -85,8 +83,7 @@ export function Header() {
 
   const handleLogout = () => {
     logout()
-    router.replace("/")
-    router.refresh()
+    window.location.href = "/"
   }
 
   return (
@@ -105,13 +102,13 @@ export function Header() {
           </Link>
 
           {/* Global Search - Desktop */}
-          <div className="hidden lg:flex flex-1 max-w-2xl relative items-center gap-2">
+          <div className="hidden lg:flex flex-1 max-w-md relative items-center gap-2">
             <GlobalSearch placeholder={t("searchPlaceholder")} className="w-full" />
+            <LocationBadge />
           </div>
 
           {/* Actions */}
           <div className="flex items-center gap-1 md:gap-2">
-            <LocationBadge />
             <LanguageSelector />
 
             {isAuthenticated ? (
@@ -119,16 +116,21 @@ export function Header() {
                 {/* User Dropdown */}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="sm" className="hidden md:flex h-9">
-                      <User className="h-4 w-4 mr-2" />
-                      {user?.name}
+                    <Button variant="ghost" size="sm" className="flex h-9 gap-2" aria-label="Open account menu">
+                      <User className="h-4 w-4 shrink-0" />
+                      <span className="max-w-[120px] truncate">{user?.name}</span>
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-48">
-                    <DropdownMenuLabel>{user?.email}</DropdownMenuLabel>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuLabel className="font-normal">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-sm font-medium">{user?.name}</span>
+                        <span className="text-xs text-muted-foreground">{user?.email}</span>
+                      </div>
+                    </DropdownMenuLabel>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
-                      onClick={() =>
+                      onSelect={() =>
                         router.push(
                           user?.role === "supplier"
                             ? "/supplier/dashboard"
@@ -138,7 +140,14 @@ export function Header() {
                     >
                       My Account
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={handleLogout} className="text-red-600">
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onSelect={(e) => {
+                        e.preventDefault()
+                        handleLogout()
+                      }}
+                      className="text-red-600 focus:text-red-600 focus:bg-red-50"
+                    >
                       {t("logout")}
                     </DropdownMenuItem>
                   </DropdownMenuContent>
@@ -146,140 +155,113 @@ export function Header() {
 
                 {/* Supplier Orders */}
                 {user?.role === "supplier" && (
-                  <Link href="/supplier/orders">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="relative h-9 w-9"
-                      title="My Orders (Seller)"
-                    >
+                  <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Orders (Seller)">
+                    <Link href="/supplier/orders">
                       <PackageSearch className="h-5 w-5" />
                       {sellerCount > 0 && (
                         <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-amber-600 text-xs font-bold text-white">
                           {sellerCount}
                         </span>
                       )}
-                    </Button>
-                  </Link>
+                    </Link>
+                  </Button>
                 )}
 
                 {/* Customer Orders */}
                 {user?.role !== "supplier" && (
                   <>
-                    <Link href="/orders">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="relative h-9 w-9"
-                        title="My Orders"
-                      >
+                    <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Orders">
+                      <Link href="/orders">
                         <Truck className="h-5 w-5" />
                         {pendingCount > 0 && (
                           <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">
                             {pendingCount}
                           </span>
                         )}
-                      </Button>
-                    </Link>
+                      </Link>
+                    </Button>
 
                     {/* Deliveries */}
-                    <Link href="/deliveries">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="relative h-9 w-9"
-                        title="My Deliveries"
-                      >
+                    <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Deliveries">
+                      <Link href="/deliveries">
                         <PackageCheck className="h-5 w-5" />
-                      </Button>
-                    </Link>
+                      </Link>
+                    </Button>
 
                     {/* Table Commands */}
-                    <Link href="/tables">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="relative h-9 w-9"
-                        title="Table Commands"
-                      >
+                    <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Table Commands">
+                      <Link href="/tables">
                         <Users className="h-5 w-5" />
-                      </Button>
-                    </Link>
+                      </Link>
+                    </Button>
                   </>
                 )}
 
                 {/* Payment Dashboard - Admin/Staff only */}
                 {(user?.role === "admin" || user?.role === "staff") && (
-                  <Link href="/payment/dashboard">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="relative h-9 w-9"
-                      title="Payment Dashboard"
-                    >
+                  <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Payment Dashboard">
+                    <Link href="/payment/dashboard">
                       <BarChart3 className="h-5 w-5" />
-                    </Button>
-                  </Link>
+                    </Link>
+                  </Button>
                 )}
               </>
             ) : (
-              <Link href="/login">
-                <Button variant="ghost" size="sm" className="h-9">
+              <Button asChild variant="ghost" size="sm" className="h-9">
+                <Link href="/login">
                   <User className="h-4 w-4 md:mr-2" />
                   <span className="hidden md:inline">{t("login")}</span>
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             )}
 
             {/* Favorites */}
-            <Link href="/favorites">
-              <Button variant="ghost" size="icon" className="relative h-9 w-9" title="Favorites">
+            <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Favorites">
+              <Link href="/favorites">
                 <Heart className="h-5 w-5" />
                 {favoritesCount > 0 && (
                   <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs font-bold text-white">
                     {favoritesCount}
                   </span>
                 )}
-              </Button>
-            </Link>
+              </Link>
+            </Button>
             {/* Reorder */}
-            <Link href="/reorder">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="relative h-9 w-9"
-                title="Reorder Items"
-              >
+            <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Reorder Items">
+              <Link href="/reorder">
                 <RotateCcw className="h-5 w-5" />
-              </Button>
-            </Link>
+              </Link>
+            </Button>
 
 
             {/* Ratings */}
-            <Link href="/ratings">
-              <Button variant="ghost" size="icon" className="relative h-9 w-9" title="My Ratings">
+            <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Ratings">
+              <Link href="/ratings">
                 <Star className="h-5 w-5" />
-              </Button>
-            </Link>
+              </Link>
+            </Button>
 
             {/* Cart */}
-            <Link href="/cart">
-              <Button variant="ghost" size="icon" className="relative h-9 w-9" title="Cart">
+            <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Cart">
+              <Link href="/cart">
                 <ShoppingCart className="h-5 w-5" />
                 {totalItems > 0 && (
                   <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-green-600 text-xs font-bold text-white">
                     {totalItems}
                   </span>
                 )}
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
         </div>
 
-        {/* Mobile Search */}
-        <div className="pb-3 lg:hidden">
+        {/* Mobile Search + Location */}
+        <div className="pb-3 space-y-2 lg:hidden">
           <div className="relative w-full">
             <GlobalSearch placeholder={t("searchPlaceholder")} className="w-full" />
+          </div>
+          <div className="flex items-center justify-center">
+            <LocationBadge />
           </div>
         </div>
       </div>

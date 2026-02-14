@@ -7,10 +7,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Terminal } from 'lucide-react';
 
 // Get base URL and normalize it (remove trailing slashes)
-let API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080').trim();
-if (API_BASE_URL.endsWith('/')) {
-  API_BASE_URL = API_BASE_URL.slice(0, -1);
-}
+const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw").trim().replace(/\/+$/, "");
 
 // Helper to build URL - ensures we don't double-add /Trading
 function buildTestUrl(endpoint: string): string[] {

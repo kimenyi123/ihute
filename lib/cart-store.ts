@@ -14,6 +14,9 @@ export type CartItem = {
   unit?: string
   image?: string
 
+  /** Item code / NIKI code (e.g. item_key_words) — sent in order transaction */
+  itemCode?: string
+
   // seller info
   supplierId: string
   supplierName: string
@@ -24,7 +27,29 @@ export type CartItem = {
   // variant key
   selectedUnit?: string
 
+  /** Set when adding from shop-with-me bar/resto (DEPARTMENT or PREFERRED_CATEGORIES); enables table-command autofill in cart */
+  isBarResto?: boolean
+
   qty: number
+}
+
+// ✅ NEW: Table info for bar/restaurant orders
+export type TableInfo = {
+  /**
+   * Encoded identifier combining name + address (for backwards compatibility),
+   * usually in the format: "Name | Address"
+   */
+  tableNumber?: string
+
+  /** Explicit customer name (for delivery or table orders) */
+  customerName?: string
+
+  /** Explicit delivery address / table location */
+  customerAddress?: string
+
+  /** Optional shop metadata */
+  shopName?: string
+  shopId?: string
 }
 
 export type SellerGroup = {
@@ -35,6 +60,8 @@ export type SellerGroup = {
   phone?: string
   items: CartItem[]
   subtotal: number
+  /** True if any item came from shop-with-me with bar-resto department/preferred category; used for table-command autofill */
+  isBarResto?: boolean
 }
 
 type PayState = "unpaid" | "pending" | "paid" | "failed"
@@ -42,6 +69,7 @@ type PayState = "unpaid" | "pending" | "paid" | "failed"
 type CartState = {
   items: CartItem[]
   payment: Record<string, PayState>
+  tableInfo: TableInfo | null  // ✅ NEW: Table information
 
   // CRUD
   addItem: (item: Omit<CartItem, "qty">, qty?: number) => void
@@ -53,6 +81,11 @@ type CartState = {
   clear: () => void
   clearCart: () => void
   removeGroupBySeller: (supplierId: string) => void
+
+  // ✅ NEW: Table management
+  setTableInfo: (info: TableInfo | null) => void
+  clearTableInfo: () => void
+  getTableInfo: () => TableInfo | null
 
   // Helpers
   getTotalItems: () => number
@@ -70,6 +103,7 @@ export const useCartStore = create<CartState>()(
     (set, get) => ({
       items: [],
       payment: {},
+      tableInfo: null,  // ✅ NEW: Initialize table info
 
       addItem: (item, qty = 1) => {
         set((state) => {
@@ -193,11 +227,11 @@ export const useCartStore = create<CartState>()(
           items: s.items.filter((x) => !(x.id === id && x.selectedUnit === selectedUnit)),
         })),
 
-      clear: () => set({ items: [], payment: {} }),
+      clear: () => set({ items: [], payment: {}, tableInfo: null }),  // ✅ Clear table info too
 
       // ✅ Alias for clear() to match checkout form usage
       clearCart: () => {
-        set({ items: [], payment: {} })
+        set({ items: [], payment: {}, tableInfo: null })
       },
 
       removeGroupBySeller: (supplierId) =>
@@ -205,6 +239,13 @@ export const useCartStore = create<CartState>()(
           items: s.items.filter((x) => x.supplierId !== supplierId),
           payment: { ...s.payment, [supplierId]: "paid" },
         })),
+
+      // ✅ NEW: Table management functions
+      setTableInfo: (info) => set({ tableInfo: info }),
+
+      clearTableInfo: () => set({ tableInfo: null }),
+
+      getTableInfo: () => get().tableInfo,
 
       getTotalItems: () => get().items.reduce((acc, it) => acc + it.qty, 0),
 
@@ -229,17 +270,18 @@ export const useCartStore = create<CartState>()(
               phone: it.sellerPhone,
               items: [],
               subtotal: 0,
+              isBarResto: false,
             }
           g.items.push(it)
           g.subtotal += it.price * it.qty
-          // Update momo/phone from any item that has it (not just first item)
           if (it.momo && it.momo.trim()) g.momo = it.momo
           if (it.sellerPhone && it.sellerPhone.trim()) g.phone = it.sellerPhone
+          if (it.isBarResto) g.isBarResto = true
           groups.set(it.supplierId, g)
         }
         return Array.from(groups.values()).map((g) => ({
           ...g,
-          subtotal: Math.max(0, Math.round(g.subtotal)), // USSD-friendly
+          subtotal: Math.max(0, Math.round(g.subtotal)),
         }))
       },
 

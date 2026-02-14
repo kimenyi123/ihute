@@ -34,6 +34,14 @@ function toIso(v?: number | string) {
   return new Date().toISOString()
 }
 
+function mapOrderStatus(raw?: string): Order["status"] {
+  const s = (raw || "").toLowerCase()
+  if (s === "delivered") return "delivered"
+  if (s === "cancelled" || s === "canceled") return "cancelled"
+  if (s === "processing" || s === "in-transit") return s as Order["status"]
+  return "pending"
+}
+
 // REQUEST LOAN FUNCTION
 async function requestLoan(order: Order) {
   if (order.orderStatus?.toLowerCase() !== "open") {
@@ -139,15 +147,19 @@ export default function OrdersPage() {
             buyerName: raw.BUYER_NAME || "Unknown Buyer",
             buyerOwner: raw.BUYER_OWNER || user?.owner || "N/A",
             buyerAccount: raw.BUYER_ISHYIGA_ACCOUNT || "",
-            sellerAccount: raw.SELLER_ISHYIGA_ACCOUNT || "",  // Add seller account
+            sellerAccount: raw.SELLER_ISHYIGA_ACCOUNT || "",
+            sellerId: raw.SELLER_ISHYIGA_ACCOUNT || "",
+            sellerName: raw.SELLER_NAMES || "Unknown Seller",
             seller: raw.SELLER_NAMES || "Unknown Seller",
             amount: raw.AMOUNT ?? 0,
             orderStatus: raw.ORDER_STATUS || "NA",
+            status: mapOrderStatus(raw.ORDER_STATUS),
+            paymentStatus: "pending",
             createdAt: toIso(raw.CREATED_AT),
             items: [],
+            subtotal: raw.subtotal ?? raw.AMOUNT ?? 0,
             buyerTIN: raw.buyerTIN || raw.BUYER_TIN || "",
             supplierTIN: raw.SUPPLIER_TIN || raw.SELLER_TIN || "",
-            subtotal: raw.subtotal,
           }))
 
           setOrders(finalOrders)
@@ -168,8 +180,8 @@ export default function OrdersPage() {
     const s = search.toLowerCase()
     return orders.filter(
       (o) =>
-        o.buyerName.toLowerCase().includes(s) ||
-        o.seller.toLowerCase().includes(s) ||
+        (o.buyerName ?? "").toLowerCase().includes(s) ||
+        (o.seller ?? "").toLowerCase().includes(s) ||
         o.id.includes(s)
     )
   }, [orders, search])
@@ -244,7 +256,7 @@ export default function OrdersPage() {
                     <td className="px-4 py-3 border font-semibold">{o.id}</td>
                     <td className="px-4 py-3 border">{o.seller}</td>
                     <td className="px-4 py-3 border font-medium">
-                      {o.amount.toLocaleString()} RWF
+                      {(o.amount ?? o.subtotal ?? 0).toLocaleString()} RWF
                     </td>
                     <td className="px-4 py-3 border">
                       <span

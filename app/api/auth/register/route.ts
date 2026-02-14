@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
+import { getAuthUrl } from "@/lib/backend-config"
 
-const JAVA_AUTH_URL = process.env.JAVA_AUTH_URL || ""
+const JAVA_AUTH_URL = getAuthUrl()
 
 export async function POST(req: Request) {
   const rid = crypto.randomUUID()
