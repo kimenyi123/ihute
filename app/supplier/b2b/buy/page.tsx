@@ -53,6 +53,17 @@ export default function B2BQuickBuyPage() {
       router.push("/login");
       return; // CRITICAL: Exit immediately after redirect
     }
+
+    // Periodic session check every 30 seconds
+    const interval = setInterval(() => {
+      const { isAuthenticated: currentAuth, user: currentUser } = useAuthStore.getState();
+      if (!currentAuth || (currentUser?.role as string) !== "supplier") {
+        console.log("Session expired - redirecting to login");
+        router.push("/login");
+      }
+    }, 30000);
+
+    return () => clearInterval(interval);
   }, [hasHydrated, isAuthenticated, user?.role, router]); // Use user?.role instead of user object
 
   // Search-as-you-type: Auto-search after 500ms of no typing

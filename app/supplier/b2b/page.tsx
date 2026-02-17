@@ -7,20 +7,47 @@
 
 import Link from "next/link";
 import { useState, useEffect } from "react";
+import { useAuthStore } from "@/lib/auth-store";
 import LoadingSpinner from "@/components/LoadingSpinner";
 import ErrorMessage from "@/components/ErrorMessage";
 
 export default function B2BDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [outgoingCount, setOutgoingCount] = useState(0);
+  const [incomingCount, setIncomingCount] = useState(0);
+  const { user } = useAuthStore();
 
   useEffect(() => {
-    // Simulate initialization
-    const timer = setTimeout(() => {
-      setLoading(false);
-    }, 500);
-    return () => clearTimeout(timer);
-  }, []);
+    const fetchCounts = async () => {
+      if (!user?.ishyigaAccount) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        // Fetch outgoing orders count
+        const outgoingRes = await fetch(`/supplier/b2b/api?action=listOutgoing&page=1&limit=1`);
+        if (outgoingRes.ok) {
+          const outgoingData = await outgoingRes.json();
+          setOutgoingCount(outgoingData.total || 0);
+        }
+
+        // Fetch incoming orders count
+        const incomingRes = await fetch(`/supplier/b2b/api?action=listIncoming&page=1&limit=1`);
+        if (incomingRes.ok) {
+          const incomingData = await incomingRes.json();
+          setIncomingCount(incomingData.total || 0);
+        }
+      } catch (err) {
+        console.error("Error fetching order counts:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchCounts();
+  }, [user]);
 
   const cards = [
     {
@@ -29,6 +56,7 @@ export default function B2BDashboard() {
       href: "/supplier/b2b/buy",
       icon: "🛒",
       color: "bg-blue-50 hover:bg-blue-100 border-blue-200",
+      badge: null,
     },
     {
       title: "Bulk Import",
@@ -36,6 +64,7 @@ export default function B2BDashboard() {
       href: "/supplier/b2b/bulk",
       icon: "📊",
       color: "bg-green-50 hover:bg-green-100 border-green-200",
+      badge: null,
     },
     {
       title: "Drafts",
@@ -43,6 +72,7 @@ export default function B2BDashboard() {
       href: "/supplier/b2b/drafts",
       icon: "📝",
       color: "bg-yellow-50 hover:bg-yellow-100 border-yellow-200",
+      badge: null,
     },
     {
       title: "Outgoing Orders",
@@ -50,6 +80,7 @@ export default function B2BDashboard() {
       href: "/supplier/b2b/outgoing",
       icon: "📤",
       color: "bg-purple-50 hover:bg-purple-100 border-purple-200",
+      badge: outgoingCount,
     },
     {
       title: "Incoming Orders",
@@ -57,6 +88,7 @@ export default function B2BDashboard() {
       href: "/supplier/b2b/incoming",
       icon: "📥",
       color: "bg-indigo-50 hover:bg-indigo-100 border-indigo-200",
+      badge: incomingCount,
     },
   ];
 
@@ -90,7 +122,7 @@ export default function B2BDashboard() {
           <Link
             key={card.href}
             href={card.href}
-            className={`${card.color} border-2 rounded-lg p-6 transition-all duration-200 hover:shadow-lg`}
+            className={`${card.color} border-2 rounded-lg p-6 transition-all duration-200 hover:shadow-lg relative`}
           >
             <div className="flex items-start gap-4">
               <div className="text-4xl">{card.icon}</div>
@@ -101,6 +133,11 @@ export default function B2BDashboard() {
                 <p className="text-gray-600 text-sm">{card.description}</p>
               </div>
             </div>
+            {card.badge !== null && card.badge > 0 && (
+              <div className="absolute top-4 right-4 bg-red-500 text-white text-xs font-bold rounded-full h-6 w-6 flex items-center justify-center">
+                {card.badge > 99 ? '99+' : card.badge}
+              </div>
+            )}
           </Link>
         ))}
       </div>

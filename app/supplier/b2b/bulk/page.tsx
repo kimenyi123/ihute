@@ -39,6 +39,17 @@ export default function B2BBulkPage() {
       router.push("/login");
       return;
     }
+
+    // Periodic session check every 30 seconds
+    const interval = setInterval(() => {
+      const { isAuthenticated: currentAuth, user: currentUser } = useAuthStore.getState();
+      if (!currentAuth || (currentUser?.role as string) !== "supplier") {
+        console.log("Session expired - redirecting to login");
+        router.push("/login");
+      }
+    }, 30000);
+
+    return () => clearInterval(interval);
   }, [hasHydrated, isAuthenticated, user?.role, router]);
 
   const handleDownloadTemplate = async () => {

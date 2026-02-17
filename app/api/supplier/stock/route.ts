@@ -129,6 +129,13 @@ export async function POST(req: NextRequest) {
 
     console.log(`[SUPPLIER-STOCK] Calling backend: ${url}`)
 
+    // Forward cookies from the incoming request to the backend
+    const cookieHeader = req.headers.get('cookie');
+    if (cookieHeader) {
+      headers['Cookie'] = cookieHeader;
+      console.log(`[SUPPLIER-STOCK] Forwarding cookies to backend`);
+    }
+
     const resp = await fetch(url, {
       method: "POST",
       headers,
@@ -167,6 +174,96 @@ export async function POST(req: NextRequest) {
     console.error("[SUPPLIER-STOCK] POST error:", e)
     return NextResponse.json(
       { ok: false, error: e?.message || "Failed to process request" },
+      { status: 500 }
+    )
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+
+// DELETE endpoint for deleting products
+export async function DELETE(req: NextRequest) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), Number(process.env.PROXY_TIMEOUT_MS ?? 12000))
+
+  try {
+    const searchParams = req.nextUrl.searchParams
+    const itemCode = searchParams.get("itemCode")
+    const account = searchParams.get("account")
+
+    console.log(`[SUPPLIER-STOCK] DELETE request - itemCode: ${itemCode}, account: ${account}`)
+
+    if (!itemCode) {
+      return NextResponse.json(
+        { ok: false, error: "itemCode required" },
+        { status: 400 }
+      )
+    }
+
+    // Build URL with query parameters
+    let url = `${STOCK_SERVLET_URL}?itemCode=${encodeURIComponent(itemCode)}`
+    if (account) {
+      url += `&account=${encodeURIComponent(account)}`
+    }
+
+    console.log(`[SUPPLIER-STOCK] Calling backend DELETE: ${url}`)
+
+    // Forward cookies from the incoming request to the backend
+    const headers: HeadersInit = {
+      "Content-Type": "application/json",
+      "Accept": "application/json"
+    }
+    
+    const cookieHeader = req.headers.get('cookie')
+    if (cookieHeader) {
+      headers['Cookie'] = cookieHeader
+      console.log(`[SUPPLIER-STOCK] Forwarding cookies to backend`)
+    }
+
+    const resp = await fetch(url, {
+      method: "DELETE",
+      headers,
+      signal: controller.signal,
+      cache: "no-store",
+    })
+
+    console.log(`[SUPPLIER-STOCK] Backend DELETE response status: ${resp.status}`)
+
+    const responseText = await resp.text()
+    let data: any
+
+    try {
+      data = JSON.parse(responseText)
+    } catch (parseError) {
+      console.error("[SUPPLIER-STOCK] Failed to parse DELETE response:", parseError)
+      return NextResponse.json(
+        { ok: false, error: "Invalid response from backend" },
+        { status: 500 }
+      )
+    }
+
+    if (!resp.ok || !data.ok) {
+      return NextResponse.json(
+        { ok: false, error: data.error || "Failed to delete product" },
+        { status: resp.status || 500 }
+      )
+    }
+
+    return NextResponse.json(data)
+
+  } catch (e: any) {
+    console.error("[SUPPLIER-STOCK] DELETE error:", e)
+
+    if (e.name === 'AbortError') {
+      return NextResponse.json(
+        { ok: false, error: "Request timeout" },
+        { status: 504 }
+      )
+    }
+
+    return NextResponse.json(
+      { ok: false, error: e?.message || "Failed to delete product" },
       { status: 500 }
     )
   } finally {

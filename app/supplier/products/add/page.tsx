@@ -22,11 +22,22 @@ export default function SupplierStockUploadPage() {
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
 
-  // Session expiration check
+  // Session expiration check - check on mount and periodically
   useEffect(() => {
+    // Initial check
     if (!checkSession()) {
       router.replace('/login');
+      return;
     }
+
+    // Periodic check every 30 seconds
+    const interval = setInterval(() => {
+      if (!checkSession()) {
+        router.replace('/login');
+      }
+    }, 30000);
+
+    return () => clearInterval(interval);
   }, [checkSession, router]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {

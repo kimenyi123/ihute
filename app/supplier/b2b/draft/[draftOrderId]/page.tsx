@@ -13,7 +13,6 @@ import {
   CheckCircle,
   Search,
   X,
-  Edit,
   Save,
   Loader2,
   AlertCircle,
@@ -23,6 +22,7 @@ import {
   getDraft,
   getSupplierOptions,
   updateLineSupplier,
+  updateLine,
   removeLine,
   submitDraft,
   B2BDraftOrder,
@@ -65,6 +65,17 @@ export default function B2BDraftPage() {
       router.push("/login");
       return;
     }
+
+    // Periodic session check every 30 seconds
+    const interval = setInterval(() => {
+      const { isAuthenticated: currentAuth, user: currentUser } = useAuthStore.getState();
+      if (!currentAuth || (currentUser?.role as string) !== "supplier") {
+        console.log("Session expired - redirecting to login");
+        router.push("/login");
+      }
+    }, 30000);
+
+    return () => clearInterval(interval);
   }, [hasHydrated, isAuthenticated, user?.role, router]);
 
   useEffect(() => {
@@ -235,7 +246,7 @@ export default function B2BDraftPage() {
     setError(null);
 
     try {
-      const result = await submitDraft(draftOrderId);
+      await submitDraft(draftOrderId);
 
       // Redirect to outgoing orders
       router.push("/supplier/b2b/outgoing");
