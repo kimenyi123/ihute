@@ -56,14 +56,15 @@ export interface UpsertResponse {
   error?: string;
 }
 
-const API_BASE = '/supplier/stock/api';
+const API_BASE = '/api/supplier/stock';
 
 /**
- * Import Excel file to Redis
+ * Import Excel file to database and Redis
  */
-export async function importStockExcel(file: File): Promise<ImportResult> {
+export async function importStockExcel(file: File, account: string): Promise<ImportResult> {
   const formData = new FormData();
   formData.append('file', file);
+  formData.append('account', account);
 
   const response = await fetch(`${API_BASE}?action=importExcel`, {
     method: 'POST',

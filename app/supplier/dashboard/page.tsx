@@ -30,6 +30,7 @@ import {
   Copy,
 } from "lucide-react";
 import Link from "next/link";
+import AddProductModal, { ProductFormData } from "@/components/supplier/AddProductModal";
 
 const QRCode = dynamic(() => import("react-qr-code"), { ssr: false });
 
@@ -44,6 +45,10 @@ function SupplierDashboard() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Add Product Modal state
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<ProductFormData | null>(null);
 
   // Shop With Me QR (collapsible so it doesn't interrupt the main dashboard)
   const [shopWithMeQROpen, setShopWithMeQROpen] = useState(false);
@@ -101,6 +106,27 @@ function SupplierDashboard() {
         const products = data.products || [];
         console.log(`Received ${products.length} products from ${data.source}`);
 
+        // Helper function to parse integers safely
+        const parseIntSafe = (value: any): number => {
+          if (typeof value === 'number') return Math.floor(value);
+          if (typeof value === 'string') {
+            const parsed = parseInt(value.trim());
+            return isNaN(parsed) ? 0 : parsed;
+          }
+          return 0;
+        };
+
+        // Helper function to parse Redis price format (e.g., "3000RWF")
+        const parsePriceFromRedis = (value: any): number => {
+          if (typeof value === 'number') return value;
+          if (typeof value === 'string') {
+            const cleaned = value.replace(/RWF/gi, '').trim();
+            const parsed = parseFloat(cleaned);
+            return isNaN(parsed) ? 0 : parsed;
+          }
+          return 0;
+        };
+
         // Helper function to parse Redis price strings like "1880.0RWF"
         const parsePrice = (value: any): number => {
           if (typeof value === 'number') return value;
@@ -113,49 +139,76 @@ function SupplierDashboard() {
           return 0;
         };
 
-        // Map products - handle both database and Redis formats
+        // Map products - handle Redis format (your format)
         const mappedProducts = products.map((p: any, index: number) => {
           console.log(`Product ${index}:`, p);
 
-          // Parse price from various sources
-          const price = parsePrice(
-            p.price ||
-            p.UNITY_PRICE ||
-            p.SALE_PRICE_INCLUSIVE ||
-            p.item_emballage ||  // Redis price field
-            0
-          );
+          // Check if this is Redis format (your format)
+          const isRedisFormat = p.item_commercial_name && p.item_key_words && p.item_packet && p.item_emballage;
+          
+          let mapped;
+          
+          if (isRedisFormat) {
+            // Handle Redis format (your format)
+            const stock = parseIntSafe(p.item_packet);
+            const price = parsePriceFromRedis(p.item_emballage);
+            
+            mapped = {
+              ...p, // Keep all original Redis fields
+              // Normalize for dashboard display
+              itemName: p.item_commercial_name,
+              ITEM_NAME: p.item_commercial_name,
+              itemCode: p.item_key_words,
+              ITEM_CODE: p.item_key_words,
+              stock: stock,
+              STOCK: stock,
+              price: price,
+              UNITY_PRICE: price,
+              costPrice: 0, // Not available in Redis format
+              COST_PRICE_INCLUSIVE: 0,
+              category: "uncategorized",
+              sales: 0,
+              batchInfo: p.item_state || "",
+              DESCRIPTION: p.item_state || "",
+              UNIT: "PCS"
+            };
+          } else {
+            // Handle database format (fallback)
+            const price = parsePrice(
+              p.price ||
+              p.UNITY_PRICE ||
+              p.SALE_PRICE_INCLUSIVE ||
+              0
+            );
 
-          const mapped = {
-            ...p, // Keep all original fields
-            // Normalize field names - handle database, Redis, and API variations
-            stock: Number(
-              p.stock ||
-              p.STOCK ||
-              p.item_packet ||  // Redis stock field
-              p.QUANTITY ||
-              0
-            ),
-            price: price,
-            costPrice: Number(
-              p.cost ||
-              p.COST_PRICE_INCLUSIVE ||
-              0
-            ),
-            itemName:
-              p.ITEM_NAME ||
-              p.itemName ||
-              p.item_commercial_name ||  // Redis name field
-              "Unknown",
-            itemCode:
-              p.ITEM_CODE ||
-              p.itemCode ||
-              p.item_key_words ||  // Redis code field
-              "",
-            batchInfo: p.item_state || "",  // Redis batch/expiry info
-            category: p.category || "uncategorized",
-            sales: 0,
-          };
+            mapped = {
+              ...p, // Keep all original fields
+              // Normalize field names
+              stock: Number(
+                p.stock ||
+                p.STOCK ||
+                p.QUANTITY ||
+                0
+              ),
+              price: price,
+              costPrice: Number(
+                p.cost ||
+                p.COST_PRICE_INCLUSIVE ||
+                0
+              ),
+              itemName:
+                p.ITEM_NAME ||
+                p.itemName ||
+                "Unknown",
+              itemCode:
+                p.ITEM_CODE ||
+                p.itemCode ||
+                "",
+              batchInfo: p.DESCRIPTION || "",
+              category: p.category || "uncategorized",
+              sales: 0,
+            };
+          }
 
           console.log(`Mapped product ${index}:`, mapped);
           return mapped;
@@ -238,6 +291,41 @@ function SupplierDashboard() {
       }
     } catch {
       alert("Error deleting product");
+    }
+  };
+
+  const handleSaveProduct = async (productData: ProductFormData) => {
+    if (!user?.ishyigaAccount) {
+      alert("No account found");
+      return;
+    }
+
+    try {
+      const action = editingProduct ? "updateProduct" : "addProduct";
+      
+      const res = await fetch("/api/supplier/stock", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action,
+          account: user.ishyigaAccount,
+          ...productData,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (data.ok) {
+        // Refresh the products list
+        window.location.reload();
+      } else {
+        alert(data.error || "Failed to save product");
+      }
+    } catch (error) {
+      console.error("Error saving product:", error);
+      alert("Error saving product");
     }
   };
 
@@ -461,16 +549,20 @@ function SupplierDashboard() {
 
               <div className="flex gap-2">
                 <Button asChild variant="outline" className="gap-2">
-                  <Link href="/supplier/products/bulk-upload">
+                  <Link href="/supplier/products/add">
                     <Package className="h-4 w-4" />
                     Bulk Upload
                   </Link>
                 </Button>
-                <Button asChild className="gap-2 bg-blue-600 hover:bg-blue-700">
-                  <Link href="/supplier/products/add">
-                    <Plus className="h-4 w-4" />
-                    Add Product
-                  </Link>
+                <Button 
+                  onClick={() => {
+                    setEditingProduct(null);
+                    setShowAddModal(true);
+                  }}
+                  className="gap-2 bg-blue-600 hover:bg-blue-700"
+                >
+                  <Plus className="h-4 w-4" />
+                  Add Product
                 </Button>
               </div>
             </div>
@@ -756,6 +848,14 @@ function SupplierDashboard() {
             )}
           </CardContent>
         </Card>
+
+        {/* Add Product Modal */}
+        <AddProductModal
+          isOpen={showAddModal}
+          onClose={() => setShowAddModal(false)}
+          onSave={handleSaveProduct}
+          editingProduct={editingProduct}
+        />
       </div>
     </div>
   );

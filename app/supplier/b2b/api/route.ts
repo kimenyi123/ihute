@@ -229,13 +229,21 @@ const emptyBodyActions = [
  * Examples: importExcel, updateLine, submitDraft, updateSupplierDecision, buyerAcceptChanges, removeLine
  */
 export async function POST(req: NextRequest) {
-  const { controller, timeout } = createAbort(
-    Number(process.env.PROXY_TIMEOUT_MS ?? 30000)
-  );
+  // Read action early so we can pick an appropriate timeout (uploads need more time)
+  const searchParams = req.nextUrl.searchParams;
+  const action = searchParams.get("action");
+
+  // Default proxy timeout (ms)
+  let timeoutMs = Number(process.env.PROXY_TIMEOUT_MS ?? 30000);
+  // Increase timeout for long-running upload/import actions
+  if (action === "importExcel") {
+    timeoutMs = Number(process.env.PROXY_TIMEOUT_MS_IMPORT ?? 120000); // 2 minutes
+  }
+
+  const { controller, timeout } = createAbort(timeoutMs);
 
   try {
-    const searchParams = req.nextUrl.searchParams;
-    const action = searchParams.get("action");
+    // action already read above
 
     if (!action) {
       return NextResponse.json(

@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Truck, CheckCircle, Clock, Package, MessageCircle, ArrowLeft, CreditCard, FileText } from "lucide-react"
 import { formatPaymentMethod } from "@/lib/payment-utils"
 import { RatingModal } from "@/components/RatingModal"
+import { useOrderTracking } from "@/hooks/useOrderTracking"
 
 // Updated to match supplier statuses
 type OrderStatus = "open" | "processing" | "invoice" | "delivered" | "pending" | "in-transit"
@@ -17,6 +18,7 @@ type OrderStatus = "open" | "processing" | "invoice" | "delivered" | "pending" |
 type OrderDetail = {
   orderId: string
   sellerName: string
+  sellerAccount?: string  // Added missing property
   sellerPhone?: string
   buyerName?: string
   buyerPhone?: string
@@ -178,8 +180,59 @@ export default function TrackOrderPage() {
 
   // Rating modal state
   const [showRatingModal, setShowRatingModal] = useState(false)
-  const [ratingAttempts, setRatingAttempts] = useState(0)
   const [ratingItems, setRatingItems] = useState<Array<{ code: string, name: string }>>([])
+  const [hasCheckedRating, setHasCheckedRating] = useState(false)
+
+  // ✅ NEW: Use order tracking hook for real-time status monitoring
+  const { 
+    currentStatus, 
+    isMonitoring, 
+    startMonitoring, 
+    isDelivered 
+  } = useOrderTracking({ 
+    orderId, 
+    initialStatus: order?.status,
+    autoStart: true 
+  })
+
+  // Use the tracking hook values to show monitoring status (optional)
+  console.log(`[TrackOrder] Monitoring: ${isMonitoring}, Status: ${currentStatus}, Delivered: ${isDelivered}`)
+
+  // Function to check if rating should be shown
+  const checkIfShouldShowRating = async (orderIdToCheck: string) => {
+    try {
+      // Use the proper shouldShowPopup API
+      const response = await fetch(`/api/ratings?action=shouldShowPopup&orderId=${orderIdToCheck}`, {
+        cache: "no-store"
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        console.log('[TrackOrder] Should show popup response:', data)
+        
+        if (data.ok && data.shouldShow) {
+          // Use the items from the API response
+          const items = data.orderDetails?.items || []
+          setRatingItems(items)
+          setShowRatingModal(true)
+          console.log('[TrackOrder] Showing rating modal for delivered order')
+        } else {
+          console.log('[TrackOrder] Not showing popup:', data.reason)
+        }
+      }
+    } catch (error) {
+      console.error('[TrackOrder] Error checking rating status:', error)
+    }
+  }
+
+  // ✅ NEW: Watch for status changes and trigger rating popup
+  useEffect(() => {
+    // This effect will trigger rating popup when order becomes delivered
+    if (order?.status === "delivered" && !showRatingModal && !hasCheckedRating) {
+      setHasCheckedRating(true)
+      checkIfShouldShowRating(orderId)
+    }
+  }, [order?.status, orderId, showRatingModal, hasCheckedRating])
 
   useEffect(() => {
     async function fetchOrder() {
@@ -205,10 +258,7 @@ export default function TrackOrderPage() {
         console.log("[Track Order] Order data received:", json.order)
         setOrder(json.order)
 
-        // Check if should show rating popup
-        if (json.order?.status === "delivered") {
-          checkIfShouldShowRating(orderId)
-        }
+        // Rating popup will be handled by the status change useEffect
       } catch (err: any) {
         setError(err?.message || "Failed to load order")
       } finally {
@@ -219,32 +269,13 @@ export default function TrackOrderPage() {
     fetchOrder()
   }, [orderId])
 
-  // Check if rating popup should be shown
-  async function checkIfShouldShowRating(orderId: string) {
-    try {
-      const res = await fetch(`/api/ratings?action=shouldShowPopup&orderId=${orderId}`, {
-        cache: "no-store"
-      })
 
-      const data = await res.json()
-      console.log("[Rating Check] Should show popup:", data)
-
-      if (data.ok && data.shouldShow) {
-        const items = data.orderDetails?.items || []
-        setRatingItems(items)
-        setRatingAttempts(data.attempts || 0)
-        setShowRatingModal(true)
-      }
-    } catch (error) {
-      console.error("[Rating Check] Error:", error)
-    }
-  }
 
   // Handle rating modal dismiss
   async function handleRatingDismiss() {
     setShowRatingModal(false)
 
-    // Track attempt
+    // Track attempt (optional - don't break if it fails)
     try {
       const res = await fetch("/api/ratings", {
         method: "POST",
@@ -260,7 +291,6 @@ export default function TrackOrderPage() {
 
       if (data.ok) {
         const nextAttempts = data.attempts || 0
-        setRatingAttempts(nextAttempts)
 
         // Schedule next popup if not max attempts
         if (nextAttempts < 3) {
@@ -268,19 +298,33 @@ export default function TrackOrderPage() {
           console.log(`[Rating] Will show again in ${data.nextWaitMinutes} minutes`)
 
           setTimeout(() => {
+            setHasCheckedRating(false) // Allow checking again
             checkIfShouldShowRating(orderId)
           }, waitMs)
         }
+      } else {
+        console.warn("[Rating] Attempt tracking failed, using fallback timing")
+        // Fallback: show again in 2 minutes if tracking fails
+        setTimeout(() => {
+          setHasCheckedRating(false)
+          checkIfShouldShowRating(orderId)
+        }, 2 * 60 * 1000)
       }
     } catch (error) {
       console.error("[Rating] Track attempt error:", error)
+      // Fallback: show again in 2 minutes if tracking fails
+      setTimeout(() => {
+        setHasCheckedRating(false)
+        checkIfShouldShowRating(orderId)
+      }, 2 * 60 * 1000)
     }
   }
 
   // Handle successful rating submission
   function handleRatingSuccess() {
     console.log("[Rating] Rating submitted successfully")
-    // No need to show again
+    setShowRatingModal(false)
+    // No need to show again since rating was successful
   }
 
   if (loading) {
@@ -603,6 +647,7 @@ export default function TrackOrderPage() {
           orderId={orderId}
           sellerId={order.sellerAccount || ""}
           sellerName={order.sellerName}
+          buyerPhone={order.buyerPhone || ""}
           items={ratingItems}
           open={showRatingModal}
           onClose={handleRatingDismiss}

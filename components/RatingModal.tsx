@@ -11,6 +11,7 @@ interface RatingModalProps {
     orderId: string
     sellerId: string
     sellerName: string
+    buyerPhone?: string
     items: Array<{ code: string; name: string }>
     open: boolean
     onClose: () => void
@@ -25,7 +26,7 @@ const EMOJIS = [
     { value: 5, emoji: "😊", label: "Excellent" },
 ]
 
-export function RatingModal({ orderId, sellerId, sellerName, items, open, onClose, onSuccess }: RatingModalProps) {
+export function RatingModal({ orderId, sellerId, sellerName, buyerPhone, items, open, onClose, onSuccess }: RatingModalProps) {
     const [step, setStep] = useState<"rating" | "success">("rating")
     const [submitting, setSubmitting] = useState(false)
 
@@ -73,6 +74,7 @@ export function RatingModal({ orderId, sellerId, sellerName, items, open, onClos
                 action: "submitRating",
                 orderId: parseInt(orderId),
                 sellerAccount: sellerId,
+                buyerPhone: buyerPhone || "",
                 supplierRating,
                 supplierFeedback,
                 itemRatings: formattedItemRatings
@@ -126,12 +128,18 @@ export function RatingModal({ orderId, sellerId, sellerName, items, open, onClos
             <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                     <DialogTitle>Rate Your Order</DialogTitle>
-                    <DialogDescription>
-                        Share your experience with {sellerName}
+                    <DialogDescription className="text-center">
+                        Share your experience with <span className="font-bold text-lg text-slate-900">{sellerName}</span>
                     </DialogDescription>
                 </DialogHeader>
 
                 <div className="space-y-6 my-4">
+                    {/* Supplier Name Highlight */}
+                    <div className="text-center p-4 bg-blue-50 rounded-lg border border-blue-200">
+                        <p className="text-sm text-blue-600 mb-1">Rating for</p>
+                        <p className="text-xl font-bold text-blue-900">{sellerName}</p>
+                    </div>
+
                     {/* Supplier Rating */}
                     <div className="space-y-3">
                         <Label className="text-base font-semibold">How was the overall service?</Label>

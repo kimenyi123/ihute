@@ -208,6 +208,7 @@ export async function POST(req: NextRequest) {
       data = {
         ID_ORDER: orderData.ID_ORDER,
         SELLER_NAMES: orderData.SELLER_NAMES || sellerData.OWNER,
+        SELLER_ISHYIGA_ACCOUNT: orderData.SELLER_ISHYIGA_ACCOUNT || sellerData.ISHYIGA_ACCOUNT,
         SELLER_PHONE: sellerData.TEL,
         BUYER_OWNER: buyerData.OWNER,
         BUYER_PHONE: buyerData.PHONE || orderData.BUYER_PHONE,
@@ -248,6 +249,7 @@ export async function POST(req: NextRequest) {
     const order = {
       orderId: data.ID_ORDER || orderId,
       sellerName: data.SELLER_NAMES || data.SELLER_OWNER || "Unknown Seller",
+      sellerAccount: data.SELLER_ISHYIGA_ACCOUNT || undefined,
       sellerPhone: data.SELLER_PHONE || data.SELLER_TEL || undefined,
       buyerName: data.BUYER_NAME || data.BUYER_OWNER || undefined,
       buyerPhone: data.BUYER_PHONE || data.BUYER_TEL || undefined,

@@ -7,6 +7,7 @@ import { Suspense } from "react"
 import { SessionProvider } from "@/components/session-provider"
 import { ServiceWorkerRegister } from "@/components/service-worker-register"
 import { NotificationPrompt } from "@/components/notification-prompt"
+import { GlobalRatingManager } from "@/components/GlobalRatingManager"
 import { Toaster } from "@/components/ui/toaster"
 import "./globals.css"
 
@@ -34,7 +35,7 @@ export default function RootLayout({
         <Toaster />
         <ServiceWorkerRegister />
         <NotificationPrompt />
-        <Toaster />
+        <GlobalRatingManager />
         <Analytics />
       </body>
     </html>
