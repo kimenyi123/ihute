@@ -5,6 +5,7 @@ import { ProductCard } from "@/components/product-card"
 import { TrendingUp, Sparkles, Clock, Heart, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react"
 import { useAuthStore } from "@/lib/auth-store"
 import { getSessionId, getRecentProductIds } from "@/lib/interaction-tracker"
+import { getSmartRecommendations } from "@/lib/recommendation-service"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { ArrowLeft } from "lucide-react"
@@ -20,6 +21,7 @@ interface Product {
   supplierName?: string
   supplierLocation?: string
   momo?: string
+  category?: string
   inStock?: boolean
   rating?: number
 }
@@ -89,39 +91,8 @@ export default function DiscoverPage() {
 
   async function loadAllRecommendations() {
     setLoading(true)
-    
+
     try {
-      const userId = user?.email || null
-      const sessionId = getSessionId()
-      
-      // 🔒 DEBUG: Log session info for verification
-      if (process.env.NODE_ENV === 'development') {
-        console.log("[Discover] Loading recommendations", {
-          userId: userId || "null",
-          sessionId: sessionId ? sessionId.substring(0, 50) + "..." : "null",
-          hasUser: !!user
-        })
-      }
-      
-      const params = new URLSearchParams()
-      if (userId) params.set("userId", userId)
-      if (sessionId) params.set("sessionId", sessionId)
-      params.set("limit", "20") // More products for discover page
-
-      // Get recommendations
-      const res = await fetch(`/api/personalization/recommendations?${params.toString()}`)
-      const data = await res.json()
-      
-      // 🔒 DEBUG: Log response source
-      if (process.env.NODE_ENV === 'development') {
-        console.log("[Discover] Recommendations response", {
-          ok: data.ok,
-          source: data.source || "unknown",
-          productCount: data.products?.length || 0,
-          hasScores: !!data.productScores
-        })
-      }
-
       const newSections: RecommendationSection[] = []
 
       // Recently viewed
@@ -139,9 +110,14 @@ export default function DiscoverPage() {
         }
       }
 
+      // Use smart caching service instead of direct API calls
+      const { products: recommendationNames, source } = await getSmartRecommendations(20)
+
+      console.log(`[Discover] Recommendations from ${source}`)
+
       // Recommended products
-      if (data.ok && data.products && data.products.length > 0 && !data.isFirstTime) {
-        const recommendedProducts = await fetchProductDetails(data.products)
+      if (recommendationNames && recommendationNames.length > 0) {
+        const recommendedProducts = await fetchProductDetails(recommendationNames)
         if (recommendedProducts.length > 0) {
           newSections.push({
             title: "Recommended for You",
@@ -153,14 +129,24 @@ export default function DiscoverPage() {
         }
       }
 
-      // 🔒 FIRST-TIME USER: Don't show trending fallback - keep it empty
-      // Only show trending if user explicitly has no recommendations but has interactions
-      // (This should rarely happen, but handle edge case)
-      if (newSections.length === 0 && data.ok && !data.isFirstTime && data.source === "trending") {
-        const trendingRes = await fetch("/api/personalization/recommendations?action=getRecommendations&limit=20")
+      // Fallback to trending/popular items if no personalized recommendations
+      if (newSections.length === 0) {
+        // Try to get trending items as fallback
+        const trendingParams = new URLSearchParams()
+        trendingParams.set("action", "getRecommendations")
+        trendingParams.set("limit", "20")
+        trendingParams.set("_t", Date.now().toString())
+
+        const trendingRes = await fetch(`/api/personalization/recommendations?${trendingParams.toString()}`, {
+          cache: "no-store",
+          headers: {
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+          },
+        })
         const trendingData = await trendingRes.json()
-        
-        if (trendingData.ok && trendingData.products && !trendingData.isFirstTime) {
+
+        if (trendingData.ok && trendingData.products && trendingData.products.length > 0) {
           const trendingProducts = await fetchProductDetails(trendingData.products)
           if (trendingProducts.length > 0) {
             newSections.push({
@@ -185,40 +171,53 @@ export default function DiscoverPage() {
 
   async function fetchProductDetails(productNames: string[]): Promise<Product[]> {
     if (productNames.length === 0) return []
-    
+
     try {
       const allProducts: Product[] = []
       const seenIds = new Set<string>()
-      
+
       const searchLimit = Math.min(productNames.length, 20)
-      
+
       for (let i = 0; i < searchLimit; i++) {
         const productName = productNames[i]?.trim()
         if (!productName) continue
-        
+
         try {
           const res = await fetch(
-            `/api/fetchSuggestions?globalSearch=${encodeURIComponent(productName)}&limit=3&Currency=RWF`,
-            { cache: "no-store" }
+            `/api/fetchSuggestions?globalSearch=${encodeURIComponent(productName)}&limit=3&Currency=RWF&_t=${Date.now()}`,
+            {
+              cache: "no-store",
+              headers: {
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+              },
+            }
           )
-          
+
           if (!res.ok) continue
-          
+
           const data = await res.json()
           const products = data.products || []
-          
+
           for (const p of products) {
             const productId = p.ITEM_CODE || p.item_code || p.id || `${productName}-${i}`
-            
+
             if (seenIds.has(productId)) continue
             seenIds.add(productId)
-            
+
             const price = parseFloat(p.SALE_PRICE_INCLUSIVE || p.item_emballage || p.price || "0")
-            
+            const category =
+              p.FAMILLE ||
+              p.famille ||
+              p.business_category ||
+              p.Business_Category ||
+              p.CATEGORY ||
+              ""
+
             allProducts.push({
               id: productId,
               name: p.ITEM_NAME || p.item_commercial_name || p.name || productName,
-              description: undefined, // hide code from UI
+              description: p.DESCRIPTION_KEYWORD || p.item_key_words || "",
               price: isNaN(price) ? 0 : price,
               unit: p.UNIT || p.item_packet || "",
               image: p.IMAGE_URL || p.image || undefined,
@@ -226,16 +225,33 @@ export default function DiscoverPage() {
               supplierName: p.SELLER_NAMES || p.supplier_name || "",
               supplierLocation: p.LOCATION || p.supplier_location || "",
               momo: p.momo || undefined,
+              category: category || undefined,
               inStock: true,
             })
-            
+
             break
           }
         } catch (error) {
           console.warn(`Error searching for product "${productName}":`, error)
         }
       }
-      
+
+      // Prefer keeping recommendations within the same dominant category
+      if (allProducts.length > 0) {
+        const counts: Record<string, number> = {}
+        for (const p of allProducts) {
+          const cat = (p.category || "").trim()
+          if (!cat) continue
+          counts[cat] = (counts[cat] || 0) + 1
+        }
+        const mainCategory = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0]
+        if (mainCategory) {
+          return allProducts.filter((p) => (p.category || "").trim() === mainCategory).length > 0
+            ? allProducts.filter((p) => (p.category || "").trim() === mainCategory)
+            : allProducts
+        }
+      }
+
       return allProducts
     } catch (error) {
       console.error("Error fetching product details:", error)
@@ -259,15 +275,15 @@ export default function DiscoverPage() {
         {/* Header */}
         <div className="mb-6">
           <div className="flex items-start justify-between mb-4">
-            <Button variant="ghost" size="sm" asChild>
-              <Link href="/">
+            <Link href="/">
+              <Button variant="ghost" size="sm">
                 <ArrowLeft className="h-4 w-4 mr-2" />
                 Back to Home
-              </Link>
-            </Button>
-            <Button 
-              variant="outline" 
-              size="sm" 
+              </Button>
+            </Link>
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => {
                 setCurrentPages({}) // Reset pagination
                 loadAllRecommendations()
@@ -282,15 +298,6 @@ export default function DiscoverPage() {
           <p className="text-muted-foreground mt-2">
             Personalized recommendations just for you
           </p>
-          <p className="text-xs text-muted-foreground mt-1">
-            Recommendations update based on your browsing activity. Refresh to see latest updates.
-          </p>
-          {process.env.NODE_ENV === 'development' && (
-            <div className="mt-2 p-2 bg-muted rounded text-xs font-mono">
-              <div>User: {user?.email || "Anonymous"}</div>
-              <div>Session: {getSessionId().substring(0, 50)}...</div>
-            </div>
-          )}
         </div>
 
         {/* Sections */}
@@ -305,11 +312,11 @@ export default function DiscoverPage() {
               <p className="text-sm text-muted-foreground mb-6">
                 Visit the homepage to explore products, search for items, or browse categories.
               </p>
-              <Button asChild>
-                <Link href="/">
+              <Link href="/">
+                <Button>
                   Explore Products
-                </Link>
-              </Button>
+                </Button>
+              </Link>
             </div>
           </div>
         ) : (
@@ -318,7 +325,7 @@ export default function DiscoverPage() {
               const paginatedProducts = getPaginatedProducts(idx, section.products)
               const totalPages = getTotalPages(section.products.length)
               const currentPage = currentPages[idx] || 1
-              
+
               return (
                 <section key={idx} id={`section-${idx}`}>
                   <div className="mb-6 flex items-center justify-between">
@@ -345,7 +352,7 @@ export default function DiscoverPage() {
                           <ProductCard key={product.id} product={product} />
                         ))}
                       </div>
-                      
+
                       {/* Pagination Controls */}
                       {totalPages > 1 && (
                         <div className="mt-6 flex items-center justify-center gap-2">
@@ -358,15 +365,15 @@ export default function DiscoverPage() {
                             <ChevronLeft className="h-4 w-4" />
                             Previous
                           </Button>
-                          
+
                           <div className="flex items-center gap-1">
                             {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
                               // Show first page, last page, current page, and pages around current
-                              const showPage = 
-                                page === 1 || 
-                                page === totalPages || 
+                              const showPage =
+                                page === 1 ||
+                                page === totalPages ||
                                 (page >= currentPage - 1 && page <= currentPage + 1)
-                              
+
                               if (!showPage) {
                                 // Show ellipsis
                                 if (page === currentPage - 2 || page === currentPage + 2) {
@@ -374,7 +381,7 @@ export default function DiscoverPage() {
                                 }
                                 return null
                               }
-                              
+
                               return (
                                 <Button
                                   key={page}
@@ -388,7 +395,7 @@ export default function DiscoverPage() {
                               )
                             })}
                           </div>
-                          
+
                           <Button
                             variant="outline"
                             size="sm"

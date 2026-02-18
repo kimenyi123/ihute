@@ -13,20 +13,28 @@ export type FavoriteItem = {
   unit?: string
   image?: string
   description?: string
+  addedAt?: string
 
   supplierId?: string
   supplierName?: string
   supplierLocation?: string
   momo?: string
+  inStock?: boolean
+  supplierDistanceKm?: number
+  supplierRating?: number
+  supplierBadge?: string
+  deliveryEtaMin?: number
 }
 
 type FavoritesState = {
   favorites: FavoriteItem[]
 
   addFavorite: (item: FavoriteItem) => void
-  removeFavorite: (productId: string) => void
-  isFavorite: (productId: string) => boolean
+  removeFavorite: (productId: string, supplierId?: string) => void
+  isFavorite: (productId: string, supplierId?: string) => boolean
   toggleFavorite: (item: FavoriteItem) => void
+  setFavorites: (items: FavoriteItem[]) => void
+  clearFavorites: () => void
 
   // handy helpers
   count: () => number
@@ -34,6 +42,10 @@ type FavoritesState = {
     supplierId: string
     supplierName: string
     supplierLocation?: string
+    supplierDistanceKm?: number
+    supplierRating?: number
+    supplierBadge?: string
+    deliveryEtaMin?: number
     items: FavoriteItem[]
   }>
 }
@@ -54,33 +66,56 @@ export const useFavoritesStore = create<FavoritesState>()(
     })
     
     return set((state) => {
-      if (state.favorites.some((f) => f.id === item.id)) return state
-      return { favorites: [item, ...state.favorites] }
+      const supplierId = item.supplierId || "unknown"
+      if (state.favorites.some((f) => f.id === item.id && (f.supplierId || "unknown") === supplierId)) return state
+      const next = { ...item, addedAt: item.addedAt || new Date().toISOString() }
+      return { favorites: [next, ...state.favorites] }
     })
   },
 
-  removeFavorite: (productId) => {
+  removeFavorite: (productId, supplierId) => {
     // Note: We don't track unfavorite as a separate interaction
     // The absence of favorite interactions will naturally decay
     return set((state) => ({
-      favorites: state.favorites.filter((f) => f.id !== productId),
+      favorites: state.favorites.filter((f) => {
+        if (f.id !== productId) return true
+        if (!supplierId) return false
+        return (f.supplierId || "unknown") !== supplierId
+      }),
     }))
   },
 
-  isFavorite: (productId) => get().favorites.some((f) => f.id === productId),
+  isFavorite: (productId, supplierId) =>
+    get().favorites.some((f) => {
+      if (f.id !== productId) return false
+      if (!supplierId) return true
+      return (f.supplierId || "unknown") === supplierId
+    }),
 
   toggleFavorite: (item) => {
     const { isFavorite, removeFavorite, addFavorite } = get()
-    if (isFavorite(item.id)) removeFavorite(item.id)
+    if (isFavorite(item.id, item.supplierId)) removeFavorite(item.id, item.supplierId)
     else addFavorite(item)
   },
+
+  setFavorites: (items) => set({ favorites: items }),
+  clearFavorites: () => set({ favorites: [] }),
 
   count: () => get().favorites.length,
 
   getGroupsBySeller: () => {
     const groups = new Map<
       string,
-      { supplierId: string; supplierName: string; supplierLocation?: string; items: FavoriteItem[] }
+      {
+        supplierId: string
+        supplierName: string
+        supplierLocation?: string
+        supplierDistanceKm?: number
+        supplierRating?: number
+        supplierBadge?: string
+        deliveryEtaMin?: number
+        items: FavoriteItem[]
+      }
     >()
     for (const it of get().favorites) {
       const sid = it.supplierId || "unknown"
@@ -90,6 +125,10 @@ export const useFavoritesStore = create<FavoritesState>()(
           supplierId: sid,
           supplierName: it.supplierName || "Supplier",
           supplierLocation: it.supplierLocation,
+          supplierDistanceKm: it.supplierDistanceKm,
+          supplierRating: it.supplierRating,
+          supplierBadge: it.supplierBadge,
+          deliveryEtaMin: it.deliveryEtaMin,
           items: [],
         }
       g.items.push(it)

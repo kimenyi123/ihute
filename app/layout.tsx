@@ -7,6 +7,7 @@ import { Suspense } from "react"
 import { SessionProvider } from "@/components/session-provider"
 import { ServiceWorkerRegister } from "@/components/service-worker-register"
 import { NotificationPrompt } from "@/components/notification-prompt"
+import { GlobalRatingManager } from "@/components/GlobalRatingManager"
 import { Toaster } from "@/components/ui/toaster"
 import "./globals.css"
 
@@ -27,13 +28,14 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`font-sans ${GeistSans.variable} ${GeistMono.variable} antialiased`}>
+      <body className={`font-sans ${GeistSans.variable} ${GeistMono.variable} antialiased`} suppressHydrationWarning>
         <SessionProvider>
           <Suspense fallback={null}>{children}</Suspense>
         </SessionProvider>
         <Toaster />
         <ServiceWorkerRegister />
         <NotificationPrompt />
+        <GlobalRatingManager />
         <Analytics />
       </body>
     </html>

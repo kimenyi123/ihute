@@ -32,17 +32,17 @@ export default function JoinTablePage() {
       return
     }
 
-    // Decode token to get table info
+    // Decode token to get table info (legacy table command)
     try {
       let decoded: string
       try {
-        decoded = atob(token.replace(/-/g, "+").replace(/_/g, "/"))
+        decoded = atob(token!.replace(/-/g, "+").replace(/_/g, "/"))
       } catch {
-        decoded = decodeURIComponent(escape(atob(token.replace(/-/g, "+").replace(/_/g, "/"))))
+        decoded = decodeURIComponent(escape(atob(token!.replace(/-/g, "+").replace(/_/g, "/"))))
       }
-      
+
       const parts = decoded.split("|")
-      
+
       if (parts.length < 2) {
         setError("Invalid token format")
         setLoading(false)
@@ -71,12 +71,12 @@ export default function JoinTablePage() {
           if (data.ok && (data.status === "ACTIVE" || data.status === "NOT_FOUND")) {
             // Get seller information
             const sellerInfo = await getSellerInfo(locationId)
-            
+
             setTableInfo({
               tableName,
               locationId,
               locationName: data.locationName || sellerInfo.name || locationId,
-              sellerInfo
+              sellerInfo,
             })
           } else {
             setError(data.message || data.error || "Table not found or no longer active")

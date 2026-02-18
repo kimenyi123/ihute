@@ -1,193 +1,283 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { useAuthStore } from "@/lib/auth-store";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { ArrowLeft, LogOut } from "lucide-react";
-import Link from "next/link";
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { 
+  Upload, 
+  FileSpreadsheet, 
+  CheckCircle, 
+  XCircle, 
+  AlertCircle
+} from 'lucide-react';
+import { 
+  importStockExcel, 
+  ImportResult
+} from '@/lib/supplierStockApi';
+import { useAuthStore } from '@/lib/auth-store';
 
-const UNITS = ["piece", "box", "carton", "crate", "kg", "liter", "pack", "bottle"];
-
-export default function AddProductPage() {
+export default function SupplierStockUploadPage() {
   const router = useRouter();
-  const { user, logout } = useAuthStore();
-  const [loading, setLoading] = useState(false);
+  const { isAuthenticated, checkSession } = useAuthStore();
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [result, setResult] = useState<ImportResult | null>(null);
 
-  const handleLogout = () => {
-    logout();
-    router.push("/");
+  // Session expiration check - check on mount and periodically
+  useEffect(() => {
+    // Initial check
+    if (!checkSession()) {
+      router.replace('/login');
+      return;
+    }
+
+    // Periodic check every 30 seconds
+    const interval = setInterval(() => {
+      if (!checkSession()) {
+        router.replace('/login');
+      }
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, [checkSession, router]);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0];
+    if (selectedFile) {
+      const fileName = selectedFile.name.toLowerCase();
+      if (!fileName.endsWith('.xlsx') && !fileName.endsWith('.xls') && !fileName.endsWith('.csv')) {
+        alert('Please select an Excel file (.xlsx, .xls) or CSV file (.csv)');
+        return;
+      }
+      if (selectedFile.size > 5 * 1024 * 1024) {
+        alert('File size must be less than 5MB');
+        return;
+      }
+      setFile(selectedFile);
+      setResult(null);
+    }
   };
-  const [formData, setFormData] = useState({
-    ITEM_NAME: "",
-    QUANTITY: "",
-    SALE_PRICE_INCLUSIVE: "",
-    COST_PRICE_INCLUSIVE: "",
-    DESCRIPTION_KEYWORD: "",
-    UNIT: "",
-  });
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
+  const handleUpload = async () => {
+    if (!file) return;
+
+    const { user } = useAuthStore.getState();
+    if (!user?.ishyigaAccount) {
+      alert('No account found. Please log in again.');
+      return;
+    }
+
+    setUploading(true);
+    setResult(null);
 
     try {
-      const res = await fetch("/api/supplier/add-product", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...formData,
-          SUPPLIER_ACCOUNT: user?.ishyigaAccount,
-          OWNER: user?.businessName,
-        }),
-      });
-
-      if (!res.ok) {
-        const err = await res.json();
-        console.error("Server response:", err);
-        throw new Error(err.message || "Failed to add product");
+      const response = await importStockExcel(file, user.ishyigaAccount);
+      setResult(response);
+      
+      if (response.ok) {
+        setFile(null);
+        // Reset file input
+        const fileInput = document.getElementById('file-input') as HTMLInputElement;
+        if (fileInput) fileInput.value = '';
+      } else if (response.error?.includes('unauthorized') || response.error?.includes('authentication')) {
+        router.replace('/login');
       }
-
-      // ✅ Notify dashboards to update instantly
-      window.dispatchEvent(new Event("productAdded"));
-
-      alert("✅ Product added successfully!");
-      router.push("/supplier/dashboard");
     } catch (error) {
-      console.error("Error adding product:", error);
-      alert("❌ Failed to add product. Please try again.");
+      console.error('Upload error:', error);
+      if (error instanceof Error && error.message.includes('401')) {
+        router.replace('/login');
+      } else {
+        setResult({
+          ok: false,
+          message: 'Failed to upload file',
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
     } finally {
-      setLoading(false);
+      setUploading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      {/* Header */}
-      <header className="bg-white border-b sticky top-0 z-10">
-        <div className="container mx-auto px-4 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <div className="flex-1">
-            <h1 className="text-xl sm:text-2xl font-bold text-slate-900">
-              {user?.businessName || "Supplier Dashboard"}
-            </h1>
-            <p className="text-xs sm:text-sm text-slate-600">
-              {user?.businessCategory || "Supplier Panel"}
-            </p>
-          </div>
-          <Button variant="outline" onClick={handleLogout} className="w-full sm:w-auto">
-            <LogOut className="h-4 w-4 mr-2" />
-            Logout
-          </Button>
+    <div className="min-h-screen bg-gray-50 p-6">
+      <div className="max-w-6xl mx-auto">
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900">Product Stock Management</h1>
+          <p className="text-gray-600 mt-2">
+            Upload Excel inventory or manage individual items
+          </p>
         </div>
-      </header>
 
-      <div className="container mx-auto px-4 py-8 max-w-2xl">
-        <Button variant="ghost" className="mb-6" asChild>
-          <Link href="/supplier/dashboard">
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Dashboard
-          </Link>
-        </Button>
+        {/* Header - Excel Upload Only */}
+        <div className="bg-white rounded-lg shadow-md mb-6">
+          <div className="border-b border-gray-200">
+            <div className="px-6 py-4">
+              <h2 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
+                <FileSpreadsheet className="w-6 h-6 text-blue-600" />
+                Bulk Excel Upload
+              </h2>
+              <p className="text-gray-600 mt-1">
+                Upload multiple products at once using Excel or CSV files
+              </p>
+            </div>
+          </div>
+        </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Add New Product</CardTitle>
-            <CardDescription>Provide all necessary product details below</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="ITEM_NAME">Product Name</Label>
-                <Input
-                  id="ITEM_NAME"
-                  placeholder="e.g., product name"
-                  value={formData.ITEM_NAME}
-                  onChange={(e) => setFormData({ ...formData, ITEM_NAME: e.target.value })}
-                  required
+        {/* Excel Upload Section */}
+        <div>
+            {/* Instructions */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-6">
+              <h2 className="text-lg font-semibold text-blue-900 mb-3 flex items-center gap-2">
+                <AlertCircle className="w-5 h-5" />
+                File Format Requirements
+              </h2>
+              <ul className="space-y-2 text-sm text-blue-800">
+                <li>• <strong>Supported formats</strong>: Excel (.xlsx) or CSV (.csv)</li>
+                <li>• <strong>NAME</strong>: Product name (required)</li>
+                <li>• <strong>QTE</strong>: Quantity/stock level (required)</li>
+                <li>• <strong>SALES</strong>: Price (required)</li>
+                <li>• <strong>CODE</strong>: Product code/SKU (required)</li>
+                <li>• <strong>DESCRIPTION</strong>: Product description (optional)</li>
+              </ul>
+              <div className="mt-4 text-sm text-blue-700">
+                <strong>Limits:</strong> Max 5MB file size, 10,000 rows
+              </div>
+            </div>
+
+            {/* Upload Card */}
+            <div className="bg-white rounded-lg shadow-md p-8">
+              <div className="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center">
+                <FileSpreadsheet className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                
+                <input
+                  id="file-input"
+                  type="file"
+                  accept=".xlsx,.csv"
+                  onChange={handleFileChange}
+                  className="hidden"
                 />
+                
+                <label
+                  htmlFor="file-input"
+                  className="inline-block px-6 py-3 bg-blue-600 text-white rounded-lg cursor-pointer hover:bg-blue-700 transition"
+                >
+                  <Upload className="w-5 h-5 inline mr-2" />
+                  Select Excel File
+                </label>
+
+                {file && (
+                  <div className="mt-4">
+                    <p className="text-sm text-gray-600">Selected file:</p>
+                    <p className="font-medium text-gray-900">{file.name}</p>
+                    <p className="text-xs text-gray-500">
+                      {(file.size / 1024).toFixed(2)} KB
+                    </p>
+                  </div>
+                )}
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="QUANTITY">Quantity</Label>
-                  <Input
-                    id="QUANTITY"
-                    type="number"
-                    placeholder="e.g., 100"
-                    value={formData.QUANTITY}
-                    onChange={(e) => setFormData({ ...formData, QUANTITY: e.target.value })}
-                    required
-                  />
-                </div>
-
-                <div>
-                  <Label htmlFor="UNIT">Unit</Label>
-                  <Select
-                    onValueChange={(val) => setFormData({ ...formData, UNIT: val })}
-                    value={formData.UNIT}
+              {file && (
+                <div className="mt-6 flex justify-center">
+                  <button
+                    onClick={handleUpload}
+                    disabled={uploading}
+                    className="px-8 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition font-medium"
                   >
-                    <SelectTrigger id="UNIT">
-                      <SelectValue placeholder="Select unit" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {UNITS.map((unit) => (
-                        <SelectItem key={unit} value={unit}>
-                          {unit}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    {uploading ? (
+                      <>
+                        <span className="inline-block animate-spin mr-2">⏳</span>
+                        Uploading...
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-5 h-5 inline mr-2" />
+                        Upload & Import
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Result */}
+            {result && (
+              <div className={`mt-6 rounded-lg p-6 ${
+                result.ok 
+                  ? 'bg-green-50 border border-green-200' 
+                  : 'bg-red-50 border border-red-200'
+              }`}>
+                <div className="flex items-start gap-3">
+                  {result.ok ? (
+                    <CheckCircle className="w-6 h-6 text-green-600 flex-shrink-0 mt-1" />
+                  ) : (
+                    <XCircle className="w-6 h-6 text-red-600 flex-shrink-0 mt-1" />
+                  )}
+                  
+                  <div className="flex-1">
+                    <h3 className={`font-semibold text-lg ${
+                      result.ok ? 'text-green-900' : 'text-red-900'
+                    }`}>
+                      {result.message}
+                    </h3>
+
+                    {result.ok && (
+                      <div className="mt-3 space-y-1 text-sm text-green-800">
+                        <p>✓ Items imported: {result.itemsImported}</p>
+                        <p>✓ Rows parsed: {result.rowsParsed}</p>
+                        {result.rowsSkipped! > 0 && (
+                          <p>⚠ Rows skipped: {result.rowsSkipped}</p>
+                        )}
+                        {result.backupKey && result.backupKey !== 'none' && (
+                          <p className="text-xs text-green-700 mt-2">
+                            Backup created: {result.backupKey}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {!result.ok && result.errors && result.errors.length > 0 && (
+                      <div className="mt-3">
+                        <p className="text-sm font-medium text-red-800 mb-2">Errors:</p>
+                        <ul className="space-y-1 text-sm text-red-700">
+                          {result.errors.map((error, idx) => (
+                            <li key={idx}>• {error}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {!result.ok && result.error && (
+                      <p className="mt-2 text-sm text-red-700">{result.error}</p>
+                    )}
+                  </div>
                 </div>
               </div>
+            )}
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="SALE_PRICE_INCLUSIVE">Sale Price (RWF)</Label>
-                  <Input
-                    id="SALE_PRICE_INCLUSIVE"
-                    type="number"
-                    placeholder="e.g., 1500"
-                    value={formData.SALE_PRICE_INCLUSIVE}
-                    onChange={(e) => setFormData({ ...formData, SALE_PRICE_INCLUSIVE: e.target.value })}
-                    required
-                  />
-                </div>
+            {/* Download Template Link */}
+            <div className="mt-8 text-center">
+              <p className="text-sm text-gray-600">
+                Need a template?{' '}
+                <a
+                  href="/supplier/stock/template"
+                  className="text-blue-600 hover:underline font-medium"
+                  download
+                >
+                  Download CSV Template
+                </a>
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                (Can be opened and edited in Excel)
+              </p>
+            </div>
+          </div>
 
-                <div>
-                  <Label htmlFor="COST_PRICE_INCLUSIVE">Cost Price (RWF)</Label>
-                  <Input
-                    id="COST_PRICE_INCLUSIVE"
-                    type="number"
-                    placeholder="e.g., 1000"
-                    value={formData.COST_PRICE_INCLUSIVE}
-                    onChange={(e) => setFormData({ ...formData, COST_PRICE_INCLUSIVE: e.target.value })}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="DESCRIPTION_KEYWORD">Description</Label>
-                <Textarea
-                  id="DESCRIPTION_KEYWORD"
-                  placeholder="Short product details or keywords"
-                  value={formData.DESCRIPTION_KEYWORD}
-                  onChange={(e) => setFormData({ ...formData, DESCRIPTION_KEYWORD: e.target.value })}
-                  required
-                />
-              </div>
-
-              <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? "Adding Product..." : "Add Product"}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
+        {/* 
+        COMMENTED OUT - Manage Items Tab
+        This functionality is now handled on the main dashboard at /supplier/dashboard
+        All the manage items functionality including search, pagination, add/edit/delete
+        has been moved to the dashboard for a unified stock management experience.
+        */}
       </div>
     </div>
   );

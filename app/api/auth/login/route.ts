@@ -66,7 +66,26 @@ export async function POST(req: Request) {
     }
 
     console.log(`[RID ${rid}] SUCCESS: Login OK`)
-    return NextResponse.json({ ...json, rid })
+
+    // Forward Set-Cookie headers from Java backend to client
+    const response = NextResponse.json({ ...json, rid })
+
+    // Try to read multiple Set-Cookie headers if available
+    // Some fetch implementations expose a single combined header, others provide get('set-cookie')
+    const setCookieHeader = res.headers.get("set-cookie")
+    if (setCookieHeader) {
+      // Rewrite Path=/Trading -> Path=/ so cookie is sent for all frontend routes
+      let rewritten = setCookieHeader.replace(/Path=\/Trading/gi, "Path=/")
+      // Ensure SameSite is present for modern browsers
+      if (!/samesite=/i.test(rewritten)) {
+        rewritten += "; SameSite=Lax"
+      }
+      response.headers.append("Set-Cookie", rewritten)
+    } else {
+      console.warn(`[RID ${rid}] WARNING: No Set-Cookie header from Java auth response`)
+    }
+
+    return response
   } catch (e: any) {
     console.error(`[RID ${rid}] EXCEPTION in login route:`)
     console.error(`[RID ${rid}] Error type: ${e?.constructor?.name}`)
