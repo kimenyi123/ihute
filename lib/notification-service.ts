@@ -10,7 +10,7 @@ let cachedVapidKey: string | null = null;
 /**
  * Get VAPID public key from environment
  */
-async function getVapidPublicKey(): Promise<string> {
+async function getVapidPublicKey(): Promise<string | null> {
   // Return cached key if available
   if (cachedVapidKey) {
     return cachedVapidKey;
@@ -23,7 +23,9 @@ async function getVapidPublicKey(): Promise<string> {
     return cachedVapidKey;
   }
 
-  throw new Error('VAPID public key not configured. Please set NEXT_PUBLIC_VAPID_PUBLIC_KEY in .env.local');
+  // Return null instead of throwing - allows graceful degradation
+  console.warn('[Notifications] VAPID public key not configured. Push notifications will be disabled.');
+  return null;
 }
 
 /**
@@ -99,7 +101,8 @@ export async function subscribeToPushNotifications(): Promise<PushSubscription |
     const vapidKey = await getVapidPublicKey();
 
     if (!vapidKey || vapidKey.trim().length === 0) {
-      throw new Error('VAPID public key is empty. Please configure VAPID keys on the server.');
+      console.warn('[Notifications] VAPID key not configured. Push notifications disabled.');
+      return null;
     }
 
     // Validate and convert key
@@ -113,7 +116,8 @@ export async function subscribeToPushNotifications(): Promise<PushSubscription |
       }
     } catch (keyError) {
       console.error('[Notifications] Invalid VAPID key format:', keyError);
-      throw new Error('Invalid VAPID public key format. Please check server configuration.');
+      console.warn('[Notifications] Push notifications disabled due to invalid VAPID key.');
+      return null;
     }
 
     console.log('[Notifications] Subscribing with VAPID key (length:', vapidKey.length, ')');
@@ -137,11 +141,15 @@ export async function subscribeToPushNotifications(): Promise<PushSubscription |
 
     // Provide user-friendly error messages
     if (error.name === 'InvalidAccessError' || error.message?.includes('applicationServerKey')) {
-      throw new Error('Invalid VAPID key. Please contact support or check server configuration.');
+      console.warn('[Notifications] Invalid VAPID key. Push notifications disabled.');
+      return null;
     } else if (error.message) {
-      throw error;
+      // Log but don't throw - allow graceful degradation
+      console.warn('[Notifications] Failed to subscribe:', error.message);
+      return null;
     } else {
-      throw new Error('Failed to subscribe to notifications. Please try again.');
+      console.warn('[Notifications] Failed to subscribe to notifications.');
+      return null;
     }
   }
 }
@@ -177,13 +185,55 @@ export async function unsubscribeFromPushNotifications(): Promise<boolean> {
  * Send subscription to backend
  */
 async function sendSubscriptionToBackend(subscription: PushSubscription): Promise<void> {
+  const p256dhKey = subscription.getKey('p256dh');
+  const authKey = subscription.getKey('auth');
+  
+  console.log('[Notifications] Preparing subscription data:', {
+    endpoint: subscription.endpoint.substring(0, 50) + '...',
+    hasP256dh: !!p256dhKey,
+    hasAuth: !!authKey,
+    p256dhLength: p256dhKey?.byteLength,
+    authLength: authKey?.byteLength,
+  });
+  
+  // Get user info from auth store or generate session ID
+  let userId: string | undefined;
+  let userEmail: string | undefined;
+  
+  if (typeof window !== 'undefined') {
+    try {
+      // Try to get user from auth store
+      const authStoreData = localStorage.getItem('auth-storage');
+      if (authStoreData) {
+        const parsed = JSON.parse(authStoreData);
+        const user = parsed?.state?.user;
+        if (user) {
+          userId = user.ishyigaAccount || user.id;
+          userEmail = user.email || user.phone;
+        }
+      }
+    } catch (error) {
+      console.warn('[Notifications] Could not get user from auth store:', error);
+    }
+  }
+  
   const subscriptionData = {
     endpoint: subscription.endpoint,
     keys: {
-      p256dh: arrayBufferToBase64(subscription.getKey('p256dh')!),
-      auth: arrayBufferToBase64(subscription.getKey('auth')!),
+      p256dh: arrayBufferToBase64(p256dhKey!),
+      auth: arrayBufferToBase64(authKey!),
     },
+    userId,
+    userEmail,
   };
+  
+  console.log('[Notifications] Subscription data to send:', {
+    endpoint: subscriptionData.endpoint.substring(0, 50) + '...',
+    p256dhLength: subscriptionData.keys.p256dh.length,
+    authLength: subscriptionData.keys.auth.length,
+    hasUserId: !!userId,
+    hasUserEmail: !!userEmail,
+  });
 
   try {
     const response = await fetch('/api/notification/subscribe', {
@@ -193,6 +243,8 @@ async function sendSubscriptionToBackend(subscription: PushSubscription): Promis
     });
 
     if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[Notifications] Subscribe API error:', errorText);
       throw new Error(`Subscription failed: ${response.status}`);
     }
 

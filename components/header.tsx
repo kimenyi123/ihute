@@ -29,6 +29,7 @@ import {
 
 import { LanguageSelector } from "@/components/language-selector"
 import { GlobalSearch } from "@/components/global-search"
+import { NotificationBell } from "@/components/notification-bell"
 
 import { useCartStore } from "@/lib/cart-store"
 import { useFavoritesStore } from "@/lib/favorites-store"
@@ -110,6 +111,9 @@ export function Header() {
           {/* Actions */}
           <div className="flex items-center gap-1 md:gap-2">
             <LanguageSelector />
+
+            {/* Notification Bell - Shows for buyers only (suppliers have unified notification) */}
+            {isAuthenticated && user?.role !== "supplier" && <NotificationBell />}
 
             {isAuthenticated ? (
               <>

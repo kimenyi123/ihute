@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Menu, X, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { OrderNotification } from "@/components/order-notification";
+import { UnifiedNotification } from "@/components/unified-notification";
 import { useAuthStore } from "@/lib/auth-store";
 
 export default function SupplierLayout({ children }: { children: React.ReactNode }) {
@@ -19,6 +19,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
     { name: "Dashboard", href: "/supplier/dashboard" },
     // { name: "My Products", href: "/supplier/products" },
     { name: "Orders", href: "/supplier/orders" },
+    { name: "Ratings", href: "/supplier/ratings" },
     { name: "B2B Procurement / Kurangura byinshi", href: "/supplier/b2b" },
     { name: "Expenses", href: "/supplier/expenses" },
     { name: "Add Product", href: "/supplier/products/add" },
@@ -143,7 +144,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
           <div className="p-4 lg:p-8">
             {children}
           </div>
-          <OrderNotification />
+          <UnifiedNotification />
         </main>
       </div>
     </div>

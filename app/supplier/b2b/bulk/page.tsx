@@ -85,10 +85,11 @@ export default function B2BBulkPage() {
       const validTypes = [
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
         'application/vnd.ms-excel', // .xls
+        'text/csv', // .csv
       ];
 
-      if (!validTypes.includes(file.type) && !file.name.match(/\.(xlsx|xls)$/i)) {
-        setError("Please select a valid Excel file (.xlsx or .xls)");
+      if (!validTypes.includes(file.type) && !file.name.match(/\.(xlsx|xls|csv)$/i)) {
+        setError("Please select a valid Excel file (.xlsx, .xls) or CSV file (.csv)");
         return;
       }
 
@@ -265,7 +266,7 @@ export default function B2BBulkPage() {
             </CardHeader>
             <CardContent>
               <p className="text-slate-600 mb-4">
-                Upload your completed Excel file with up to 500 items.
+                Upload your completed Excel or CSV file with up to 500 items.
               </p>
 
               {/* File Drop Zone */}
@@ -299,14 +300,14 @@ export default function B2BBulkPage() {
                 ) : (
                   <div>
                     <p className="text-slate-600 mb-4">
-                      Drag and drop your Excel file here, or click to browse
+                      Drag and drop your Excel or CSV file here, or click to browse
                     </p>
                     <Button
                       onClick={() => fileInputRef.current?.click()}
                       variant="outline"
                     >
                       <FileSpreadsheet className="h-4 w-4 mr-2" />
-                      Select Excel File
+                      Select File
                     </Button>
                   </div>
                 )}
@@ -314,7 +315,7 @@ export default function B2BBulkPage() {
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".xlsx,.xls"
+                  accept=".xlsx,.xls,.csv"
                   onChange={handleFileSelect}
                   className="hidden"
                 />
@@ -371,7 +372,7 @@ export default function B2BBulkPage() {
               <div>
                 <div className="font-semibold text-slate-900 mb-2">2. Fill Your List</div>
                 <p className="text-slate-600">
-                  Add your items, quantities, and optional codes. Save as .xlsx or .xls.
+                  Add your items, quantities, and optional codes. Save as .xlsx, .xls, or .csv.
                 </p>
               </div>
               <div>
