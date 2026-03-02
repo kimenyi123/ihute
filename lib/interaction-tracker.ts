@@ -10,7 +10,7 @@ import { useAuthStore } from "./auth-store"
  * syncs with backend for logged-in users.
  */
 
-export type InteractionType = 
+export type InteractionType =
   | "product_view"
   | "supplier_view"
   | "search"
@@ -18,6 +18,7 @@ export type InteractionType =
   | "click"
   | "favorite"
   | "time_spent"
+  | "add_to_cart"
 
 export type EntityType = "product" | "supplier" | "category" | "search"
 
@@ -42,7 +43,7 @@ const MAX_LOCAL_INTERACTIONS = 500 // Limit local storage size
  */
 function generateBrowserFingerprint(): string {
   if (typeof window === "undefined") return ""
-  
+
   try {
     const canvas = document.createElement("canvas")
     const ctx = canvas.getContext("2d")
@@ -51,10 +52,10 @@ function generateBrowserFingerprint(): string {
       ctx.font = "14px 'Arial'"
       ctx.fillText("Browser fingerprint", 2, 2)
     }
-    
+
     // Access experimental APIs with type assertion
     const nav = navigator as Navigator & { deviceMemory?: number }
-    
+
     const fingerprint = [
       navigator.userAgent,
       navigator.language,
@@ -64,7 +65,7 @@ function generateBrowserFingerprint(): string {
       navigator.hardwareConcurrency || "",
       nav.deviceMemory || "",
     ].join("|")
-    
+
     // Create a simple hash
     let hash = 0
     for (let i = 0; i < fingerprint.length; i++) {
@@ -72,7 +73,7 @@ function generateBrowserFingerprint(): string {
       hash = ((hash << 5) - hash) + char
       hash = hash & hash // Convert to 32-bit integer
     }
-    
+
     return Math.abs(hash).toString(36)
   } catch {
     // Fallback if fingerprinting fails
@@ -86,10 +87,10 @@ function generateBrowserFingerprint(): string {
  */
 export function getSessionId(): string {
   if (typeof window === "undefined") return ""
-  
+
   let sessionId = localStorage.getItem(SESSION_KEY)
   const browserFingerprint = generateBrowserFingerprint()
-  
+
   // Validate existing session ID format (should include fingerprint)
   if (sessionId) {
     // Check if session ID is in the new format (includes fingerprint)
@@ -107,7 +108,7 @@ export function getSessionId(): string {
       sessionId = null
     }
   }
-  
+
   if (!sessionId) {
     // Generate new session ID with fingerprint
     const timestamp = Date.now()
@@ -116,7 +117,7 @@ export function getSessionId(): string {
     localStorage.setItem(SESSION_KEY, sessionId)
     console.log("[Session] Generated new session ID:", sessionId.substring(0, 50) + "...")
   }
-  
+
   return sessionId
 }
 
@@ -134,22 +135,22 @@ export function clearSession(): void {
  */
 function getLocalInteractions(): Interaction[] {
   if (typeof window === "undefined") return []
-  
+
   try {
     const stored = localStorage.getItem(STORAGE_KEY)
     if (!stored) return []
-    
+
     const interactions: Interaction[] = JSON.parse(stored)
     // Clean old interactions (older than 90 days)
     const ninetyDaysAgo = Date.now() - 90 * 24 * 60 * 60 * 1000
     const recent = interactions.filter(i => i.timestamp > ninetyDaysAgo)
-    
+
     // Limit size
     if (recent.length > MAX_LOCAL_INTERACTIONS) {
       const sorted = recent.sort((a, b) => b.timestamp - a.timestamp)
       return sorted.slice(0, MAX_LOCAL_INTERACTIONS)
     }
-    
+
     return recent
   } catch {
     return []
@@ -161,12 +162,45 @@ function getLocalInteractions(): Interaction[] {
  */
 function saveLocalInteractions(interactions: Interaction[]) {
   if (typeof window === "undefined") return
-  
+
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(interactions))
   } catch (e) {
     console.error("Failed to save interactions to localStorage", e)
   }
+}
+
+/**
+ * Event system for notifying components when interactions change
+ */
+type InteractionChangeListener = () => void
+const interactionChangeListeners = new Set<InteractionChangeListener>()
+
+/**
+ * Subscribe to interaction changes (returns unsubscribe function)
+ */
+export function onInteractionChange(listener: InteractionChangeListener): () => void {
+  interactionChangeListeners.add(listener)
+  return () => {
+    interactionChangeListeners.delete(listener)
+  }
+}
+
+/**
+ * Notify all listeners that interactions have changed
+ */
+function notifyInteractionChange() {
+  if (typeof window === "undefined") return
+  // Dispatch custom event for components that use event listeners
+  window.dispatchEvent(new CustomEvent("ihute:interaction-change"))
+  // Call all registered listeners
+  interactionChangeListeners.forEach(listener => {
+    try {
+      listener()
+    } catch (error) {
+      console.warn("Error in interaction change listener:", error)
+    }
+  })
 }
 
 /**
@@ -202,6 +236,9 @@ export async function trackInteraction(
   localInteractions.push(interaction)
   saveLocalInteractions(localInteractions)
 
+  // Notify listeners that interactions have changed (only once)
+  notifyInteractionChange()
+
   // Sync with backend (fire and forget)
   try {
     const response = await fetch("/api/personalization/track", {
@@ -217,6 +254,7 @@ export async function trackInteraction(
     if (!response.ok) {
       console.warn("Failed to sync interaction to backend")
     }
+    // Removed second notification - recommendations will update on next user action
   } catch (error) {
     // Silently fail - interactions are stored locally
     console.warn("Error syncing interaction:", error)
@@ -291,7 +329,7 @@ export function trackTimeSpent(
  */
 export async function mergeSessionToUser(userId: string) {
   const sessionId = getSessionId()
-  
+
   try {
     const response = await fetch("/api/personalization/merge", {
       method: "POST",
@@ -316,12 +354,12 @@ export function getRecentInteractions(
   limit: number = 20
 ): Interaction[] {
   const interactions = getLocalInteractions()
-  
+
   let filtered = interactions
   if (entityType) {
     filtered = interactions.filter(i => i.entityType === entityType)
   }
-  
+
   return filtered
     .sort((a, b) => b.timestamp - a.timestamp)
     .slice(0, limit)
@@ -333,13 +371,13 @@ export function getRecentInteractions(
 export function getRecentProductIds(limit: number = 10): string[] {
   const interactions = getRecentInteractions("product", limit)
   const productIds = new Set<string>()
-  
+
   for (const interaction of interactions) {
     if (interaction.entityType === "product") {
       productIds.add(interaction.entityId)
     }
   }
-  
+
   return Array.from(productIds)
 }
 

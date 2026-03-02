@@ -1,8 +1,8 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
-import { CheckCircle, XCircle, Eye, AlertCircle } from 'lucide-react'
+import { CheckCircle, XCircle, Eye, AlertCircle, Search } from 'lucide-react'
 import { useAuthStore } from '@/lib/auth-store'
 
 interface Seller {
@@ -35,7 +35,14 @@ export default function SellersPage() {
   const [totalActive, setTotalActive] = useState(0)
   const [totalSuspended, setTotalSuspended] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const [searchTerm, setSearchTerm] = useState('')
   const pageSize = 10
+
+  // Debounced search - updates after 300ms of no typing
+  const debouncedSearch = useMemo(() => {
+    const timer = setTimeout(() => searchTerm, 300)
+    return () => clearTimeout(timer)
+  }, [searchTerm])
 
   // reset pagination when switching tabs
   useEffect(() => {
@@ -46,7 +53,7 @@ export default function SellersPage() {
 
   useEffect(() => {
     loadSellers()
-  }, [activeTab, pageApps, pageActive, pageSuspended])
+  }, [activeTab, pageApps, pageActive, pageSuspended, searchTerm])
 
   const loadSellers = async () => {
     try {
@@ -54,17 +61,31 @@ export default function SellersPage() {
       setError(null)
       let action = ''
       let page = 1
-      if (activeTab === 'applications') { action = 'getSellerApplications'; page = pageApps }
-      else if (activeTab === 'active') { action = 'getActiveSellers'; page = pageActive }
-      else { action = 'getSuspendedSellers'; page = pageSuspended }
+      let size = pageSize
+
+      if (activeTab === 'applications') {
+        action = 'getSellerApplications'
+        page = pageApps
+      } else if (activeTab === 'active') {
+        action = 'getActiveSellers'
+        page = pageActive
+        // When searching, fetch ALL sellers for client-side filtering
+        if (searchTerm.trim()) {
+          size = 9999 // Large number to get all
+          page = 1
+        }
+      } else {
+        action = 'getSuspendedSellers'
+        page = pageSuspended
+      }
 
       const res = await fetch('/api/admin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, page, pageSize, adminEmail: user?.email || '' })
+        body: JSON.stringify({ action, page, pageSize: size, adminEmail: user?.email || '' })
       })
       const data = await res.json()
-      
+
       if (data.ok) {
         if (activeTab === 'applications') {
           setApplications(data.sellers || [])
@@ -89,7 +110,7 @@ export default function SellersPage() {
 
   const handleApprove = async (sellerAccount: string) => {
     if (!confirm('Approve this seller application?')) return
-    
+
     try {
       setActionLoading(sellerAccount)
       const res = await fetch('/api/admin', {
@@ -98,7 +119,7 @@ export default function SellersPage() {
         body: JSON.stringify({ action: 'approveSeller', sellerAccount, adminEmail: user?.email || '' })
       })
       const data = await res.json()
-      
+
       if (data.ok) {
         alert('Seller approved successfully')
         loadSellers()
@@ -116,7 +137,7 @@ export default function SellersPage() {
   const handleSuspend = async (sellerAccount: string) => {
     const reason = prompt('Enter suspension reason:')
     if (!reason) return
-    
+
     try {
       setActionLoading(sellerAccount)
       const res = await fetch('/api/admin', {
@@ -125,7 +146,7 @@ export default function SellersPage() {
         body: JSON.stringify({ action: 'suspendSeller', sellerAccount, reason, adminEmail: user?.email || '' })
       })
       const data = await res.json()
-      
+
       if (data.ok) {
         alert('Seller suspended successfully')
         loadSellers()
@@ -142,7 +163,7 @@ export default function SellersPage() {
 
   const handleReinstate = async (sellerAccount: string) => {
     if (!confirm('Reinstate this seller?')) return
-    
+
     try {
       setActionLoading(sellerAccount)
       const res = await fetch('/api/admin', {
@@ -151,7 +172,7 @@ export default function SellersPage() {
         body: JSON.stringify({ action: 'reinstateSeller', sellerAccount, adminEmail: user?.email || '' })
       })
       const data = await res.json()
-      
+
       if (data.ok) {
         alert('Seller reinstated successfully')
         loadSellers()
@@ -166,8 +187,25 @@ export default function SellersPage() {
     }
   }
 
-  const currentSellers = activeTab === 'applications' ? applications : 
-                        activeTab === 'active' ? activeSellers : suspendedSellers
+  // Filter active sellers based on search
+  const filteredActiveSellers = useMemo(() => {
+    if (activeTab !== 'active' || !searchTerm.trim()) {
+      return activeSellers
+    }
+
+    const term = searchTerm.toLowerCase()
+    return activeSellers.filter(seller =>
+      seller.firstName?.toLowerCase().includes(term) ||
+      seller.lastName?.toLowerCase().includes(term) ||
+      seller.ishyigaAccount?.toLowerCase().includes(term) ||
+      seller.email?.toLowerCase().includes(term) ||
+      seller.tel?.toLowerCase().includes(term) ||
+      seller.location?.toLowerCase().includes(term)
+    )
+  }, [activeSellers, searchTerm, activeTab])
+
+  const currentSellers = activeTab === 'applications' ? applications :
+    activeTab === 'active' ? filteredActiveSellers : suspendedSellers
   const currentPage = activeTab === 'applications' ? pageApps : activeTab === 'active' ? pageActive : pageSuspended
   const currentTotal = activeTab === 'applications' ? totalApps : activeTab === 'active' ? totalActive : totalSuspended
 
@@ -191,10 +229,9 @@ export default function SellersPage() {
               onClick={() => setActiveTab(tab.id as any)}
               className={`
                 py-4 px-1 border-b-2 font-medium text-sm
-                ${
-                  activeTab === tab.id
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                ${activeTab === tab.id
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                 }
               `}
             >
@@ -208,6 +245,36 @@ export default function SellersPage() {
           ))}
         </nav>
       </div>
+
+      {/* Search Input - Active Sellers Only */}
+      {activeTab === 'active' && (
+        <div className="bg-white p-4 rounded-lg border shadow-sm">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search by name, email, phone, account ID, or location..."
+              className="w-full pl-10 pr-10 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                title="Clear search"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+          {searchTerm && (
+            <div className="mt-2 text-sm text-gray-600">
+              Found {filteredActiveSellers.length} seller{filteredActiveSellers.length !== 1 ? 's' : ''}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Error Message */}
       {error && (
@@ -234,166 +301,166 @@ export default function SellersPage() {
         <div className="text-center py-12 text-gray-500">No sellers found</div>
       ) : (
         <div>
-        <div className="bg-white rounded-lg shadow overflow-hidden">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Seller
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Contact
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Location
-                </th>
-                {activeTab === 'active' && (
-                  <>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Products
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Total Sales
-                    </th>
-                  </>
-                )}
-                {activeTab === 'applications' && (
+          <div className="bg-white rounded-lg shadow overflow-hidden">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Certificate
+                    Seller
                   </th>
-                )}
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {currentSellers.map((seller) => (
-                <tr key={seller.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div>
-                      <div className="text-sm font-medium text-gray-900">
-                        {seller.firstName} {seller.lastName}
-                      </div>
-                      <div className="text-sm text-gray-500">{seller.ishyigaAccount}</div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">{seller.email}</div>
-                    <div className="text-sm text-gray-500">{seller.tel}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {seller.location || 'N/A'}
-                  </td>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Contact
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Location
+                  </th>
                   {activeTab === 'active' && (
                     <>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {seller.productCount || 0}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {seller.totalSales ? new Intl.NumberFormat('en-RW', {
-                          style: 'currency',
-                          currency: 'RWF',
-                          minimumFractionDigits: 0,
-                        }).format(seller.totalSales) : '0'}
-                      </td>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Products
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Total Sales
+                      </th>
                     </>
                   )}
                   {activeTab === 'applications' && (
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      {seller.certificate && seller.certificate !== 'NA' ? (
-                        <span className="text-green-600 text-sm">✓ Has Certificate</span>
-                      ) : (
-                        <span className="text-red-600 text-sm flex items-center gap-1">
-                          <AlertCircle size={16} />
-                          Missing
-                        </span>
-                      )}
-                    </td>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Certificate
+                    </th>
                   )}
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <div className="flex items-center justify-end gap-2">
-                      <Link
-                        href={`/admin/sellers/${seller.ishyigaAccount}`}
-                        className="text-blue-600 hover:text-blue-900"
-                      >
-                        <Eye size={18} />
-                      </Link>
-                      {activeTab === 'applications' && (
-                        <button
-                          onClick={() => handleApprove(seller.ishyigaAccount)}
-                          disabled={actionLoading === seller.ishyigaAccount}
-                          className="text-green-600 hover:text-green-900 disabled:opacity-50"
-                          title="Approve"
-                        >
-                          <CheckCircle size={18} />
-                        </button>
-                      )}
-                      {activeTab === 'applications' && (
-                        <button
-                          onClick={() => handleSuspend(seller.ishyigaAccount)}
-                          disabled={actionLoading === seller.ishyigaAccount}
-                          className="text-red-600 hover:text-red-900 disabled:opacity-50"
-                          title="Reject"
-                        >
-                          <XCircle size={18} />
-                        </button>
-                      )}
-                      {activeTab === 'suspended' && (
-                        <button
-                          onClick={() => handleReinstate(seller.ishyigaAccount)}
-                          disabled={actionLoading === seller.ishyigaAccount}
-                          className="text-green-600 hover:text-green-900 disabled:opacity-50"
-                          title="Reinstate"
-                        >
-                          <CheckCircle size={18} />
-                        </button>
-                      )}
-                      {activeTab === 'active' && (
-                        <button
-                          onClick={() => handleSuspend(seller.ishyigaAccount)}
-                          disabled={actionLoading === seller.ishyigaAccount}
-                          className="text-red-600 hover:text-red-900 disabled:opacity-50"
-                          title="Suspend"
-                        >
-                          <XCircle size={18} />
-                        </button>
-                      )}
-                    </div>
-                  </td>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Actions
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="flex items-center justify-between mt-4 text-sm text-gray-600">
-          <div>Page {currentPage} of {Math.max(1, Math.ceil(currentTotal / pageSize))}</div>
-          <div className="space-x-2">
-            <button
-              className="px-3 py-1 border rounded disabled:opacity-50"
-              onClick={() => {
-                if (activeTab === 'applications') setPageApps((p) => Math.max(1, p - 1))
-                else if (activeTab === 'active') setPageActive((p) => Math.max(1, p - 1))
-                else setPageSuspended((p) => Math.max(1, p - 1))
-              }}
-              disabled={currentPage === 1}
-            >
-              Previous
-            </button>
-            <button
-              className="px-3 py-1 border rounded disabled:opacity-50"
-              onClick={() => {
-                const maxPage = Math.max(1, Math.ceil(currentTotal / pageSize))
-                if (activeTab === 'applications') setPageApps((p) => (p < maxPage ? p + 1 : p))
-                else if (activeTab === 'active') setPageActive((p) => (p < maxPage ? p + 1 : p))
-                else setPageSuspended((p) => (p < maxPage ? p + 1 : p))
-              }}
-              disabled={currentPage >= Math.max(1, Math.ceil(currentTotal / pageSize))}
-            >
-              Next
-            </button>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {currentSellers.map((seller) => (
+                  <tr key={seller.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div>
+                        <div className="text-sm font-medium text-gray-900">
+                          {seller.firstName} {seller.lastName}
+                        </div>
+                        <div className="text-sm text-gray-500">{seller.ishyigaAccount}</div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">{seller.email}</div>
+                      <div className="text-sm text-gray-500">{seller.tel}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {seller.location || 'N/A'}
+                    </td>
+                    {activeTab === 'active' && (
+                      <>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {seller.productCount || 0}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {seller.totalSales ? new Intl.NumberFormat('en-RW', {
+                            style: 'currency',
+                            currency: 'RWF',
+                            minimumFractionDigits: 0,
+                          }).format(seller.totalSales) : '0'}
+                        </td>
+                      </>
+                    )}
+                    {activeTab === 'applications' && (
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        {seller.certificate && seller.certificate !== 'NA' ? (
+                          <span className="text-green-600 text-sm">✓ Has Certificate</span>
+                        ) : (
+                          <span className="text-red-600 text-sm flex items-center gap-1">
+                            <AlertCircle size={16} />
+                            Missing
+                          </span>
+                        )}
+                      </td>
+                    )}
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                      <div className="flex items-center justify-end gap-2">
+                        <Link
+                          href={`/admin/sellers/${seller.ishyigaAccount}`}
+                          className="text-blue-600 hover:text-blue-900"
+                        >
+                          <Eye size={18} />
+                        </Link>
+                        {activeTab === 'applications' && (
+                          <button
+                            onClick={() => handleApprove(seller.ishyigaAccount)}
+                            disabled={actionLoading === seller.ishyigaAccount}
+                            className="text-green-600 hover:text-green-900 disabled:opacity-50"
+                            title="Approve"
+                          >
+                            <CheckCircle size={18} />
+                          </button>
+                        )}
+                        {activeTab === 'applications' && (
+                          <button
+                            onClick={() => handleSuspend(seller.ishyigaAccount)}
+                            disabled={actionLoading === seller.ishyigaAccount}
+                            className="text-red-600 hover:text-red-900 disabled:opacity-50"
+                            title="Reject"
+                          >
+                            <XCircle size={18} />
+                          </button>
+                        )}
+                        {activeTab === 'suspended' && (
+                          <button
+                            onClick={() => handleReinstate(seller.ishyigaAccount)}
+                            disabled={actionLoading === seller.ishyigaAccount}
+                            className="text-green-600 hover:text-green-900 disabled:opacity-50"
+                            title="Reinstate"
+                          >
+                            <CheckCircle size={18} />
+                          </button>
+                        )}
+                        {activeTab === 'active' && (
+                          <button
+                            onClick={() => handleSuspend(seller.ishyigaAccount)}
+                            disabled={actionLoading === seller.ishyigaAccount}
+                            className="text-red-600 hover:text-red-900 disabled:opacity-50"
+                            title="Suspend"
+                          >
+                            <XCircle size={18} />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        </div>
+          <div className="flex items-center justify-between mt-4 text-sm text-gray-600">
+            <div>Page {currentPage} of {Math.max(1, Math.ceil(currentTotal / pageSize))}</div>
+            <div className="space-x-2">
+              <button
+                className="px-3 py-1 border rounded disabled:opacity-50"
+                onClick={() => {
+                  if (activeTab === 'applications') setPageApps((p) => Math.max(1, p - 1))
+                  else if (activeTab === 'active') setPageActive((p) => Math.max(1, p - 1))
+                  else setPageSuspended((p) => Math.max(1, p - 1))
+                }}
+                disabled={currentPage === 1}
+              >
+                Previous
+              </button>
+              <button
+                className="px-3 py-1 border rounded disabled:opacity-50"
+                onClick={() => {
+                  const maxPage = Math.max(1, Math.ceil(currentTotal / pageSize))
+                  if (activeTab === 'applications') setPageApps((p) => (p < maxPage ? p + 1 : p))
+                  else if (activeTab === 'active') setPageActive((p) => (p < maxPage ? p + 1 : p))
+                  else setPageSuspended((p) => (p < maxPage ? p + 1 : p))
+                }}
+                disabled={currentPage >= Math.max(1, Math.ceil(currentTotal / pageSize))}
+              >
+                Next
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

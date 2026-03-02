@@ -24,9 +24,11 @@ interface AuthState {
   isAuthenticated: boolean
   loginTime: number | null
   sessionTimeout: number
+  hasHydrated: boolean
   login: (user: User) => void
   logout: () => void
   updateUser: (user: Partial<User>) => void
+  updateActivity: () => void
   checkSession: () => boolean
   setSessionTimeout: (timeout: number) => void
 }
@@ -38,10 +40,11 @@ export const useAuthStore = create<AuthState>()(
       isAuthenticated: false,
       loginTime: null,
       sessionTimeout: 24 * 60 * 60 * 1000,
+      hasHydrated: false,
 
       login: (user) => {
         const now = Date.now()
-        set({ user, isAuthenticated: true, loginTime: now })
+        set({ user, isAuthenticated: true, loginTime: now, hasHydrated: true })
         
         // Merge anonymous session interactions to user account
         if (typeof window !== "undefined") {
@@ -67,6 +70,13 @@ export const useAuthStore = create<AuthState>()(
       updateUser: (updates) =>
         set((state) => ({ user: state.user ? { ...state.user, ...updates } : null })),
 
+      updateActivity: () => {
+        const state = get()
+        if (state.isAuthenticated) {
+          set({ loginTime: Date.now() })
+        }
+      },
+
       checkSession: () => {
         const state = get()
         if (!state.isAuthenticated || !state.loginTime) return false
@@ -90,6 +100,11 @@ export const useAuthStore = create<AuthState>()(
         loginTime: s.loginTime,
         sessionTimeout: s.sessionTimeout,
       }),
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          state.hasHydrated = true
+        }
+      },
     }
   )
 )

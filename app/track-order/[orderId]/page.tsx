@@ -9,6 +9,8 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Truck, CheckCircle, Clock, Package, MessageCircle, ArrowLeft, CreditCard, FileText } from "lucide-react"
 import { formatPaymentMethod } from "@/lib/payment-utils"
+import { RatingModal } from "@/components/RatingModal"
+import { useOrderTracking } from "@/hooks/useOrderTracking"
 
 // Updated to match supplier statuses
 type OrderStatus = "open" | "processing" | "invoice" | "delivered" | "pending" | "in-transit"
@@ -16,6 +18,7 @@ type OrderStatus = "open" | "processing" | "invoice" | "delivered" | "pending" |
 type OrderDetail = {
   orderId: string
   sellerName: string
+  sellerAccount?: string  // Added missing property
   sellerPhone?: string
   buyerName?: string
   buyerPhone?: string
@@ -175,6 +178,62 @@ export default function TrackOrderPage() {
   const [error, setError] = useState<string | null>(null)
   const [order, setOrder] = useState<OrderDetail | null>(null)
 
+  // Rating modal state
+  const [showRatingModal, setShowRatingModal] = useState(false)
+  const [ratingItems, setRatingItems] = useState<Array<{ code: string, name: string }>>([])
+  const [hasCheckedRating, setHasCheckedRating] = useState(false)
+
+  // ✅ NEW: Use order tracking hook for real-time status monitoring
+  const { 
+    currentStatus, 
+    isMonitoring, 
+    startMonitoring, 
+    isDelivered 
+  } = useOrderTracking({ 
+    orderId, 
+    initialStatus: order?.status,
+    autoStart: true 
+  })
+
+  // Use the tracking hook values to show monitoring status (optional)
+  console.log(`[TrackOrder] Monitoring: ${isMonitoring}, Status: ${currentStatus}, Delivered: ${isDelivered}`)
+
+  // Function to check if rating should be shown
+  const checkIfShouldShowRating = async (orderIdToCheck: string) => {
+    try {
+      // Use the proper shouldShowPopup API
+      const response = await fetch(`/api/ratings?action=shouldShowPopup&orderId=${orderIdToCheck}`, {
+        cache: "no-store"
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        console.log('[TrackOrder] Should show popup response:', data)
+        
+        if (data.ok && data.shouldShow) {
+          // Use the items from the API response
+          const items = data.orderDetails?.items || []
+          setRatingItems(items)
+          setShowRatingModal(true)
+          console.log('[TrackOrder] Showing rating modal for delivered order')
+        } else {
+          console.log('[TrackOrder] Not showing popup:', data.reason)
+        }
+      }
+    } catch (error) {
+      console.error('[TrackOrder] Error checking rating status:', error)
+    }
+  }
+
+  // ✅ NEW: Watch for status changes and trigger rating popup
+  useEffect(() => {
+    // This effect will trigger rating popup when order becomes delivered
+    if (order?.status === "delivered" && !showRatingModal && !hasCheckedRating) {
+      setHasCheckedRating(true)
+      checkIfShouldShowRating(orderId)
+    }
+  }, [order?.status, orderId, showRatingModal, hasCheckedRating])
+
   useEffect(() => {
     async function fetchOrder() {
       if (!orderId) return
@@ -198,6 +257,8 @@ export default function TrackOrderPage() {
 
         console.log("[Track Order] Order data received:", json.order)
         setOrder(json.order)
+
+        // Rating popup will be handled by the status change useEffect
       } catch (err: any) {
         setError(err?.message || "Failed to load order")
       } finally {
@@ -207,6 +268,64 @@ export default function TrackOrderPage() {
 
     fetchOrder()
   }, [orderId])
+
+
+
+  // Handle rating modal dismiss
+  async function handleRatingDismiss() {
+    setShowRatingModal(false)
+
+    // Track attempt (optional - don't break if it fails)
+    try {
+      const res = await fetch("/api/ratings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "trackAttempt",
+          orderId: parseInt(orderId)
+        })
+      })
+
+      const data = await res.json()
+      console.log("[Rating] Attempt tracked:", data)
+
+      if (data.ok) {
+        const nextAttempts = data.attempts || 0
+
+        // Schedule next popup if not max attempts
+        if (nextAttempts < 3) {
+          const waitMs = data.nextWaitMinutes * 60 * 1000
+          console.log(`[Rating] Will show again in ${data.nextWaitMinutes} minutes`)
+
+          setTimeout(() => {
+            setHasCheckedRating(false) // Allow checking again
+            checkIfShouldShowRating(orderId)
+          }, waitMs)
+        }
+      } else {
+        console.warn("[Rating] Attempt tracking failed, using fallback timing")
+        // Fallback: show again in 2 minutes if tracking fails
+        setTimeout(() => {
+          setHasCheckedRating(false)
+          checkIfShouldShowRating(orderId)
+        }, 2 * 60 * 1000)
+      }
+    } catch (error) {
+      console.error("[Rating] Track attempt error:", error)
+      // Fallback: show again in 2 minutes if tracking fails
+      setTimeout(() => {
+        setHasCheckedRating(false)
+        checkIfShouldShowRating(orderId)
+      }, 2 * 60 * 1000)
+    }
+  }
+
+  // Handle successful rating submission
+  function handleRatingSuccess() {
+    console.log("[Rating] Rating submitted successfully")
+    setShowRatingModal(false)
+    // No need to show again since rating was successful
+  }
 
   if (loading) {
     return (
@@ -403,13 +522,12 @@ export default function TrackOrderPage() {
                     <div key={index} className="flex items-start gap-3">
                       <div className="relative">
                         <div
-                          className={`h-10 w-10 rounded-full flex items-center justify-center transition-colors ${
-                            step.completed
+                          className={`h-10 w-10 rounded-full flex items-center justify-center transition-colors ${step.completed
                               ? "bg-green-600"
                               : step.isCurrent
                                 ? "bg-blue-500 ring-4 ring-blue-100"
                                 : "bg-slate-200"
-                          }`}
+                            }`}
                         >
                           {step.completed ? (
                             <CheckCircle className="h-6 w-6 text-white" />
@@ -421,20 +539,18 @@ export default function TrackOrderPage() {
                         </div>
                         {index < steps.length - 1 && (
                           <div
-                            className={`absolute left-5 top-10 w-0.5 h-8 transition-colors ${
-                              step.completed ? "bg-green-600" : "bg-slate-200"
-                            }`}
+                            className={`absolute left-5 top-10 w-0.5 h-8 transition-colors ${step.completed ? "bg-green-600" : "bg-slate-200"
+                              }`}
                           />
                         )}
                       </div>
                       <div className="flex-1 pt-2">
-                        <p className={`font-medium ${
-                          step.completed
+                        <p className={`font-medium ${step.completed
                             ? "text-slate-900"
                             : step.isCurrent
                               ? "text-blue-600 font-semibold"
                               : "text-slate-500"
-                        }`}>
+                          }`}>
                           {step.label}
                           {step.isCurrent && (
                             <span className="ml-2 text-xs text-blue-600 font-normal">(Current)</span>
@@ -524,6 +640,20 @@ export default function TrackOrderPage() {
         </div>
       </main>
       <Footer />
+      
+      {/* Rating Modal */}
+      {order && showRatingModal && (
+        <RatingModal
+          orderId={orderId}
+          sellerId={order.sellerAccount || ""}
+          sellerName={order.sellerName}
+          buyerPhone={order.buyerPhone || ""}
+          items={ratingItems}
+          open={showRatingModal}
+          onClose={handleRatingDismiss}
+          onSuccess={handleRatingSuccess}
+        />
+      )}
     </div>
   )
 }

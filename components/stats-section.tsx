@@ -10,6 +10,34 @@ type Stats = {
   paymentMethods: number
 }
 
+// Custom hook for counting animation
+function useCountUp(end: number, duration: number = 2000) {
+  const [count, setCount] = useState(0)
+
+  useEffect(() => {
+    let startTime: number | null = null
+    let animationFrame: number
+
+    const animate = (currentTime: number) => {
+      if (!startTime) startTime = currentTime
+      const progress = Math.min((currentTime - startTime) / duration, 1)
+
+      // Easing function for smooth animation
+      const easeOutQuart = 1 - Math.pow(1 - progress, 4)
+      setCount(Math.floor(easeOutQuart * end))
+
+      if (progress < 1) {
+        animationFrame = requestAnimationFrame(animate)
+      }
+    }
+
+    animationFrame = requestAnimationFrame(animate)
+    return () => cancelAnimationFrame(animationFrame)
+  }, [end, duration])
+
+  return count
+}
+
 export function StatsSection() {
   const [stats, setStats] = useState<Stats>({
     activeSuppliers: 500,
@@ -18,6 +46,10 @@ export function StatsSection() {
     paymentMethods: 5,
   })
   const [loading, setLoading] = useState(true)
+
+  // Animated counters
+  const suppliersCount = useCountUp(stats.activeSuppliers)
+  const customersCount = useCountUp(stats.totalCustomers)
 
   useEffect(() => {
     fetchStats()
@@ -55,13 +87,13 @@ export function StatsSection() {
   const statsDisplay = [
     {
       icon: Store,
-      value: loading ? "..." : formatNumber(stats.activeSuppliers),
+      value: loading ? "..." : formatNumber(suppliersCount),
       label: "Active Suppliers",
       color: "text-blue-600",
     },
     {
       icon: Users,
-      value: loading ? "..." : formatNumber(stats.totalCustomers),
+      value: loading ? "..." : formatNumber(customersCount),
       label: "Happy Customers",
       color: "text-green-600",
     },

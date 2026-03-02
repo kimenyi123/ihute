@@ -168,32 +168,11 @@ export function TableCommandDialog({
       
       console.log('🎫 Using user email:', userEmail)
 
-      // ✅ Check table status before joining
+      // ✅ Check table status before joining - DISABLED FOR NOW
+      // Allow users to join any table, backend will handle validation
       if (mode === "join") {
-        const res = await fetch("/api/table-commands/status", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            tableName: tableName.trim(),
-            locationId,
-          }),
-        })
-        const json = await res.json()
-
-        if (json?.status !== "ACTIVE") {
-          const statusMessage = json?.status === "SENT" 
-            ? "is locked (order already sent)" 
-            : json?.status === "CLOSED"
-            ? "is closed"
-            : "is not available"
-          
-          setError(
-            `Table "${tableName.trim()}" ${statusMessage}. ` +
-            `Please create a new table (e.g., ${tableName.trim()}-2) or select a different table.`
-          )
-          setSubmitting(false)
-          return
-        }
+        // Skip status check - let backend handle it
+        console.log('Joining table:', tableName.trim())
       }
 
       // Create or join table command with consistent email

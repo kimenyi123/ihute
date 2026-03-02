@@ -9,9 +9,10 @@
  */
 
 const CACHE_NAME = 'ihute-v1';
-// VAPID_PUBLIC_KEY will be injected at build time or passed from main thread
-// For now, we'll get it from the notification service when needed
-const VAPID_PUBLIC_KEY = '';
+// VAPID public key - this will be passed from the notification service
+// during subscription via applicationServerKey parameter
+// You can also hardcode it here if needed: const VAPID_PUBLIC_KEY = 'YOUR_KEY_HERE';
+const VAPID_PUBLIC_KEY = self.VAPID_PUBLIC_KEY || '';
 
 // Install event
 self.addEventListener('install', (event) => {
@@ -28,7 +29,7 @@ self.addEventListener('activate', (event) => {
 // Push event - receive push notification
 self.addEventListener('push', (event) => {
   console.log('[SW] Push received:', event);
-  
+
   let notificationData = {
     title: 'New Update',
     body: 'You have a new notification',
@@ -38,7 +39,7 @@ self.addEventListener('push', (event) => {
       url: '/',
     },
   };
-  
+
   if (event.data) {
     try {
       const payload = event.data.json();
@@ -54,7 +55,7 @@ self.addEventListener('push', (event) => {
       notificationData.body = event.data.text();
     }
   }
-  
+
   event.waitUntil(
     self.registration.showNotification(notificationData.title, {
       body: notificationData.body,
@@ -87,12 +88,12 @@ self.addEventListener('push', (event) => {
 // Notification click event
 self.addEventListener('notificationclick', (event) => {
   console.log('[SW] Notification clicked:', event);
-  
+
   event.notification.close();
-  
+
   const action = event.action;
   const data = event.notification.data || {};
-  
+
   // Handle dismiss action
   if (action === 'dismiss') {
     // Mark as ignored (if we have notification tracking)
@@ -112,12 +113,12 @@ self.addEventListener('notificationclick', (event) => {
     }
     return;
   }
-  
+
   // Get the deep link URL from notification data
   // For search notifications, this should be: /search?q=keyword
   // For other notifications, it could be: /product/{id}, /category/{id}, etc.
   const urlToOpen = data.url || '/';
-  
+
   event.waitUntil(
     clients
       .matchAll({
@@ -140,7 +141,7 @@ self.addEventListener('notificationclick', (event) => {
             });
           }
         }
-        
+
         // No existing window found, open a new one with the deep link
         if (clients.openWindow) {
           return clients.openWindow(urlToOpen);
@@ -174,9 +175,14 @@ self.addEventListener('notificationclick', (event) => {
 // Background sync (optional)
 self.addEventListener('sync', (event) => {
   console.log('[SW] Background sync:', event.tag);
-  
+
   if (event.tag === 'sync-search-history') {
     event.waitUntil(syncSearchHistory());
+  }
+
+  // GPS queue sync
+  if (event.tag === 'sync-gps-updates') {
+    event.waitUntil(syncGPSUpdates());
   }
 });
 
@@ -190,13 +196,119 @@ async function syncSearchHistory() {
         action: 'syncLocalHistory',
       }),
     });
-    
+
     if (response.ok) {
       console.log('[SW] Search history synced');
     }
   } catch (error) {
     console.error('[SW] Error syncing search history:', error);
   }
+}
+
+/**
+ * Sync GPS updates from IndexedDB
+ */
+async function syncGPSUpdates() {
+  console.log('[SW] Starting GPS sync...');
+
+  try {
+    // Open IndexedDB
+    const db = await openGPSDatabase();
+    const pending = await getPendingGPSUpdates(db);
+
+    console.log(`[SW] Found ${pending.length} pending GPS updates`);
+
+    for (const update of pending) {
+      try {
+        const response = await fetch('/api/supplier/location/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            lat: update.lat,
+            lng: update.lng,
+            accuracy: update.accuracy,
+            speed: update.speed,
+            heading: update.heading,
+            source: update.source + '_bg_sync',
+          }),
+          credentials: 'include',
+        });
+
+        if (response.ok) {
+          await markGPSAsSynced(db, update.id);
+          console.log('[SW] Synced GPS update:', update.id);
+        } else {
+          console.warn('[SW] Failed to sync GPS update:', update.id, response.status);
+        }
+      } catch (error) {
+        console.error('[SW] Error syncing GPS update:', update.id, error);
+      }
+    }
+
+    console.log('[SW] GPS sync complete');
+  } catch (error) {
+    console.error('[SW] GPS sync failed:', error);
+    throw error;
+  }
+}
+
+/**
+ * Open GPS Queue IndexedDB
+ */
+function openGPSDatabase() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open('GPSQueueDB', 1);
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+
+    request.onupgradeneeded = (event) => {
+      const db = event.target.result;
+      if (!db.objectStoreNames.contains('gpsQueue')) {
+        const store = db.createObjectStore('gpsQueue', { keyPath: 'id', autoIncrement: true });
+        store.createIndex('timestamp', 'timestamp');
+        store.createIndex('synced', 'synced');
+      }
+    };
+  });
+}
+
+/**
+ * Get pending GPS updates from IndexedDB
+ */
+function getPendingGPSUpdates(db) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(['gpsQueue'], 'readonly');
+    const store = transaction.objectStore('gpsQueue');
+    const index = store.index('synced');
+    const request = index.getAll(false);
+
+    request.onsuccess = () => {
+      const updates = request.result.filter(item => item.retries < 5);
+      resolve(updates);
+    };
+    request.onerror = () => reject(request.error);
+  });
+}
+
+/**
+ * Mark GPS update as synced
+ */
+function markGPSAsSynced(db, id) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(['gpsQueue'], 'readwrite');
+    const store = transaction.objectStore('gpsQueue');
+    const request = store.get(id);
+
+    request.onsuccess = () => {
+      const update = request.result;
+      update.synced = true;
+      const updateRequest = store.put(update);
+      updateRequest.onsuccess = () => resolve();
+      updateRequest.onerror = () => reject(updateRequest.error);
+    };
+    request.onerror = () => reject(request.error);
+  });
 }
 
 

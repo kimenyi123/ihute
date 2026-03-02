@@ -392,6 +392,23 @@ class PaymentDashboardApi {
 
     return response.blob();
   }
+
+  /**
+   * Get analytics charts data (time-series, trends, distributions)
+   */
+  async getAnalyticsCharts(params?: {
+    period?: 'daily' | 'weekly' | 'monthly';
+    days?: number;
+  }): Promise<{ data: any; status: number }> {
+    const queryParams = new URLSearchParams();
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value) queryParams.append(key, String(value));
+      });
+    }
+
+    return this.fetch(`/api/analytics/charts?${queryParams}`);
+  }
 }
 
 export const paymentDashboardApi = new PaymentDashboardApi();

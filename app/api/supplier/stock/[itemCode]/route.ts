@@ -55,3 +55,35 @@ export async function PUT(req: NextRequest, { params }: { params: { itemCode: st
     return NextResponse.json({ ok: false, message: err.message || "Internal Server Error" }, { status: 500 });
   }
 }
+
+export async function DELETE(req: NextRequest, { params }: { params: { itemCode: string } }) {
+  const { itemCode } = params;
+  const searchParams = req.nextUrl.searchParams;
+  const account = searchParams.get("account");
+
+  if (!itemCode) {
+    return NextResponse.json({ ok: false, message: "Item code is required" }, { status: 400 });
+  }
+
+  try {
+    let query = "DELETE FROM seller_add_stock WHERE ITEM_CODE = ?";
+    let queryParams: any[] = [itemCode];
+
+    // If account is provided, add it to the WHERE clause for safety
+    if (account) {
+      query += " AND SELLER_ISHYIGA_ACCOUNT = ?";
+      queryParams.push(account);
+    }
+
+    const [result]: any = await pool.query(query, queryParams);
+
+    if (result.affectedRows === 0) {
+      return NextResponse.json({ ok: false, message: "Product not found or already deleted" }, { status: 404 });
+    }
+
+    return NextResponse.json({ ok: true, message: "Product deleted successfully" });
+  } catch (err: any) {
+    console.error("[DELETE-PRODUCT] Error:", err);
+    return NextResponse.json({ ok: false, message: err.message || "Internal Server Error" }, { status: 500 });
+  }
+}

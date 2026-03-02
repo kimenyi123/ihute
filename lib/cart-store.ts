@@ -151,6 +151,64 @@ export const useCartStore = create<CartState>()(
           const withCode = { ...item, selectedUnit, qty, itemCode: (item.itemCode ?? item.id).toString().trim() || undefined }
           return { items: [...state.items, withCode] }
         }),
+          return { items: [...state.items, { ...item, selectedUnit, qty }] }
+        })
+
+        // Track cart activity for abandoned cart reminders
+        try {
+          // Get email from auth store
+          let userEmail: string | null = null
+          try {
+            const authStorage = localStorage.getItem('auth-storage')
+            if (authStorage) {
+              const authData = JSON.parse(authStorage)
+              userEmail = authData?.state?.user?.email || null
+            }
+          } catch (e) {
+            console.error('[Abandoned Cart] Error reading auth storage:', e)
+          }
+
+          console.log('[Abandoned Cart] Tracking attempt:', {
+            email: userEmail,
+            hasEmail: !!userEmail,
+            itemId: item.id,
+            itemName: item.name
+          })
+
+          if (userEmail && typeof window !== 'undefined') {
+            // Get current cart state
+            const currentItems = get().items
+            const cartTotal = currentItems.reduce((sum, i) => sum + (i.price * i.qty), 0)
+
+            console.log('[Abandoned Cart] Calling trackCartActivity for:', userEmail)
+
+            fetch(`${BACKEND_URL}/OrdersServlet?action=trackCartActivity`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: new URLSearchParams({
+                buyerEmail: userEmail,
+                itemCount: currentItems.length.toString(),
+                cartValue: cartTotal.toString(),
+                currency: 'RWF'
+              })
+            })
+              .then(response => {
+                console.log('[Abandoned Cart] Response status:', response.status)
+                return response.json()
+              })
+              .then(data => {
+                console.log('[Abandoned Cart] Success:', data)
+              })
+              .catch(error => {
+                console.error('[Abandoned Cart] Error:', error)
+              })
+          } else {
+            console.warn('[Abandoned Cart] No user email found in storage')
+          }
+        } catch (error) {
+          console.error('[Abandoned Cart] Exception:', error)
+        }
+      },
 
       add: (item, qty = 1) => get().addItem(item, qty),
 

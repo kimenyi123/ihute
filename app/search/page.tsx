@@ -433,7 +433,7 @@ export default function SearchPage() {
       try {
         const url = `/api/fetchSuggestions?supplierProducts=${encodeURIComponent(
           selectedShop.supplier_account,
-        )}&limit=100&Currency=RWF`
+        )}&limit=500&Currency=RWF`
         const res = await fetch(url, { cache: "no-store" })
         const raw = res.ok ? await res.json() : null
         const data = normalizeSupplierProductsResponse(
