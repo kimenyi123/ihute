@@ -17,9 +17,12 @@ type Product = {
   name: string
   description?: string
   price: number
+  /** Currency from account_signup (e.g. RWF, USD) — concatenated with price for display */
+  currency?: string
   unit?: string
   inStock?: boolean
   rating?: number
+  itemCode?: string
   supplierId?: string
   supplierName?: string
   supplierLocation?: string
@@ -36,7 +39,7 @@ export function ProductCard({
   navigateAfterAdd?: boolean
 }) {
   const router = useRouter()
-  const addItem = useCartStore((s) => s.addItem)
+  const addOrInc = useCartStore((s) => s.addOrInc ?? s.addItem)
   const toggleFavorite = useFavoritesStore((s) => s.toggleFavorite)
   const isFavorite = useFavoritesStore((s) => s.isFavorite)
   const { toast } = useToast()
@@ -46,7 +49,9 @@ export function ProductCard({
     name,
     description,
     price,
+    currency = "RWF",
     unit,
+    itemCode,
     supplierId,
     supplierName,
     supplierLocation,
@@ -123,7 +128,7 @@ export function ProductCard({
 
         <div className="text-sm">
           <div className="font-semibold">
-            {price.toLocaleString()}{" "}
+            {price.toLocaleString()} {currency}
             <span className="text-muted-foreground">{unit ? ` / ${unit}` : ""}</span>
           </div>
           {supplierName && (
@@ -139,14 +144,15 @@ export function ProductCard({
           className="mt-1"
           onClick={() => {
             trackClick("product", id, name)
-            addItem(
+            addOrInc(
               {
                 id,
+                itemCode: itemCode ?? id,
                 name,
                 price,
                 unit,
                 image,
-                supplierId: supplierId || "unknown",
+                supplierId: (supplierId || "unknown").toString().trim(),
                 supplierName: supplierName || "Supplier",
                 supplierLocation,
                 momo,

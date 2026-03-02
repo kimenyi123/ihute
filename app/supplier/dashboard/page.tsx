@@ -54,12 +54,37 @@ function SupplierDashboard() {
   const [shopWithMeQROpen, setShopWithMeQROpen] = useState(false);
   const [shopNickname, setShopNickname] = useState("");
   const [isBarOrRestaurant, setIsBarOrRestaurant] = useState(false);
+  /** When true, Bar or Restaurant was set from account PREFEREDCATEGORIES and must not be edited */
+  const [isBarOrRestaurantFromAccount, setIsBarOrRestaurantFromAccount] = useState(false);
+  /** Only show Bar or Restaurant checkbox when PREFEREDCATEGORIES is resto-bar/restaurant/bar */
+  const [showBarOrRestaurantOption, setShowBarOrRestaurantOption] = useState(false);
   const [tableNameOrNumber, setTableNameOrNumber] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
 
   useEffect(() => {
     if (typeof window !== "undefined") setBaseUrl(window.location.origin);
   }, []);
+
+  // Only show Bar or Restaurant when PREFEREDCATEGORIES is resto-bar/restaurant/bar
+  useEffect(() => {
+    if (!user?.ishyigaAccount || user?.role !== "supplier") return;
+    fetch(`/api/supplier/profile?account=${encodeURIComponent(user.ishyigaAccount)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        const raw = (data?.preferredCategories ?? "").trim().toLowerCase();
+        const isRestoBar =
+          raw === "resto-bar" ||
+          raw.includes("restaurant") ||
+          raw.includes("resto") ||
+          raw.includes("bar");
+        if (isRestoBar) {
+          setShowBarOrRestaurantOption(true);
+          setIsBarOrRestaurant(true);
+          setIsBarOrRestaurantFromAccount(true);
+        }
+      })
+      .catch(() => {});
+  }, [user?.ishyigaAccount, user?.role]);
 
   const shopWithMeLink = shopNickname.trim()
     ? `${baseUrl}/shop-with-me?nickname=${encodeURIComponent(shopNickname.trim().toLowerCase())}${isBarOrRestaurant && tableNameOrNumber.trim() ? `&table=${encodeURIComponent(tableNameOrNumber.trim())}` : ""}`
@@ -143,72 +168,47 @@ function SupplierDashboard() {
         const mappedProducts = products.map((p: any, index: number) => {
           console.log(`Product ${index}:`, p);
 
-          // Check if this is Redis format (your format)
-          const isRedisFormat = p.item_commercial_name && p.item_key_words && p.item_packet && p.item_emballage;
-          
-          let mapped;
-          
-          if (isRedisFormat) {
-            // Handle Redis format (your format)
-            const stock = parseIntSafe(p.item_packet);
-            const price = parsePriceFromRedis(p.item_emballage);
-            
-            mapped = {
-              ...p, // Keep all original Redis fields
-              // Normalize for dashboard display
-              itemName: p.item_commercial_name,
-              ITEM_NAME: p.item_commercial_name,
-              itemCode: p.item_key_words,
-              ITEM_CODE: p.item_key_words,
-              stock: stock,
-              STOCK: stock,
-              price: price,
-              UNITY_PRICE: price,
-              costPrice: 0, // Not available in Redis format
-              COST_PRICE_INCLUSIVE: 0,
-              category: "uncategorized",
-              sales: 0,
-              batchInfo: p.item_state || "",
-              DESCRIPTION: p.item_state || "",
-              UNIT: "PCS"
-            };
-          } else {
-            // Handle database format (fallback)
-            const price = parsePrice(
-              p.price ||
-              p.UNITY_PRICE ||
-              p.SALE_PRICE_INCLUSIVE ||
-              0
-            );
+          // Parse price from various sources
+          const price = parsePrice(
+            p.selling_price ??
+            p.price ??
+            p.UNITY_PRICE ??
+            p.SALE_PRICE_INCLUSIVE ??
+            0
+          );
 
-            mapped = {
-              ...p, // Keep all original fields
-              // Normalize field names
-              stock: Number(
-                p.stock ||
-                p.STOCK ||
-                p.QUANTITY ||
-                0
-              ),
-              price: price,
-              costPrice: Number(
-                p.cost ||
-                p.COST_PRICE_INCLUSIVE ||
-                0
-              ),
-              itemName:
-                p.ITEM_NAME ||
-                p.itemName ||
-                "Unknown",
-              itemCode:
-                p.ITEM_CODE ||
-                p.itemCode ||
-                "",
-              batchInfo: p.DESCRIPTION || "",
-              category: p.category || "uncategorized",
-              sales: 0,
-            };
-          }
+          const mapped = {
+            ...p, // Keep all original fields
+            // Normalize field names - handle database, Redis, and API variations
+            stock: Number(
+              p.stock ||
+              p.STOCK ||
+              p.item_packet ||  // Redis stock field
+              p.QUANTITY ||
+              0
+            ),
+            price: price,
+            costPrice: Number(
+              p.cost_price ??
+              p.cost ??
+              p.COST_PRICE_INCLUSIVE ??
+              0
+            ),
+            itemName:
+              p.ITEM_NAME ||
+              p.itemName ||
+              p.item_commercial_name ||  // Redis name field
+              "Unknown",
+            itemCode:
+              p.ITEM_CODE ||
+              p.itemCode ||
+              p.item_key_words ||  // Redis code field
+              "",
+            batchInfo: p.item_state || "",  // Redis batch/expiry info
+            category: p.category || "uncategorized",
+            sales: 0,
+            currency: p.currency ?? "RWF",
+          };
 
           console.log(`Mapped product ${index}:`, mapped);
           return mapped;
@@ -302,7 +302,7 @@ function SupplierDashboard() {
 
     try {
       const action = editingProduct ? "updateProduct" : "addProduct";
-      
+
       const res = await fetch("/api/supplier/stock", {
         method: "POST",
         headers: {
@@ -495,18 +495,25 @@ function SupplierDashboard() {
                     className="max-w-xs"
                   />
                 </div>
-                <div className="flex items-center space-x-2 pt-6">
-                  <Checkbox
-                    id="bar-restaurant"
-                    checked={isBarOrRestaurant}
-                    onCheckedChange={(checked) => setIsBarOrRestaurant(!!checked)}
-                  />
-                  <Label htmlFor="bar-restaurant" className="cursor-pointer">
-                    Bar or Restaurant
-                  </Label>
-                </div>
+                {showBarOrRestaurantOption && (
+                  <div className="flex items-center space-x-2 pt-6">
+                    <Checkbox
+                      id="bar-restaurant"
+                      checked={isBarOrRestaurant}
+                      disabled={isBarOrRestaurantFromAccount}
+                      onCheckedChange={(checked) => setIsBarOrRestaurant(!!checked)}
+                    />
+                    <Label
+                      htmlFor="bar-restaurant"
+                      className={isBarOrRestaurantFromAccount ? "cursor-not-allowed text-muted-foreground" : "cursor-pointer"}
+                    >
+                      Bar or Restaurant
+                      {isBarOrRestaurantFromAccount && " (set from your account)"}
+                    </Label>
+                  </div>
+                )}
               </div>
-              {isBarOrRestaurant && (
+              {showBarOrRestaurantOption && isBarOrRestaurant && (
                 <div className="space-y-2 max-w-xs">
                   <Label htmlFor="table-name">Default table name or number (optional)</Label>
                   <Input
@@ -547,14 +554,14 @@ function SupplierDashboard() {
                 </CardDescription>
               </div>
 
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button asChild variant="outline" className="gap-2">
                   <Link href="/supplier/products/add">
                     <Package className="h-4 w-4" />
                     Bulk Upload
                   </Link>
                 </Button>
-                <Button 
+                <Button
                   onClick={() => {
                     setEditingProduct(null);
                     setShowAddModal(true);
@@ -685,7 +692,7 @@ function SupplierDashboard() {
                             <td className="px-4 py-4">
                               {p.price > 0 ? (
                                 <span className="font-medium text-slate-900">
-                                  {p.price.toLocaleString()} RWF
+                                  {p.price.toLocaleString()} {p.currency ?? "RWF"}
                                 </span>
                               ) : (
                                 <span className="text-slate-400 text-sm italic">

@@ -25,6 +25,10 @@ export interface GlobalResult {
   item_commercial_name?: string
   item_packet?: string
   item_emballage?: string
+  selling_price?: number | string
+  cost_price?: number | string
+  /** Currency from account_signup for this supplier. */
+  currency?: string
   item_key_words?: string
   item_seller_account?: string
   supplier_account?: string
@@ -258,18 +262,21 @@ export function GlobalSearch({
 
   const addProductAndGoToCart = (p: GlobalResult) => {
     if (!addToCartFn) return
-    const id = p.item_code || `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`
+    const itemCode = (p.item_code || p.item_key_words || "").toString().trim()
+    const id = itemCode || `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`
     const unit = p.item_packet || ""
-    const price = extractNumericPrice(p.item_emballage)
+    const price = extractNumericPrice(p.selling_price)
+    const supplierId = (p.supplier_account || p.item_seller_account || "unknown").toString().trim()
 
     addToCartFn({
       id,
+      itemCode: itemCode || id,
       name: p.item_commercial_name,
       price,
       unit,
       selectedUnit: unit,
       qty: 1,
-      supplierId: p.supplier_account || p.item_seller_account,
+      supplierId,
       supplierName: p.supplier_name || p.supplier_account || "Supplier",
       supplierLocation: p.supplier_location,
       image: p.image || "/placeholder.svg?height=300&width=300",
@@ -819,27 +826,14 @@ export function GlobalSearch({
                                 }}
                                 title="Click to add & go to cart"
                               >
-                                <div className="flex justify-between items-start gap-2">
-                                  <div className="flex-1 min-w-0">
-                                    <div className="font-medium text-gray-900 group-hover:text-blue-700 text-sm line-clamp-2">
-                                      {p.item_commercial_name}
-                                    </div>
-                                    <div className="text-xs text-gray-600 mt-0.5 line-clamp-1">
-                                      {p.item_packet || ""}
-                                    </div>
-                                    <div className="mt-1 text-sm font-semibold text-green-600">
-                                      {p.item_emballage || "Price N/A"}
-                                    </div>
-                                  </div>
-                                  {p.calculated_distance_km !== undefined && p.calculated_distance_km < 100 && (
-                                    <div className="flex-shrink-0">
-                                      <div className="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded">
-                                        {p.calculated_distance_km < 1
-                                          ? `${Math.round(p.calculated_distance_km * 1000)} m`
-                                          : `${p.calculated_distance_km.toFixed(1)} km`}
-                                      </div>
-                                    </div>
-                                  )}
+                                <div className="font-medium text-gray-900 group-hover:text-blue-700 text-sm">
+                                  {p.item_commercial_name}
+                                </div>
+                                <div className="text-xs text-gray-600 mt-0.5">
+                                  {p.item_packet || ""}
+                                </div>
+                                <div className="mt-1 text-sm font-semibold text-green-600">
+                                  {p.item_emballage || "Price N/A"}
                                 </div>
                                 {p.finalScore && p.finalScore > 0 && (
                                   <div className="mt-1 text-[10px] text-gray-400">

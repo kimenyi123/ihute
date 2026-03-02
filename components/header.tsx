@@ -15,6 +15,7 @@ import {
   PackageCheck,
   Users,
   BarChart3,
+  LogOut,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -84,7 +85,10 @@ export function Header() {
 
   const handleLogout = () => {
     logout()
-    window.location.href = "/"
+    // Brief delay so store/localStorage clear completes before redirect
+    setTimeout(() => {
+      window.location.href = "/"
+    }, 0)
   }
 
   return (
@@ -117,15 +121,23 @@ export function Header() {
 
             {isAuthenticated ? (
               <>
-                {/* User Dropdown */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="sm" className="flex h-9 gap-2" aria-label="Open account menu">
-                      <User className="h-4 w-4 shrink-0" />
-                      <span className="max-w-[120px] truncate">{user?.name}</span>
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-56">
+                {/* User Dropdown - wrapper so profile is on top and clickable */}
+                <div className="relative z-[60]">
+                  <DropdownMenu modal={false}>
+                    <DropdownMenuTrigger
+                      asChild
+                      className="outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-md"
+                    >
+                      <button
+                        type="button"
+                        className="inline-flex h-9 min-w-[120px] items-center gap-2 rounded-md px-3 text-sm font-medium hover:bg-accent hover:text-accent-foreground cursor-pointer"
+                        aria-label="Open account menu"
+                      >
+                        <User className="h-4 w-4 shrink-0" />
+                        <span className="max-w-[120px] truncate">{user?.name}</span>
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-56 z-[100]" sideOffset={4}>
                     <DropdownMenuLabel className="font-normal">
                       <div className="flex flex-col gap-0.5">
                         <span className="text-sm font-medium">{user?.name}</span>
@@ -138,7 +150,7 @@ export function Header() {
                         router.push(
                           user?.role === "supplier"
                             ? "/supplier/dashboard"
-                            : "/orders"
+                            : "/buyer/dashboard"
                         )
                       }
                     >
@@ -146,16 +158,15 @@ export function Header() {
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
-                      onSelect={(e) => {
-                        e.preventDefault()
-                        handleLogout()
-                      }}
-                      className="text-red-600 focus:text-red-600 focus:bg-red-50"
+                      onSelect={() => handleLogout()}
+                      className="cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50"
                     >
+                      <LogOut className="mr-2 h-4 w-4" />
                       {t("logout")}
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
+                </div>
 
                 {/* Supplier Orders */}
                 {user?.role === "supplier" && (
@@ -175,7 +186,7 @@ export function Header() {
                 {user?.role !== "supplier" && (
                   <>
                     <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Orders">
-                      <Link href="/orders">
+                      <Link href="/buyer/orders">
                         <Truck className="h-5 w-5" />
                         {pendingCount > 0 && (
                           <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">

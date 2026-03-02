@@ -77,7 +77,7 @@ export function ProductTable({ products }: { products: Product[] }) {
                 <TableRow key={product.id}>
                   <TableCell className="font-medium">{product.name}</TableCell>
                   <TableCell>{product.category}</TableCell>
-                  <TableCell>{product.price.toLocaleString()} RWF</TableCell>
+                  <TableCell>{product.price.toLocaleString()} {product.currency || "RWF"}</TableCell>
                   <TableCell>{product.unit}</TableCell>
                   <TableCell>
                     <span

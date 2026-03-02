@@ -63,14 +63,18 @@ export async function POST(req: Request) {
         const result = JSON.parse(responseText)
 
         if (result.ok) {
-          console.log("[table-commands/send] ✅ Table order sent successfully")
+          console.log("[table-commands/send] ✅ Table order sent successfully, masterOrderId:", result.masterOrderId)
           return NextResponse.json({
             ok: true,
             message: result.message || "Table order sent successfully",
             tableName: result.tableName,
+            masterOrderId: result.masterOrderId ?? result.orderCount ? result.orders?.[0]?.orderId : 0,
             orderCount: result.orderCount || 0,
+            childOrderCount: result.childOrderCount ?? result.orderCount ?? 0,
             totalAmount: result.totalAmount || 0,
+            sentBy: result.sentBy || "",
             orders: result.orders || [],
+            childOrders: result.orders || [],
           })
         } else {
           return NextResponse.json(

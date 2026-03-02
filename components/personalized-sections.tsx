@@ -204,16 +204,9 @@ export function PersonalizedSections() {
             // Skip if we've already seen this product
             if (seenIds.has(productId)) continue
             seenIds.add(productId)
-
-            const price = parseFloat(p.SALE_PRICE_INCLUSIVE || p.item_emballage || p.price || "0")
-            const category =
-              p.FAMILLE ||
-              p.famille ||
-              p.business_category ||
-              p.Business_Category ||
-              p.CATEGORY ||
-              ""
-
+            
+            const price = parseFloat(p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? p.price ?? "0")
+            
             allProducts.push({
               id: productId,
               name: p.ITEM_NAME || p.item_commercial_name || p.name || productName,

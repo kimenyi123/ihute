@@ -16,6 +16,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Users, Plus, LogIn, Beer, Utensils, User, Search, Loader2, AlertTriangle } from "lucide-react"
 import { useTableCommandStore, getOrCreateGuestEmail } from "@/lib/table-command-store"
 import { useAuthStore } from "@/lib/auth-store"
+import { createTableCommandApi } from "@/lib/api/table-commands"
 
 type TableInfo = {
   tableName: string
@@ -176,13 +177,55 @@ export function TableCommandDialog({
 
       // Create or join table command with consistent email
       if (mode === "create") {
-        createTableCommand(
-          tableName.trim(), 
-          locationId, 
-          locationName, 
-          userName.trim() || "Guest", 
-          userEmail
-        )
+        // Try to create table on backend first (so it exists before checkout; others can join via share link)
+        const apiResult = await createTableCommandApi({
+          tableName: tableName.trim(),
+          locationId,
+          locationName,
+          userEmail,
+          userName: userName.trim() || "Guest",
+        })
+        if (apiResult.ok && apiResult.shareableLink) {
+          createTableCommand(
+            tableName.trim(),
+            locationId,
+            locationName,
+            userName.trim() || "Guest",
+            userEmail,
+            {
+              shareableLink: apiResult.shareableLink,
+              shareableToken: apiResult.shareableToken || "",
+              qrCodeUrl: apiResult.qrCodeUrl || "",
+            }
+          )
+        } else if (
+          !apiResult.ok &&
+          apiResult.error &&
+          (apiResult.error.includes("Unknown action") || apiResult.error.includes("createTableCommand"))
+        ) {
+          // Backend doesn't have createTableCommand yet (e.g. not deployed) — continue without error:
+          // table will be created on backend when you checkout (createOrder)
+          createTableCommand(
+            tableName.trim(),
+            locationId,
+            locationName,
+            userName.trim() || "Guest",
+            userEmail
+          )
+        } else if (!apiResult.ok && apiResult.error) {
+          setError(apiResult.error)
+          setSubmitting(false)
+          return
+        } else {
+          // Fallback: create session only in store (table created on backend at checkout)
+          createTableCommand(
+            tableName.trim(),
+            locationId,
+            locationName,
+            userName.trim() || "Guest",
+            userEmail
+          )
+        }
       } else if (mode === "join") {
         joinTableCommand(
           tableName.trim(), 

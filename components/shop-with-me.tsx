@@ -47,6 +47,10 @@ type ShopWithMeProduct = {
   /** item_packet = quantity (available stock), not unit */
   item_packet?: string | number;
   item_emballage?: string;
+  selling_price?: number | string;
+  cost_price?: number | string;
+  /** Currency from account_signup for this supplier. */
+  currency?: string;
   item_key_words?: string;
   item_state?: string;
   price?: string;
@@ -72,6 +76,8 @@ type ShopWithMeSeller = {
   PREFERRED_CATEGORIES?: string;
   DEPARTMENT?: string;
   OWNER?: string;
+  /** Currency from account_signup (e.g. RWF). */
+  currency?: string;
   products?: ShopWithMeProduct[];
   product_count?: number;
   total_stock?: number;
@@ -102,14 +108,6 @@ function extractNumericPrice(value: any): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-/** Extract currency from item_emballage e.g. "12000RWF" → "RWF", "3500.50 RWF" → "RWF" */
-function extractCurrency(value: any): string {
-  const s = String(value ?? "").trim();
-  if (!s) return "";
-  const withoutNumbers = s.replace(/[\d.,\s]+/g, "").trim();
-  return withoutNumbers || "";
-}
-
 /** Single item code from API. Prefer ITEM_CODE (backend catalog) so order creation finds the item; fallback to item_code then item_key_words. */
 function getItemCode(product: ShopWithMeProduct): string {
   const p = product as Record<string, unknown>;
@@ -128,7 +126,7 @@ function normalizeSellersProducts(sellers: ShopWithMeSeller[]): ShopWithMeSeller
           const packet = item.item_packet;
           const stockNum = typeof packet === "number" ? packet : parseInt(String(packet ?? ""), 10);
           const stock = Number.isFinite(stockNum) ? stockNum : 0;
-          const currency = extractCurrency(item.item_emballage) || (item as ShopWithMeProduct).currency;
+          const currency = (item as ShopWithMeProduct).currency || (seller as ShopWithMeSeller).currency;
           const fam = (p as Record<string, unknown>).famille ?? (p as Record<string, unknown>).FAMILLE ?? (item as Record<string, unknown>).famille ?? (item as Record<string, unknown>).FAMILLE;
           flatProducts.push({
             ...item,
@@ -141,7 +139,7 @@ function normalizeSellersProducts(sellers: ShopWithMeSeller[]): ShopWithMeSeller
         }
       } else {
         const flatP = p as ShopWithMeProduct;
-        const currency = extractCurrency(flatP.item_emballage) || flatP.currency;
+        const currency = flatP.currency || (seller as ShopWithMeSeller).currency;
         const fam = (p as Record<string, unknown>).famille ?? (p as Record<string, unknown>).FAMILLE ?? flatP.famille;
         flatProducts.push({ ...flatP, currency: currency || flatP.currency, famille: fam != null ? String(fam) : flatP.famille });
       }
@@ -456,15 +454,15 @@ export default function ShopWithMePage() {
     switch (sortBy) {
       case "price-low":
         sorted.sort((a, b) => {
-          const priceA = extractNumericPrice(a.price || a.item_emballage);
-          const priceB = extractNumericPrice(b.price || b.item_emballage);
+          const priceA = extractNumericPrice(a.selling_price ?? a.price);
+          const priceB = extractNumericPrice(b.selling_price ?? b.price);
           return priceA - priceB;
         });
         break;
       case "price-high":
         sorted.sort((a, b) => {
-          const priceA = extractNumericPrice(a.price || a.item_emballage);
-          const priceB = extractNumericPrice(b.price || b.item_emballage);
+          const priceA = extractNumericPrice(a.selling_price ?? a.price);
+          const priceB = extractNumericPrice(b.selling_price ?? b.price);
           return priceB - priceA;
         });
         break;
@@ -825,7 +823,7 @@ function ProductCard({
   // API returns normalized format: item_commercial_name, item_emballage, item_key_words, item_state, famille, item_packet
   // Items from Redis/shop-with-me are considered available (cached before sent to Redis as stock).
   const productName = String(p.item_commercial_name ?? p.item_name ?? p.ITEM_NAME ?? p.ITEM_COMMERCIAL_NAME ?? "").trim() || "Product";
-  const priceRaw = p.item_emballage ?? p.price ?? p.UNITY_PRICE ?? p.SALE_PRICE_INCLUSIVE;
+  const priceRaw = p.selling_price ?? p.price ?? p.UNITY_PRICE ?? p.SALE_PRICE_INCLUSIVE;
   const price = extractNumericPrice(priceRaw);
   const fav = isFavorite(itemCode);
 
@@ -936,8 +934,7 @@ function ProductCard({
 
         <div className="space-y-0.5">
           <div className="font-bold text-base">
-            {price.toLocaleString()}
-            {product.currency && <span className="text-muted-foreground font-normal text-sm"> {product.currency}</span>}
+            {price.toLocaleString()} {product.currency || "RWF"}
           </div>
         </div>
 

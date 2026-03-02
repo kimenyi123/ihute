@@ -12,6 +12,8 @@ type Product = {
   price: number
   unit?: string
   image?: string
+  /** Product code for cart merge (same code + same seller = one line) */
+  itemCode?: string
   supplierId?: string
   supplierName?: string
   supplierLocation?: string
@@ -47,27 +49,47 @@ export function CartAlsoBuy({ cartItems }: { cartItems: CartItem[] }) {
 
   useEffect(() => {
     let cancelled = false
-    const excludeIdsNow = new Set(cartItems.map((i) => i.id))
+    const excludeIdsNow = new Set(cartItems.flatMap((i) => [(i.itemCode ?? i.id).toString().trim(), i.id].filter(Boolean)))
     const excludeNamesNow = new Set(cartItems.map((i) => i.name.trim().toLowerCase()))
 
     function rawToProduct(p: any, fallbackId: string): Product | null {
-      const id = String(p.ITEM_CODE ?? p.item_code ?? p.id ?? "").trim()
+      const code = String(p.ITEM_CODE ?? p.item_code ?? p.id ?? "").trim()
       const name = String(p.ITEM_NAME ?? p.item_commercial_name ?? p.name ?? "").trim()
       if (!name) return null
-      const key = (id || fallbackId).toLowerCase()
-      const price = parsePrice(p.SALE_PRICE_INCLUSIVE ?? p.item_emballage ?? p.price)
+      const key = (code || fallbackId).toLowerCase()
+      const id = code || key
+      const price = parsePrice(p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? p.price)
+      const supplierIdRaw = (p.SELLER_ISHYIGA_ACCOUNT ?? p.item_seller_account ?? "").toString().trim()
+      const supplierNameRaw = (p.SELLER_NAMES ?? p.supplier_name ?? "").toString().trim()
       return {
-        id: id || key,
+        id,
+        itemCode: code || id,
         name,
         price,
         unit: p.UNIT ?? p.item_packet ?? "",
         image: p.IMAGE_URL ?? p.image,
-        supplierId: p.SELLER_ISHYIGA_ACCOUNT ?? p.item_seller_account ?? "",
-        supplierName: p.SELLER_NAMES ?? p.supplier_name ?? "",
+        supplierId: supplierIdRaw,
+        supplierName: supplierNameRaw,
         supplierLocation: p.LOCATION ?? p.supplier_location,
         momo: p.momo,
         inStock: true,
       }
+    }
+
+    // Use first cart item's supplierId when product is from same seller so "You can also buy" adds to same checkout group
+    function normalizeSupplierId(products: Product[]): Product[] {
+      if (cartItems.length === 0) return products
+      return products.map((prod) => {
+        const sameSeller = cartItems.find(
+          (c) =>
+            (c.supplierName?.trim().toLowerCase() === prod.supplierName?.trim().toLowerCase()) ||
+            (c.supplierId?.trim().toLowerCase() === prod.supplierId?.trim().toLowerCase())
+        )
+        if (sameSeller) {
+          return { ...prod, supplierId: sameSeller.supplierId }
+        }
+        return prod
+      })
     }
 
     async function loadFromSuggestions(searchTerm: string): Promise<Product[]> {
@@ -148,7 +170,7 @@ export function CartAlsoBuy({ cartItems }: { cartItems: CartItem[] }) {
           list = await loadFromSuggestions(searchTerm)
         }
 
-        if (!cancelled) setProducts(list.slice(0, MAX_PRODUCTS))
+        if (!cancelled) setProducts(normalizeSupplierId(list).slice(0, MAX_PRODUCTS))
       } catch (e) {
         if (!cancelled) setProducts([])
       } finally {

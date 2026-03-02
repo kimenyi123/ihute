@@ -329,7 +329,7 @@ export default function MyProductsPage() {
                         </td>
                         <td className="p-3 text-sm">{product.category}</td>
                         <td className="p-3 text-right font-semibold text-sm">
-                          {product.price.toLocaleString()} RWF
+                          {product.price.toLocaleString()} {product.currency || "RWF"}
                         </td>
                         <td className="p-3 text-right">
                           <span
