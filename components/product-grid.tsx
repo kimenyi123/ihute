@@ -12,6 +12,10 @@ type ServerProduct = {
   item_commercial_name?: string;
   item_packet?: string;
   item_emballage?: string;
+  selling_price?: number | string;
+  cost_price?: number | string;
+  /** Currency from account_signup for this supplier. */
+  currency?: string;
   item_key_words?: string;
   item_seller_account?: string;
   supplier_name?: string;
@@ -61,7 +65,10 @@ function normalizeProduct(
   return {
     item_commercial_name: p.item_commercial_name ?? p.ITEM_NAME ?? p.name ?? "Product",
     item_packet: p.item_packet ?? p.UNIT ?? p.pack ?? "",
-    item_emballage: p.item_emballage ?? p.SALE_PRICE_INCLUSIVE ?? p.price ?? "",
+    item_emballage: p.item_emballage ?? "",
+    selling_price: p.selling_price,
+    cost_price: p.cost_price,
+    currency: p.currency,
     item_key_words: p.item_key_words ?? p.DESCRIPTION_KEYWORD ?? "",
     item_seller_account:
       p.item_seller_account ??
@@ -317,8 +324,9 @@ export function ProductGrid({
       return {
         id: `${categoryId}-${idx}`,
         name: p.item_commercial_name || "Product",
-        description: undefined, // hide code (item_key_words) from UI
-        price: extractNumericPrice(p.item_emballage),
+        description: undefined,
+        price: extractNumericPrice(p.selling_price),
+        currency: p.currency || "RWF",
         unit: p.item_packet,
         inStock: true,
         rating: 4,
@@ -327,7 +335,6 @@ export function ProductGrid({
         supplierLocation: p.supplier_location,
         image: p.image || "/placeholder.svg?height=300&width=300",
         momo: p.momo,
-        // keep for category filtering when supplier is selected
         _routeCategory: firstCategoryHint,
       };
     });

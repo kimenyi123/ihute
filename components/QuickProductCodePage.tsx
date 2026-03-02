@@ -11,6 +11,10 @@ import Image from "next/image";
 
 type QuickProductItem = {
   item_emballage?: string;
+  selling_price?: number | string;
+  cost_price?: number | string;
+  /** Currency from account_signup for this supplier (e.g. RWF, USD). */
+  currency?: string;
   item_commercial_name?: string;
   item_code?: string;
   item_packet?: string;
@@ -41,7 +45,17 @@ export default function QuickProductCodePage() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const codeFromUrl = params.get('quick_product_code');
+    let codeFromUrl = params.get('quick_product_code') ?? '';
+    let accountFromUrl = params.get('account') ?? '';
+
+    // If someone used ? instead of & (e.g. ?quick_product_code=CODE?account=ACC), the code param gets the whole string
+    if (codeFromUrl.includes('?')) {
+      const [codePart, rest] = codeFromUrl.split('?', 2);
+      codeFromUrl = (codePart ?? '').trim();
+      if (rest && rest.startsWith('account=')) {
+        accountFromUrl = rest.replace(/^account=/, '').trim();
+      }
+    }
 
     if (!codeFromUrl) {
       setError('No product code provided in URL');
@@ -50,22 +64,29 @@ export default function QuickProductCodePage() {
     }
 
     setSearchCode(codeFromUrl);
-    performSearch(codeFromUrl);
+    performSearch(codeFromUrl, accountFromUrl);
   }, []);
 
-  const performSearch = async (code: string) => {
+  const performSearch = async (code: string, account?: string) => {
     setLoading(true);
     setError('');
     setResults(null);
 
     try {
-      const response = await fetch(`/api/fetchSuggestions?quick_product_code=${encodeURIComponent(code)}&Currency=RWF`);
+      let url = `/api/fetchSuggestions?quick_product_code=${encodeURIComponent(code)}&Currency=RWF`;
+      if (account && account.trim() !== '') {
+        url += `&account=${encodeURIComponent(account.trim())}`;
+      }
+      const response = await fetch(url);
       const data = await response.json();
 
       if (data.ok && data.products && data.products.length > 0) {
         setResults(data as QuickProductResult);
       } else {
-        setError(`No products found for code "${code}"`);
+        const msg = account?.trim()
+          ? `No products found for code "${code}" at pharmacy ${account}`
+          : `No products found for code "${code}"`;
+        setError(msg);
       }
     } catch (err: unknown) {
       setError(`Failed to search: ${err instanceof Error ? err.message : String(err)}`);
@@ -74,16 +95,24 @@ export default function QuickProductCodePage() {
     }
   };
 
-  const getPrice = (product: QuickProductItem) => {
-    const priceStr = product.item_emballage || '0';
-    const numericPrice = parseFloat(priceStr.replace(/[^0-9.]/g, ''));
-    return isNaN(numericPrice) ? 0 : numericPrice;
+  /** Price from selling_price only (no fallback to item_emballage). */
+  const getPrice = (product: QuickProductItem): number => {
+    if (typeof product.selling_price === 'number' && Number.isFinite(product.selling_price)) return product.selling_price;
+    if (product.selling_price != null) {
+      const n = parseFloat(String(product.selling_price).replace(/[^0-9.]/g, ''));
+      if (!isNaN(n)) return n;
+    }
+    return 0;
   };
 
-  const getCurrency = (product: QuickProductItem) => {
-    const priceStr = product.item_emballage || '';
-    const match = priceStr.match(/[A-Z]{3}/);
-    return match ? match[0] : 'RWF';
+  /** Currency from account_signup (product.currency). */
+  const getCurrency = (product: QuickProductItem) => product.currency || 'RWF';
+
+  /** Display: selling_price with currency concatenated (from account_signup). */
+  const formatPrice = (product: QuickProductItem) => {
+    const price = getPrice(product);
+    const curr = getCurrency(product);
+    return price > 0 ? `${Number(price).toLocaleString()} ${curr}` : '—';
   };
 
   const handleAddToCart = (product: QuickProductItem) => {
@@ -236,16 +265,21 @@ export default function QuickProductCodePage() {
                       Quality product
                     </p>
 
-                    {/* Price */}
+                    {/* Price: selling_price + currency from account_signup */}
                     <div className="text-lg font-bold">
-                      {getPrice(product).toLocaleString()}
+                      {formatPrice(product)}
                     </div>
 
-                    {/* Supplier Info */}
-                    <div className="text-xs text-muted-foreground">
-                      <div className="font-medium">{product.supplier_name}</div>
+                    {/* Supplier / Seller name — visible like main ihute display */}
+                    <div className="text-sm border-t border-border/50 pt-2 mt-2">
+                      <span className="text-muted-foreground">Supplier: </span>
+                      <span className="font-medium text-foreground">
+                        {product.supplier_name || product.supplier_account || "—"}
+                      </span>
                       {product.supplier_location && (
-                        <div>— {product.supplier_location}</div>
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          {product.supplier_location}
+                        </div>
                       )}
                     </div>
 

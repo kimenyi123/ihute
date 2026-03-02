@@ -78,6 +78,8 @@ type CartState = {
   clear: () => void
   clearCart: () => void
   removeGroupBySeller: (supplierId: string) => void
+  /** Merge duplicate lines (same supplier + same product code or name) into one line with summed qty */
+  mergeDuplicateCartLines: () => void
 
   // ✅ NEW: Table management
   setTableInfo: (info: TableInfo | null) => void
@@ -102,13 +104,30 @@ export const useCartStore = create<CartState>()(
       payment: {},
       tableInfo: null,  // ✅ NEW: Initialize table info
 
+      // Same product = same supplier + (same product CODE or same product name) — merge into one line
       addItem: (item, qty = 1) =>
         set((state) => {
           const selectedUnit = item.selectedUnit ?? item.unit
-          const keyMatch = (x: CartItem) => x.id === item.id && x.selectedUnit === selectedUnit
-          const existing = state.items.find(keyMatch)
+          const productCode = (item.itemCode ?? item.id).toString().trim()
+          const nameKey = (item.name ?? "").toString().trim().toLowerCase()
+          const sid = (item.supplierId ?? "").toString().trim()
 
-          // Track add-to-cart as a preference (best-effort)
+          const matchExact = (x: CartItem) => {
+            const xCode = (x.itemCode ?? x.id).toString().trim()
+            const xUnit = (x.selectedUnit ?? x.unit) ?? ""
+            return (x.supplierId ?? "").toString().trim() === sid && xCode === productCode && (x.selectedUnit ?? x.unit) === selectedUnit
+          }
+          const matchByCode = (x: CartItem) => {
+            const xCode = (x.itemCode ?? x.id).toString().trim()
+            return (x.supplierId ?? "").toString().trim() === sid && xCode === productCode
+          }
+          const matchByName = (x: CartItem) => {
+            const xName = (x.name ?? "").toString().trim().toLowerCase()
+            return (x.supplierId ?? "").toString().trim() === sid && xName === nameKey && nameKey !== ""
+          }
+
+          const existing = state.items.find(matchExact) ?? state.items.find(matchByCode) ?? state.items.find(matchByName)
+
           try {
             trackClick("product", item.id, item.name)
           } catch {
@@ -116,28 +135,67 @@ export const useCartStore = create<CartState>()(
           }
 
           if (existing) {
+            const keyMatch = (x: CartItem) => x === existing || matchExact(x) || (productCode && matchByCode(x)) || (nameKey && matchByName(x))
+            const matching = state.items.filter(keyMatch)
+            const totalQty = matching.reduce((sum, x) => sum + x.qty, 0) + qty
+            const first = matching[0]
+            const mergedLine: CartItem = {
+              ...first,
+              qty: totalQty,
+              itemCode: (first.itemCode ?? item.itemCode ?? first.id ?? item.id).toString().trim() || first.itemCode,
+            }
             return {
-              items: state.items.map((x) => (keyMatch(x) ? { ...x, qty: x.qty + qty } : x)),
+              items: state.items.filter((x) => !keyMatch(x)).concat([mergedLine]),
             }
           }
-          return { items: [...state.items, { ...item, selectedUnit, qty }] }
+          const withCode = { ...item, selectedUnit, qty, itemCode: (item.itemCode ?? item.id).toString().trim() || undefined }
+          return { items: [...state.items, withCode] }
         }),
 
-      // alias for compatibility with older calls (s.add)
       add: (item, qty = 1) => get().addItem(item, qty),
 
-      // NEW: add or increment if same (id, selectedUnit)
+      // Add or increment: same supplier + (same code or same name) = one line (quantity added up)
       addOrInc: (item, qty = 1) =>
         set((state) => {
           const selectedUnit = item.selectedUnit ?? item.unit
-          const keyMatch = (x: CartItem) => x.id === item.id && x.selectedUnit === selectedUnit
-          const idx = state.items.findIndex(keyMatch)
-          if (idx >= 0) {
-            const next = [...state.items]
-            next[idx] = { ...next[idx], qty: next[idx].qty + qty }
-            return { items: next }
+          const productCode = (item.itemCode ?? item.id).toString().trim()
+          const nameKey = (item.name ?? "").toString().trim().toLowerCase()
+          const sid = (item.supplierId ?? "").toString().trim()
+
+          const matchExact = (x: CartItem) => {
+            const xCode = (x.itemCode ?? x.id).toString().trim()
+            return (x.supplierId ?? "").toString().trim() === sid && xCode === productCode && (x.selectedUnit ?? x.unit) === selectedUnit
           }
-          return { items: [...state.items, { ...item, selectedUnit, qty }] }
+          const matchByCode = (x: CartItem) => {
+            const xCode = (x.itemCode ?? x.id).toString().trim()
+            return (x.supplierId ?? "").toString().trim() === sid && xCode === productCode
+          }
+          const matchByName = (x: CartItem) => {
+            const xName = (x.name ?? "").toString().trim().toLowerCase()
+            return (x.supplierId ?? "").toString().trim() === sid && xName === nameKey && nameKey !== ""
+          }
+
+          const idx = state.items.findIndex(matchExact)
+          const idxByCode = idx >= 0 ? idx : state.items.findIndex(matchByCode)
+          const idxByName = idxByCode >= 0 ? idxByCode : state.items.findIndex(matchByName)
+          const targetIdx = idx >= 0 ? idx : idxByCode >= 0 ? idxByCode : idxByName
+
+          if (targetIdx >= 0) {
+            const keyMatch = (x: CartItem) => matchExact(x) || (productCode && matchByCode(x)) || (nameKey && matchByName(x))
+            const matching = state.items.filter(keyMatch)
+            const totalQty = matching.reduce((sum, x) => sum + x.qty, 0) + qty
+            const first = matching[0]
+            const mergedLine: CartItem = {
+              ...first,
+              qty: totalQty,
+              itemCode: (first.itemCode ?? item.itemCode ?? first.id ?? item.id).toString().trim() || first.itemCode,
+            }
+            return {
+              items: state.items.filter((x) => !keyMatch(x)).concat([mergedLine]),
+            }
+          }
+          const withCode = { ...item, selectedUnit, qty, itemCode: (item.itemCode ?? item.id).toString().trim() || undefined }
+          return { items: [...state.items, withCode] }
         }),
 
       inc: (id, selectedUnit) =>
@@ -167,11 +225,46 @@ export const useCartStore = create<CartState>()(
         set({ items: [], payment: {}, tableInfo: null })
       },
 
-      removeGroupBySeller: (supplierId) =>
+      removeGroupBySeller: (supplierId) => {
+        const sid = (supplierId ?? "").toString().trim()
         set((s) => ({
-          items: s.items.filter((x) => x.supplierId !== supplierId),
+          items: s.items.filter((x) => (x.supplierId ?? "").toString().trim() !== sid),
           payment: { ...s.payment, [supplierId]: "paid" },
-        })),
+        }))
+      },
+
+      mergeDuplicateCartLines: () =>
+        set((state) => {
+          const items = state.items
+          if (items.length <= 1) return state
+          const merged: CartItem[] = []
+          for (const it of items) {
+            const sid = (it.supplierId ?? "").toString().trim()
+            const code = (it.itemCode ?? it.id).toString().trim()
+            const nameKey = (it.name ?? "").toString().trim().toLowerCase()
+            const existingIdx = merged.findIndex((m) => {
+              const msid = (m.supplierId ?? "").toString().trim()
+              if (msid !== sid) return false
+              const mCode = (m.itemCode ?? m.id).toString().trim()
+              if (code && mCode === code) return true
+              const mName = (m.name ?? "").toString().trim().toLowerCase()
+              if (nameKey && mName === nameKey) return true
+              return false
+            })
+            if (existingIdx >= 0) {
+              const cur = merged[existingIdx]
+              merged[existingIdx] = {
+                ...cur,
+                qty: cur.qty + it.qty,
+                itemCode: (cur.itemCode ?? it.itemCode ?? cur.id ?? it.id).toString().trim() || cur.itemCode,
+              }
+            } else {
+              merged.push({ ...it, itemCode: (it.itemCode ?? it.id).toString().trim() || it.itemCode })
+            }
+          }
+          if (merged.length === items.length) return state
+          return { items: merged }
+        }),
 
       // ✅ NEW: Table management functions
       setTableInfo: (info) => set({ tableInfo: info }),
@@ -192,11 +285,12 @@ export const useCartStore = create<CartState>()(
       getGroupsBySeller: () => {
         const groups = new Map<string, SellerGroup>()
         for (const it of get().items) {
-          if (!it.supplierId) continue
+          const sid = (it.supplierId ?? "").toString().trim()
+          if (!sid) continue
           const g =
-            groups.get(it.supplierId) ??
+            groups.get(sid) ??
             {
-              supplierId: it.supplierId,
+              supplierId: sid,
               supplierName: it.supplierName,
               supplierLocation: it.supplierLocation,
               momo: it.momo,
@@ -210,7 +304,7 @@ export const useCartStore = create<CartState>()(
           if (it.momo && it.momo.trim()) g.momo = it.momo
           if (it.sellerPhone && it.sellerPhone.trim()) g.phone = it.sellerPhone
           if (it.isBarResto) g.isBarResto = true
-          groups.set(it.supplierId, g)
+          groups.set(sid, g)
         }
         return Array.from(groups.values()).map((g) => ({
           ...g,

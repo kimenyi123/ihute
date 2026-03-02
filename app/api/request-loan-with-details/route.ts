@@ -6,6 +6,8 @@ import { getBackendBase, getSellerOrdersUrl, getOrderStatusUrl, getSupplierStock
 const JAVA_API_BASE = process.env.JAVA_API_URL || getBackendBase().replace(/\/Trading\/?$/, "") || "https://ihute.rw"
 const UMUSADA_AUTH_BASE = process.env.UMUSADA_AUTH_BASE || "https://umusada-master.umusada.com/umusada-master-service"
 const UMUSADA_BANK_API = process.env.UMUSADA_BANK_API || "https://bank-apis.umusada.com/api/v1"
+/** Full URL for invoice submit; if set, overrides UMUSADA_BANK_API + /invoice/submit (use when bank API path differs) */
+const UMUSADA_INVOICE_SUBMIT_URL = process.env.UMUSADA_INVOICE_SUBMIT_URL
 
 export async function POST(req: NextRequest) {
   try {
@@ -38,7 +40,7 @@ export async function POST(req: NextRequest) {
     // ================================
     // STEP 1: FETCH ORDER DETAILS
     // ================================
-    console.log("\n🔍 Step 1: Fetching order details...")
+    console.log("\n Step 1: Fetching order details...")
     const formData = new URLSearchParams()
     formData.append("action", "listBuyerOrderItems")
     formData.append("buyerAccount", buyerAccount)
@@ -188,20 +190,48 @@ export async function POST(req: NextRequest) {
       }, { status: 500 })
     }
     console.log(`✓ Available products in stock: ${products.length}`)
+    // Log first product keys to help debug backend response shape changes
+    const firstProduct = products[0] as Record<string, unknown>
+    if (firstProduct && typeof firstProduct === "object") {
+      console.log("   Sample stock product keys:", Object.keys(firstProduct).join(", "))
+    }
+
+    // Helpers: backend may use item_key_words (NIKI) for code; item_packet is quantity.
+    const getStockProductCode = (p: Record<string, unknown>): string | undefined => {
+      const raw = (p.item_key_words ?? p.itemCode ?? p.ITEM_CODE ?? p.item_code ?? p.productCode ?? p.code ?? p.niki_code ?? p.NIKI_CODE) as string | undefined
+      return raw != null ? String(raw).trim() : undefined
+    }
+    const getStockQuantity = (p: Record<string, unknown>): number => {
+      const raw = p.item_packet ?? p.stock ?? p.STOCK ?? p.quantity ?? p.QUANTITY ?? p.qty ?? p.availableStock ?? p.available_quantity ?? p.stock_quantity ?? p.item_quantity ?? p.item_stock
+      return Number(raw) || 0
+    }
+    // If product is in stock list but backend doesn't expose quantity, treat as sufficient
+    const productFoundButNoQty = (p: Record<string, unknown>): boolean => {
+      const hasQtyKey = "item_packet" in p || "stock" in p || "STOCK" in p || "quantity" in p || "QUANTITY" in p || "qty" in p || "availableStock" in p || "available_quantity" in p || "stock_quantity" in p || "item_quantity" in p || "item_stock" in p
+      return !hasQtyKey
+    }
 
     // ================================
     // STEP 4: COMPARE REQUESTED VS STOCK
     // ================================
     console.log("\n🔍 Step 4: Stock Comparison:")
     const stockComparison = itemsToCheck.map(itemToCheck => {
+      const wantCode = itemToCheck.itemCode?.trim()
+      const wantNiki = itemToCheck.nikiCode?.trim()
       const stockItem = products.find((p: any) => {
-        const stockCode = p.itemCode || p.ITEM_CODE
-        return stockCode === itemToCheck.itemCode ||
-               (itemToCheck.nikiCode && stockCode === itemToCheck.nikiCode)
-      })
+        const stockCode = getStockProductCode(p as Record<string, unknown>)
+        if (!stockCode) return false
+        return stockCode === wantCode || (!!wantNiki && stockCode === wantNiki)
+      }) as Record<string, unknown> | undefined
 
-      const availableStock = stockItem ? Number(stockItem.stock ?? stockItem.STOCK ?? 0) : 0
-      console.log(`  • ${itemToCheck.itemName} (${itemToCheck.itemCode}): Requested = ${itemToCheck.requestedQty}, Available = ${availableStock}`)
+      let availableStock = stockItem ? getStockQuantity(stockItem) : 0
+      // Backend may list products without a quantity field (e.g. NIKI item_key_words format); treat "in list" as in stock
+      if (stockItem && availableStock === 0 && productFoundButNoQty(stockItem)) {
+        availableStock = itemToCheck.requestedQty
+        console.log(`  • ${itemToCheck.itemName} (${itemToCheck.itemCode}): Requested = ${itemToCheck.requestedQty}, Available = (listed, no qty) → treating as ${availableStock}`)
+      } else {
+        console.log(`  • ${itemToCheck.itemName} (${itemToCheck.itemCode}): Requested = ${itemToCheck.requestedQty}, Available = ${availableStock}`)
+      }
 
       return {
         itemCode: itemToCheck.itemCode,
@@ -233,8 +263,8 @@ export async function POST(req: NextRequest) {
     // STEP 5: UMUSADA LOGIN
     // ================================
     console.log("\n🔐 Step 5: Authenticating with Umusada...")
-    const username = "pm.serge@gmail.com"
-    const password = "1234"
+    const username = "umusada.dev@gmail.com"
+    const password = "Admin@123"
     const basicAuth = Buffer.from(`${username}:${password}`).toString('base64')
 
     const loginStep1 = await fetch(`${UMUSADA_AUTH_BASE}/auth/login`, {
@@ -391,7 +421,10 @@ export async function POST(req: NextRequest) {
 
     console.log(" Invoice Payload:", JSON.stringify(invoicePayload, null, 2))
 
-    const invoiceResp = await fetch(`${UMUSADA_BANK_API}/invoice/submit`, {
+    const invoiceSubmitUrl = UMUSADA_INVOICE_SUBMIT_URL || `${UMUSADA_BANK_API}/invoice/submit`
+    console.log(" Invoice Submit URL:", invoiceSubmitUrl)
+
+    const invoiceResp = await fetch(invoiceSubmitUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -485,15 +518,22 @@ export async function POST(req: NextRequest) {
         (String(parsedData.message || "").toLowerCase().includes("duplicate") ||
          String(parsedData.error || "").toLowerCase().includes("duplicate"))
       if (parsedData && typeof parsedData === "object") {
-        errorMessage = parsedData.message || parsedData.error || parsedData.errorMessage || JSON.stringify(parsedData)
+        const firstErr = Array.isArray(parsedData.errorInfo) ? parsedData.errorInfo[0] : null
+        const fromErrorInfo = firstErr ? (firstErr.errorDescription || firstErr.errorCode) : null
+        errorMessage = fromErrorInfo || parsedData.messageDescription || parsedData.message || parsedData.error || parsedData.errorMessage || JSON.stringify(parsedData)
       }
+
+      const isWrongEndpoint = String(errorMessage).toLowerCase().includes("no static resource") || String(errorMessage).toLowerCase().includes("api/v1/invoice/submit")
+      const suggestion = isWrongEndpoint
+        ? " The bank API endpoint may have changed. Set UMUSADA_INVOICE_SUBMIT_URL in .env to the correct invoice submit URL (contact Umusada for the current endpoint)."
+        : ""
 
       return NextResponse.json({
         success: false,
         error: isDuplicate
           ? "This order was already submitted for financing. Duplicate invoice not allowed."
-          : `Invoice submission failed (${invoiceResp.status}): ${errorMessage}`,
-        code: isDuplicate ? "DUPLICATE_INVOICE" : undefined,
+          : `Invoice submission failed (${invoiceResp.status}): ${errorMessage}${suggestion}`,
+        code: isDuplicate ? "DUPLICATE_INVOICE" : isWrongEndpoint ? "WRONG_ENDPOINT" : undefined,
         details: parsedData
       }, { status: invoiceResp.status })
     }

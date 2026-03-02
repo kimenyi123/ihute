@@ -49,12 +49,37 @@ function SupplierDashboard() {
   const [shopWithMeQROpen, setShopWithMeQROpen] = useState(false);
   const [shopNickname, setShopNickname] = useState("");
   const [isBarOrRestaurant, setIsBarOrRestaurant] = useState(false);
+  /** When true, Bar or Restaurant was set from account PREFEREDCATEGORIES and must not be edited */
+  const [isBarOrRestaurantFromAccount, setIsBarOrRestaurantFromAccount] = useState(false);
+  /** Only show Bar or Restaurant checkbox when PREFEREDCATEGORIES is resto-bar/restaurant/bar */
+  const [showBarOrRestaurantOption, setShowBarOrRestaurantOption] = useState(false);
   const [tableNameOrNumber, setTableNameOrNumber] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
 
   useEffect(() => {
     if (typeof window !== "undefined") setBaseUrl(window.location.origin);
   }, []);
+
+  // Only show Bar or Restaurant when PREFEREDCATEGORIES is resto-bar/restaurant/bar
+  useEffect(() => {
+    if (!user?.ishyigaAccount || user?.role !== "supplier") return;
+    fetch(`/api/supplier/profile?account=${encodeURIComponent(user.ishyigaAccount)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        const raw = (data?.preferredCategories ?? "").trim().toLowerCase();
+        const isRestoBar =
+          raw === "resto-bar" ||
+          raw.includes("restaurant") ||
+          raw.includes("resto") ||
+          raw.includes("bar");
+        if (isRestoBar) {
+          setShowBarOrRestaurantOption(true);
+          setIsBarOrRestaurant(true);
+          setIsBarOrRestaurantFromAccount(true);
+        }
+      })
+      .catch(() => {});
+  }, [user?.ishyigaAccount, user?.role]);
 
   const shopWithMeLink = shopNickname.trim()
     ? `${baseUrl}/shop-with-me?nickname=${encodeURIComponent(shopNickname.trim().toLowerCase())}${isBarOrRestaurant && tableNameOrNumber.trim() ? `&table=${encodeURIComponent(tableNameOrNumber.trim())}` : ""}`
@@ -119,10 +144,10 @@ function SupplierDashboard() {
 
           // Parse price from various sources
           const price = parsePrice(
-            p.price ||
-            p.UNITY_PRICE ||
-            p.SALE_PRICE_INCLUSIVE ||
-            p.item_emballage ||  // Redis price field
+            p.selling_price ??
+            p.price ??
+            p.UNITY_PRICE ??
+            p.SALE_PRICE_INCLUSIVE ??
             0
           );
 
@@ -138,8 +163,9 @@ function SupplierDashboard() {
             ),
             price: price,
             costPrice: Number(
-              p.cost ||
-              p.COST_PRICE_INCLUSIVE ||
+              p.cost_price ??
+              p.cost ??
+              p.COST_PRICE_INCLUSIVE ??
               0
             ),
             itemName:
@@ -155,6 +181,7 @@ function SupplierDashboard() {
             batchInfo: p.item_state || "",  // Redis batch/expiry info
             category: p.category || "uncategorized",
             sales: 0,
+            currency: p.currency ?? "RWF",
           };
 
           console.log(`Mapped product ${index}:`, mapped);
@@ -407,18 +434,25 @@ function SupplierDashboard() {
                     className="max-w-xs"
                   />
                 </div>
-                <div className="flex items-center space-x-2 pt-6">
-                  <Checkbox
-                    id="bar-restaurant"
-                    checked={isBarOrRestaurant}
-                    onCheckedChange={(checked) => setIsBarOrRestaurant(!!checked)}
-                  />
-                  <Label htmlFor="bar-restaurant" className="cursor-pointer">
-                    Bar or Restaurant
-                  </Label>
-                </div>
+                {showBarOrRestaurantOption && (
+                  <div className="flex items-center space-x-2 pt-6">
+                    <Checkbox
+                      id="bar-restaurant"
+                      checked={isBarOrRestaurant}
+                      disabled={isBarOrRestaurantFromAccount}
+                      onCheckedChange={(checked) => setIsBarOrRestaurant(!!checked)}
+                    />
+                    <Label
+                      htmlFor="bar-restaurant"
+                      className={isBarOrRestaurantFromAccount ? "cursor-not-allowed text-muted-foreground" : "cursor-pointer"}
+                    >
+                      Bar or Restaurant
+                      {isBarOrRestaurantFromAccount && " (set from your account)"}
+                    </Label>
+                  </div>
+                )}
               </div>
-              {isBarOrRestaurant && (
+              {showBarOrRestaurantOption && isBarOrRestaurant && (
                 <div className="space-y-2 max-w-xs">
                   <Label htmlFor="table-name">Default table name or number (optional)</Label>
                   <Input
@@ -459,7 +493,7 @@ function SupplierDashboard() {
                 </CardDescription>
               </div>
 
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button asChild variant="outline" className="gap-2">
                   <Link href="/supplier/products/bulk-upload">
                     <Package className="h-4 w-4" />
@@ -593,7 +627,7 @@ function SupplierDashboard() {
                             <td className="px-4 py-4">
                               {p.price > 0 ? (
                                 <span className="font-medium text-slate-900">
-                                  {p.price.toLocaleString()} RWF
+                                  {p.price.toLocaleString()} {p.currency ?? "RWF"}
                                 </span>
                               ) : (
                                 <span className="text-slate-400 text-sm italic">

@@ -95,6 +95,53 @@ export async function checkTableStatus(
 }
 
 /**
+ * ✅ Create table command on the backend (so table exists before checkout).
+ * Call this when the user clicks "Create table" so others can join via the share link.
+ */
+export interface CreateTableCommandResponse {
+  ok: boolean;
+  tableCommandId?: number;
+  tableName?: string;
+  tableLocation?: string;
+  status?: string;
+  shareableLink?: string;
+  shareableToken?: string;
+  qrCodeUrl?: string;
+  message?: string;
+  error?: string;
+}
+
+export async function createTableCommandApi(params: {
+  tableName: string;
+  locationId: string;
+  locationName: string;
+  userEmail: string;
+  userName?: string;
+}): Promise<CreateTableCommandResponse> {
+  try {
+    const response = await fetch(`${API_BASE}/OrdersServlet?action=createTableCommand`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tableName: params.tableName.trim(),
+        locationId: params.locationId,
+        locationName: params.locationName || "",
+        userEmail: params.userEmail,
+        userName: params.userName || "Guest",
+      }),
+    });
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error("❌ createTableCommandApi error:", error);
+    return {
+      ok: false,
+      error: "Failed to create table",
+    };
+  }
+}
+
+/**
  * ✅ Get list of active tables (for autocomplete/join)
  */
 export async function getActiveTables(

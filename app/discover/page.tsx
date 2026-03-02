@@ -213,7 +213,7 @@ export default function DiscoverPage() {
             if (seenIds.has(productId)) continue
             seenIds.add(productId)
             
-            const price = parseFloat(p.SALE_PRICE_INCLUSIVE || p.item_emballage || p.price || "0")
+            const price = parseFloat(p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? p.price ?? "0")
             
             allProducts.push({
               id: productId,

@@ -1,7 +1,7 @@
 "use client"
 
 /**
- * ✅ TABLE COMMANDS PAGE - FIXED for Anonymous Users
+ *  TABLE COMMANDS PAGE - FIXED for Anonymous Users
  *
  * Works with both logged-in users AND anonymous/guest users.
  * Anonymous users can create and manage table commands using guest email.
@@ -60,7 +60,7 @@ export default function TablesPage() {
     setLoading(false)
   }, [user?.email, guestEmail])
 
-  // ✅ Prevent hydration mismatch by waiting for client-side mount
+  //  Prevent hydration mismatch by waiting for client-side mount
   if (!mounted || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -72,7 +72,7 @@ export default function TablesPage() {
     )
   }
 
-  // ✅ FIXED: Support both authenticated AND anonymous users (no Date.now() here)
+  //  FIXED: Support both authenticated AND anonymous users (no Date.now() here)
   const userEmail = user?.email || guestEmail || "guest@ihute.rw"
   const userName = user?.name || "Guest User"
   const locationId = selectedLocation?.ishyigaAccount || selectedLocation?.id || "ALGGG0942009"
@@ -143,7 +143,7 @@ export default function TablesPage() {
           </div>
         </div>
 
-        {/* ✅ Table Management Panel - Now works for all users */}
+        {/*  Table Management Panel - Now works for all users */}
         <TableCommandManagementPanel
           userEmail={userEmail}
           userName={userName}

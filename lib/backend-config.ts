@@ -56,6 +56,11 @@ export function getAuthUrl(): string {
   return process.env.JAVA_AUTH_URL || `${getBackendBase()}/Kaos/user-auth`
 }
 
+/** Umusada Excel upload – proxies to Java backend when UMUSADA_EXCEL_USE_JAVA_BACKEND=true */
+export function getUmusadaExcelUrl(): string {
+  return process.env.JAVA_UMUSADA_EXCEL_URL || `${getBackendBase()}/UmusadaExcelServlet`
+}
+
 export function getOrderStatusUrl(): string {
   return process.env.JAVA_ORDER_STATUS_URL || `${getBackendBase()}/OrderStatusServlet`
 }

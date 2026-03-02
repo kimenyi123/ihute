@@ -30,6 +30,10 @@ type Product = {
   item_commercial_name: string
   item_packet?: string
   item_emballage?: string
+  selling_price?: number | string
+  cost_price?: number | string
+  /** Currency from account_signup for this supplier. */
+  currency?: string
   item_key_words?: string
   supplier_account?: string
   supplier_name?: string
@@ -82,9 +86,10 @@ function toCardProduct(p: Product) {
   return {
     id: p.item_code || p.item_key_words || `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`,
     name: p.item_commercial_name || "Product",
-    description: undefined, // hide code (item_key_words) from UI
-    price: extractNumericPrice(p.item_emballage),
-    unit: "", // item_packet is quantity, not a unit label
+    description: undefined,
+    price: extractNumericPrice(p.selling_price),
+    currency: p.currency || "RWF",
+    unit: p.item_packet || "",
     inStock: true,
     rating: 4,
     supplierId: p.supplier_account,
@@ -120,7 +125,10 @@ function normalizeSupplierProductsResponse(
             item_code: item.item_key_words ?? item.item_code ?? "",
             item_commercial_name: item.item_commercial_name ?? item.item_name ?? "Product",
             item_packet: item.item_packet,
-            item_emballage: item.item_emballage ?? item.price ?? "",
+            item_emballage: item.item_emballage ?? "",
+            selling_price: item.selling_price,
+            cost_price: item.cost_price,
+            currency: item.currency,
             item_key_words: item.item_key_words,
             supplier_account,
             supplier_name,
@@ -135,7 +143,10 @@ function normalizeSupplierProductsResponse(
           item_code: (p as any).item_key_words ?? (p as any).item_code ?? "",
           item_commercial_name: (p as any).item_commercial_name ?? (p as any).item_name ?? "Product",
           item_packet: (p as any).item_packet,
-          item_emballage: (p as any).item_emballage ?? (p as any).price ?? "",
+          item_emballage: (p as any).item_emballage ?? "",
+            selling_price: (p as any).selling_price,
+            cost_price: (p as any).cost_price,
+            currency: (p as any).currency,
           item_key_words: (p as any).item_key_words,
           supplier_account: (p as any).supplier_account ?? supplier_account,
           supplier_name: (p as any).supplier_name ?? supplier_name,
@@ -215,60 +226,36 @@ export default function SearchPage() {
       return
     }
 
-    const id = p.item_code || `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`
+    const itemCode = (p.item_code || p.item_key_words || "").toString().trim()
+    const id = itemCode || `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`
     const unit = p.item_packet || ""
-    const price = extractNumericPrice(p.item_emballage)
-    const supplierId = p.supplier_account || "unknown"
+    const price = extractNumericPrice(p.selling_price)
+    const supplierId = (p.supplier_account || "unknown").toString().trim()
     const supplierName = p.supplier_name || p.supplier_account || "Supplier"
+    const baseItem = {
+      id,
+      itemCode: itemCode || id,
+      name: p.item_commercial_name,
+      price,
+      unit,
+      selectedUnit: unit,
+      qty: 1,
+      supplierId,
+      supplierName,
+      supplierLocation: p.supplier_location,
+      image: p.image || "/placeholder.svg?height=300&width=300",
+      momo: p.momo || (p as any)?.seller_momo || "",
+    }
 
     // Check if we're in a table command context
     if (tableCommand && tableCommand.locationId === p.supplier_account) {
-      // Add to table command cart (special handling for table orders)
       if (addToTableCart) {
-        addToTableCart({
-          id,
-          name: p.item_commercial_name,
-          price,
-          unit,
-          selectedUnit: unit,
-          qty: 1,
-          supplierId,
-          supplierName,
-          supplierLocation: p.supplier_location,
-          image: p.image || "/placeholder.svg?height=300&width=300",
-          momo: p.momo || (p as any)?.seller_momo || "",
-        })
+        addToTableCart({ ...baseItem })
       } else {
-        // Fallback to regular cart
-        addToCartFn({
-          id,
-          name: p.item_commercial_name,
-          price,
-          unit,
-          selectedUnit: unit,
-          qty: 1,
-          supplierId,
-          supplierName,
-          supplierLocation: p.supplier_location,
-          image: p.image || "/placeholder.svg?height=300&width=300",
-          momo: p.momo || (p as any)?.seller_momo || "",
-        })
+        addToCartFn({ ...baseItem })
       }
     } else {
-      // Regular order (not part of table command)
-      addToCartFn({
-        id,
-        name: p.item_commercial_name,
-        price,
-        unit,
-        selectedUnit: unit,
-        qty: 1,
-        supplierId,
-        supplierName,
-        supplierLocation: p.supplier_location,
-        image: p.image || "/placeholder.svg?height=300&width=300",
-        momo: p.momo || (p as any)?.seller_momo || "",
-      })
+      addToCartFn({ ...baseItem })
     }
 
     // Show success message instead of redirecting
@@ -832,7 +819,7 @@ export default function SearchPage() {
                               <div className="text-sm font-medium">{p.item_commercial_name}</div>
                               <div className="text-xs text-gray-600">{p.item_packet || ""}</div>
                               <div className="text-sm font-semibold text-green-700">
-                                {p.item_emballage || ""}
+                                {p.selling_price != null ? `${Number(p.selling_price).toLocaleString()} ${p.currency || "RWF"}` : "Price not available"}
                               </div>
                             </div>
                           ))}
@@ -926,7 +913,7 @@ export default function SearchPage() {
                       </div>
                       <div className="text-sm text-gray-600 mt-1">{product.item_packet || "No description"}</div>
                       <div className="mt-2 text-base font-semibold text-green-600">
-                        {product.item_emballage || "Price not available"}
+                        {product.selling_price != null ? `${Number(product.selling_price).toLocaleString()} ${product.currency || "RWF"}` : "Price not available"}
                       </div>
                       {product.supplier_name && (
                         <div className="mt-2 text-xs text-gray-500">

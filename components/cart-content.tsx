@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect } from "react"
 import { useCartStore } from "@/lib/cart-store"
 import { CartItemCard } from "@/components/cart-item-card"
 import { CartSummary } from "@/components/cart-summary"
@@ -12,7 +13,13 @@ import { CartAlsoBuy } from "@/components/cart-also-buy"
 
 export function CartContent() {
   const items = useCartStore((state) => state.items)
+  const mergeDuplicateCartLines = useCartStore((state) => state.mergeDuplicateCartLines)
   const [searchQuery, setSearchQuery] = useState("")
+
+  // Merge duplicate lines (same product code or name from same seller) when cart is opened
+  useEffect(() => {
+    mergeDuplicateCartLines?.()
+  }, [mergeDuplicateCartLines])
 
   if (items.length === 0) {
     return (
