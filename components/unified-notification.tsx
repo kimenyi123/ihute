@@ -1,0 +1,444 @@
+"use client"
+
+import { useEffect, useState } from "react"
+import { useAuthStore } from "@/lib/auth-store"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Bell, X, ShoppingCart, Pin, PinOff, Star } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { RatingModal } from "./RatingModal"
+
+type OrderNotification = {
+  id: string
+  type: "order"
+  orderId: string | number
+  buyerName: string
+  amount: number
+  timestamp: string
+  isNew: boolean
+}
+
+type RatingNotification = {
+  id: number
+  type: "rating"
+  title: string
+  message: string
+  actionUrl: string
+  notificationType: string
+  createdAt: number
+  isRead: boolean
+}
+
+type UnifiedNotification = OrderNotification | RatingNotification
+
+// Minimal shape we expect from the backend
+type RawOrder = {
+  ID_ORDER?: string | number
+  BUYER_OWNER?: string
+  BUYER_NAMES?: string
+  BUYER_ISHYIGA_ACCOUNT?: string
+  buyerName?: string
+  AMOUNT?: number
+  total?: number
+  heure?: unknown
+  HEURE?: unknown
+  CREATED_AT?: unknown
+  createdAt?: unknown
+}
+
+function toEpochMs(v: unknown): number | null {
+  if (v == null) return null
+  if (typeof v === "number") return v < 1e12 ? v * 1000 : v
+  if (typeof v === "string") {
+    const s = v.trim()
+    if (!s) return null
+    const n = Number(s)
+    if (Number.isFinite(n)) return n < 1e12 ? n * 1000 : n
+    const d = new Date(s)
+    return isNaN(d.getTime()) ? null : d.getTime()
+  }
+  return null
+}
+
+function fmt(ts: string | number) {
+  const d = typeof ts === "number" ? new Date(ts) : new Date(ts)
+  return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
+}
+
+function getBuyerName(o: {
+  BUYER_OWNER?: string
+  BUYER_NAMES?: string
+  BUYER_ISHYIGA_ACCOUNT?: string
+  buyerName?: string
+}): string {
+  return (
+    o.BUYER_OWNER ??
+    o.BUYER_NAMES ??
+    o.buyerName ??
+    o.BUYER_ISHYIGA_ACCOUNT ??
+    "Customer"
+  )
+}
+
+export function UnifiedNotification() {
+  const { user, isAuthenticated } = useAuthStore()
+  const router = useRouter()
+  const [notifications, setNotifications] = useState<UnifiedNotification[]>([])
+  const [showNotifications, setShowNotifications] = useState(true)
+  const [pinned, setPinned] = useState(true)
+  const [ratingModalOpen, setRatingModalOpen] = useState(false)
+  const [ratingData, setRatingData] = useState<{
+    orderId: string
+    sellerId: string
+    sellerName: string
+    items: Array<{ code: string; name: string }>
+  } | null>(null)
+
+  // Restore pinned/open state
+  useEffect(() => {
+    const saved = typeof window !== "undefined" ? localStorage.getItem("sellerNotifPinned") : null
+    if (saved != null) {
+      const v = saved === "1"
+      setPinned(v)
+      setShowNotifications(v)
+    }
+  }, [])
+
+  // Persist pinned state
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("sellerNotifPinned", pinned ? "1" : "0")
+    }
+  }, [pinned])
+
+  // Fetch order notifications
+  useEffect(() => {
+    if (!isAuthenticated || user?.role !== "supplier") return
+
+    const fetchOrders = async () => {
+      try {
+        const res = await fetch("/api/seller-orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sellerAccount: user.ishyigaAccount }),
+          cache: "no-store",
+        })
+        const json = await res.json()
+
+        if (json?.ok && Array.isArray(json.orders)) {
+          const raw: RawOrder[] = json.orders as RawOrder[]
+
+          const recent: OrderNotification[] = raw
+            .map((order: RawOrder): OrderNotification | null => {
+              const tsMs = toEpochMs(order.heure ?? order.HEURE ?? order.CREATED_AT ?? order.createdAt)
+              if (tsMs == null) return null
+              const buyerName = getBuyerName(order)
+              return {
+                id: `order-${String(order.ID_ORDER ?? "")}`,
+                type: "order",
+                orderId: order.ID_ORDER ?? "",
+                buyerName,
+                amount: Number(order.AMOUNT ?? order.total ?? 0),
+                timestamp: new Date(tsMs).toISOString(),
+                isNew: true,
+              }
+            })
+            .filter((x: OrderNotification | null): x is OrderNotification => x !== null)
+            .filter((n: OrderNotification) => new Date(n.timestamp).getTime() > Date.now() - 24 * 60 * 60 * 1000)
+            .sort((a: OrderNotification, b: OrderNotification) =>
+              new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+            )
+            .slice(0, 5)
+
+          setNotifications((prev) => {
+            const ratings = prev.filter((n): n is RatingNotification => n.type === "rating")
+            const seen = new Set(prev.filter((n): n is OrderNotification => n.type === "order").map((n) => String(n.orderId)))
+            const deduped = recent.filter((n) => !seen.has(String(n.orderId)))
+            
+            if (pinned && deduped.length > 0) {
+              setShowNotifications(true)
+            }
+            
+            return [...deduped, ...ratings].sort((a, b) => {
+              const aTime = a.type === "order" ? new Date(a.timestamp).getTime() : a.createdAt
+              const bTime = b.type === "order" ? new Date(b.timestamp).getTime() : b.createdAt
+              return bTime - aTime
+            }).slice(0, 10)
+          })
+        }
+      } catch (err) {
+        console.error("Failed to fetch order notifications:", err)
+      }
+    }
+
+    const interval = setInterval(fetchOrders, 30000)
+    fetchOrders()
+    return () => clearInterval(interval)
+  }, [isAuthenticated, user?.role, user?.ishyigaAccount, pinned])
+
+  // Fetch rating notifications
+  useEffect(() => {
+    if (!isAuthenticated || !user) return
+
+    const fetchRatings = async () => {
+      try {
+        const userEmail = user?.email || user?.ishyigaAccount
+        if (!userEmail) return
+
+        const res = await fetch(`/api/notifications/unread?userId=${encodeURIComponent(userEmail)}`)
+        const data = await res.json()
+
+        if (data.ok && Array.isArray(data.notifications)) {
+          const ratingNotifs: RatingNotification[] = data.notifications.map((n: any) => ({
+            id: n.id,
+            type: "rating" as const,
+            title: n.title,
+            message: n.message,
+            actionUrl: n.actionUrl,
+            notificationType: n.type,
+            createdAt: n.createdAt,
+            isRead: false,
+          }))
+
+          setNotifications((prev) => {
+            const orders = prev.filter((n): n is OrderNotification => n.type === "order")
+            const seen = new Set(prev.filter((n): n is RatingNotification => n.type === "rating").map((n) => n.id))
+            const deduped = ratingNotifs.filter((n) => !seen.has(n.id))
+            
+            if (pinned && deduped.length > 0) {
+              setShowNotifications(true)
+            }
+            
+            return [...orders, ...deduped].sort((a, b) => {
+              const aTime = a.type === "order" ? new Date(a.timestamp).getTime() : a.createdAt
+              const bTime = b.type === "order" ? new Date(b.timestamp).getTime() : b.createdAt
+              return bTime - aTime
+            }).slice(0, 10)
+          })
+        }
+      } catch (err) {
+        console.error("Failed to fetch rating notifications:", err)
+      }
+    }
+
+    const interval = setInterval(fetchRatings, 30000)
+    fetchRatings()
+    return () => clearInterval(interval)
+  }, [isAuthenticated, user, pinned])
+
+  const markAsRead = async (notification: UnifiedNotification) => {
+    if (notification.type === "order") {
+      setNotifications((prev) =>
+        prev.map((n) => (n.type === "order" && n.id === notification.id ? { ...n, isNew: false } : n))
+      )
+    } else {
+      try {
+        const userEmail = user?.email || user?.ishyigaAccount
+        if (!userEmail) return
+
+        await fetch(`/api/notifications/${notification.id}/read?userId=${encodeURIComponent(userEmail)}`, {
+          method: "POST",
+        })
+
+        setNotifications((prev) => prev.filter((n) => n.type !== "rating" || n.id !== notification.id))
+      } catch (err) {
+        console.error("Failed to mark rating as read:", err)
+      }
+    }
+  }
+
+  const handleNotificationClick = async (notification: UnifiedNotification) => {
+    if (notification.type === "order") {
+      router.push(`/supplier/orders/${notification.orderId}`)
+      markAsRead(notification)
+      if (!pinned) setShowNotifications(false)
+    } else {
+      // Handle rating notification
+      if (notification.actionUrl && notification.actionUrl.includes('/products/rate')) {
+        const urlParams = new URLSearchParams(notification.actionUrl.split('?')[1])
+        const orderId = urlParams.get('orderId')
+
+        if (orderId) {
+          try {
+            const userEmail = user?.email || user?.ishyigaAccount
+            const res = await fetch(`/api/orders/details?orderId=${orderId}&userEmail=${encodeURIComponent(userEmail || '')}`)
+            const data = await res.json()
+
+            if (data.ok && data.order) {
+              setRatingData({
+                orderId: orderId,
+                sellerId: data.order.sellerAccount || '',
+                sellerName: data.order.sellerName || 'Supplier',
+                items: data.order.items || [],
+              })
+              setRatingModalOpen(true)
+            }
+          } catch (error) {
+            console.error('Failed to fetch order details:', error)
+          }
+        }
+        markAsRead(notification)
+        if (!pinned) setShowNotifications(false)
+      } else if (notification.actionUrl) {
+        router.push(notification.actionUrl)
+        markAsRead(notification)
+        if (!pinned) setShowNotifications(false)
+      }
+    }
+  }
+
+  const removeNotification = (notification: UnifiedNotification) => {
+    setNotifications((prev) => prev.filter((n) => 
+      n.type === "order" ? n.id !== notification.id : n.type === "rating" && n.id !== (notification as RatingNotification).id
+    ))
+  }
+
+  const newCount = notifications.filter((n) => 
+    n.type === "order" ? n.isNew : !n.isRead
+  ).length
+
+  // Always show the bell for authenticated suppliers
+  if (!isAuthenticated) return null
+
+  return (
+    <>
+      <div className="fixed top-4 right-4 z-50">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setShowNotifications(!showNotifications)}
+          className="relative"
+          title="Show notifications"
+        >
+          <Bell className="h-4 w-4" />
+          {newCount > 0 && (
+            <Badge className="absolute -top-2 -right-2 h-5 w-5 flex items-center justify-center p-0 text-xs">
+              {newCount}
+            </Badge>
+          )}
+        </Button>
+
+        {showNotifications && (
+          <Card className="absolute top-12 right-0 w-80 max-h-96 overflow-y-auto">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center justify-between w-full">
+                <span className="flex items-center gap-2">
+                  Notifications
+                  {pinned && <Badge variant="secondary" className="text-xs">Pinned</Badge>}
+                </span>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setPinned((p) => !p)}
+                    title={pinned ? "Unpin panel" : "Pin panel"}
+                  >
+                    {pinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => !pinned && setShowNotifications(false)}
+                    disabled={pinned}
+                    title={pinned ? "Panel is pinned" : "Close"}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {notifications.length === 0 ? (
+                <div className="p-8 text-center text-gray-500">
+                  <Bell className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+                  <p className="font-medium">No notifications</p>
+                  <p className="text-sm mt-1">You're all caught up!</p>
+                </div>
+              ) : (
+                <>
+                  {notifications.map((n) => (
+                <div
+                  key={n.type === "order" ? n.id : `rating-${n.id}`}
+                  className={`p-3 rounded-lg border cursor-pointer ${
+                    (n.type === "order" && n.isNew) || (n.type === "rating" && !n.isRead)
+                      ? "bg-blue-50 border-blue-200"
+                      : "bg-gray-50"
+                  }`}
+                  onClick={() => handleNotificationClick(n)}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      {n.type === "order" ? (
+                        <>
+                          <div className="flex items-center gap-2">
+                            <ShoppingCart className="h-4 w-4" />
+                            <span className="font-medium text-sm">Order #{n.orderId}</span>
+                            {n.isNew && <Badge variant="default" className="text-xs">New</Badge>}
+                          </div>
+                          <p className="text-sm text-gray-600 mt-1">{n.buyerName}</p>
+                          <p className="text-sm font-semibold">{n.amount.toLocaleString()} RWF</p>
+                          <p className="text-xs text-gray-500">{fmt(n.timestamp)}</p>
+                        </>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-2">
+                            <Star className="h-4 w-4 text-yellow-500" />
+                            <span className="font-medium text-sm">{n.title}</span>
+                            {!n.isRead && <Badge variant="default" className="text-xs">New</Badge>}
+                          </div>
+                          <p className="text-sm text-gray-600 mt-1">{n.message}</p>
+                          <p className="text-xs text-gray-500">{fmt(n.createdAt)}</p>
+                        </>
+                      )}
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        removeNotification(n)
+                      }}
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full mt-2"
+                onClick={() => router.push(user?.role === "supplier" ? "/supplier/orders" : "/notifications")}
+              >
+                View All
+              </Button>
+            </>
+          )}
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
+      {/* Rating Modal */}
+      {ratingData && (
+        <RatingModal
+          open={ratingModalOpen}
+          onClose={() => {
+            setRatingModalOpen(false)
+            setRatingData(null)
+          }}
+          onSuccess={() => {
+            setRatingModalOpen(false)
+            setRatingData(null)
+          }}
+          orderId={ratingData.orderId}
+          sellerId={ratingData.sellerId}
+          sellerName={ratingData.sellerName}
+          buyerPhone={user?.phone}
+          items={ratingData.items}
+        />
+      )}
+    </>
+  )
+}

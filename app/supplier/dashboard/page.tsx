@@ -227,7 +227,7 @@ function SupplierDashboard() {
         setError(err.message);
         setLoading(false);
       });
-  }, [isAuthenticated, user, router]);
+  }, [isAuthenticated, user?.ishyigaAccount, user?.role, router]);
 
   const handleLogout = () => {
     logout();
