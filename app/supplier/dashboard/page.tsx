@@ -209,34 +209,6 @@ function SupplierDashboard() {
             sales: 0,
             currency: p.currency ?? "RWF",
           };
-            mapped = {
-              ...p, // Keep all original fields
-              // Normalize field names
-              stock: Number(
-                p.stock ||
-                p.STOCK ||
-                p.QUANTITY ||
-                0
-              ),
-              price: price,
-              costPrice: Number(
-                p.cost ||
-                p.COST_PRICE_INCLUSIVE ||
-                0
-              ),
-              itemName:
-                p.ITEM_NAME ||
-                p.itemName ||
-                "Unknown",
-              itemCode:
-                p.ITEM_CODE ||
-                p.itemCode ||
-                "",
-              batchInfo: p.DESCRIPTION || "",
-              category: p.category || "uncategorized",
-              sales: 0,
-            };
-          }
 
           console.log(`Mapped product ${index}:`, mapped);
           return mapped;

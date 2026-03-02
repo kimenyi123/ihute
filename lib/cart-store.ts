@@ -105,7 +105,7 @@ export const useCartStore = create<CartState>()(
       tableInfo: null,  // ✅ NEW: Initialize table info
 
       // Same product = same supplier + (same product CODE or same product name) — merge into one line
-      addItem: (item, qty = 1) =>
+      addItem: (item, qty = 1) => {
         set((state) => {
           const selectedUnit = item.selectedUnit ?? item.unit
           const productCode = (item.itemCode ?? item.id).toString().trim()
@@ -150,8 +150,6 @@ export const useCartStore = create<CartState>()(
           }
           const withCode = { ...item, selectedUnit, qty, itemCode: (item.itemCode ?? item.id).toString().trim() || undefined }
           return { items: [...state.items, withCode] }
-        }),
-          return { items: [...state.items, { ...item, selectedUnit, qty }] }
         })
 
         // Track cart activity for abandoned cart reminders

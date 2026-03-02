@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Header } from '@/components/header';
 import { Footer } from '@/components/footer';
-import { PaymentDashboard } from '@/components/payment/payment-dashboard';
+import PaymentDashboard from '@/components/payment/payment-dashboard';
 
 export default function PaymentDashboardPage() {
   return (

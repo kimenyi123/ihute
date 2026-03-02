@@ -1,6 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import 'leaflet/dist/leaflet.css';
+/* Leaflet CSS is imported only on map pages (e.g. supplier/routes, admin/gps) to avoid breaking main layout if resolution fails */
 
 @custom-variant dark (&:is(.dark *));
 
