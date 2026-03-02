@@ -11,6 +11,9 @@ async function forward(req: NextRequest) {
   // Copy query params
   incoming.searchParams.forEach((v, k) => target.searchParams.append(k, v))
 
+  // Log so you can confirm the exact URL hit by Kaos (check terminal where Next runs)
+  console.log("[fetchSuggestions] Forwarding to backend:", target.toString())
+
   const method = req.method
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',

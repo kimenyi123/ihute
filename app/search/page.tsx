@@ -51,6 +51,9 @@ type SearchResult = {
   query: string
   timestamp?: number
   error?: string
+  /** When item is not in NIKI (Redis), backend falls back to DB and may set this */
+  source?: "redis" | "database"
+  fromNiki?: boolean
 }
 
 type SectorSeller = {
@@ -721,6 +724,13 @@ export default function SearchPage() {
         {searchResult?.error && (
           <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700">
             {searchResult.error}
+          </div>
+        )}
+
+        {/* When item is not in NIKI (Redis), backend returns DB results; show hint */}
+        {searchResult && (searchResult.products.length > 0 || searchResult.suppliersByName.length > 0 || searchResult.suppliersByProduct.length > 0) && (searchResult.source === "database" || searchResult.fromNiki === false) && (
+          <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-sm">
+            Showing results from full catalog (not in NIKI cache).
           </div>
         )}
 
