@@ -1,8 +1,13 @@
 'use client'
 
+import dynamic from 'next/dynamic'
+const MapContainer = dynamic(() => import('./LeafletMap').then(m => m.MapContainer), { ssr: false })
+const TileLayer = dynamic(() => import('./LeafletMap').then(m => m.TileLayer), { ssr: false })
+const Circle = dynamic(() => import('./LeafletMap').then(m => m.Circle), { ssr: false })
+const Marker = dynamic(() => import('./LeafletMap').then(m => m.Marker), { ssr: false })
+const Popup = dynamic(() => import('./LeafletMap').then(m => m.Popup), { ssr: false })
+
 import { useState, useEffect } from 'react'
-import { MapContainer, TileLayer, Circle, Marker, Popup } from 'react-leaflet'
-import 'leaflet/dist/leaflet.css'
 
 interface ActivityZone {
     zone_id: number

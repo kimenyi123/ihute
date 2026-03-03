@@ -3,10 +3,10 @@
 import dynamic from 'next/dynamic';
 import { Suspense } from 'react';
 
-// Dynamically import the client component
+// Dynamically import the actual component with no SSR
 const SupplierRoutesContent = dynamic(
   () => import('./SupplierRoutesContent'),
-  {
+  { 
     ssr: false,
     loading: () => <div>Loading routes...</div>
   }
