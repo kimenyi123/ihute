@@ -1,5 +1,7 @@
 'use client';
 
+export const dynamic = 'force-dynamic'
+
 import { useState, useEffect } from 'react';
 import { useAuthStore } from '@/lib/auth-store';
 
@@ -34,13 +36,13 @@ export default function DebugAuth() {
       setBackendTest({
         status: response.status,
         data,
-        cookies: document.cookie,
+        cookies: (typeof document !== 'undefined' ? document.cookie : ''),
         timestamp: new Date().toISOString()
       });
     } catch (error) {
       setBackendTest({
         error: error instanceof Error ? error.message : 'Unknown error',
-        cookies: document.cookie,
+        cookies: (typeof document !== 'undefined' ? document.cookie : ''),
         timestamp: new Date().toISOString()
       });
     }
@@ -59,14 +61,14 @@ export default function DebugAuth() {
         type: 'proxy',
         status: response.status,
         data,
-        cookies: document.cookie,
+        cookies: (typeof document !== 'undefined' ? document.cookie : ''),
         timestamp: new Date().toISOString()
       });
     } catch (error) {
       setBackendTest({
         type: 'proxy',
         error: error instanceof Error ? error.message : 'Unknown error',
-        cookies: document.cookie,
+        cookies: (typeof document !== 'undefined' ? document.cookie : ''),
         timestamp: new Date().toISOString()
       });
     }
@@ -115,7 +117,7 @@ export default function DebugAuth() {
         <h2 className="text-lg font-semibold mb-4">Browser Info</h2>
         <div className="text-sm space-y-2">
           <div><strong>User Agent:</strong> {navigator.userAgent}</div>
-          <div><strong>Cookies:</strong> {document.cookie || 'None'}</div>
+          <div><strong>Cookies:</strong> {(typeof document !== 'undefined' ? document.cookie : '') || 'None'}</div>
           <div><strong>Current URL:</strong> {window.location.href}</div>
         </div>
       </div>

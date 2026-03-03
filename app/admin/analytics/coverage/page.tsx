@@ -1,8 +1,12 @@
 'use client'
 
+import dynamic from 'next/dynamic'
+const MapContainer = dynamic(() => import('./LeafletMap').then(m => m.MapContainer), { ssr: false })
+const TileLayer = dynamic(() => import('./LeafletMap').then(m => m.TileLayer), { ssr: false })
+const Rectangle = dynamic(() => import('./LeafletMap').then(m => m.Rectangle), { ssr: false })
+const Popup = dynamic(() => import('./LeafletMap').then(m => m.Popup), { ssr: false })
+
 import { useState, useEffect } from 'react'
-import { MapContainer, TileLayer, Rectangle, Popup } from 'react-leaflet'
-import 'leaflet/dist/leaflet.css'
 
 interface CoverageGrid {
     geohash: string
