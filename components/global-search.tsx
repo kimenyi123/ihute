@@ -54,6 +54,9 @@ type GlobalSearchResponse = {
   query: string
   timestamp?: number
   error?: string
+  /** When item is not in NIKI (Redis), backend falls back to DB */
+  source?: "redis" | "database"
+  fromNiki?: boolean
   searchStats?: {
     totalProducts: number
     totalSuppliers: number
@@ -101,6 +104,7 @@ export function GlobalSearch({
   const [products, setProducts] = useState<GlobalResult[]>([])
   const [suppliers, setSuppliers] = useState<GlobalResult[]>([])
   const [stats, setStats] = useState<GlobalSearchResponse["searchStats"] | null>(null)
+  const [fromNiki, setFromNiki] = useState<boolean | null>(null)
   const [mounted, setMounted] = useState(false)
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -309,6 +313,7 @@ export function GlobalSearch({
       setProducts([])
       setSuppliers([])
       setStats(null)
+      setFromNiki(null)
       setOpen(false)
       return
     }
@@ -356,6 +361,7 @@ export function GlobalSearch({
           setProducts([])
           setSuppliers([])
           setStats(null)
+          setFromNiki(null)
           setOpen(true)
           return
         }
@@ -390,6 +396,7 @@ export function GlobalSearch({
         setProducts(p)
         setSuppliers(s)
         setStats(json.searchStats || null)
+        setFromNiki(json.fromNiki ?? (json.source === "database" ? false : json.source === "redis" ? true : null))
         setOpen(true)
 
         // Track search intent
@@ -406,6 +413,7 @@ export function GlobalSearch({
         setProducts([])
         setSuppliers([])
         setStats(null)
+        setFromNiki(null)
         setOpen(true)
       } finally {
         setLoading(false)
@@ -767,6 +775,11 @@ export function GlobalSearch({
 
           {!loading && !err && (products.length > 0 || suppliers.length > 0) && (
             <div className="p-3 space-y-3">
+              {fromNiki === false && (
+                <div className="px-2 py-1 text-[10px] text-amber-700 bg-amber-50 rounded border border-amber-200">
+                  Results from full catalog (not in NIKI cache).
+                </div>
+              )}
               {/* Search Stats */}
               {stats && (
                 <div className="px-2 py-1 text-[10px] text-muted-foreground flex items-center gap-3">

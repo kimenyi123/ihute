@@ -129,7 +129,6 @@ export function ProductCard({
         <div className="text-sm">
           <div className="font-semibold">
             {price.toLocaleString()} {currency}
-            <span className="text-muted-foreground">{unit ? ` / ${unit}` : ""}</span>
           </div>
           {supplierName && (
             <div className="text-xs text-muted-foreground">
