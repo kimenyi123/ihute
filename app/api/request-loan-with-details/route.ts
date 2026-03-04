@@ -263,9 +263,16 @@ export async function POST(req: NextRequest) {
     // STEP 5: UMUSADA LOGIN
     // ================================
     console.log("\n🔐 Step 5: Authenticating with Umusada...")
-    const username = "umusada.dev@gmail.com"
-    const password = "Admin@123"
-    const basicAuth = Buffer.from(`${username}:${password}`).toString('base64')
+    const username = process.env.UMUSADA_USERNAME ?? process.env.UMUSADA_EXCEL_EMAIL ?? ""
+    const password = process.env.UMUSADA_PASSWORD ?? process.env.UMUSADA_EXCEL_PASSWORD ?? ""
+    if (!username?.trim() || !password) {
+      console.error("[request-loan] Umusada credentials not set. Set UMUSADA_USERNAME and UMUSADA_PASSWORD (or UMUSADA_EXCEL_EMAIL / UMUSADA_EXCEL_PASSWORD) in .env")
+      return NextResponse.json({
+        success: false,
+        error: "Umusada credentials not configured. Set UMUSADA_USERNAME and UMUSADA_PASSWORD in environment."
+      }, { status: 500 })
+    }
+    const basicAuth = Buffer.from(`${username.trim()}:${password}`).toString('base64')
 
     const loginStep1 = await fetch(`${UMUSADA_AUTH_BASE}/auth/login`, {
       method: "POST",
@@ -307,15 +314,23 @@ export async function POST(req: NextRequest) {
     }
 
     const tokenResponse = await loginStep2.json()
-    const finalToken = tokenResponse.token
-    if (!finalToken) {
+    // Support common response shapes: { token }, { data: { token } }, { accessToken }, { access_token }
+    const finalToken =
+      tokenResponse.token ??
+      tokenResponse.data?.token ??
+      tokenResponse.accessToken ??
+      tokenResponse.access_token
+    const tokenStr = typeof finalToken === "string" ? finalToken.trim() : ""
+    if (!tokenStr) {
+      console.error("[request-loan] Auth response missing token. Keys:", Object.keys(tokenResponse || {}))
       return NextResponse.json({
         success: false,
-        error: "Failed to get auth token"
+        error: "Failed to get auth token from Umusada login response"
       }, { status: 401 })
     }
 
-    console.log("✓ Successfully authenticated with Umusada")
+    console.log("✓ Successfully authenticated with Umusada (token length:", tokenStr.length, ")")
+    console.log("[request-loan] TOKEN (use for invoice API):", tokenStr)
 
     // ================================
     // STEP 5.5: FETCH BUSINESS REGISTRATION INFO
@@ -336,17 +351,38 @@ export async function POST(req: NextRequest) {
     let businessLocation = ""
     let businessCategory = ""
 
+    const businessApiUrl = process.env.JAVA_BUSINESS_API_URL || `${getBackendBase()}/api/business`
+    const businessUrl = `${businessApiUrl}?tin=${encodeURIComponent(finalBuyerTIN)}`
+    console.log("   Business API URL:", businessUrl)
+
     try {
-      const businessRes = await fetch(`${getBackendBase()}/api/business?tin=${finalBuyerTIN}`)
+      const businessRes = await fetch(businessUrl, { cache: "no-store" })
+      const businessText = await businessRes.text()
 
       if (!businessRes.ok) {
+        console.error("[request-loan] Step 5.5 business API failed:", businessRes.status, businessText.slice(0, 500))
         return NextResponse.json({
           success: false,
-          error: `Failed to fetch business details (${businessRes.status})`
+          error: `Failed to fetch business details (HTTP ${businessRes.status})`,
+          code: "BUSINESS_API_ERROR",
+          details: businessRes.status === 404
+            ? "Business API endpoint may not exist. Set JAVA_BUSINESS_API_URL in .env to the correct URL if the API is elsewhere."
+            : businessText.slice(0, 300)
         }, { status: 500 })
       }
 
-      const businessData = await businessRes.json()
+      let businessData: { success?: boolean; data?: Record<string, unknown> }
+      try {
+        businessData = JSON.parse(businessText)
+      } catch {
+        console.error("[request-loan] Step 5.5 business API returned non-JSON:", businessText.slice(0, 300))
+        return NextResponse.json({
+          success: false,
+          error: "Business API returned invalid JSON",
+          code: "BUSINESS_API_INVALID_JSON",
+          details: businessText.slice(0, 200)
+        }, { status: 500 })
+      }
 
       if (!businessData.success || !businessData.data) {
         return NextResponse.json({
@@ -355,13 +391,13 @@ export async function POST(req: NextRequest) {
         }, { status: 404 })
       }
 
-      const business = businessData.data
-      businessRegistrationCode = business.registration_code
-      businessMsisdn = business.phone_number
-      businessName = business.name
-      businessEmail = business.email
-      businessLocation = business.location
-      businessCategory = business.category
+      const business = businessData.data as Record<string, unknown>
+      businessRegistrationCode = String(business.registration_code ?? "")
+      businessMsisdn = String(business.phone_number ?? "")
+      businessName = String(business.name ?? "")
+      businessEmail = String(business.email ?? "")
+      businessLocation = String(business.location ?? "")
+      businessCategory = String(business.category ?? "")
 
       console.log("✓ Business Details Fetched:")
       console.log("   Name:", businessName)
@@ -383,10 +419,11 @@ export async function POST(req: NextRequest) {
       }
 
     } catch (error) {
-      console.error("Error fetching business details:", error)
+      console.error("[request-loan] Step 5.5 error fetching business details:", error)
       return NextResponse.json({
         success: false,
         error: "Failed to fetch business registration details",
+        code: "BUSINESS_FETCH_ERROR",
         details: error instanceof Error ? error.message : "Unknown error"
       }, { status: 500 })
     }
@@ -405,6 +442,16 @@ export async function POST(req: NextRequest) {
 
     const messageId = orderId.toString()
 
+    // Bank API example uses E.164 (e.g. +25071234575). Normalize Rwandan 07/078/079 to +250.
+    const normalizeMsisdn = (s: string): string => {
+      const digits = (s || "").replace(/\D/g, "")
+      if (digits.startsWith("250") && digits.length >= 12) return `+${digits}`
+      if (digits.startsWith("0") && digits.length >= 9) return `+250${digits.slice(1)}`
+      if (digits.length >= 9) return `+250${digits}`
+      return (s || "").trim()
+    }
+    const primaryMsisdn = normalizeMsisdn(businessMsisdn)
+
     const invoicePayload = {
       messageId: messageId,
       financialInstitutionId: 1,
@@ -412,7 +459,7 @@ export async function POST(req: NextRequest) {
         invoiceNumber: orderId.toString(),
         businessTin: finalBuyerTIN,
         businessRegistrationCode: businessRegistrationCode,
-        businessMsisdn: businessMsisdn,
+        businessMsisdn: primaryMsisdn,
         currency: "RWF",
         invoiceAmount: invoiceAmount.toString()
       },
@@ -424,12 +471,21 @@ export async function POST(req: NextRequest) {
     const invoiceSubmitUrl = UMUSADA_INVOICE_SUBMIT_URL || `${UMUSADA_BANK_API}/invoice/submit`
     console.log(" Invoice Submit URL:", invoiceSubmitUrl)
 
+    // Umusada master (invoice/save) often expects the raw token only; bank-apis may expect "Bearer <token>". Env overrides: UMUSADA_INVOICE_AUTH_SCHEME, UMUSADA_INVOICE_AUTH_HEADER.
+    const isUmusadaMasterInvoice = (invoiceSubmitUrl || "").includes("umusada-master")
+    const defaultScheme = isUmusadaMasterInvoice ? "" : "Bearer"
+    const authScheme = process.env.UMUSADA_INVOICE_AUTH_SCHEME !== undefined ? process.env.UMUSADA_INVOICE_AUTH_SCHEME : defaultScheme
+    const authHeaderName = process.env.UMUSADA_INVOICE_AUTH_HEADER || "Authorization"
+    const authValue = (authScheme && authScheme.trim()) ? `${authScheme.trim()} ${tokenStr}`.trim() : tokenStr
+    const invoiceHeaders: Record<string, string> = {
+      "Content-Type": "application/json",
+      [authHeaderName]: authValue
+    }
+    console.log(" Sending", authHeaderName, authScheme ? `(${authScheme} + token, length ${tokenStr.length})` : `(raw token, length ${tokenStr.length})`)
+
     const invoiceResp = await fetch(invoiceSubmitUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${finalToken}`
-      },
+      headers: invoiceHeaders,
       body: JSON.stringify(invoicePayload)
     })
 
