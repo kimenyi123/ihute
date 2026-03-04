@@ -477,6 +477,9 @@ export default function ShopWithMePage() {
     return sorted;
   };
 
+  /** Total items from backend (full Redis/API list) */
+  const totalItemsFromBackend = currentSeller?.products?.length ?? currentSeller?.product_count ?? 0;
+  /** Filtered count (after search) */
   const totalProductCount = categories.reduce((sum, cat) => {
     const filtered = getFilteredProducts(cat.products);
     return sum + filtered.length;
@@ -605,7 +608,9 @@ export default function ShopWithMePage() {
                   {currentSeller.OWNER || currentSeller.SELLER_NAMES || currentSeller.NICKNAME}
                 </h1>
                 <p className="text-sm text-muted-foreground mt-1">
-                  {totalProductCount} product{totalProductCount !== 1 ? "s" : ""}
+                  {productSearchQuery.trim()
+                    ? `Showing ${totalProductCount} of ${totalItemsFromBackend} item${totalItemsFromBackend !== 1 ? "s" : ""}`
+                    : `${totalItemsFromBackend} item${totalItemsFromBackend !== 1 ? "s" : ""}`}
                 </p>
               </div>
 
@@ -636,7 +641,7 @@ export default function ShopWithMePage() {
               )}
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-3">
+            <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -647,17 +652,24 @@ export default function ShopWithMePage() {
                   className="pl-10"
                 />
               </div>
-              <Select value={sortBy} onValueChange={setSortBy}>
-                <SelectTrigger className="w-full sm:w-[200px]">
-                  <SelectValue placeholder="Sort by" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="featured">Featured</SelectItem>
-                  <SelectItem value="price-low">Price: Low to High</SelectItem>
-                  <SelectItem value="price-high">Price: High to Low</SelectItem>
-                  <SelectItem value="name">Name: A to Z</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <span className="text-sm text-muted-foreground whitespace-nowrap">
+                  {productSearchQuery.trim()
+                    ? `${totalProductCount} of ${totalItemsFromBackend} item${totalItemsFromBackend !== 1 ? "s" : ""}`
+                    : `${totalItemsFromBackend} item${totalItemsFromBackend !== 1 ? "s" : ""}`}
+                </span>
+                <Select value={sortBy} onValueChange={setSortBy}>
+                  <SelectTrigger className="w-full sm:w-[200px]">
+                    <SelectValue placeholder="Sort by" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="featured">Featured</SelectItem>
+                    <SelectItem value="price-low">Price: Low to High</SelectItem>
+                    <SelectItem value="price-high">Price: High to Low</SelectItem>
+                    <SelectItem value="name">Name: A to Z</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             {loading ? (
