@@ -76,47 +76,6 @@ function InlineStatusPicker({ order, orders, setOrders }: { order: Order, orders
 }
 
 // ===========================================
-// Loan Request Function
-// ===========================================
-async function requestLoan(order: Order, sellerAccount: string) {
-  if (!["open", "processing"].includes(order.supplierStatus || "")) {
-    alert(`Financing not allowed for orders with status "${order.supplierStatus}"`)
-    return
-  }
-
-  if (!confirm("You are about to request a loan from BPR for this order. Continue?")) return
-
-  try {
-    const res = await fetch("/api/request-loan-with-details", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        orderId: order.id,
-        sellerAccount,
-        buyerTIN: order.buyerTIN,
-        supplierTIN: order.SUPPLIER_TIN,
-        invoiceAmount: order.subtotal
-      })
-    })
-
-    const result = await res.json()
-    if (res.ok && result.success) {
-      alert(
-        `✅ Loan request submitted\n\n` +
-        `Order #: ${order.id}\n` +
-        `Product: ${result.itemName}\n` +
-        `Product Code: ${result.itemCode}\n` +
-        `Amount: ${order.subtotal.toLocaleString()} RWF`
-      )
-    } else {
-      alert(`❌ Loan Request Failed\n\n${result.error || "Unknown error"}`)
-    }
-  } catch (err: any) {
-    alert(`❌ Error\n\n${err.message || "Unknown error"}`)
-  }
-}
-
-// ===========================================
 // Supplier Orders Page
 // ===========================================
 export default function SupplierOrdersPage() {
@@ -318,14 +277,6 @@ export default function SupplierOrdersPage() {
                       <InlineStatusPicker order={order} orders={orders} setOrders={setOrders} />
                     </TableCell>
                     <TableCell className="text-center flex gap-2 justify-center">
-                      <Button
-                        size="sm"
-                        className={`bg-blue-600 hover:bg-blue-700 text-white ${!["open", "processing"].includes(order.supplierStatus || "") ? "opacity-50 cursor-not-allowed" : ""}`}
-                        onClick={() => requestLoan(order, user?.ishyigaAccount || "")}
-                        disabled={!["open", "processing"].includes(order.supplierStatus || "")}
-                      >
-                        Financing
-                      </Button>
                       <Button variant="outline" size="sm" onClick={() => router.push(supplierOrderLink(order.id))}>
                         View
                       </Button>
