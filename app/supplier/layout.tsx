@@ -48,20 +48,52 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [sidebarOpen, closeSidebar]);
 
-  // When on orders page with ?account= and not logged in: create session from account so link acts as login (no redirect).
+  // When on orders page with ?account=: ensure session reflects that account (auto-login + real seller name)
   const isOrdersPageWithAccount = pathname === "/supplier/orders" && accountFromUrl.length > 0;
   useEffect(() => {
-    if (!hasHydrated || isAuthenticated || !isOrdersPageWithAccount) return;
-    login({
-      id: accountFromUrl,
-      email: `${accountFromUrl}@supplier`,
-      name: accountFromUrl,
-      role: "supplier",
-      phone: "",
-      location: "",
-      ishyigaAccount: accountFromUrl,
-    });
-  }, [hasHydrated, isAuthenticated, isOrdersPageWithAccount, accountFromUrl, login]);
+    if (!hasHydrated || !isOrdersPageWithAccount) return;
+
+    // If current session already matches this account and has a human-readable name, keep it
+    const current = user;
+    const hasNiceName =
+      !!current?.name &&
+      current.name.trim().length > 0 &&
+      current.name !== current.ishyigaAccount;
+    if (current?.ishyigaAccount === accountFromUrl && hasNiceName) {
+      return;
+    }
+
+    // Fetch supplier profile to get real owner name for this account, then (re)login
+    (async () => {
+      let displayName = accountFromUrl;
+      try {
+        const res = await fetch(`/api/supplier/profile?account=${encodeURIComponent(accountFromUrl)}`, {
+          method: "GET",
+          cache: "no-store",
+        });
+        if (res.ok) {
+          const j: any = await res.json().catch(() => ({}));
+          const owner = (j?.owner || j?.OWNER || "").toString().trim();
+          if (owner) {
+            displayName = owner;
+          }
+        }
+      } catch {
+        // best-effort only; fall back to account code
+      }
+
+      login({
+        id: accountFromUrl,
+        email: `${accountFromUrl}@supplier`,
+        name: displayName,
+        role: "supplier",
+        phone: "",
+        location: "",
+        businessName: displayName,
+        ishyigaAccount: accountFromUrl,
+      });
+    })();
+  }, [hasHydrated, isOrdersPageWithAccount, accountFromUrl, user, login]);
 
   // Enhanced session protection with automatic redirect (skip when we're creating session from ?account=)
   useEffect(() => {
