@@ -97,6 +97,18 @@ function toCardProduct(p: Product) {
     p.image_url ||
     p.item_image_url ||
     "/placeholder.svg?height=300&width=300"
+  // Debug: see which image fields we actually have when rendering cards
+  const src = (p as any).source
+  console.log("[search] product image debug", {
+    item_code: p.item_code,
+    name: p.item_commercial_name,
+    image,
+    image_field: p.image,
+    image_url: p.image_url,
+    item_image_url: p.item_image_url,
+    source: src,
+    note: src === "redis" ? "it's redis" : src === "database" ? "it's database" : "source unknown",
+  })
   const priceFromEmballage = extractNumericPrice(p.item_emballage)
   const priceFromSelling = extractNumericPrice(p.selling_price)
   const price = priceFromEmballage > 0 ? priceFromEmballage : priceFromSelling
@@ -267,7 +279,18 @@ export default function SearchPage() {
     const itemCode = (p.item_code || p.item_key_words || "").toString().trim()
     const id = itemCode || `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`
     const unit = p.item_packet || ""
-    const price = extractNumericPrice(p.selling_price)
+    // Use same price resolution as toCardProduct: item_emballage first, then selling_price, then API-specific keys
+    const priceFromEmballage = extractNumericPrice(p.item_emballage)
+    const priceFromSelling = extractNumericPrice(p.selling_price)
+    const priceFromApi = extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE)
+    const price =
+      priceFromEmballage > 0
+        ? priceFromEmballage
+        : priceFromSelling > 0
+          ? priceFromSelling
+          : priceFromApi > 0
+            ? priceFromApi
+            : 0
     const supplierId = (p.supplier_account || "unknown").toString().trim()
     const supplierName = p.supplier_name || p.supplier_account || "Supplier"
     const baseItem = {
