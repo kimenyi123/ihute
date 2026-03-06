@@ -464,7 +464,16 @@ function CartSummaryBody() {
         router.refresh()
       } else {
         setPaymentStatus(g.supplierId, "failed")
-        alert(`Failed to create order: ${json?.error || "Unknown error"}`)
+        const errMsg = json?.error || "Unknown error"
+        const isInsufficientStock = /insufficient stock/i.test(errMsg)
+        if (isInsufficientStock) {
+          alert(
+            `Unable to place order: ${errMsg}\n\n` +
+            "Try reducing the quantity, or contact the seller to confirm availability."
+          )
+        } else {
+          alert(`Failed to create order: ${errMsg}`)
+        }
       }
     } catch (error) {
       console.error("Order creation error:", error)
