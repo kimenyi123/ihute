@@ -2,7 +2,7 @@
 
 import type React from "react"
 import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import Image from "next/image"
 import { Button } from "@/components/ui/button"
@@ -54,6 +54,8 @@ function normalizeToStoreUser(payload: ApiLoginOK): User {
 
 export default function LoginPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const redirectTo = searchParams?.get("redirect")
   const login = useAuthStore((s) => s.login)
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -98,7 +100,15 @@ export default function LoginPage() {
 
       login(user)
 
-      // Redirect based on role
+      // If they came from a link (e.g. "View my orders" QR), send them back after login
+      const decoded = redirectTo ? decodeURIComponent(redirectTo) : ""
+      const safeRedirect = decoded.startsWith("/") && !decoded.startsWith("//")
+      if (safeRedirect && decoded.length > 0) {
+        router.push(decoded)
+        return
+      }
+
+      // Otherwise redirect based on role
       if (user.role === "admin") {
         router.push("/admin/dashboard")
       } else if (user.role === "supplier") {

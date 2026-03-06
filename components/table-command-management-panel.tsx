@@ -12,7 +12,8 @@
  */
 
 import { useState, useEffect } from "react"
-import { Users, Send, XCircle, CheckCircle, AlertCircle, Clock } from "lucide-react"
+import { Users, Send, XCircle, CheckCircle, AlertCircle, Clock, PhoneCall, Copy } from "lucide-react"
+import dynamic from "next/dynamic"
 import { SendTableButton } from "./table-command-send-button"
 
 interface TableInfo {
@@ -39,6 +40,7 @@ export function TableCommandManagementPanel({ userEmail, userName, locationId, l
   const [tables, setTables] = useState<TableInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [momoDialog, setMomoDialog] = useState<null | { tableName: string; amount: number; momo: string }>(null)
 
   const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw/Trading"
 
@@ -89,6 +91,12 @@ export function TableCommandManagementPanel({ userEmail, userName, locationId, l
 
       if (result.ok) {
         alert(`✅ Table "${tableName}" closed successfully!`)
+        // Always show summary dialog (amount + MoMo QR if configured)
+        setMomoDialog({
+          tableName,
+          amount: Number(result.finalAmount ?? 0),
+          momo: String(result.sellerMomo ?? ""),
+        })
         fetchTables() // Refresh list
       } else {
         alert(`❌ Error: ${result.error || "Failed to close table"}`)
@@ -133,6 +141,7 @@ export function TableCommandManagementPanel({ userEmail, userName, locationId, l
   }
 
   return (
+    <>
     <div className="space-y-4">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-bold text-gray-900">Active Tables at {locationName}</h2>
@@ -247,6 +256,80 @@ export function TableCommandManagementPanel({ userEmail, userName, locationId, l
           </div>
         )
       })}
+    </div>
+
+    {momoDialog && (
+      <MomoQRDialog data={momoDialog} onClose={() => setMomoDialog(null)} />
+    )}
+    </>
+  )
+}
+
+const QRCode = dynamic(() => import("react-qr-code"), { ssr: false })
+
+function MomoQRDialog({ data, onClose }: { data: { tableName: string; amount: number; momo: string }; onClose: () => void }) {
+  const momoTarget = (data.momo || "").trim()
+  const hasTarget = momoTarget.length > 0
+  const payload = hasTarget ? `*182*8*1*${momoTarget}*${data.amount}#` : ""
+  const telHref = hasTarget ? `tel:${encodeURIComponent(payload)}` : ""
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 space-y-4">
+        <h2 className="text-lg font-semibold">MoMo Payment for {data.tableName}</h2>
+        <p className="text-sm text-slate-600">
+          Total amount: <span className="font-bold">{data.amount.toLocaleString()} RWF</span>
+        </p>
+
+        {hasTarget ? (
+          <>
+            <div className="text-center space-y-2">
+              <p className="text-sm font-medium">Scan this QR code to pay with MoMo</p>
+              <div className="bg-white p-4 rounded-lg inline-block border-2">
+                <QRCode value={payload} size={200} />
+              </div>
+              <p className="text-xs text-muted-foreground break-all">Or dial: {payload}</p>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 border rounded-md text-sm"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(momoTarget)
+                    alert(`Copied MoMo number: ${momoTarget}`)
+                  } catch {
+                    // ignore
+                  }
+                }}
+              >
+                <Copy className="h-4 w-4" />
+                Copy number
+              </button>
+              <a
+                href={telHref}
+                className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 border rounded-md text-sm"
+              >
+                <PhoneCall className="h-4 w-4" />
+                Dial now
+              </a>
+            </div>
+          </>
+        ) : (
+          <p className="text-sm text-red-600">
+            No MoMo code configured for this location. Please update it in supplier settings.
+          </p>
+        )}
+
+        <div className="flex justify-end pt-2">
+          <button
+            className="px-4 py-2 text-sm rounded-md border"
+            onClick={onClose}
+          >
+            Close
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

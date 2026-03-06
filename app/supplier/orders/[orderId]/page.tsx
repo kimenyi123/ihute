@@ -10,8 +10,11 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ArrowLeft, Phone, MapPin, User2, RotateCw, CreditCard, Truck } from "lucide-react"
 import { useAuthStore } from "@/lib/auth-store"
+import dynamic from "next/dynamic"
 
 type Detail = { order?: any; items?: any[]; seller?: any; buyer?: any }
+
+const QRCode = dynamic(() => import("react-qr-code"), { ssr: false })
 
 // Improved payment status detection
 function getPaymentStatus(order: any): { status: string; displayName: string; isPaid: boolean } {
@@ -178,6 +181,11 @@ export default function SupplierOrderDetailsPage() {
     return { order, buyer, items, created, currency, grandTotal, paymentInfo, orderStatus, isGuestBuyer }
   }, [detail])
 
+  const sellerMomo = (detail?.seller?.momo ?? "").toString().trim()
+  const showMomoQR = !!sellerMomo
+  const momoAmount = Number(order?.AMOUNT || grandTotal || 0)
+  const momoPayload = showMomoQR ? `*182*8*1*${sellerMomo}*${momoAmount}#` : ""
+
   // --- initial skeleton while store hydrates ---
   if (!hydrated) {
     return (
@@ -321,6 +329,7 @@ export default function SupplierOrderDetailsPage() {
                     <tr className="[&>th]:py-2 [&>th]:px-3 text-xs text-slate-500 uppercase tracking-wide">
                       <th className="text-left pl-0 w-28">Code</th>
                       <th className="text-left">Item</th>
+                      <th className="text-left w-36">Ordered By</th>
                       <th className="text-right w-20">Qty</th>
                       <th className="text-right w-28">Unit Price</th>
                       <th className="text-right w-32 pr-0">Total</th>
@@ -334,11 +343,15 @@ export default function SupplierOrderDetailsPage() {
                       const qty = qtyOf(it)
                       const unitPrice = unitPriceOf(it)
                       const total = totalOf(it)
+                      const orderedBy = (it.ORDERED_BY ?? buyer?.OWNER ?? "").toString().trim()
 
                       return (
                         <tr key={code}>
                           <td className="py-2 px-3 pl-0 align-middle">{code}</td>
                           <td className="py-2 px-3 align-middle">{name}</td>
+                          <td className="py-2 px-3 align-middle text-sm text-slate-700">
+                            {orderedBy || "—"}
+                          </td>
                           <td className="py-2 px-3 text-right align-middle font-mono tabular-nums">
                             {n(qty)}
                           </td>
@@ -402,6 +415,35 @@ export default function SupplierOrderDetailsPage() {
                     </div>
                   )}
                 </div>
+
+                  {showMomoQR && (
+                    <div className="mt-4 pt-4 border-t space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="text-sm text-slate-600">MoMo Payment (optional)</div>
+                          <div className="text-xs text-slate-500">
+                            Seller MoMo: <span className="font-mono">{sellerMomo}</span>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-sm text-slate-600">Amount</div>
+                          <div className="font-semibold">
+                            {n(momoAmount)} {currency}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
+                        <div className="bg-white p-3 rounded-lg border">
+                          <QRCode value={momoPayload} size={160} />
+                        </div>
+                        <div className="space-y-2 text-sm">
+                          <p>Scan this QR code with your phone to open the MoMo payment screen.</p>
+                          <p className="font-mono text-xs break-all">Or dial: {momoPayload}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
               </CardContent>
             </Card>
           </>
