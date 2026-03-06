@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
     })
 
     const text = await resp.text()
-    let data: { ok?: boolean; preferredCategories?: string; error?: string }
+    let data: { ok?: boolean; preferredCategories?: string; owner?: string; error?: string }
     try {
       data = JSON.parse(text)
     } catch {
@@ -52,6 +52,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       preferredCategories: typeof data.preferredCategories === "string" ? data.preferredCategories : "",
+      owner: typeof data.owner === "string" ? data.owner : "",
     })
   } catch (e: any) {
     if (e.name === "AbortError") {
