@@ -207,13 +207,14 @@ function SupplierDashboard() {
             };
           } else {
             // Handle database format (fallback)
-            const price = parsePrice(
-              p.selling_price ??
-              p.price ||
-              p.UNITY_PRICE ||
-              p.SALE_PRICE_INCLUSIVE ||
-              0
-            );
+const price = parsePrice(
+  p.selling_price ?? (
+    p.price ||
+    p.UNITY_PRICE ||
+    p.SALE_PRICE_INCLUSIVE ||
+    0
+  )
+);
 
             mapped = {
               ...p, // Keep all original fields
