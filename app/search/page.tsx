@@ -35,12 +35,18 @@ type Product = {
   /** Currency from account_signup for this supplier. */
   currency?: string
   item_key_words?: string
+  item_key_words_french?: string
+  item_key_words_kinyarwanda?: string
+  item_description?: string
   supplier_account?: string
   supplier_name?: string
   supplier_location?: string
   momo?: string
   type: string
   image?: string
+  image_url?: string
+  item_image_url?: string
+  selling_price?: string | number
   relevance_score?: number
 }
 
@@ -86,20 +92,28 @@ function extractNumericPrice(value: any): number {
 }
 
 function toCardProduct(p: Product) {
+  const image =
+    p.image ||
+    p.image_url ||
+    p.item_image_url ||
+    "/placeholder.svg?height=300&width=300"
+  const priceFromEmballage = extractNumericPrice(p.item_emballage)
+  const priceFromSelling = extractNumericPrice(p.selling_price)
+  const price = priceFromEmballage > 0 ? priceFromEmballage : priceFromSelling
   return {
     id: p.item_code || p.item_key_words || `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`,
     name: p.item_commercial_name || "Product",
-    description: undefined,
-    price: extractNumericPrice(p.selling_price),
+    description: undefined, // hide code (item_key_words) from UI
+    price,
     currency: p.currency || "RWF",
-    unit: p.item_packet || "",
+    unit: "", // item_packet is quantity, not a unit label
     inStock: true,
     rating: 4,
     supplierId: p.supplier_account,
     supplierName: p.supplier_name || p.supplier_account || "Supplier",
     supplierLocation: p.supplier_location,
     momo: p.momo,
-    image: p.image || "/placeholder.svg?height=300&width=300",
+    image,
   }
 }
 
@@ -124,6 +138,11 @@ function normalizeSupplierProductsResponse(
       const items = (p as any).items
       if (Array.isArray(items) && items.length > 0) {
         for (const item of items) {
+              const img =
+                item.item_image_url ??
+                item.IMAGE_URL ??
+                item.image_url ??
+                item.image
           flat.push({
             item_code: item.item_key_words ?? item.item_code ?? "",
             item_commercial_name: item.item_commercial_name ?? item.item_name ?? "Product",
@@ -133,30 +152,44 @@ function normalizeSupplierProductsResponse(
             cost_price: item.cost_price,
             currency: item.currency,
             item_key_words: item.item_key_words,
+            item_key_words_french: item.item_key_words_french,
+            item_key_words_kinyarwanda: item.item_key_words_kinyarwanda,
+            item_description: item.item_description ?? item.description,
             supplier_account,
             supplier_name,
             supplier_location: (p as any).supplier_location ?? undefined,
             type: (p as any).type ?? "product",
-            image: item.image,
+            image: img,
+            image_url: item.image_url ?? item.item_image_url ?? img,
+            item_image_url: item.item_image_url ?? item.image_url ?? img,
+            selling_price: item.selling_price ?? item.SALE_PRICE_INCLUSIVE,
             momo: item.momo ?? (p as any).momo,
           })
         }
       } else {
+            const q = p as any
+            const img =
+              q.item_image_url ?? q.IMAGE_URL ?? q.image_url ?? q.image
         flat.push({
-          item_code: (p as any).item_key_words ?? (p as any).item_code ?? "",
-          item_commercial_name: (p as any).item_commercial_name ?? (p as any).item_name ?? "Product",
-          item_packet: (p as any).item_packet,
-          item_emballage: (p as any).item_emballage ?? "",
-            selling_price: (p as any).selling_price,
-            cost_price: (p as any).cost_price,
-            currency: (p as any).currency,
-          item_key_words: (p as any).item_key_words,
-          supplier_account: (p as any).supplier_account ?? supplier_account,
-          supplier_name: (p as any).supplier_name ?? supplier_name,
-          supplier_location: (p as any).supplier_location,
-          type: (p as any).type ?? "product",
-          image: (p as any).image,
-          momo: (p as any).momo,
+          item_code: q.item_key_words ?? q.item_code ?? "",
+          item_commercial_name: q.item_commercial_name ?? q.item_name ?? "Product",
+          item_packet: q.item_packet,
+          item_emballage: q.item_emballage ?? q.price ?? "",
+          item_key_words: q.item_key_words,
+          item_key_words_french: q.item_key_words_french,
+          item_key_words_kinyarwanda: q.item_key_words_kinyarwanda,
+          item_description: q.item_description ?? q.description,
+          supplier_account: q.supplier_account ?? supplier_account,
+          supplier_name: q.supplier_name ?? supplier_name,
+          supplier_location: q.supplier_location,
+          type: q.type ?? "product",
+          image: img,
+          image_url: q.image_url ?? q.item_image_url ?? img,
+          item_image_url: q.item_image_url ?? q.image_url ?? img,
+          selling_price: q.selling_price ?? q.SALE_PRICE_INCLUSIVE,
+          cost_price: q.cost_price,
+          currency: q.currency,
+          momo: q.momo,
         })
       }
     }
@@ -206,9 +239,11 @@ export default function SearchPage() {
   const [sectorSellers, setSectorSellers] = useState<SectorSeller[]>([])
   const [loadingSector, setLoadingSector] = useState(false)
 
-  // Supplier product search
+  // Supplier product search (hits backend when query is non-empty)
   const [supplierSearch, setSupplierSearch] = useState("")
   const [debouncedSupplierSearch, setDebouncedSupplierSearch] = useState("")
+  const [supplierSearchResults, setSupplierSearchResults] = useState<Product[] | null>(null)
+  const [loadingSupplierSearch, setLoadingSupplierSearch] = useState(false)
 
   // Table command store
   const {
@@ -457,16 +492,63 @@ export default function SearchPage() {
     }
   }, [selectedShop])
 
-  // Filter shop products - simple text search (no strict filtering)
-  const filteredShopProducts = useMemo(() => {
-    if (!debouncedSupplierSearch) return shopProducts
+  // When user types in "Search in PANGOLIN'S BURROWS", hit backend (fetchSuggestions) so keyword search works
+  useEffect(() => {
+    let cancelled = false
+    const query = debouncedSupplierSearch.trim()
+    if (!selectedShop || !query) {
+      setSupplierSearchResults(null)
+      setLoadingSupplierSearch(false)
+      return
+    }
+    const supplierAccount = selectedShop.supplier_account
+    const supplierName = selectedShop.supplier_name
+    setLoadingSupplierSearch(true)
+    async function run() {
+      try {
+        const url = new URL(`/api/fetchSuggestions`, window.location.origin)
+        url.searchParams.set("globalSearch", query)
+        url.searchParams.set("supplier", supplierAccount)
+        url.searchParams.set("Currency", "RWF")
+        const res = await fetch(url.toString(), { cache: "no-store" })
+        const data = res.ok ? await res.json() : null
+        if (cancelled) return
+        setSupplierSearchResults(
+          Array.isArray(data?.products)
+            ? normalizeSupplierProductsResponse(data.products, supplierAccount, supplierName)
+            : []
+        )
+      } catch {
+        if (!cancelled) setSupplierSearchResults([])
+      } finally {
+        if (!cancelled) setLoadingSupplierSearch(false)
+      }
+    }
+    run()
+    return () => { cancelled = true }
+  }, [debouncedSupplierSearch, selectedShop])
 
-    const searchLower = debouncedSupplierSearch.toLowerCase()
-    return shopProducts.filter(product => {
-      const productText = `${product.item_commercial_name} ${product.item_key_words || ''}`.toLowerCase()
-      return productText.includes(searchLower)
+  // Products to show in "Products from X" panel: backend results when searching, else full catalogue. Exclude 0 price.
+  const displayedSupplierProducts = useMemo(() => {
+    const raw = debouncedSupplierSearch.trim()
+      ? (supplierSearchResults ?? [])
+      : shopProducts
+    return raw.filter(p => {
+      const priceFromEmballage = extractNumericPrice(p.item_emballage)
+      const priceFromSelling = extractNumericPrice(p.selling_price)
+      const price = priceFromEmballage > 0 ? priceFromEmballage : priceFromSelling
+      return price > 0
     })
-  }, [shopProducts, debouncedSupplierSearch])
+  }, [debouncedSupplierSearch, supplierSearchResults, shopProducts])
+
+  // Main search products (global): exclude 0 price for display
+  const searchProductsWithPrice = useMemo(() => {
+    const list = searchResult?.products ?? []
+    return list.filter(p => {
+      const price = extractNumericPrice(p.item_emballage) || extractNumericPrice(p.selling_price)
+      return price > 0
+    })
+  }, [searchResult?.products])
 
   // Merge suppliers from both buckets (no dupes)
   const allSuppliers = useMemo(() => {
@@ -812,9 +894,9 @@ export default function SearchPage() {
                       </div>
                       {Array.isArray(s.products) && s.products.length > 0 && (
                         <div className="mt-3 space-y-2">
-                          {s.products.slice(0, 3).map((p) => (
+                          {s.products.slice(0, 3).map((p, idx) => (
                             <div
-                              key={p.item_code + (p.supplier_account || s.seller_account)}
+                              key={`${p.item_code}-${p.supplier_account || s.seller_account}-${idx}`}
                               className="p-2 rounded border hover:border-blue-300 cursor-pointer"
                               onClick={() =>
                                 addProductToCart({
@@ -860,16 +942,18 @@ export default function SearchPage() {
                 </div>
                 {loadingProducts ? (
                   <div className="py-8 text-center text-gray-500 text-sm">Loading products…</div>
-                ) : filteredShopProducts.length > 0 ? (
+                ) : loadingSupplierSearch && debouncedSupplierSearch.trim() ? (
+                  <div className="py-8 text-center text-gray-500 text-sm">Searching…</div>
+                ) : displayedSupplierProducts.length > 0 ? (
                   <>
                     <p className="text-sm text-gray-500 mb-3">
-                      {filteredShopProducts.length} product{filteredShopProducts.length !== 1 ? "s" : ""}
-                      {debouncedSupplierSearch ? ` matching "${debouncedSupplierSearch}"` : ""}
+                      {displayedSupplierProducts.length} product{displayedSupplierProducts.length !== 1 ? "s" : ""}
+                      {debouncedSupplierSearch.trim() ? ` matching "${debouncedSupplierSearch.trim()}"` : ""}
                     </p>
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-                  {filteredShopProducts.map((p) => (
+                  {displayedSupplierProducts.map((p, index) => (
                     <div
-                      key={p.item_code + (p.supplier_account || "")}
+                      key={`${p.item_code}-${p.supplier_account || ""}-${index}`}
                       role="button"
                       tabIndex={0}
                       onClick={() => addProductToCart(p)}
@@ -883,8 +967,8 @@ export default function SearchPage() {
                   </>
                 ) : (
                   <div className="text-center py-6 text-gray-500">
-                    {debouncedSupplierSearch
-                      ? `No products matching "${debouncedSupplierSearch}"`
+                    {debouncedSupplierSearch.trim()
+                      ? `No products matching "${debouncedSupplierSearch.trim()}"`
                       : "No products available from this supplier"}
                   </div>
                 )}
@@ -892,7 +976,7 @@ export default function SearchPage() {
             )}
 
             {/* Products */}
-            {searchResult && searchResult.products.length > 0 && (
+            {searchResult && searchProductsWithPrice.length > 0 && (
               <section className="bg-white rounded-xl border p-4">
                 <div className="flex items-center justify-between mb-3">
                   <h2 className="font-semibold text-lg">
@@ -902,15 +986,15 @@ export default function SearchPage() {
                     {selectedShop && <Badge variant="outline">🔍 Supplier only</Badge>}
                     {locationParam && <Badge variant="secondary">📍 {locationParam}</Badge>}
                     <span className="text-sm font-normal text-gray-500">
-                      {searchResult.products.length} found
+                      {searchProductsWithPrice.length} found
                     </span>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {searchResult.products.map((product) => (
+                  {searchProductsWithPrice.map((product, index) => (
                     <div
-                      key={product.item_code + (product.supplier_account || "")}
+                      key={`${product.item_code}-${product.supplier_account || ""}-${index}`}
                       className="rounded-lg border p-3 hover:border-blue-300 transition-colors cursor-pointer group"
                       role="button"
                       tabIndex={0}
@@ -994,7 +1078,10 @@ export default function SearchPage() {
 
             {/* No Results */}
             {searchResult && allSuppliers.length === 0 && searchResult.products.length === 0 && (
-              <div className="text-center py-8 text-gray-500">No results found for "{debouncedQ}"</div>
+              <div className="text-center py-8 text-gray-500 space-y-2">
+                <p>No results found for &quot;{debouncedQ}&quot;</p>
+                <p className="text-sm">Try a different search term, or check spelling (e.g. product name in English or Kinyarwanda).</p>
+              </div>
             )}
           </div>
         </div>

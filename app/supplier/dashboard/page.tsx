@@ -174,47 +174,81 @@ function SupplierDashboard() {
         const mappedProducts = products.map((p: any, index: number) => {
           console.log(`Product ${index}:`, p);
 
-          // Parse price from various sources
-          const price = parsePrice(
-            p.selling_price ??
-            p.price ??
-            p.UNITY_PRICE ??
-            p.SALE_PRICE_INCLUSIVE ??
-            0
-          );
+          // Check if this is Redis format (your format)
+          const isRedisFormat = p.item_commercial_name && p.item_key_words && p.item_packet && p.item_emballage;
 
-          const mapped = {
-            ...p, // Keep all original fields
-            // Normalize field names - handle database, Redis, and API variations
-            stock: Number(
-              p.stock ||
-              p.STOCK ||
-              p.item_packet ||  // Redis stock field
-              p.QUANTITY ||
+          let mapped;
+
+          if (isRedisFormat) {
+            // Handle Redis format (your format)
+            const stock = parseIntSafe(p.item_packet);
+            const price = parsePriceFromRedis(p.item_emballage);
+
+            mapped = {
+              ...p, // Keep all original Redis fields
+              // Normalize for dashboard display
+              itemName: p.item_commercial_name,
+              ITEM_NAME: p.item_commercial_name,
+              itemCode: p.item_key_words,
+              ITEM_CODE: p.item_key_words,
+              stock: stock,
+              STOCK: stock,
+              price: price,
+              UNITY_PRICE: price,
+              costPrice: Number(p.cost_price ?? p.cost ?? p.COST_PRICE_INCLUSIVE ?? 0),
+              COST_PRICE_INCLUSIVE: Number(p.cost_price ?? p.cost ?? 0),
+              category: p.item_category || p.category || "uncategorized",
+              sales: 0,
+              batchInfo: p.item_state || "",
+              DESCRIPTION: p.item_description || p.item_state || "",
+              UNIT: p.item_unit || "PCS",
+              currency: p.currency ?? "RWF",
+              imageUrl: p.item_image_url || p.IMAGE_URL || p.image_url || ""
+            };
+          } else {
+            // Handle database format (fallback)
+            const price = parsePrice(
+              p.selling_price ??
+              p.price ||
+              p.UNITY_PRICE ||
+              p.SALE_PRICE_INCLUSIVE ||
               0
-            ),
-            price: price,
-            costPrice: Number(
-              p.cost_price ??
-              p.cost ??
-              p.COST_PRICE_INCLUSIVE ??
-              0
-            ),
-            itemName:
-              p.ITEM_NAME ||
-              p.itemName ||
-              p.item_commercial_name ||  // Redis name field
-              "Unknown",
-            itemCode:
-              p.ITEM_CODE ||
-              p.itemCode ||
-              p.item_key_words ||  // Redis code field
-              "",
-            batchInfo: p.item_state || "",  // Redis batch/expiry info
-            category: p.category || "uncategorized",
-            sales: 0,
-            currency: p.currency ?? "RWF",
-          };
+            );
+
+            mapped = {
+              ...p, // Keep all original fields
+              // Normalize field names - handle database, Redis, and API variations
+              stock: Number(
+                p.stock ||
+                p.STOCK ||
+                p.item_packet ||
+                p.QUANTITY ||
+                0
+              ),
+              price: price,
+              costPrice: Number(
+                p.cost_price ??
+                p.cost ??
+                p.COST_PRICE_INCLUSIVE ??
+                0
+              ),
+              itemName:
+                p.ITEM_NAME ||
+                p.itemName ||
+                p.item_commercial_name ||
+                "Unknown",
+              itemCode:
+                p.ITEM_CODE ||
+                p.itemCode ||
+                p.item_key_words ||
+                "",
+              batchInfo: p.item_state || p.DESCRIPTION || "",
+              category: p.category || "uncategorized",
+              sales: 0,
+              currency: p.currency ?? "RWF",
+              imageUrl: p.IMAGE_URL || p.image_url || p.item_image_url || "",
+            };
+          }
 
           console.log(`Mapped product ${index}:`, mapped);
           return mapped;
@@ -692,6 +726,9 @@ function SupplierDashboard() {
                         <th className="text-left px-4 py-3 text-sm font-semibold text-slate-700">
                           Value
                         </th>
+                        <th className="text-left px-4 py-3 text-sm font-semibold text-slate-700">
+                          Image
+                        </th>
                         <th className="text-center px-4 py-3 text-sm font-semibold text-slate-700">
                           Actions
                         </th>
@@ -699,14 +736,15 @@ function SupplierDashboard() {
                     </thead>
 
                     <tbody className="divide-y divide-slate-200">
-                      {paginatedProducts.map((p) => {
+                      {paginatedProducts.map((p, rowIndex) => {
                         const revenue = p.price * p.stock;
                         const displayName = p.ITEM_NAME || p.itemName || "Unknown";
                         const displayCode = p.ITEM_CODE || p.itemCode || "";
+                        const uniqueKey = `${displayCode}-${startIndex + rowIndex}`;
 
                         return (
                           <tr
-                            key={displayCode}
+                            key={uniqueKey}
                             className="hover:bg-slate-50 transition-colors"
                           >
                             <td className="px-4 py-4">
@@ -768,6 +806,20 @@ function SupplierDashboard() {
                                 <span className="text-slate-400 text-sm italic">
                                   -
                                 </span>
+                              )}
+                            </td>
+                            <td className="px-4 py-4">
+                              {p.imageUrl ? (
+                                <a
+                                  href={p.imageUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-blue-600 hover:text-blue-800 underline text-sm"
+                                >
+                                  View Image
+                                </a>
+                              ) : (
+                                <span className="text-slate-400 text-sm">—</span>
                               )}
                             </td>
                             <td className="px-4 py-4">

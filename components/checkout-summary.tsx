@@ -1,11 +1,65 @@
 "use client"
 
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
-import { useCartStore } from "@/lib/cart-store"
+import { useCartStore, type CartItem } from "@/lib/cart-store"
 import { Lock } from "lucide-react"
 import Image from "next/image"
+
+const PLACEHOLDER = "/placeholder.svg?height=64&width=64"
+
+function CheckoutSummaryItemRow({ item, lineTotal }: { item: CartItem; lineTotal: number }) {
+  const [imgError, setImgError] = useState(false)
+  const rawImage = item.image ?? (item as Record<string, unknown>).image_url ?? (item as Record<string, unknown>).item_image_url
+  const validImage =
+    rawImage &&
+    typeof rawImage === "string" &&
+    rawImage.trim() !== "" &&
+    (rawImage.startsWith("http://") || rawImage.startsWith("https://") || rawImage.startsWith("/"))
+  const src = !imgError && validImage ? (validImage as string).trim() : PLACEHOLDER
+  const isRemote = /^https?:\/\//i.test(src)
+
+  useEffect(() => {
+    setImgError(false)
+  }, [item.image])
+
+  return (
+    <div className="flex gap-3">
+      <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-muted">
+        {isRemote ? (
+          <img
+            src={src}
+            alt={item.name}
+            className="absolute inset-0 h-full w-full object-cover"
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            onError={() => setImgError(true)}
+          />
+        ) : (
+          <Image
+            src={src}
+            alt={item.name}
+            fill
+            className="object-cover"
+            onError={() => setImgError(true)}
+            unoptimized={src === PLACEHOLDER}
+          />
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium truncate">{item.name}</p>
+        <p className="text-xs text-muted-foreground">
+          {item.qty ?? 0} × {item.selectedUnit || item.unit || "pcs"}
+        </p>
+        <p className="text-sm font-semibold text-primary">
+          {lineTotal.toLocaleString()} RWF
+        </p>
+      </div>
+    </div>
+  )
+}
 
 interface CheckoutSummaryProps {
   isProcessing: boolean
@@ -25,34 +79,11 @@ export function CheckoutSummary({ isProcessing, showReview }: CheckoutSummaryPro
         <CardTitle>Order Summary</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Items List */}
         <div className="space-y-3 max-h-64 overflow-y-auto">
           {items.map((item) => {
-            // ✅ Calculate line total: price × quantity
             const lineTotal = item.price * (item.qty ?? 0)
-
             return (
-              <div key={`${item.id}-${item.selectedUnit}`} className="flex gap-3">
-                <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-muted">
-                  <Image
-                    src={item.image || "/placeholder.svg"}
-                    alt={item.name}
-                    fill
-                    className="object-cover"
-                  />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{item.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {/* ✅ Use quantity property */}
-                    {item.qty ?? 0} × {item.selectedUnit || item.unit || "pcs"}
-                  </p>
-                  <p className="text-sm font-semibold text-primary">
-                    {/* ✅ Use calculated lineTotal */}
-                    {lineTotal.toLocaleString()} RWF
-                  </p>
-                </div>
-              </div>
+              <CheckoutSummaryItemRow key={`${item.id}-${item.selectedUnit}`} item={item} lineTotal={lineTotal} />
             )
           })}
         </div>

@@ -42,6 +42,10 @@ export interface Transaction {
   slip_number: string;
   created_at: string;
   updated_at?: string;
+  /** Subscription months paid (1,3,6,12). Set at initiation; used when activating. */
+  subscription_period_months?: number | null;
+  /** When this transaction was activated (Activate button); null if not yet activated. */
+  activated_at?: string | null;
 }
 
 export interface SummaryStats {
@@ -176,6 +180,8 @@ class PaymentDashboardApi {
     limit?: number;
     offset?: number;
     export?: 'csv' | 'json';
+    /** Filter by activation: 'true' = activated only, 'false' = not activated only */
+    activated?: string;
   }): Promise<{ data: { transactions: Transaction[]; total: number; limit: number; offset: number; has_more: boolean }; status: number }> {
     const queryParams = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => {
@@ -408,6 +414,25 @@ class PaymentDashboardApi {
     }
 
     return this.fetch(`/api/analytics/charts?${queryParams}`);
+  }
+
+  /**
+   * Activate user access for a VALID payment (grant system permission to payer).
+   * Optional valid_payment_time (YYYY-MM-DD) sets the next payment date; otherwise backend computes it.
+   */
+  async activateTransaction(
+    transactionId: string,
+    options?: { valid_payment_time?: string; grace_period_days?: number }
+  ): Promise<{ data?: any; message?: string; status: number; activated_until?: string; valid_payment_time?: string }> {
+    const body: { transaction_id: string; valid_payment_time?: string; grace_period_days?: number } = {
+      transaction_id: transactionId,
+    };
+    if (options?.valid_payment_time) body.valid_payment_time = options.valid_payment_time;
+    if (options?.grace_period_days != null) body.grace_period_days = options.grace_period_days;
+    return this.fetch('/api/payment/activate', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
   }
 }
 

@@ -2,13 +2,16 @@
 
 import { useEffect, useState } from "react"
 import { ProductCard } from "@/components/product-card"
-import { TrendingUp, Sparkles, Clock, Heart, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react"
+import { TrendingUp, Sparkles, Clock, Store, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react"
 import { useAuthStore } from "@/lib/auth-store"
 import { getSessionId, getRecentProductIds } from "@/lib/interaction-tracker"
 import { getSmartRecommendations } from "@/lib/recommendation-service"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { ArrowLeft } from "lucide-react"
+
+const BURROWS_NICKNAME = "burrows"
+const BURROWS_DISPLAY_NAME = "PANGOLIN'S BURROWS"
 
 interface Product {
   id: string
@@ -89,18 +92,88 @@ export default function DiscoverPage() {
     }
   }
 
+  /** Single fast request: load Burrows products with images. */
+  async function fetchBurrowsProducts(limit = 20): Promise<Product[]> {
+    try {
+      const res = await fetch(
+        `/api/shop-with-me?nickname=${encodeURIComponent(BURROWS_NICKNAME)}`,
+        { cache: "no-store", headers: { "Cache-Control": "no-cache" } }
+      )
+      if (!res.ok) return []
+      const data = await res.json()
+      const sellers = data.sellers || []
+      const products: Product[] = []
+      const seen = new Set<string>()
+      for (const seller of sellers) {
+        const list = seller.products || []
+        const supplierName = seller.OWNER || seller.supplier_name || BURROWS_DISPLAY_NAME
+        const supplierId = seller.ISHYIGA_ACCOUNT || seller.supplier_account || ""
+        for (const p of list) {
+          if (products.length >= limit) break
+          const code = p.item_code || p.ITEM_CODE || p.item_commercial_name || ""
+          if (seen.has(code)) continue
+          seen.add(code)
+          const price = parsePrice(p.item_emballage ?? p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? "0")
+          if (price <= 0) continue
+          const img = p.image_url ?? p.item_image_url ?? p.image ?? p.IMAGE_URL
+          products.push({
+            id: code || `burrows-${products.length}`,
+            name: p.item_commercial_name ?? p.ITEM_NAME ?? p.item_name ?? "Product",
+            description: undefined,
+            price,
+            unit: p.item_packet ?? p.UNIT ?? "",
+            image: typeof img === "string" ? img : undefined,
+            supplierId,
+            supplierName,
+            supplierLocation: seller.loc_cell ?? seller.supplier_location ?? "",
+            momo: seller.momo ?? p.momo,
+            category: p.famille ?? p.FAMILLE ?? p.item_department,
+            inStock: true,
+          })
+        }
+      }
+      return products.slice(0, limit)
+    } catch (e) {
+      console.warn("[Discover] Burrows fetch failed:", e)
+      return []
+    }
+  }
+
+  function parsePrice(val: string | number): number {
+    if (typeof val === "number") return isNaN(val) ? 0 : val
+    const s = String(val).replace(/[^\d.,-]/g, "").replace(",", ".")
+    const n = parseFloat(s)
+    return isNaN(n) ? 0 : n
+  }
+
   async function loadAllRecommendations() {
     setLoading(true)
 
     try {
       const newSections: RecommendationSection[] = []
 
-      // Recently viewed
+      // 1) Load Burrows first (one fast request with images) so the page shows content immediately
+      const burrowsProducts = await fetchBurrowsProducts(20)
+      if (burrowsProducts.length > 0) {
+        newSections.push({
+          title: `From ${BURROWS_DISPLAY_NAME}`,
+          subtitle: "Menu favorites with images",
+          icon: <Store className="h-5 w-5" />,
+          products: burrowsProducts,
+          loading: false,
+        })
+      }
+      setSections(newSections)
+      setLoading(false)
+
+      // 2) In background: load recently viewed, recommended, and trending
+      const moreSections: RecommendationSection[] = []
+
       const recentIds = getRecentProductIds(12)
       if (recentIds.length > 0) {
         const recentProducts = await fetchProductDetails(recentIds)
         if (recentProducts.length > 0) {
-          newSections.push({
+          moreSections.push({
             title: "Recently Viewed",
             subtitle: "Continue browsing where you left off",
             icon: <Clock className="h-5 w-5" />,
@@ -110,16 +183,12 @@ export default function DiscoverPage() {
         }
       }
 
-      // Use smart caching service instead of direct API calls
       const { products: recommendationNames, source } = await getSmartRecommendations(20)
-
       console.log(`[Discover] Recommendations from ${source}`)
-
-      // Recommended products
-      if (recommendationNames && recommendationNames.length > 0) {
+      if (recommendationNames?.length > 0) {
         const recommendedProducts = await fetchProductDetails(recommendationNames)
         if (recommendedProducts.length > 0) {
-          newSections.push({
+          moreSections.push({
             title: "Recommended for You",
             subtitle: "Based on your browsing history",
             icon: <Sparkles className="h-5 w-5" />,
@@ -129,42 +198,15 @@ export default function DiscoverPage() {
         }
       }
 
-      // Fallback to trending/popular items if no personalized recommendations
-      if (newSections.length === 0) {
-        // Try to get trending items as fallback
-        const trendingParams = new URLSearchParams()
-        trendingParams.set("action", "getRecommendations")
-        trendingParams.set("limit", "20")
-        trendingParams.set("_t", Date.now().toString())
-
-        const trendingRes = await fetch(`/api/personalization/recommendations?${trendingParams.toString()}`, {
-          cache: "no-store",
-          headers: {
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Pragma": "no-cache",
-          },
+      if (moreSections.length > 0) {
+        setSections((prev) => {
+          const burrows = prev.find((s) => s.title.includes(BURROWS_DISPLAY_NAME))
+          return burrows ? [burrows, ...moreSections] : [...prev, ...moreSections]
         })
-        const trendingData = await trendingRes.json()
-
-        if (trendingData.ok && trendingData.products && trendingData.products.length > 0) {
-          const trendingProducts = await fetchProductDetails(trendingData.products)
-          if (trendingProducts.length > 0) {
-            newSections.push({
-              title: "Trending Now",
-              subtitle: "Popular products this week",
-              icon: <TrendingUp className="h-5 w-5" />,
-              products: trendingProducts,
-              loading: false,
-            })
-          }
-        }
       }
-
-      setSections(newSections)
     } catch (error) {
       console.error("Error loading recommendations:", error)
       setSections([])
-    } finally {
       setLoading(false)
     }
   }
@@ -213,7 +255,7 @@ export default function DiscoverPage() {
               description: p.DESCRIPTION_KEYWORD || p.item_key_words || "",
               price: isNaN(price) ? 0 : price,
               unit: p.UNIT || p.item_packet || "",
-              image: p.IMAGE_URL || p.image || undefined,
+              image: p.image_url ?? p.item_image_url ?? p.IMAGE_URL ?? p.image ?? undefined,
               supplierId: p.SELLER_ISHYIGA_ACCOUNT || p.item_seller_account || "",
               supplierName: p.SELLER_NAMES || p.supplier_name || "",
               supplierLocation: p.LOCATION || p.supplier_location || "",

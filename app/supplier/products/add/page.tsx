@@ -136,8 +136,10 @@ export default function SupplierStockUploadPage() {
                 <li>• <strong>NAME</strong>: Product name (required)</li>
                 <li>• <strong>QTE</strong>: Quantity/stock level (required)</li>
                 <li>• <strong>SALES</strong>: Price (required)</li>
-                <li>• <strong>CODE</strong>: Product code/SKU (required)</li>
+                <li>• <strong>CODE</strong>: Product code/SKU — <span className="text-blue-600 font-semibold">optional</span>, auto-generated from name if blank</li>
                 <li>• <strong>DESCRIPTION</strong>: Product description (optional)</li>
+                <li className="pt-2 border-t border-blue-200 mt-2">Compatible with Scan Menu export:</li>
+                <li>• <strong>Category</strong>, <strong>Subcategory</strong>, <strong>Item</strong>, <strong>Price</strong>, <strong>Currency</strong>, <strong>Dietary</strong>, <strong>Image</strong> (optional)</li>
               </ul>
               <div className="mt-4 text-sm text-blue-700">
                 <strong>Limits:</strong> Max 5MB file size, 10,000 rows
@@ -222,10 +224,20 @@ export default function SupplierStockUploadPage() {
 
                     {result.ok && (
                       <div className="mt-3 space-y-1 text-sm text-green-800">
-                        <p>✓ Items imported: {result.itemsImported}</p>
+                        {(result.itemsImported ?? 0) > 0 && (
+                          <p>✓ Items added: {result.itemsImported}</p>
+                        )}
+                        {(result.itemsUpdated ?? 0) > 0 && (
+                          <p>✓ Items updated: {result.itemsUpdated}</p>
+                        )}
                         <p>✓ Rows parsed: {result.rowsParsed}</p>
-                        {result.rowsSkipped! > 0 && (
-                          <p>⚠ Rows skipped: {result.rowsSkipped}</p>
+                        {(result.rowsSkipped ?? 0) > 0 && (
+                          <>
+                            <p className="text-amber-700">⚠ Rows skipped (invalid): {result.rowsSkipped}</p>
+                            {result.rowsSkippedNote && (
+                              <p className="text-xs text-amber-600 mt-0.5">{result.rowsSkippedNote}</p>
+                            )}
+                          </>
                         )}
                         {result.backupKey && result.backupKey !== 'none' && (
                           <p className="text-xs text-green-700 mt-2">

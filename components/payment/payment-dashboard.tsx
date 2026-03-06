@@ -33,7 +33,8 @@ import {
   Trash2,
   Eye,
   Search,
-  X
+  X,
+  UserCheck
 } from 'lucide-react';
 // import { PaymentDashboardDebug } from './payment-dashboard-debug';
 import { WebhookMonitor } from './webhook-monitor';
@@ -55,23 +56,43 @@ interface PaymentDashboardProps {
 }
 
 /**
- * Convert UTC timestamp to local time for display
- * UrubutoPay sends timestamps in UTC (e.g., "2026-01-10 08:29:33" or "2026-01-10T08:29:33.609Z")
- * but we need to display them in local timezone (CAT/UTC+2)
+ * Convert payment timestamp to local time for display.
+ * UrubutoPay sends: "26/02/2026 14:33:24" (DD/MM/YYYY HH:MM:SS) or ISO "2026-01-10T08:29:33.609Z"
  */
 const formatUTCTimestamp = (timestamp: string | null | undefined): string => {
   if (!timestamp) return 'N/A';
 
   try {
-    // Handle ISO format with Z (UTC indicator)
+    // Handle ISO format with Z or T
     if (timestamp.includes('Z') || timestamp.includes('T')) {
       return new Date(timestamp).toLocaleString();
     }
 
-    // Handle format "YYYY-MM-DD HH:MM:SS" (assume UTC from UrubutoPay)
-    // Append 'Z' to explicitly mark as UTC
+    // UrubutoPay format: "DD/MM/YYYY HH:MM:SS" (e.g. "26/02/2026 14:33:24")
+    const ddmmyyyy = timestamp.trim().split(/\s+/);
+    if (ddmmyyyy.length >= 2) {
+      const [datePart, timePart] = ddmmyyyy;
+      const parts = datePart.split('/');
+      if (parts.length === 3) {
+        const [dd, mm, yyyy] = parts;
+        // new Date(year, monthIndex, day, hour, minute, second) - monthIndex 0-based
+        const year = parseInt(yyyy, 10);
+        const month = parseInt(mm, 10) - 1;
+        const day = parseInt(dd, 10);
+        const time = timePart.split(':').map((n) => parseInt(n, 10));
+        const hour = time[0] ?? 0;
+        const minute = time[1] ?? 0;
+        const second = time[2] ?? 0;
+        const dateObj = new Date(year, month, day, hour, minute, second);
+        if (!isNaN(dateObj.getTime())) {
+          return dateObj.toLocaleString();
+        }
+      }
+    }
+
+    // Fallback: "YYYY-MM-DD HH:MM:SS" with Z
     const dateObj = new Date(timestamp + 'Z');
-    return dateObj.toLocaleString();
+    return isNaN(dateObj.getTime()) ? timestamp : dateObj.toLocaleString();
   } catch (error) {
     console.error('Error parsing timestamp:', timestamp, error);
     return timestamp;
@@ -89,6 +110,7 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
   // Filters - no date filter by default to show ALL transactions
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [channelFilter, setChannelFilter] = useState<string>('all');
+  const [activationFilter, setActivationFilter] = useState<string>('all');
   const [fromDate, setFromDate] = useState<string>('');
   const [toDate, setToDate] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -115,6 +137,11 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
   // Transaction details modal
   const [selectedTransactionDetails, setSelectedTransactionDetails] = useState<any>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
+
+  // Activate (grant user access) for VALID payments
+  const [activatingTransactionId, setActivatingTransactionId] = useState<string | null>(null);
+  const [activateDialogTx, setActivateDialogTx] = useState<Transaction | null>(null);
+  const [activateValidUntil, setActivateValidUntil] = useState<string>('');
 
   // Alert details modal
   const [showAlertModal, setShowAlertModal] = useState(false);
@@ -170,6 +197,7 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
         from_date: fromDate || undefined,
         to_date: toDate || undefined,
         search: searchQuery || undefined,
+        activated: activationFilter === 'all' ? undefined : activationFilter === 'activated' ? 'true' : 'false',
         limit: pageSize,
         offset: offset,
       });
@@ -205,7 +233,7 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [statusFilter, channelFilter, fromDate, toDate, debouncedSearchQuery]);
+  }, [statusFilter, channelFilter, activationFilter, fromDate, toDate, debouncedSearchQuery]);
 
   // Reload transactions when page changes or filters change
   useEffect(() => {
@@ -218,6 +246,7 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
           from_date: fromDate || undefined,
           to_date: toDate || undefined,
           search: debouncedSearchQuery || undefined,
+          activated: activationFilter === 'all' ? undefined : activationFilter === 'activated' ? 'true' : 'false',
           limit: pageSize,
           offset: offset,
         });
@@ -238,7 +267,7 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
       }
     };
     load();
-  }, [currentPage, statusFilter, channelFilter, fromDate, toDate, debouncedSearchQuery, pageSize]);
+  }, [currentPage, statusFilter, channelFilter, activationFilter, fromDate, toDate, debouncedSearchQuery, pageSize]);
 
   const loadSummary = async () => {
     try {
@@ -448,6 +477,70 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
     } finally {
       setLoadingDetails(false);
     }
+  };
+
+  function defaultValidUntilDate(paymentDateTime?: string | null): string {
+    let base = new Date();
+    if (paymentDateTime && paymentDateTime.trim()) {
+      const s = paymentDateTime.trim();
+      if (s.length >= 10) {
+        if (s[2] === '/' && s[5] === '/') {
+          const [d, m, y] = s.split(/[/\s]/);
+          if (d && m && y) base = new Date(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(d, 10));
+        } else if (s[4] === '-' && s[7] === '-') {
+          base = new Date(s.substring(0, 10));
+        }
+      }
+    }
+    base.setMonth(base.getMonth() + 1);
+    return base.toISOString().slice(0, 10);
+  }
+
+  const openActivateDialog = (tx: Transaction) => {
+    setActivateDialogTx(tx);
+    setActivateValidUntil(defaultValidUntilDate(tx.payment_date_time));
+  };
+
+  const handleActivateConfirm = async () => {
+    if (!activateDialogTx) return;
+    const transactionId = activateDialogTx.transaction_id;
+    setActivatingTransactionId(transactionId);
+    try {
+      const result = await paymentDashboardApi.activateTransaction(transactionId, {
+        valid_payment_time: activateValidUntil || undefined,
+      }) as {
+        status: number;
+        message?: string;
+        activated_until?: string;
+        valid_payment_time?: string;
+        ishyiga_updated?: boolean;
+        ishyiga_message?: string;
+      };
+      if (result.status === 200) {
+        setActivateDialogTx(null);
+        const until = result.activated_until || result.valid_payment_time;
+        let message = until
+          ? `User access activated successfully. Active until ${until}.`
+          : 'User access activated successfully.';
+        if (result.ishyiga_updated === false && result.ishyiga_message) {
+          message += '\n\n' + result.ishyiga_message;
+        }
+        alert(message);
+        loadTransactions();
+      } else {
+        const msg = result.message || 'Failed to activate';
+        alert(msg);
+      }
+    } catch (error) {
+      console.error('Error activating transaction:', error);
+      alert(error instanceof Error ? error.message : 'Failed to activate');
+    } finally {
+      setActivatingTransactionId(null);
+    }
+  };
+
+  const handleActivate = (tx: Transaction) => {
+    openActivateDialog(tx);
   };
 
   const getStatusBadge = (status: string) => {
@@ -854,7 +947,10 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle>Transactions</CardTitle>
-                  <CardDescription>View and manage payment transactions</CardDescription>
+                  <CardDescription>
+                  {/* View and manage payment transactions. Payer code must start with ALG (e.g. ALG01000000767) and match the Ishyiga client identifier. Each payment is a new transaction—when a client pays again for the next period, activate that new transaction to extend their access. */}
+                  View and manage payment transactions.
+                </CardDescription>
                 </div>
                 <div className="flex gap-2">
                   <Button
@@ -953,6 +1049,23 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
                       <SelectItem value="MOMO">📱 MOMO</SelectItem>
                       <SelectItem value="AIRTEL">📱 Airtel</SelectItem>
                       <SelectItem value="CARD">💳 Card</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Activation Filter */}
+                <div>
+                  <label className="text-xs font-medium text-gray-700 mb-1.5 block">
+                    Activation
+                  </label>
+                  <Select value={activationFilter} onValueChange={setActivationFilter}>
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="All" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All</SelectItem>
+                      <SelectItem value="not_activated">Not activated</SelectItem>
+                      <SelectItem value="activated">Activated</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -1073,7 +1186,7 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
               </div>
 
               {/* Clear Filters Button */}
-              {(statusFilter !== 'all' || channelFilter !== 'all' || fromDate || toDate || searchQuery) && (
+              {(statusFilter !== 'all' || channelFilter !== 'all' || activationFilter !== 'all' || fromDate || toDate || searchQuery) && (
                 <div className="mb-4">
                   <Button
                     variant="ghost"
@@ -1081,6 +1194,7 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
                     onClick={() => {
                       setStatusFilter('all');
                       setChannelFilter('all');
+                      setActivationFilter('all');
                       setFromDate('');
                       setToDate('');
                       setSearchQuery('');
@@ -1192,7 +1306,7 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
                               : tx.created_at ? new Date(tx.created_at).toLocaleString() : 'N/A'}
                           </TableCell>
                           <TableCell>
-                            <div className="flex gap-1">
+                            <div className="flex gap-1 flex-wrap">
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -1203,6 +1317,24 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
                               >
                                 <Eye className="h-4 w-4" />
                               </Button>
+                              {tx.status === 'VALID' && !tx.activated_at && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleActivate(tx)}
+                                  disabled={activatingTransactionId === tx.transaction_id}
+                                  className="text-green-600 hover:text-green-700 hover:bg-green-50"
+                                  title="Activate – set next payment date and grant access"
+                                >
+                                  <UserCheck className={`h-4 w-4 mr-1 ${activatingTransactionId === tx.transaction_id ? 'animate-pulse' : ''}`} />
+                                  Activate
+                                </Button>
+                              )}
+                              {tx.status === 'VALID' && tx.activated_at && (
+                                <span className="text-xs text-gray-500" title={`Activated at ${tx.activated_at}`}>
+                                  Activated
+                                </span>
+                              )}
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -1426,6 +1558,45 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
               </Accordion>
             </div>
           ) : null}
+        </DialogContent>
+      </Dialog>
+
+      {/* Activate – set next payment date */}
+      <Dialog open={activateDialogTx !== null} onOpenChange={(open) => !open && setActivateDialogTx(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Activate subscription</DialogTitle>
+            <DialogDescription>
+              Set the next payment date (valid until). The payer will have access until this date. You can change the suggested date.
+            </DialogDescription>
+          </DialogHeader>
+          {activateDialogTx && (
+            <div className="space-y-4 py-2">
+              <div className="grid gap-2">
+                <Label htmlFor="activate-valid-until">Valid until (next payment date)</Label>
+                <Input
+                  id="activate-valid-until"
+                  type="date"
+                  value={activateValidUntil}
+                  onChange={(e) => setActivateValidUntil(e.target.value)}
+                  min={new Date().toISOString().slice(0, 10)}
+                  className="w-full"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="outline" onClick={() => setActivateDialogTx(null)}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleActivateConfirm}
+                  disabled={activatingTransactionId === activateDialogTx.transaction_id}
+                  className="bg-green-600 hover:bg-green-700"
+                >
+                  {activatingTransactionId === activateDialogTx.transaction_id ? 'Activating…' : 'Activate'}
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

@@ -11,8 +11,9 @@ import { getShopWithMeUrl } from '@/lib/backend-config';
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const nickname = searchParams.get('nickname');
+  const productSearch = searchParams.get('productSearch') ?? searchParams.get('q') ?? '';
 
-  console.log('[API shop-with-me] Received request for nickname:', nickname);
+  console.log('[API shop-with-me] Received request for nickname:', nickname, 'productSearch:', productSearch || '(none)');
 
   if (!nickname || !nickname.trim()) {
     return NextResponse.json(
@@ -24,7 +25,10 @@ export async function GET(request: NextRequest) {
   try {
     const base = getShopWithMeUrl().replace(/\?.*$/, '').replace(/\/+$/, '');
     const normalizedNickname = nickname.trim();
-    const backendUrl = `${base}?nickname=${encodeURIComponent(normalizedNickname)}`;
+    let backendUrl = `${base}?nickname=${encodeURIComponent(normalizedNickname)}`;
+    if (productSearch.trim()) {
+      backendUrl += `&productSearch=${encodeURIComponent(productSearch.trim())}`;
+    }
     console.log('[API shop-with-me] Fetching from backend:', backendUrl);
 
     const response = await fetch(backendUrl, {

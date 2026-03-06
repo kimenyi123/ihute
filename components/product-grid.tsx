@@ -78,7 +78,7 @@ function normalizeProduct(
       "",
     supplier_name: p.supplier_name ?? p.SELLER_NAMES ?? fallbacks?.sellerName ?? "",
     supplier_location: p.supplier_location ?? p.LOCATION ?? fallbacks?.sellerLoc ?? "",
-    image: p.image ?? p.IMAGE_URL ?? undefined,
+    image: p.image ?? p.image_url ?? p.item_image_url ?? p.IMAGE_URL ?? undefined,
     momo: p.momo,
     // keep any server-provided category hint
     type: p.type ?? p.TYPE ?? undefined,

@@ -269,7 +269,13 @@ export default function TrackOrderPage() {
     fetchOrder()
   }, [orderId])
 
-
+  // Sync currentStatus from useOrderTracking to order state
+  useEffect(() => {
+    if (currentStatus && order && currentStatus !== order.status) {
+      console.log(`[TrackOrder] Status changed from ${order.status} to ${currentStatus}, updating UI`)
+      setOrder(prev => prev ? { ...prev, status: currentStatus as OrderStatus } : null)
+    }
+  }, [currentStatus, order?.status])
 
   // Handle rating modal dismiss
   async function handleRatingDismiss() {

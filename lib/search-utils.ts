@@ -100,7 +100,6 @@ export function filterSuppliersByRelevance<T extends { supplier_name: string }>(
   minScore: number = 5 // Lower default to show more suppliers (can be overridden per call)
 ): (T & { finalScore: number })[] {
   if (!suppliers || suppliers.length === 0) {
-    console.log("[SupplierFilter] No suppliers to filter")
     return []
   }
 

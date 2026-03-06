@@ -90,7 +90,7 @@ export function RecommendedForYou({ className, limit = 12 }: RecommendedForYouPr
                         id: productId,
                         name: item.ITEM_NAME || id,
                         price: parseFloat(item.SALE_PRICE_INCLUSIVE || "0") || undefined,
-                        image: item.IMAGE_URL,
+                        image: item.image_url ?? item.item_image_url ?? item.image ?? item.IMAGE_URL,
                         supplierName: item.SELLER_NAMES,
                         category: item.FAMILLE || item.CATEGORY,
                     })
