@@ -445,7 +445,8 @@ export default function ShopWithMePage() {
     return products.filter((product) => {
       const name = (product.item_commercial_name || product.item_name || "").toLowerCase();
       const keywords = (product.item_key_words || "").toLowerCase();
-      return name.includes(query) || keywords.includes(query);
+      const famille = String((product as Record<string, unknown>).famille ?? (product as Record<string, unknown>).FAMILLE ?? "").toLowerCase();
+      return name.includes(query) || keywords.includes(query) || famille.includes(query);
     });
   };
 

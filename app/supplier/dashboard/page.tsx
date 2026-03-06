@@ -90,6 +90,12 @@ function SupplierDashboard() {
     ? `${baseUrl}/shop-with-me?nickname=${encodeURIComponent(shopNickname.trim().toLowerCase())}${isBarOrRestaurant && tableNameOrNumber.trim() ? `&table=${encodeURIComponent(tableNameOrNumber.trim())}` : ""}`
     : "";
 
+  // Link for this seller only (like shop-with-me: URL identifies the seller)
+  const supplierOrdersLink =
+    baseUrl && user?.ishyigaAccount
+      ? `${baseUrl}/supplier/orders?account=${encodeURIComponent(user.ishyigaAccount)}`
+      : "";
+
   const copyShopWithMeLink = () => {
     if (!shopWithMeLink) return;
     navigator.clipboard.writeText(shopWithMeLink).then(() => alert("Link copied to clipboard"));
@@ -462,11 +468,11 @@ function SupplierDashboard() {
               <div className="flex items-center gap-2">
                 <Share2 className="h-6 w-6 text-blue-600 shrink-0" />
                 <div>
-                  <CardTitle className="text-xl">QR Code</CardTitle>
+                  <CardTitle className="text-xl">QR Codes</CardTitle>
                   <CardDescription className="mt-1">
                     {shopWithMeQROpen
-                      ? "Customers scan this to browse your products. Collapse when not needed."
-                      : "Generate a link and QR so customers can browse your shop. Click to expand."}
+                      ? "Customer shop link + scan to open your orders. Click to collapse."
+                      : "Shop link for customers and scan-to-open-orders for you. Click to expand."}
                   </CardDescription>
                 </div>
               </div>
@@ -530,9 +536,36 @@ function SupplierDashboard() {
                     <QRCode value={shopWithMeLink} size={180} />
                   </div>
                   <div className="flex-1 min-w-0 space-y-2">
-                    <Label className="text-slate-600">Link</Label>
+                    <Label className="text-slate-600">Link (for customers)</Label>
                     <p className="text-sm text-slate-700 break-all font-mono">{shopWithMeLink}</p>
                     <Button variant="outline" size="sm" onClick={copyShopWithMeLink} className="gap-2">
+                      <Copy className="h-4 w-4" />
+                      Copy link
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Supplier: scan to open my orders (e.g. on phone) */}
+              {supplierOrdersLink && (
+                <div className="flex flex-col sm:flex-row gap-4 items-start pt-6 mt-6 border-t">
+                  <div className="bg-slate-50 p-4 rounded-lg">
+                    <QRCode value={supplierOrdersLink} size={180} />
+                  </div>
+                  <div className="flex-1 min-w-0 space-y-2">
+                    <Label className="text-slate-600">Scan to open your orders</Label>
+                    <p className="text-sm text-slate-700">
+                      Scan with your phone to open this link. Log in with your supplier account — you’ll be returned here to view only your orders.
+                    </p>
+                    <p className="text-sm text-slate-500 break-all font-mono">{supplierOrdersLink}</p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        navigator.clipboard.writeText(supplierOrdersLink).then(() => alert("Link copied"));
+                      }}
+                      className="gap-2"
+                    >
                       <Copy className="h-4 w-4" />
                       Copy link
                     </Button>

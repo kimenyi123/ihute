@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Menu, X, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { UnifiedNotification } from "@/components/unified-notification";
@@ -12,8 +12,11 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const accountFromUrl = searchParams?.get("account")?.trim() ?? "";
   const { user, isAuthenticated, hasHydrated } = useAuthStore();
   const logout = useAuthStore((state) => state.logout);
+  const login = useAuthStore((state) => state.login);
 
   const menu = [
     { name: "Dashboard", href: "/supplier/dashboard" },
@@ -44,16 +47,31 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [sidebarOpen, closeSidebar]);
 
-  // Enhanced session protection with automatic redirect
+  // When on orders page with ?account= and not logged in: create session from account so link acts as login (no redirect).
+  const isOrdersPageWithAccount = pathname === "/supplier/orders" && accountFromUrl.length > 0;
+  useEffect(() => {
+    if (!hasHydrated || isAuthenticated || !isOrdersPageWithAccount) return;
+    login({
+      id: accountFromUrl,
+      email: `${accountFromUrl}@supplier`,
+      name: accountFromUrl,
+      role: "supplier",
+      phone: "",
+      location: "",
+      ishyigaAccount: accountFromUrl,
+    });
+  }, [hasHydrated, isAuthenticated, isOrdersPageWithAccount, accountFromUrl, login]);
+
+  // Enhanced session protection with automatic redirect (skip when we're creating session from ?account=)
   useEffect(() => {
     if (!hasHydrated) return; // Wait for store to load from localStorage
+    if (isOrdersPageWithAccount && !isAuthenticated) return; // Let the effect above create session first
 
     if (!isAuthenticated || user?.role !== "supplier") {
-      // Clear any existing auth state and redirect
       logout();
       router.replace("/login");
     }
-  }, [hasHydrated, isAuthenticated, user, router, logout]);
+  }, [hasHydrated, isAuthenticated, user, isOrdersPageWithAccount, router, logout]);
 
   return (
     <div className="min-h-screen bg-slate-50">

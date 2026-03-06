@@ -2,7 +2,7 @@
 "use client"
 
 import { useEffect, useMemo, useState, useCallback } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams, usePathname } from "next/navigation"
 import { useAuthStore } from "@/lib/auth-store"
 import { useOrdersStore, type Order } from "@/lib/orders-store"
 import { Header } from "@/components/header"
@@ -121,16 +121,55 @@ async function requestLoan(order: Order, sellerAccount: string) {
 // ===========================================
 export default function SupplierOrdersPage() {
   const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const accountFromUrl = searchParams?.get("account")?.trim() ?? ""
   const { user, isAuthenticated } = useAuthStore()
   const { orders, setOrders } = useOrdersStore()
 
+  const [hydrated, setHydrated] = useState(false)
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
 
-  useEffect(() => { if (!isAuthenticated) router.push("/login") }, [isAuthenticated, router])
+  // Wait for persisted auth (localStorage) so link-with-account can "auto" show orders when already logged in on this device
+  useEffect(() => {
+    const setNow = () => setHydrated(true)
+    setHydrated(!!(useAuthStore as any).persist?.hasHydrated?.())
+    const unsub = (useAuthStore as any).persist?.onFinishHydration?.(setNow)
+    return () => { unsub?.() }
+  }, [])
+
+  // Link is for one seller (e.g. from QR). If logged-in user doesn't match, show message.
+  const isWrongSeller = accountFromUrl.length > 0 && isAuthenticated && user?.ishyigaAccount && accountFromUrl !== user.ishyigaAccount
+
+  // When URL has ?account= and we're not logged in: treat account as identity and create a session so they see orders (no login page).
+  useEffect(() => {
+    if (!hydrated || isAuthenticated || !accountFromUrl) return
+    const login = useAuthStore.getState().login
+    const minimalUser = {
+      id: accountFromUrl,
+      email: `${accountFromUrl}@supplier`,
+      name: accountFromUrl,
+      role: "supplier" as const,
+      phone: "",
+      location: "",
+      ishyigaAccount: accountFromUrl,
+    }
+    login(minimalUser)
+  }, [hydrated, isAuthenticated, accountFromUrl])
+
+  // After hydration: if still not logged in (and no account in URL), send to login with return URL
+  useEffect(() => {
+    if (!hydrated) return
+    if (isAuthenticated) return
+    if (accountFromUrl) return // session-from-account effect above will run; don't redirect
+    const returnTo = pathname + (searchParams?.toString() ? `?${searchParams.toString()}` : "")
+    const safe = returnTo.startsWith("/") && !returnTo.startsWith("//")
+    router.push(safe ? `/login?redirect=${encodeURIComponent(returnTo)}` : "/login")
+  }, [hydrated, isAuthenticated, accountFromUrl, router, pathname, searchParams])
 
   const loadOrders = useCallback(async () => {
     const sellerAccount = user?.ishyigaAccount?.trim()
@@ -183,13 +222,18 @@ export default function SupplierOrdersPage() {
 
   useEffect(() => {
     if (!isAuthenticated || !user) return
+    // When link is for another seller (?account=X), don't load; show banner and "View my orders"
+    if (isWrongSeller) {
+      setOrders([])
+      return
+    }
     if (user.ishyigaAccount) {
       setErr(null)
       loadOrders()
     } else {
       setErr("No supplier account found. Please log out and log in again so your supplier account is loaded.")
     }
-  }, [isAuthenticated, user, user?.ishyigaAccount, loadOrders])
+  }, [isAuthenticated, user, user?.ishyigaAccount, loadOrders, isWrongSeller, setOrders])
 
   useEffect(() => {
     if (!user?.ishyigaAccount) return
@@ -200,11 +244,35 @@ export default function SupplierOrdersPage() {
   const totalPages = useMemo(() => Math.max(1, Math.ceil(orders.length / pageSize)), [orders.length, pageSize])
   const pagedOrders = useMemo(() => orders.slice((page - 1) * pageSize, page * pageSize), [orders, page, pageSize])
   const supplierOrderLink = (orderId: number | string) => `/supplier/orders/${orderId}`
+
+  // Wait for auth to hydrate from localStorage so existing session counts as "logged in"
+  if (!hydrated) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center text-slate-600">
+          <RotateCw className="h-8 w-8 animate-spin mx-auto mb-2" />
+          <p>Checking session…</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-slate-50">
       <Header />
 
       <main className="container mx-auto px-4 py-8">
+        {isWrongSeller && (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm text-amber-800">
+              This link is for another seller. You’re logged in as <strong>{user?.ishyigaAccount}</strong>.
+            </p>
+            <Button variant="outline" size="sm" onClick={() => router.push("/supplier/orders")}>
+              View my orders
+            </Button>
+          </div>
+        )}
+
         <div className="flex items-center justify-between gap-4 mb-4 flex-wrap">
           <h1 className="text-2xl font-bold">My Orders</h1>
           {user?.ishyigaAccount && (
