@@ -19,6 +19,7 @@ const SUPPLIER_STATUS = [
   { key: "open", label: "Open" },
   { key: "processing", label: "Processing" },
   { key: "invoice", label: "Invoice" },
+  { key: "in-transit", label: "Out for Delivery" },
   { key: "delivered", label: "Delivered" },
 ] as const
 

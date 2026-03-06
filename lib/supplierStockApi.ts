@@ -20,8 +20,11 @@ export interface ImportResult {
   ok: boolean;
   message: string;
   itemsImported?: number;
+  itemsUpdated?: number;
   rowsParsed?: number;
   rowsSkipped?: number;
+  /** Why rows were skipped (e.g. title/footer/blank rows) */
+  rowsSkippedNote?: string;
   backupKey?: string;
   supplierKey?: string;
   errors?: string[];

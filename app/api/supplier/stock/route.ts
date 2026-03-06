@@ -85,12 +85,16 @@ export async function GET(req: NextRequest) {
 // POST endpoint for adding products and Excel import
 export async function POST(req: NextRequest) {
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 30000) // Longer timeout for file uploads
+  const searchParams = req.nextUrl.searchParams
+  const action = searchParams.get("action")
+  // Excel import can take minutes (parse + DB batch + Redis per item); use 5 min for importExcel
+  const timeoutMs =
+    action === "importExcel"
+      ? Number(process.env.SUPPLIER_STOCK_IMPORT_TIMEOUT_MS) || 300000 // 5 min default
+      : 30000
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
 
   try {
-    const searchParams = req.nextUrl.searchParams
-    const action = searchParams.get("action")
-
     console.log(`[SUPPLIER-STOCK] POST action: ${action}`)
 
     const contentType = req.headers.get('content-type') || ''

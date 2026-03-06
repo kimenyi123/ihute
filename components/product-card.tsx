@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import Image from "next/image"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -60,24 +60,53 @@ export function ProductCard({
   } = product
 
   const fav = isFavorite(id)
+  const [imgError, setImgError] = useState(false)
+  const placeholder = "/placeholder.svg?height=300&width=300"
+
+  // Treat as valid image only if non-empty and either full URL or local path
+  const validImage =
+    image &&
+    typeof image === "string" &&
+    image.trim() !== "" &&
+    (image.startsWith("http://") || image.startsWith("https://") || image.startsWith("/"))
+  const src = !imgError && validImage ? (typeof image === "string" ? image.trim() : String(image)) : placeholder
+  const isRemote = /^https?:\/\//i.test(src)
+
+  // Reset error when image URL changes
+  useEffect(() => {
+    setImgError(false)
+  }, [image])
 
   // Track product view when component mounts
   useEffect(() => {
     trackProductView(id, name, {
       supplierId,
-      categoryId: undefined, // Add if available
+      categoryId: undefined,
     })
   }, [id, name, supplierId])
 
   return (
     <Card className="group h-full overflow-hidden transition-all hover:shadow-lg">
       <div className="relative w-full aspect-square bg-muted">
-        <Image
-          fill
-          src={image || "/placeholder.svg?height=300&width=300"}
-          alt={name}
-          className="object-cover"
-        />
+        {isRemote ? (
+          <img
+            src={src}
+            alt={name}
+            className="absolute inset-0 h-full w-full object-cover"
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            onError={() => setImgError(true)}
+          />
+        ) : (
+          <Image
+            fill
+            src={src}
+            alt={name}
+            className="object-cover"
+            onError={() => setImgError(true)}
+            unoptimized={src === placeholder}
+          />
+        )}
 
         {/* Heart overlay */}
         <button

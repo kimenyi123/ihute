@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { CheckCircle, MessageCircle, Copy, ArrowRight } from "lucide-react"
 import { formatPaymentMethod } from "@/lib/payment-utils" // ✅ IMPORTED
+import { RatingModal } from "@/components/RatingModal"
 
 function normalizePhone(raw?: string | null): string {
   let v = (raw || "").replace(/\s|-/g, "")
@@ -38,6 +39,9 @@ export default function OrderSuccessPage() {
   const [copied, setCopied] = useState(false)
   const [orderDetails, setOrderDetails] = useState<any>(null)
   const [loadingDetails, setLoadingDetails] = useState(true)
+  const [showRatingModal, setShowRatingModal] = useState(false)
+  const [ratingItems, setRatingItems] = useState<Array<{ code: string, name: string }>>([])
+  const [hasCheckedRating, setHasCheckedRating] = useState(false)
 
   useEffect(() => {
     if (!orderId) {
@@ -69,6 +73,16 @@ export default function OrderSuccessPage() {
 
     fetchOrderDetails()
   }, [orderId, router])
+
+  useEffect(() => {
+    if (orderDetails && orderId && !hasCheckedRating && orderDetails.status === "delivered") {
+      setHasCheckedRating(true)
+      const items = orderDetails?.items || []
+      setRatingItems(items)
+      setShowRatingModal(true)
+      console.log('[Order Success] Showing rating modal for delivered order')
+    }
+  }, [orderDetails, orderId, hasCheckedRating])
 
   if (!orderId) {
     return null
@@ -160,6 +174,25 @@ export default function OrderSuccessPage() {
     } catch (err) {
       console.error("Failed to copy:", err)
     }
+  }
+
+  async function handleRatingDismiss() {
+    setShowRatingModal(false)
+    
+    try {
+      await fetch("/api/ratings/track-attempt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId, action: "dismissed" }),
+      })
+    } catch (error) {
+      console.error("[Rating] Failed to track dismiss:", error)
+    }
+  }
+
+  function handleRatingSuccess() {
+    console.log("[Rating] Rating submitted successfully")
+    setShowRatingModal(false)
   }
 
   const content = (
@@ -330,6 +363,20 @@ export default function OrderSuccessPage() {
         </div>
       </main>
       <Footer />
+
+      {/* Rating Modal */}
+      {orderDetails && showRatingModal && (
+        <RatingModal
+          orderId={orderId!}
+          sellerId={orderDetails.sellerAccount || ""}
+          sellerName={sellerName || orderDetails.sellerName || ""}
+          buyerPhone={buyerPhone || orderDetails.buyerPhone || ""}
+          items={ratingItems}
+          open={showRatingModal}
+          onClose={handleRatingDismiss}
+          onSuccess={handleRatingSuccess}
+        />
+      )}
     </div>
   )
   return content

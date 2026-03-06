@@ -1,18 +1,79 @@
 import { NextResponse } from "next/server"
-import { getAuthUrl } from "@/lib/backend-config"
+import { getAuthUrl, getSuppliersUrl } from "@/lib/backend-config" // ← add getSuppliersUrl
 
 const JAVA_AUTH_URL = getAuthUrl()
+const JAVA_SUPPLIERS_URL = getSuppliersUrl() // e.g. http://yourserver/Api/InsertSuppliers
 
 export async function POST(req: Request) {
   const rid = crypto.randomUUID()
   const t0 = Date.now()
 
   try {
-    const { email, password, firstName, lastName, tel, location, role, latitude, longitude, gpsAccuracy } = await req.json()
+    const body = await req.json()
+    const { role } = body
+
+    // ─── SELLER → InsertSuppliers servlet ───────────────────────────────────
+    if (String(role).toUpperCase() === "SELLER") {
+      if (!JAVA_SUPPLIERS_URL) {
+        console.error(`[RID ${rid}] Missing JAVA_SUPPLIERS_URL`)
+        return NextResponse.json({ ok: false, error: "JAVA_SUPPLIERS_URL not configured", rid }, { status: 500 })
+      }
+
+      const {
+        email, firstName, lastName, tel, location,
+        tin, sector, deliveryMode, momoCode, companyName,
+        latitude, longitude,
+      } = body
+
+      const sellerPayload = {
+        email:           String(email || ""),
+        owner:           [firstName, lastName].filter(Boolean).join(" "),
+        company_name:    String(companyName || ""),
+        phone:           String(tel || ""),
+        location:        String(location || ""),
+        tin:             String(tin || ""),
+        ishyiga_account: "NA",                                  // servlet will auto-generate
+        sector:          String(sector || "").toLowerCase(),
+        delivery_mode:   String(deliveryMode || "").toLowerCase(),
+        momo_code:       String(momoCode || ""),
+      }
+
+      console.log(`[RID ${rid}] -> POST ${JAVA_SUPPLIERS_URL} (seller registration)`, sellerPayload)
+
+      const res = await fetch(JAVA_SUPPLIERS_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(sellerPayload),
+        cache: "no-store",
+      })
+
+      const text = await res.text()
+      let json: any
+      try { json = JSON.parse(text) } catch {
+        console.error(`[RID ${rid}] Bad JSON from InsertSuppliers. Status=${res.status} Body: ${text.slice(0, 800)}`)
+        return NextResponse.json({ ok: false, error: "Bad JSON from supplier server", rid }, { status: 502 })
+      }
+
+      // 201 = created successfully
+      if (res.status === 201) {
+        return NextResponse.json({ ok: true, message: json.message, rid })
+      }
+
+      // 409 = duplicate / conflict
+      if (res.status === 409) {
+        return NextResponse.json({ ok: false, error: json.message || json.error || "Conflict", rid }, { status: 409 })
+      }
+
+      return NextResponse.json({ ok: false, error: json.error || "Supplier registration failed", rid }, { status: 400 })
+    }
+
+    // ─── BUYER → existing general auth servlet ───────────────────────────────
     if (!JAVA_AUTH_URL) {
       console.error(`[RID ${rid}] Missing JAVA_AUTH_URL`)
       return NextResponse.json({ ok: false, error: "JAVA_AUTH_URL not configured", rid }, { status: 500 })
     }
+
+    const { email, password, firstName, lastName, tel, location, latitude, longitude, gpsAccuracy } = body
 
     const form = new URLSearchParams()
     form.set("action", "register")
@@ -22,20 +83,12 @@ export async function POST(req: Request) {
     form.set("lastName", String(lastName || ""))
     form.set("tel", String(tel || ""))
     form.set("location", String(location || ""))
-    form.set("role", String(role || "BUYER").toUpperCase())
+    form.set("role", "BUYER")
+    if (latitude  != null) form.set("latitude",    String(latitude))
+    if (longitude != null) form.set("longitude",   String(longitude))
+    if (gpsAccuracy != null) form.set("gpsAccuracy", String(gpsAccuracy))
 
-    // Add GPS coordinates if provided (for sellers)
-    if (latitude !== null && latitude !== undefined) {
-      form.set("latitude", String(latitude))
-    }
-    if (longitude !== null && longitude !== undefined) {
-      form.set("longitude", String(longitude))
-    }
-    if (gpsAccuracy !== null && gpsAccuracy !== undefined) {
-      form.set("gpsAccuracy", String(gpsAccuracy))
-    }
-
-    console.log(`[RID ${rid}] -> POST ${JAVA_AUTH_URL} action=register email=${email} role=${role} hasGPS=${!!latitude}`)
+    console.log(`[RID ${rid}] -> POST ${JAVA_AUTH_URL} action=register email=${email} role=BUYER`)
 
     const res = await fetch(JAVA_AUTH_URL, {
       method: "POST",
@@ -46,22 +99,18 @@ export async function POST(req: Request) {
 
     const text = await res.text()
     let json: any
-    try {
-      json = JSON.parse(text)
-    } catch {
-      console.error(`[RID ${rid}] Bad JSON from servlet. Status=${res.status} Body(800): ${text.slice(0, 800)}`)
-      return NextResponse.json(
-        { ok: false, error: "Bad JSON from auth server", raw: text.slice(0, 800), rid },
-        { status: 502 },
-      )
+    try { json = JSON.parse(text) } catch {
+      console.error(`[RID ${rid}] Bad JSON from auth servlet. Status=${res.status} Body: ${text.slice(0, 800)}`)
+      return NextResponse.json({ ok: false, error: "Bad JSON from auth server", raw: text.slice(0, 800), rid }, { status: 502 })
     }
 
     if (!res.ok || !json?.ok) {
-      console.warn(`[RID ${rid}] Upstream register failed HTTP ${res.status} payload=${JSON.stringify(json)}`)
+      console.warn(`[RID ${rid}] Upstream register failed HTTP ${res.status}`, json)
       return NextResponse.json({ ok: false, error: json?.error || "Register failed", rid }, { status: 400 })
     }
 
     return NextResponse.json({ ...json, rid })
+
   } catch (e: any) {
     console.error(`[RID ${rid}] Register route exception`, e)
     return NextResponse.json({ ok: false, error: e?.message || "unknown error", rid }, { status: 400 })

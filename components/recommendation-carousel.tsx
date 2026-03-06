@@ -116,7 +116,7 @@ export function RecommendationCarousel({
               id,
               name: p.ITEM_NAME || p.item_commercial_name || p.name || q,
               price: isNaN(price) ? undefined : price,
-              image: p.IMAGE_URL || p.image || undefined,
+              image: p.image_url ?? p.item_image_url ?? p.IMAGE_URL ?? p.image ?? undefined,
               supplierName: p.SELLER_NAMES || p.supplier_name || p.item_seller_name,
               category: category || undefined,
             })

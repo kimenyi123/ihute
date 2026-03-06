@@ -57,13 +57,18 @@ type ShopWithMeProduct = {
   stock?: number;
   in_stock?: boolean;
   expiry_days?: number;
+  /** Product image URL (from Redis image_url / item_image_url). */
   image?: string;
+  image_url?: string;
+  item_image_url?: string;
   source?: string;
   OWNER?: string;
   momo?: string;
   currency?: string;
   /** Category/family from API (e.g. BREAKFAST, COLD STARTERS). Preserved when flattening. */
   famille?: string;
+  item_key_words_french?: string;
+  item_key_words_kinyarwanda?: string;
 };
 
 type ShopWithMeSeller = {
@@ -128,20 +133,28 @@ function normalizeSellersProducts(sellers: ShopWithMeSeller[]): ShopWithMeSeller
           const stock = Number.isFinite(stockNum) ? stockNum : 0;
           const currency = (item as ShopWithMeProduct).currency || (seller as ShopWithMeSeller).currency;
           const fam = (p as Record<string, unknown>).famille ?? (p as Record<string, unknown>).FAMILLE ?? (item as Record<string, unknown>).famille ?? (item as Record<string, unknown>).FAMILLE;
-          flatProducts.push({
+          const img = (item as Record<string, unknown>).image_url ?? (item as Record<string, unknown>).item_image_url ?? (item as Record<string, unknown>).image;
+        flatProducts.push({
             ...item,
             OWNER: item.OWNER ?? (p as ShopWithMeProduct).OWNER ?? seller.OWNER,
             stock,
             in_stock: stock > 0,
             currency: currency || undefined,
             famille: fam != null ? String(fam) : undefined,
+            image: typeof img === "string" ? img : undefined,
           });
         }
       } else {
         const flatP = p as ShopWithMeProduct;
         const currency = flatP.currency || (seller as ShopWithMeSeller).currency;
         const fam = (p as Record<string, unknown>).famille ?? (p as Record<string, unknown>).FAMILLE ?? flatP.famille;
-        flatProducts.push({ ...flatP, currency: currency || flatP.currency, famille: fam != null ? String(fam) : flatP.famille });
+        const img = (p as Record<string, unknown>).image_url ?? (p as Record<string, unknown>).item_image_url ?? flatP.image;
+        flatProducts.push({
+          ...flatP,
+          currency: currency || flatP.currency,
+          famille: fam != null ? String(fam) : flatP.famille,
+          image: typeof img === "string" ? img : flatP.image,
+        });
       }
     }
     const in_stock_products = flatProducts.filter((pr) => pr.in_stock !== false && (pr.stock ?? 0) > 0).length;
@@ -240,6 +253,7 @@ export default function ShopWithMePage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedSeller, setSelectedSeller] = useState<string | null>(null);
   const [productSearchQuery, setProductSearchQuery] = useState("");
+  const [debouncedProductSearch, setDebouncedProductSearch] = useState("");
   const [sortBy, setSortBy] = useState("featured");
   const [categories, setCategories] = useState<CategorySection[]>([]);
 
@@ -248,12 +262,49 @@ export default function ShopWithMePage() {
   const setTableInfo = useCartStore((s) => s.setTableInfo);
   const clearTableInfo = useCartStore((s) => s.clearTableInfo);
 
-  // When URL has nickname (e.g. ?nickname=burrows or /shop-with-me/burrows), fetch that shop. Params can be dynamic: table, customer, address.
+  // Debounce product search so we hit the backend with the query
   useEffect(() => {
-    if (nicknameFromUrl && nicknameFromUrl.trim()) {
-      searchShop(nicknameFromUrl.trim());
-    }
-  }, [nicknameFromUrl]);
+    const t = setTimeout(() => setDebouncedProductSearch(productSearchQuery.trim()), 300);
+    return () => clearTimeout(t);
+  }, [productSearchQuery]);
+
+  // Fetch shop from backend when nickname or product search changes (search hits backend, not just client filter)
+  useEffect(() => {
+    if (!nicknameFromUrl?.trim()) return;
+    let cancelled = false;
+    const normalizedNickname = nicknameFromUrl.trim().toLowerCase();
+    setLoading(true);
+    setError(null);
+    const params = new URLSearchParams({ nickname: normalizedNickname });
+    if (debouncedProductSearch) params.set("productSearch", debouncedProductSearch);
+    fetch(`/api/shop-with-me?${params.toString()}`, { cache: "no-store" })
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch shop data`);
+        return res.json();
+      })
+      .then((data: ShopWithMeResponse) => {
+        if (cancelled) return;
+        if (!data.ok) throw new Error("Shop not found");
+        if (data.sellers && data.sellers.length > 0) {
+          setSellers(normalizeSellersProducts(data.sellers));
+          setNickname(normalizedNickname);
+          if (data.sellers.length === 1) setSelectedSeller(data.sellers[0].ISHYIGA_ACCOUNT || null);
+        } else {
+          setSellers([]);
+          setError("No shops found with this nickname");
+        }
+      })
+      .catch((err: any) => {
+        if (!cancelled) {
+          setError(err.message || "Failed to fetch shop");
+          setSellers([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [nicknameFromUrl, debouncedProductSearch]);
 
   // Pre-fill customer/table from URL (table=table%204, customer=..., address=...)
   useEffect(() => {
@@ -403,6 +454,9 @@ export default function ShopWithMePage() {
     const categoryMap = new Map<string, ShopWithMeProduct[]>();
 
     currentSeller.products.forEach((product) => {
+      const price = extractNumericPrice(product.price || product.item_emballage)
+        || extractNumericPrice((product as Record<string, unknown>).selling_price as string);
+      if (price <= 0) return; // don't show 0-price items
       const fam = (product as Record<string, unknown>).famille ?? (product as Record<string, unknown>).FAMILLE;
       const category = (fam && String(fam).trim()) ? String(fam).trim() : categorizeProduct(product);
       if (!categoryMap.has(category)) {
@@ -441,13 +495,22 @@ export default function ShopWithMePage() {
   const getFilteredProducts = (products: ShopWithMeProduct[]) => {
     if (!productSearchQuery.trim()) return products;
 
-    const query = productSearchQuery.toLowerCase();
-    return products.filter((product) => {
+    const query = productSearchQuery.toLowerCase().trim();
+    const terms = query.split(/\s+/).filter(Boolean);
+
+    const matches = products.filter((product) => {
       const name = (product.item_commercial_name || product.item_name || "").toLowerCase();
       const keywords = (product.item_key_words || "").toLowerCase();
       const famille = String((product as Record<string, unknown>).famille ?? (product as Record<string, unknown>).FAMILLE ?? "").toLowerCase();
-      return name.includes(query) || keywords.includes(query) || famille.includes(query);
+      const french = ((product as Record<string, unknown>).item_key_words_french as string || "").toLowerCase();
+      const kinyarwanda = ((product as Record<string, unknown>).item_key_words_kinyarwanda as string || "").toLowerCase();
+      const description = ((product as Record<string, unknown>).item_description as string || (product as Record<string, unknown>).description as string || "").toLowerCase();
+      const combined = `${name} ${keywords} ${famille} ${french} ${kinyarwanda} ${description}`;
+      return terms.every((term) => combined.includes(term));
     });
+
+    // If nothing matches the text, fall back to showing all products
+    return matches.length > 0 ? matches : products;
   };
 
   const getSortedProducts = (products: ShopWithMeProduct[]) => {
@@ -610,7 +673,7 @@ export default function ShopWithMePage() {
                 </h1>
                 <p className="text-sm text-muted-foreground mt-1">
                   {productSearchQuery.trim()
-                    ? `Showing ${totalProductCount} of ${totalItemsFromBackend} item${totalItemsFromBackend !== 1 ? "s" : ""}`
+                    ? `Showing ${totalProductCount} of ${totalItemsFromBackend} item${totalItemsFromBackend !== 1 ? "s" : ""} matching "${productSearchQuery.trim()}"`
                     : `${totalItemsFromBackend} item${totalItemsFromBackend !== 1 ? "s" : ""}`}
                 </p>
               </div>
@@ -833,12 +896,21 @@ function ProductCard({
 
   const itemCode = getItemCode(product);
   const p = product as Record<string, unknown>;
-  // API returns normalized format: item_commercial_name, item_emballage, item_key_words, item_state, famille, item_packet
-  // Items from Redis/shop-with-me are considered available (cached before sent to Redis as stock).
+  // API returns normalized format: item_commercial_name, item_emballage, item_key_words, item_state, famille, item_packet, image_url
   const productName = String(p.item_commercial_name ?? p.item_name ?? p.ITEM_NAME ?? p.ITEM_COMMERCIAL_NAME ?? "").trim() || "Product";
   const priceRaw = p.selling_price ?? p.price ?? p.UNITY_PRICE ?? p.SALE_PRICE_INCLUSIVE;
   const price = extractNumericPrice(priceRaw);
+  const rawImageUrl = product.image ?? (p.image_url as string) ?? (p.item_image_url as string) ?? "";
+  const imageUrl = typeof rawImageUrl === "string" && rawImageUrl.trim() !== "" ? rawImageUrl.trim() : "";
+  const validImage =
+    imageUrl &&
+    (imageUrl.startsWith("http://") || imageUrl.startsWith("https://") || imageUrl.startsWith("/"));
+  const [imgError, setImgError] = useState(false);
   const fav = isFavorite(itemCode);
+
+  useEffect(() => {
+    setImgError(false);
+  }, [imageUrl]);
 
   useEffect(() => {
     trackProductView(itemCode, productName, {
@@ -877,7 +949,7 @@ function ProductCard({
         name: productName,
         price: price,
         unit: "pcs",
-        image: product.image,
+        image: imageUrl || product.image,
         itemCode,
         supplierId: supplierId,
         supplierName: ownerName || "Supplier",
@@ -906,7 +978,7 @@ function ProductCard({
       name: productName,
       price: price,
       unit: "pcs",
-      image: product.image,
+      image: imageUrl || product.image,
       description: undefined,
       supplierId,
       supplierName: ownerName,
@@ -924,11 +996,33 @@ function ProductCard({
   return (
     <Card className="group h-full overflow-hidden transition-all hover:shadow-lg border rounded-lg">
       <div className="relative w-full aspect-square bg-muted">
+        {validImage && !imgError && /^https?:\/\//i.test(imageUrl) ? (
+          <img
+            src={imageUrl}
+            alt={productName}
+            className="absolute inset-0 h-full w-full object-cover"
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            onError={() => setImgError(true)}
+          />
+        ) : validImage && !imgError ? (
+          <Image
+            fill
+            src={imageUrl}
+            alt={productName}
+            className="object-cover"
+            onError={() => setImgError(true)}
+          />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">
+            <Store className="h-10 w-10 opacity-50" />
+          </div>
+        )}
         <button
           aria-label={fav ? "Remove from favorites" : "Add to favorites"}
           onClick={handleToggleFavorite}
           className={cn(
-            "absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-background/80 backdrop-blur transition border-0 shadow-sm",
+            "absolute right-2 top-2 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full bg-background/80 backdrop-blur transition border-0 shadow-sm",
             "hover:bg-background",
             fav ? "text-red-600" : "text-muted-foreground"
           )}

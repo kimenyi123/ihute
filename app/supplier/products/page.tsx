@@ -45,7 +45,7 @@ export default function MyProductsPage() {
 
   // Filters
   const [searchQuery, setSearchQuery] = useState("")
-  const [categoryFilter, setCategoryFilter] = useState("all")
+  // const [categoryFilter, setCategoryFilter] = useState("all")
   const [statusFilter, setStatusFilter] = useState<ProductStatus | "all">("all")
   const [fromCache, setFromCache] = useState(false)
 
@@ -69,39 +69,47 @@ export default function MyProductsPage() {
       if (json.products) {
         // Map the response to our Product type
         const mappedProducts = (json.products || []).map((p: any) => {
-          // Extract price from API response
-          const price = parseFloat(p.price || p.SALE_PRICE_INCLUSIVE || 0)
+  // ✅ Handle both Redis format and DB format
+  const name = p.item_commercial_name || p.ITEM_NAME || p.name || ""
+  const id   = p.item_key_words || p.ITEM_CODE || p.id || ""
 
-          // Extract stock from API response
-          const stock = parseInt(p.stock || p.QUANTITY || 0)
+  // ✅ Handle Redis price format "5000RWF" or plain number
+  let price = 0
+  if (p.item_emballage) {
+    price = parseFloat(p.item_emballage.replace(/RWF/gi, "").trim()) || 0
+  } else {
+    price = parseFloat(p.price || p.SALE_PRICE_INCLUSIVE || 0)
+  }
 
-          // Determine status based on stock
-          let status: ProductStatus = "active"
-          if (stock === 0) {
-            status = "out-of-stock"
-          } else if (stock < 10) {
-            status = "active" // Low stock but still active
-          }
+  // ✅ Handle Redis stock format (item_packet) or DB format
+  let stock = 0
+  if (p.item_packet) {
+    stock = parseInt(p.item_packet) || 0
+  } else {
+    stock = parseInt(p.stock || p.QUANTITY || 0)
+  }
 
-          return {
-            id: p.ITEM_CODE || p.id,
-            name: p.ITEM_NAME || p.name,
-            category: p.category || "uncategorized",
-            price,
-            stock,
-            status,
-            sales: p.sales || 0,
-            revenue: p.revenue || (price * stock), // Calculate revenue if not provided
-            lastRestocked: p.lastRestocked,
-          } as Product
-        })
+  let status: ProductStatus = "active"
+  if (stock === 0) status = "out-of-stock"
 
+  return {
+    id,
+    name,
+    category: p.category || "uncategorized",
+    price,
+    stock,
+    status,
+    sales: p.sales || 0,
+    revenue: p.revenue || price * stock,
+    lastRestocked: p.lastRestocked,
+  } as Product
+})
         // Apply client-side filters
         let filtered = mappedProducts
 
-        if (categoryFilter !== "all") {
-          filtered = filtered.filter((p: { category?: string }) => p.category === categoryFilter)
-        }
+        // if (categoryFilter !== "all") {
+        //   filtered = filtered.filter((p: { category?: string }) => p.category === categoryFilter)
+        // }
 
         if (statusFilter !== "all") {
           filtered = filtered.filter((p: { status?: string }) => p.status === statusFilter)
@@ -127,7 +135,9 @@ export default function MyProductsPage() {
     }
 
     fetchProducts()
-  }, [isAuthenticated, user, router, currentPage, categoryFilter, statusFilter])
+  // }, [isAuthenticated, user, router, currentPage, categoryFilter, statusFilter])
+  }, [isAuthenticated, user, router, currentPage, statusFilter])
+
 
   // Filter products by search query (client-side)
   const filteredProducts = products.filter((product) =>
@@ -238,7 +248,7 @@ export default function MyProductsPage() {
               </div>
 
               {/* Category Filter */}
-              <div className="flex flex-col">
+              {/* <div className="flex flex-col">
                 <label className="text-sm font-medium mb-2">Category</label>
                 <select
                   value={categoryFilter}
@@ -252,7 +262,7 @@ export default function MyProductsPage() {
                   <option value="home">Home & Garden</option>
                   <option value="food">Food & Beverage</option>
                 </select>
-              </div>
+              </div> */}
 
               {/* Status Filter */}
               <div className="flex flex-col">
@@ -302,7 +312,7 @@ export default function MyProductsPage() {
                   <thead>
                     <tr className="border-b">
                       <th className="text-left p-3 text-sm font-semibold">Product</th>
-                      <th className="text-left p-3 text-sm font-semibold">Category</th>
+                      {/* <th className="text-left p-3 text-sm font-semibold">Category</th> */}
                       <th className="text-right p-3 text-sm font-semibold">Price</th>
                       <th className="text-right p-3 text-sm font-semibold">Stock</th>
                       <th className="text-center p-3 text-sm font-semibold">Status</th>
@@ -327,7 +337,7 @@ export default function MyProductsPage() {
                             </div>
                           </div>
                         </td>
-                        <td className="p-3 text-sm">{product.category}</td>
+                        {/* <td className="p-3 text-sm">{product.category}</td> */}
                         <td className="p-3 text-right font-semibold text-sm">
                           {product.price.toLocaleString()} {product.currency || "RWF"}
                         </td>

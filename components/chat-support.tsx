@@ -130,7 +130,7 @@ export function ChatSupport() {
     const supplierName = product.supplier_name || product.item_seller_name || "Supplier"
     const price = parseFloat(product.item_price || product.ITEM_PRICE || product.price || "0")
     const unit = product.item_packet || product.ITEM_PACKET || product.unit || "unit"
-    const image = product.image || product.ITEM_IMAGE || ""
+    const image = product.image ?? product.image_url ?? product.item_image_url ?? product.ITEM_IMAGE ?? ""
     const momo = product.momo || ""
     const supplierLocation = product.supplier_location || product.item_seller_location || ""
 

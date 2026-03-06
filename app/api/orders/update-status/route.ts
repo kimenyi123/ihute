@@ -13,7 +13,7 @@ export async function GET() {
     endpoint: "/api/orders/update-status",
     backendUrl: ORDER_STATUS_URL,
     requiredFields: ["orderId", "status"],
-    validStatuses: ["pending", "processing", "invoice", "delivered"],
+    validStatuses: ["pending", "processing", "invoice", "in-transit", "delivered"],
     example: {
       orderId: 400,
       status: "processing"
@@ -47,7 +47,7 @@ export async function POST(req: Request) {
     }
 
     // Validate status value
-    const validStatuses = ["pending", "processing", "invoice", "delivered"]
+    const validStatuses = ["pending", "processing", "invoice", "in-transit", "delivered"]
     if (!validStatuses.includes(status)) {
       return NextResponse.json(
         { ok: false, error: `Invalid status: ${status}. Must be one of: ${validStatuses.join(", ")}` },

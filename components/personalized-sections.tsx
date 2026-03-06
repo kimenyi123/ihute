@@ -1,13 +1,16 @@
 // components/personalized-sections.tsx
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import { ProductCard } from "./product-card"
-import { TrendingUp, ArrowRight } from "lucide-react"
+import { TrendingUp, ArrowRight, Store } from "lucide-react"
 import { useAuthStore } from "@/lib/auth-store"
 import { getSessionId } from "@/lib/interaction-tracker"
 import { getSmartRecommendations } from "@/lib/recommendation-service"
 import Link from "next/link"
+
+const BURROWS_NICKNAME = "burrows"
+const BURROWS_DISPLAY_NAME = "PANGOLIN'S BURROWS"
 
 interface Product {
   id: string
@@ -50,77 +53,121 @@ export function PersonalizedSections() {
   const [loading, setLoading] = useState(true)
   const [hasInteractionHistory, setHasInteractionHistory] = useState(false)
 
+  const hasInteractionRef = useRef(false)
+
   useEffect(() => {
-    checkInteractionHistory()
-    loadPersonalizedSections()
+    checkInteractionHistory().then(() => {
+      loadPersonalizedSections()
+    })
   }, [user])
 
   async function checkInteractionHistory() {
-    // Check if user has enough interaction history to show recommendations
     try {
       const { getRecentProductIds } = await import("@/lib/interaction-tracker")
-      const recentIds = getRecentProductIds(3) // Need at least 3 interactions
-      setHasInteractionHistory(recentIds.length >= 3)
-    } catch (error) {
+      const recentIds = getRecentProductIds(3)
+      const has = recentIds.length >= 3
+      hasInteractionRef.current = has
+      setHasInteractionHistory(has)
+    } catch {
+      hasInteractionRef.current = false
       setHasInteractionHistory(false)
     }
+  }
+
+  /** Single fast request: load Burrows products with images (shop-with-me). */
+  async function fetchBurrowsProducts(limit = 6): Promise<Product[]> {
+    try {
+      const res = await fetch(
+        `/api/shop-with-me?nickname=${encodeURIComponent(BURROWS_NICKNAME)}`,
+        { cache: "no-store", headers: { "Cache-Control": "no-cache" } }
+      )
+      if (!res.ok) return []
+      const data = await res.json()
+      const sellers = data.sellers || []
+      const products: Product[] = []
+      const seen = new Set<string>()
+      for (const seller of sellers) {
+        const list = seller.products || []
+        const supplierName = seller.OWNER || seller.supplier_name || BURROWS_DISPLAY_NAME
+        const supplierId = seller.ISHYIGA_ACCOUNT || seller.supplier_account || ""
+        for (const p of list) {
+          if (products.length >= limit) break
+          const code = p.item_code || p.ITEM_CODE || p.item_commercial_name || ""
+          if (seen.has(code)) continue
+          seen.add(code)
+          const price = parsePrice(p.item_emballage ?? p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? "0")
+          if (price <= 0) continue
+          const img = p.image_url ?? p.item_image_url ?? p.image ?? p.IMAGE_URL
+          products.push({
+            id: code || `burrows-${products.length}`,
+            name: p.item_commercial_name ?? p.ITEM_NAME ?? p.item_name ?? "Product",
+            description: undefined,
+            price,
+            unit: p.item_packet ?? p.UNIT ?? "",
+            image: typeof img === "string" ? img : undefined,
+            supplierId,
+            supplierName,
+            supplierLocation: seller.loc_cell ?? seller.supplier_location ?? "",
+            momo: seller.momo ?? p.momo,
+            category: p.famille ?? p.FAMILLE ?? p.item_department,
+            inStock: true,
+          })
+        }
+      }
+      return products.slice(0, limit)
+    } catch (e) {
+      console.warn("[PersonalizedSections] Burrows fetch failed:", e)
+      return []
+    }
+  }
+
+  function parsePrice(val: string | number): number {
+    if (typeof val === "number") return isNaN(val) ? 0 : val
+    const s = String(val).replace(/[^\d.,-]/g, "").replace(",", ".")
+    const n = parseFloat(s)
+    return isNaN(n) ? 0 : n
   }
 
   async function loadPersonalizedSections() {
     setLoading(true)
 
-    try {
-      // Use smart caching service instead of direct API calls
-      const { products: productNames, source } = await getSmartRecommendations(12)
-
-      console.log(`[PersonalizedSections] Recommendations from ${source}`)
-
-      if (!productNames || productNames.length === 0) {
-        // No recommendations available
-        setSections([])
-        return
-      }
-
-      // Fetch product details for recommended products
-      const recommendedProducts = await fetchProductDetails(productNames)
-
-      // Only show if we have products AND user has interaction history
-      // This prevents showing recommendations to brand-new users
-      if (recommendedProducts.length > 0 && hasInteractionHistory) {
-        // Limit to 6 products max on homepage (prevents clutter)
-        const limitedProducts = recommendedProducts.slice(0, 6)
-
-        setSections([
-          {
-            title: "For You",
-            subtitle: "Based on your browsing",
-            icon: <TrendingUp className="h-5 w-5" />,
-            products: limitedProducts,
-            loading: false,
-          },
-        ])
-      } else if (recommendedProducts.length > 0 && !hasInteractionHistory) {
-        // New user - show trending but limit to 6
-        const limitedProducts = recommendedProducts.slice(0, 6)
-        setSections([
-          {
-            title: "Trending Now",
-            subtitle: "Popular this week",
-            icon: <TrendingUp className="h-5 w-5" />,
-            products: limitedProducts,
-            loading: false,
-          },
-        ])
-      } else {
-        // No products available
-        setSections([])
-      }
-    } catch (error) {
-      console.error("Error loading personalized sections:", error)
-      setSections([])
-    } finally {
-      setLoading(false)
+    // 1) Load Burrows first (one fast request with images) so the page shows content quickly
+    const burrowsProducts = await fetchBurrowsProducts(6)
+    if (burrowsProducts.length > 0) {
+      setSections([
+        {
+          title: `From ${BURROWS_DISPLAY_NAME}`,
+          subtitle: "Menu favorites with images",
+          icon: <Store className="h-5 w-5" />,
+          products: burrowsProducts,
+          loading: false,
+        },
+      ])
     }
+    setLoading(false)
+
+    // 2) In background: load personalized recommendations and append section when ready
+    const hasHistory = hasInteractionRef.current
+    getSmartRecommendations(12)
+      .then(async ({ products: productNames, source }) => {
+        if (!productNames?.length) return
+        console.log(`[PersonalizedSections] Recommendations from ${source}`)
+        const recommendedProducts = await fetchProductDetails(productNames)
+        if (recommendedProducts.length === 0) return
+        const limited = recommendedProducts.slice(0, 6)
+        setSections((prev) => {
+          const next = prev.filter((s) => !s.title.startsWith("For You") && !s.title.startsWith("Trending Now"))
+          next.push({
+            title: hasHistory ? "For You" : "Trending Now",
+            subtitle: hasHistory ? "Based on your browsing" : "Popular this week",
+            icon: <TrendingUp className="h-5 w-5" />,
+            products: limited,
+            loading: false,
+          })
+          return next
+        })
+      })
+      .catch((err) => console.error("Error loading personalized sections:", err))
   }
 
   async function loadTrendingSections() {
@@ -213,7 +260,7 @@ export function PersonalizedSections() {
               description: undefined, // hide code from UI
               price: isNaN(price) ? 0 : price,
               unit: p.UNIT || p.item_packet || "",
-              image: p.IMAGE_URL || p.image || undefined,
+              image: p.image_url ?? p.item_image_url ?? p.IMAGE_URL ?? p.image ?? undefined,
               supplierId: p.SELLER_ISHYIGA_ACCOUNT || p.item_seller_account || "",
               supplierName: p.SELLER_NAMES || p.supplier_name || "",
               supplierLocation: p.LOCATION || p.supplier_location || "",
@@ -296,14 +343,24 @@ export function PersonalizedSections() {
                 )}
               </div>
             </div>
-            {/* "See More" link to discover page */}
-            <Link
-              href="/discover"
-              className="text-sm text-primary hover:underline flex items-center gap-1 hidden sm:flex"
-            >
-              See More
-              <ArrowRight className="h-4 w-4" />
-            </Link>
+            <div className="flex items-center gap-3">
+              {section.title.includes(BURROWS_DISPLAY_NAME) && (
+                <Link
+                  href={`/shop-with-me/${BURROWS_NICKNAME}`}
+                  className="text-sm text-primary hover:underline flex items-center gap-1"
+                >
+                  Browse full menu
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              )}
+              <Link
+                href="/discover"
+                className="text-sm text-primary hover:underline flex items-center gap-1 hidden sm:flex"
+              >
+                See More
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </div>
           </div>
 
           {section.products.length > 0 ? (

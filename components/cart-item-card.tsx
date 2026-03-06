@@ -1,25 +1,55 @@
 "use client"
 
+import { useState, useEffect } from "react"
 import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { useCartStore, CartItem } from "@/lib/cart-store"
 import { Minus, Plus, Trash2 } from "lucide-react"
 
+const PLACEHOLDER = "/placeholder.svg?height=64&width=64"
+
 export function CartItemCard({ item }: { item: CartItem }) {
   const inc = useCartStore((s) => s.inc)
   const dec = useCartStore((s) => s.dec)
   const remove = useCartStore((s) => s.remove)
+  const [imgError, setImgError] = useState(false)
+
+  const rawImage = item.image ?? (item as Record<string, unknown>).image_url ?? (item as Record<string, unknown>).item_image_url
+  const validImage =
+    rawImage &&
+    typeof rawImage === "string" &&
+    rawImage.trim() !== "" &&
+    (rawImage.startsWith("http://") || rawImage.startsWith("https://") || rawImage.startsWith("/"))
+  const src = !imgError && validImage ? (validImage as string).trim() : PLACEHOLDER
+  const isRemote = /^https?:\/\//i.test(src)
+
+  useEffect(() => {
+    setImgError(false)
+  }, [item.image])
 
   return (
     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4 rounded-lg border p-3">
       <div className="flex items-center gap-3 flex-1 w-full sm:w-auto">
         <div className="relative h-16 w-16 flex-shrink-0 rounded bg-muted overflow-hidden">
-          <Image
-            fill
-            src={item.image || "/placeholder.svg?height=64&width=64"}
-            alt={item.name}
-            className="object-cover"
-          />
+          {isRemote ? (
+            <img
+              src={src}
+              alt={item.name}
+              className="absolute inset-0 h-full w-full object-cover"
+              loading="lazy"
+              referrerPolicy="no-referrer"
+              onError={() => setImgError(true)}
+            />
+          ) : (
+            <Image
+              fill
+              src={src}
+              alt={item.name}
+              className="object-cover"
+              onError={() => setImgError(true)}
+              unoptimized={src === PLACEHOLDER}
+            />
+          )}
         </div>
 
         <div className="flex-1 min-w-0">

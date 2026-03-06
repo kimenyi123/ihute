@@ -283,7 +283,7 @@ export function GlobalSearch({
       supplierId,
       supplierName: p.supplier_name || p.supplier_account || "Supplier",
       supplierLocation: p.supplier_location,
-      image: p.image || "/placeholder.svg?height=300&width=300",
+      image: p.image ?? p.image_url ?? p.item_image_url ?? p.IMAGE_URL ?? "/placeholder.svg?height=300&width=300",
       momo: p.momo,
     })
 
