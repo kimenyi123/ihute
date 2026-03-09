@@ -5,7 +5,6 @@ import { useParams, useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   ArrowLeft,
@@ -18,10 +17,9 @@ import {
   CheckCircle,
   XCircle,
   MessageCircle,
-  Copy,
-  Beer,
 } from "lucide-react"
 import { formatPaymentMethod } from "@/lib/payment-utils"
+import { useAuthStore } from "@/lib/auth-store"
 
 interface OrderItem {
   ITEM_CODE: string
@@ -66,6 +64,7 @@ export default function OrderDetailsPage() {
   const params = useParams()
   const router = useRouter()
   const orderId = params.orderId as string
+  const user = useAuthStore((s) => s.user)
 
   const [order, setOrder] = useState<OrderDetails | null>(null)
   const [loading, setLoading] = useState(true)
@@ -104,6 +103,16 @@ export default function OrderDetailsPage() {
     fetchOrderDetails()
   }, [orderId])
 
+  // If the viewer is the seller for this order, send them to the supplier order page (not buyer view with "Contact Seller")
+  useEffect(() => {
+    if (!order || !orderId) return
+    const sellerAccount = (order.SELLER_ISHYIGA_ACCOUNT || "").toString().trim().toLowerCase()
+    const userAccount = (user?.ishyigaAccount || "").toString().trim().toLowerCase()
+    if (sellerAccount && userAccount && sellerAccount === userAccount) {
+      router.replace(`/supplier/orders/${orderId}`)
+    }
+  }, [order, orderId, user?.ishyigaAccount, router])
+
   const copyToClipboard = async (text: string, label: string) => {
     try {
       await navigator.clipboard.writeText(text)
@@ -131,7 +140,7 @@ export default function OrderDetailsPage() {
     if (!status) return "bg-gray-100 text-gray-800 border-gray-200"
     const s = status.toUpperCase()
     if (s === "PAID") return "bg-green-100 text-green-800 border-green-200"
-    if (s === "PENDING") return "bg-yellow-100 text-yellow-800 border-yellow-200"
+    if (s === "PENDING" || s === "UNPAID") return "bg-yellow-100 text-yellow-800 border-yellow-200"
     if (s === "FAILED") return "bg-red-100 text-red-800 border-red-200"
     return "bg-gray-100 text-gray-800 border-gray-200"
   }
@@ -212,9 +221,15 @@ ${items}
     )
   }
 
+  const displayOrderStatus = order.ORDER_STATUS ? String(order.ORDER_STATUS).trim() : "Open"
+  const displayPaymentStatus = order.PAYMENT_STATUS ? String(order.PAYMENT_STATUS).trim() : "Pending"
+  const paymentLabel =
+    displayPaymentStatus.toUpperCase() === "UNKNOWN" || !displayPaymentStatus ? "Pending" : displayPaymentStatus
+  const currency = order.CURRENCY || "RWF"
+
   return (
     <div className="container mx-auto px-4 py-8 max-w-4xl">
-      {/* Header */}
+      {/* Header — buyer view: who placed the order (anonymous or logged in) can see details and contact seller */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon" onClick={() => router.back()}>
@@ -225,11 +240,14 @@ ${items}
             <p className="text-sm text-muted-foreground">
               Placed on {formatDate(order.CREATED_AT || order.createdAt)}
             </p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Your order — contact the seller below if needed
+            </p>
           </div>
         </div>
 
         {order.SELLER_PHONE && (
-          <Button onClick={sendWhatsApp} className="bg-[#25D366] hover:bg-[#20b05a]">
+          <Button onClick={sendWhatsApp} className="bg-[#25D366] hover:bg-[#20b05a]" title="Open WhatsApp to contact the seller">
             <MessageCircle className="h-4 w-4 mr-2" />
             Contact Seller
           </Button>
@@ -245,8 +263,8 @@ ${items}
                 <Package className="h-5 w-5 text-muted-foreground" />
                 <div>
                   <p className="text-sm text-muted-foreground">Order Status</p>
-                  <Badge className={getStatusColor(order.ORDER_STATUS)} variant="outline">
-                    {order.ORDER_STATUS}
+                  <Badge className={getStatusColor(displayOrderStatus)} variant="outline">
+                    {displayOrderStatus}
                   </Badge>
                 </div>
               </div>
@@ -261,8 +279,8 @@ ${items}
                 <CreditCard className="h-5 w-5 text-muted-foreground" />
                 <div>
                   <p className="text-sm text-muted-foreground">Payment Status</p>
-                  <Badge className={getPaymentStatusColor(order.PAYMENT_STATUS)} variant="outline">
-                     {order?.PAYMENT_STATUS || "UNKNOWN"}
+                  <Badge className={getPaymentStatusColor(paymentLabel)} variant="outline">
+                    {paymentLabel}
                   </Badge>
                 </div>
               </div>
@@ -270,6 +288,64 @@ ${items}
           </CardContent>
         </Card>
       </div>
+
+      {/* Seller & buyer details */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Store className="h-4 w-4" />
+              Seller
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm">
+            <p className="font-medium">{order.SELLER_NAMES || "—"}</p>
+            {order.SELLER_PHONE && (
+              <p className="text-muted-foreground mt-1 flex items-center gap-1">
+                <Phone className="h-3.5 w-3" />
+                {order.SELLER_PHONE}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <User className="h-4 w-4" />
+              Buyer & delivery
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm space-y-1">
+            <p className="font-medium">{order.BUYER_NAME || order.BUYER_OWNER || "—"}</p>
+            {order.BUYER_PHONE && (
+              <p className="text-muted-foreground flex items-center gap-1">
+                <Phone className="h-3.5 w-3" />
+                {order.BUYER_PHONE}
+              </p>
+            )}
+            {(order.DELIVERY_LOCATION || order.BUYER_LOCATION) && (
+              <p className="text-muted-foreground flex items-center gap-1 mt-1">
+                <MapPin className="h-3.5 w-3" />
+                {order.DELIVERY_LOCATION || order.BUYER_LOCATION}
+              </p>
+            )}
+            {order.IS_TABLE_COMMAND && order.TABLE_NAME && (
+              <p className="text-muted-foreground mt-1">
+                Table: {order.TABLE_NAME}
+                {order.TABLE_LOCATION ? ` · ${order.TABLE_LOCATION}` : ""}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Payment method */}
+      <Card className="mb-6">
+        <CardContent className="pt-6">
+          <p className="text-sm text-muted-foreground">Payment method</p>
+          <p className="font-medium mt-1">{formatPaymentMethod(order.PAYMENT_NAME)}</p>
+        </CardContent>
+      </Card>
 
       {/* Order Items Table */}
       <Card className="mb-6">
@@ -299,8 +375,8 @@ ${items}
                   <tr key={idx}>
                     <td className="px-4 py-2 border">{name}</td>
                     <td className="px-4 py-2 border">{qty}</td>
-                    <td className="px-4 py-2 border">{price.toLocaleString()} {order.CURRENCY}</td>
-                    <td className="px-4 py-2 border font-semibold">{total.toLocaleString()} {order.CURRENCY}</td>
+                    <td className="px-4 py-2 border">{price.toLocaleString()} {currency}</td>
+                    <td className="px-4 py-2 border font-semibold">{total.toLocaleString()} {currency}</td>
                   </tr>
                 )
               })}
@@ -308,7 +384,7 @@ ${items}
           </table>
 
           <div className="flex justify-end mt-4 text-lg font-bold">
-            Total: {(order.AMOUNT || order.total || 0).toLocaleString()} {order.CURRENCY}
+            Total: {(order.AMOUNT || order.total || 0).toLocaleString()} {currency}
           </div>
         </CardContent>
       </Card>
@@ -317,7 +393,7 @@ ${items}
       <div className="flex justify-end mb-6">
         <Button
           variant="default"
-          disabled={order.ORDER_STATUS?.toUpperCase() !== "OPEN"}
+          disabled={displayOrderStatus.toUpperCase() !== "OPEN"}
         >
           Finance Order
         </Button>

@@ -70,16 +70,20 @@ export async function POST(req: Request) {
     })
 
     const raw = await res.text()
+    if (!res.ok || raw.trim().startsWith("<")) {
+      console.warn(`[${reqId}] Backend unavailable (HTTP ${res.status}), returning empty orders`)
+      return NextResponse.json({ ok: true, orders: [], total: 0, page, pageSize }, { status: 200 })
+    }
     let data: any
     try { data = tryParseJson(raw) }
     catch {
-      console.error(`[${reqId}] ❌ Backend returned invalid JSON, snippet:`, raw.slice(0, 400))
-      return NextResponse.json({ ok: false, error: "Backend returned invalid JSON" }, { status: 502 })
+      console.warn(`[${reqId}] Backend returned invalid JSON, returning empty orders`)
+      return NextResponse.json({ ok: true, orders: [], total: 0, page, pageSize }, { status: 200 })
     }
 
-    if (!res.ok || data?.ok === false) {
-      console.error(`[${reqId}] ❌ Backend error:`, data?.error, "HTTP:", res.status, "snippet:", raw.slice(0, 400))
-      return NextResponse.json({ ok: false, error: data?.error || `HTTP ${res.status}` }, { status: 502 })
+    if (data?.ok === false) {
+      console.warn(`[${reqId}] Backend error:`, data?.error, "returning empty orders")
+      return NextResponse.json({ ok: true, orders: [], total: 0, page, pageSize }, { status: 200 })
     }
 
     const orders = normalizeOrders(data)
@@ -117,16 +121,20 @@ export async function GET(req: Request) {
     })
 
     const raw = await res.text()
+    if (!res.ok || raw.trim().startsWith("<")) {
+      console.warn("Seller-orders GET: backend unavailable (HTTP " + res.status + "), returning empty orders")
+      return NextResponse.json({ ok: true, orders: [], total: 0, page, pageSize }, { status: 200 })
+    }
     let data: any
     try { data = tryParseJson(raw) }
     catch {
-      console.error("❌ list GET: bad JSON from servlet, snippet:", raw.slice(0, 400))
-      return NextResponse.json({ ok: false, error: "Backend returned invalid JSON" }, { status: 502 })
+      console.warn("Seller-orders GET: invalid JSON from backend, returning empty orders")
+      return NextResponse.json({ ok: true, orders: [], total: 0, page, pageSize }, { status: 200 })
     }
 
-    if (!res.ok || data?.ok === false) {
-      console.error("❌ list GET: servlet error:", data?.error, "HTTP:", res.status, "snippet:", raw.slice(0, 400))
-      return NextResponse.json({ ok: false, error: data?.error || `HTTP ${res.status}` }, { status: 502 })
+    if (data?.ok === false) {
+      console.warn("Seller-orders GET: backend error, returning empty orders")
+      return NextResponse.json({ ok: true, orders: [], total: 0, page, pageSize }, { status: 200 })
     }
 
     const orders = normalizeOrders(data)

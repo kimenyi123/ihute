@@ -5,6 +5,7 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/componen
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { useCartStore, type CartItem } from "@/lib/cart-store"
+import { getProductImageSrc, isValidImageUrl } from "@/lib/image-utils"
 import { Lock } from "lucide-react"
 import Image from "next/image"
 
@@ -12,18 +13,14 @@ const PLACEHOLDER = "/placeholder.svg?height=64&width=64"
 
 function CheckoutSummaryItemRow({ item, lineTotal }: { item: CartItem; lineTotal: number }) {
   const [imgError, setImgError] = useState(false)
-  const rawImage = item.image ?? (item as Record<string, unknown>).image_url ?? (item as Record<string, unknown>).item_image_url
-  const validImage =
-    rawImage &&
-    typeof rawImage === "string" &&
-    rawImage.trim() !== "" &&
-    (rawImage.startsWith("http://") || rawImage.startsWith("https://") || rawImage.startsWith("/"))
-  const src = !imgError && validImage ? (validImage as string).trim() : PLACEHOLDER
+  const resolvedUrl = getProductImageSrc(item as Record<string, unknown>, PLACEHOLDER)
+  const hasValidUrl = resolvedUrl !== PLACEHOLDER && isValidImageUrl(resolvedUrl)
+  const src = !imgError && hasValidUrl ? resolvedUrl : PLACEHOLDER
   const isRemote = /^https?:\/\//i.test(src)
 
   useEffect(() => {
     setImgError(false)
-  }, [item.image])
+  }, [resolvedUrl])
 
   return (
     <div className="flex gap-3">

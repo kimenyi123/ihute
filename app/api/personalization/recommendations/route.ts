@@ -24,7 +24,7 @@ export async function GET(req: Request) {
     console.log("[personalization/recommendations] Params:", { action, userId, sessionId, limit })
     
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 30000) // 30 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 12000) // 12s timeout for quick fallback
     
     const response = await fetch(url, {
       method: "GET",
@@ -39,47 +39,26 @@ export async function GET(req: Request) {
 
     const text = await response.text()
     console.log("[personalization/recommendations] Backend response status:", response.status)
-    console.log("[personalization/recommendations] Backend response (first 500 chars):", text.substring(0, 500))
-    
+    if (!response.ok || text.trim().startsWith("<")) {
+      console.warn("[personalization/recommendations] Backend unavailable, returning empty recommendations")
+      return NextResponse.json({ ok: true, recommendations: [], forYou: [] }, { status: 200 })
+    }
     let json: any
-    
     try {
       json = JSON.parse(text)
     } catch (parseError) {
-      console.error("[personalization/recommendations] Failed to parse JSON:", parseError)
-      return NextResponse.json({ 
-        ok: false, 
-        error: "Invalid response from backend",
-        raw: text.substring(0, 500),
-        status: response.status,
-        url
-      }, { status: 500 })
+      console.warn("[personalization/recommendations] Failed to parse JSON, returning empty")
+      return NextResponse.json({ ok: true, recommendations: [], forYou: [] }, { status: 200 })
     }
-
     return NextResponse.json(json)
   } catch (error: any) {
     console.error("[personalization/recommendations] Error:", error?.message)
-    console.error("[personalization/recommendations] Stack:", error?.stack)
-    console.error("[personalization/recommendations] Backend URL:", JAVA_BACKEND_URL)
-    
     if (error?.name === 'AbortError') {
-      return NextResponse.json(
-        { ok: false, error: "Backend request timed out after 30 seconds" },
-        { status: 504 }
-      )
+      return NextResponse.json({ ok: true, recommendations: [], forYou: [] }, { status: 200 })
     }
-    
     return NextResponse.json(
-      { 
-        ok: false, 
-        error: error?.message || "Failed to get recommendations",
-        details: process.env.NODE_ENV === 'development' ? {
-          stack: error?.stack,
-          backendUrl: JAVA_BACKEND_URL,
-          type: error?.name
-        } : undefined
-      },
-      { status: 500 }
+      { ok: true, recommendations: [], forYou: [] },
+      { status: 200 }
     )
   }
 }

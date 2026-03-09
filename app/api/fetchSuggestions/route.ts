@@ -35,7 +35,24 @@ async function forward(req: NextRequest) {
     })
 
     if (!resp.ok) {
-      throw new Error(`Backend responded with status: ${resp.status}`)
+      const outBody = await resp.text()
+      console.warn("[fetchSuggestions] Backend returned", resp.status, ", returning empty results")
+      return new Response(JSON.stringify({
+        ok: true,
+        suppliersByName: [],
+        suppliersByProduct: [],
+        products: [],
+        query: incoming.searchParams.get('globalSearch') || '',
+        warning: "Search service temporarily unavailable"
+      }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        },
+      })
     }
 
     const outBody = await resp.text()
@@ -109,16 +126,21 @@ async function forward(req: NextRequest) {
       })
     }
 
-    return new Response(JSON.stringify({ 
-      ok: false, 
-      error: "Backend service unavailable",
+    return new Response(JSON.stringify({
+      ok: true,
       suppliersByName: [],
-      suppliersByProduct: [], 
+      suppliersByProduct: [],
       products: [],
-      query: incoming.searchParams.get('globalSearch') || ''
+      query: incoming.searchParams.get('globalSearch') || '',
+      warning: "Search service temporarily unavailable"
     }), {
-      status: 503,
-      headers: { "content-type": "application/json" },
+      status: 200,
+      headers: {
+        "content-type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      },
     })
   } finally {
     clearTimeout(timeout)

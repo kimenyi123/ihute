@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,9 +37,12 @@ import {
 import { Label } from "@/components/ui/label";
 import { useCartStore } from "@/lib/cart-store";
 import { useFavoritesStore } from "@/lib/favorites-store";
+import { useTableCommandStore, getOrCreateGuestEmail } from "@/lib/table-command-store";
+import { useAuthStore } from "@/lib/auth-store";
 import { trackProductView, trackClick } from "@/lib/interaction-tracker";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/use-toast";
+import { getProductImageUrl, getProductImageSrc, normalizeImageUrl } from "@/lib/image-utils";
 
 type ShopWithMeProduct = {
   item_name?: string;
@@ -50,7 +53,6 @@ type ShopWithMeProduct = {
   selling_price?: number | string;
   cost_price?: number | string;
   /** Currency from account_signup for this supplier. */
-  currency?: string;
   item_key_words?: string;
   item_state?: string;
   price?: string;
@@ -133,7 +135,8 @@ function normalizeSellersProducts(sellers: ShopWithMeSeller[]): ShopWithMeSeller
           const stock = Number.isFinite(stockNum) ? stockNum : 0;
           const currency = (item as ShopWithMeProduct).currency || (seller as ShopWithMeSeller).currency;
           const fam = (p as Record<string, unknown>).famille ?? (p as Record<string, unknown>).FAMILLE ?? (item as Record<string, unknown>).famille ?? (item as Record<string, unknown>).FAMILLE;
-          const img = (item as Record<string, unknown>).image_url ?? (item as Record<string, unknown>).item_image_url ?? (item as Record<string, unknown>).image;
+          const rawImg = getProductImageUrl(item as Record<string, unknown>);
+          const img = rawImg ? (normalizeImageUrl(rawImg) ?? rawImg) : undefined;
         flatProducts.push({
             ...item,
             OWNER: item.OWNER ?? (p as ShopWithMeProduct).OWNER ?? seller.OWNER,
@@ -141,19 +144,20 @@ function normalizeSellersProducts(sellers: ShopWithMeSeller[]): ShopWithMeSeller
             in_stock: stock > 0,
             currency: currency || undefined,
             famille: fam != null ? String(fam) : undefined,
-            image: typeof img === "string" ? img : undefined,
+            image: img ?? undefined,
           });
         }
       } else {
         const flatP = p as ShopWithMeProduct;
         const currency = flatP.currency || (seller as ShopWithMeSeller).currency;
         const fam = (p as Record<string, unknown>).famille ?? (p as Record<string, unknown>).FAMILLE ?? flatP.famille;
-        const img = (p as Record<string, unknown>).image_url ?? (p as Record<string, unknown>).item_image_url ?? flatP.image;
+        const rawImg = getProductImageUrl(p as Record<string, unknown>);
+        const img = rawImg ? (normalizeImageUrl(rawImg) ?? rawImg) : undefined;
         flatProducts.push({
           ...flatP,
           currency: currency || flatP.currency,
           famille: fam != null ? String(fam) : flatP.famille,
-          image: typeof img === "string" ? img : flatP.image,
+          image: img ?? flatP.image,
         });
       }
     }
@@ -253,7 +257,6 @@ export default function ShopWithMePage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedSeller, setSelectedSeller] = useState<string | null>(null);
   const [productSearchQuery, setProductSearchQuery] = useState("");
-  const [debouncedProductSearch, setDebouncedProductSearch] = useState("");
   const [sortBy, setSortBy] = useState("featured");
   const [categories, setCategories] = useState<CategorySection[]>([]);
 
@@ -261,23 +264,29 @@ export default function ShopWithMePage() {
   const cartItemCount = cartItems.reduce((sum, item) => sum + item.qty, 0);
   const setTableInfo = useCartStore((s) => s.setTableInfo);
   const clearTableInfo = useCartStore((s) => s.clearTableInfo);
+  const joinTableCommand = useTableCommandStore((s) => s.joinTableCommand);
+  const { user, isAuthenticated } = useAuthStore();
 
-  // Debounce product search so we hit the backend with the query
+  const [debouncedProductSearch, setDebouncedProductSearch] = useState("");
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedProductSearch(productSearchQuery.trim()), 300);
+    const t = setTimeout(() => setDebouncedProductSearch(productSearchQuery.trim()), 200);
     return () => clearTimeout(t);
   }, [productSearchQuery]);
 
-  // Fetch shop from backend when nickname or product search changes (search hits backend, not just client filter)
+  // Fetch from backend when nickname or product search changes — always send productSearch when user typed (backend keyword search)
+  const prevNicknameRef = useRef<string>("");
   useEffect(() => {
     if (!nicknameFromUrl?.trim()) return;
     let cancelled = false;
     const normalizedNickname = nicknameFromUrl.trim().toLowerCase();
-    setLoading(true);
+    const nicknameChanged = prevNicknameRef.current !== normalizedNickname;
+    if (nicknameChanged) prevNicknameRef.current = normalizedNickname;
+    if (nicknameChanged) setLoading(true);
     setError(null);
     const params = new URLSearchParams({ nickname: normalizedNickname });
     if (debouncedProductSearch) params.set("productSearch", debouncedProductSearch);
-    fetch(`/api/shop-with-me?${params.toString()}`, { cache: "no-store" })
+    const url = `/api/shop-with-me?${params.toString()}`;
+    fetch(url, { cache: "no-store" })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch shop data`);
         return res.json();
@@ -306,15 +315,12 @@ export default function ShopWithMePage() {
     return () => { cancelled = true; };
   }, [nicknameFromUrl, debouncedProductSearch]);
 
-  // Pre-fill customer/table from URL (table=table%204, customer=..., address=...)
+  // Pre-fill customer/address only from URL params (never use table name as buyer name)
   useEffect(() => {
     if (customerFromQuery?.trim()) setCustomerName(customerFromQuery.trim());
     if (addressFromQuery?.trim()) setCustomerAddress(addressFromQuery.trim());
-    if (tableFromQuery?.trim()) {
-      if (!customerFromQuery?.trim()) setCustomerName(tableFromQuery.trim());
-      if (!addressFromQuery?.trim()) setCustomerAddress(tableFromQuery.trim());
-    }
-  }, [customerFromQuery, addressFromQuery, tableFromQuery]);
+    // Do NOT set customerName/customerAddress from tableFromQuery — table name is not the buyer
+  }, [customerFromQuery, addressFromQuery]);
 
   async function searchShop(searchNickname: string) {
     if (!searchNickname.trim()) {
@@ -445,6 +451,25 @@ export default function ShopWithMePage() {
     });
   }, [customerFromQuery, addressFromQuery, tableFromQuery, currentSeller, setTableInfo, clearTableInfo]);
 
+  // Auto-join table when landing from supplier QR (e.g. ...?nickname=burrows&table=TEST ISHYIGA2)
+  const joinedTableRef = useRef<string | null>(null);
+  useEffect(() => {
+    const tableName = tableFromQuery?.trim();
+    if (!tableName) {
+      joinedTableRef.current = null;
+      return;
+    }
+    if (!currentSeller?.ISHYIGA_ACCOUNT) return;
+    const key = `${tableName}|${currentSeller.ISHYIGA_ACCOUNT}`;
+    if (joinedTableRef.current === key) return;
+    joinedTableRef.current = key;
+    const locationId = currentSeller.ISHYIGA_ACCOUNT;
+    const locationName = currentSeller.OWNER || currentSeller.SELLER_NAMES || currentSeller.NICKNAME || "Shop";
+    const userName = customerName?.trim() || tableName || "Guest";
+    const userEmail = isAuthenticated && user?.email ? user.email : getOrCreateGuestEmail();
+    joinTableCommand(tableName, locationId, locationName, userName, userEmail);
+  }, [tableFromQuery, currentSeller, joinTableCommand, customerName, isAuthenticated, user?.email]);
+
   useEffect(() => {
     if (!currentSeller?.products) {
       setCategories([]);
@@ -492,7 +517,10 @@ export default function ShopWithMePage() {
     setCategories((prev) => prev.map((cat) => (cat.name === categoryName ? { ...cat, expanded: !cat.expanded } : cat)));
   };
 
+  // When we have a backend search (debouncedProductSearch), the API was called with productSearch — trust backend result (no client-side filter).
+  // When no backend search, filter on client for instant feedback.
   const getFilteredProducts = (products: ShopWithMeProduct[]) => {
+    if (debouncedProductSearch.trim()) return products; // Backend already filtered; show exactly what we got
     if (!productSearchQuery.trim()) return products;
 
     const query = productSearchQuery.toLowerCase().trim();
@@ -505,12 +533,12 @@ export default function ShopWithMePage() {
       const french = ((product as Record<string, unknown>).item_key_words_french as string || "").toLowerCase();
       const kinyarwanda = ((product as Record<string, unknown>).item_key_words_kinyarwanda as string || "").toLowerCase();
       const description = ((product as Record<string, unknown>).item_description as string || (product as Record<string, unknown>).description as string || "").toLowerCase();
-      const combined = `${name} ${keywords} ${famille} ${french} ${kinyarwanda} ${description}`;
+      const itemKeywords = ((product as Record<string, unknown>).item_keywords as string || "").toLowerCase();
+      const combined = `${name} ${keywords} ${famille} ${french} ${kinyarwanda} ${description} ${itemKeywords}`;
       return terms.every((term) => combined.includes(term));
     });
 
-    // If nothing matches the text, fall back to showing all products
-    return matches.length > 0 ? matches : products;
+    return matches;
   };
 
   const getSortedProducts = (products: ShopWithMeProduct[]) => {
@@ -672,12 +700,28 @@ export default function ShopWithMePage() {
                   {currentSeller.OWNER || currentSeller.SELLER_NAMES || currentSeller.NICKNAME}
                 </h1>
                 <p className="text-sm text-muted-foreground mt-1">
-                  {productSearchQuery.trim()
-                    ? `Showing ${totalProductCount} of ${totalItemsFromBackend} item${totalItemsFromBackend !== 1 ? "s" : ""} matching "${productSearchQuery.trim()}"`
-                    : `${totalItemsFromBackend} item${totalItemsFromBackend !== 1 ? "s" : ""}`}
+                  {productSearchQuery.trim() ? (
+                    productSearchQuery.trim() !== debouncedProductSearch ? (
+                      <>Searching backend for &quot;{productSearchQuery.trim()}&quot;…</>
+                    ) : (
+                      <>Showing {totalProductCount} of {totalItemsFromBackend} item{totalItemsFromBackend !== 1 ? "s" : ""} matching &quot;{productSearchQuery.trim()}&quot;</>
+                    )
+                  ) : (
+                    `${totalItemsFromBackend} item${totalItemsFromBackend !== 1 ? "s" : ""}`
+                  )}
                 </p>
               </div>
 
+              {hasTableContext && tableFromQuery?.trim() && (
+                <Badge variant="outline" className="text-xs bg-primary/5 border-primary/20">
+                  Table: <span className="font-mono font-medium">{tableFromQuery.trim()}</span>
+                </Badge>
+              )}
+              {hasTableContext && tableFromQuery?.trim() && (
+                <Badge variant="default" className="bg-[#1e3a5f] text-xs sm:text-sm py-1.5 sm:py-2 px-3 sm:px-4">
+                  Table: <span className="font-mono font-medium">{tableFromQuery.trim()}</span>
+                </Badge>
+              )}
               {hasTableContext && (isDeliveryShop || isBarOrRestaurant) && (
                 <div className="flex items-center gap-2 self-start sm:self-auto">
                   {customerName && customerAddress ? (
@@ -736,10 +780,9 @@ export default function ShopWithMePage() {
               </div>
             </div>
 
-            {loading ? (
-              <div className="text-center py-12">
-                <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2 text-primary" />
-                <p className="text-muted-foreground">Loading products...</p>
+            {loading && categories.length === 0 ? (
+              <div className="text-center py-6">
+                <Loader2 className="h-5 w-5 animate-spin mx-auto text-muted-foreground" />
               </div>
             ) : (
               <div className="space-y-8">
@@ -820,26 +863,32 @@ export default function ShopWithMePage() {
       <Dialog open={showCustomerDialog} onOpenChange={setShowCustomerDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{isBarOrRestaurant ? "Table Information" : "Customer Information"}</DialogTitle>
+            <DialogTitle>
+              {isBarOrRestaurant ? "Your name at this table" : "Customer Information"}
+            </DialogTitle>
             <DialogDescription>
               {isBarOrRestaurant
-                ? "Provide your table or group name so the bar/restaurant can find you"
+                ? "Tell the bar/restaurant who you are so they can match orders to people at this table. The table name (e.g. Ishyiga Table) comes from the QR link."
                 : "Please provide your name and delivery address"}
             </DialogDescription>
           </DialogHeader>
           <div className="py-4 space-y-4">
             <div>
-              <Label htmlFor="customer-name">{isBarOrRestaurant ? "Table / Guest Name *" : "Full Name *"}</Label>
+              <Label htmlFor="customer-name">
+                {isBarOrRestaurant ? "Your Name *" : "Full Name *"}
+              </Label>
               <Input
                 id="customer-name"
-                placeholder={isBarOrRestaurant ? "e.g., Table 5 - Friends" : "e.g., John Doe"}
+                placeholder={isBarOrRestaurant ? "e.g., John, Alice, Nelly" : "e.g., John Doe"}
                 value={customerName}
                 onChange={(e) => setCustomerName(e.target.value)}
                 className="mt-2"
               />
             </div>
             <div>
-              <Label htmlFor="customer-address">{isBarOrRestaurant ? "Location / Note (optional)" : "Delivery Address *"}</Label>
+              <Label htmlFor="customer-address">
+                {isBarOrRestaurant ? "Where are you sitting? (optional)" : "Delivery Address *"}
+              </Label>
               <Input
                 id="customer-address"
                 placeholder={
@@ -900,10 +949,8 @@ function ProductCard({
   const productName = String(p.item_commercial_name ?? p.item_name ?? p.ITEM_NAME ?? p.ITEM_COMMERCIAL_NAME ?? "").trim() || "Product";
   const priceRaw = p.selling_price ?? p.price ?? p.UNITY_PRICE ?? p.SALE_PRICE_INCLUSIVE;
   const price = extractNumericPrice(priceRaw);
-  const rawImageUrl = product.image ?? (p.image_url as string) ?? (p.item_image_url as string) ?? "";
-  const imageUrl = typeof rawImageUrl === "string" && rawImageUrl.trim() !== "" ? rawImageUrl.trim() : "";
-  const validImage =
-    imageUrl &&
+  const imageUrl = getProductImageSrc(product as Record<string, unknown>);
+  const validImage = imageUrl && imageUrl !== "/placeholder.svg?height=300&width=300" &&
     (imageUrl.startsWith("http://") || imageUrl.startsWith("https://") || imageUrl.startsWith("/"));
   const [imgError, setImgError] = useState(false);
   const fav = isFavorite(itemCode);
@@ -949,7 +996,7 @@ function ProductCard({
         name: productName,
         price: price,
         unit: "pcs",
-        image: imageUrl || product.image,
+        image: validImage ? imageUrl : undefined,
         itemCode,
         supplierId: supplierId,
         supplierName: ownerName || "Supplier",
@@ -978,7 +1025,7 @@ function ProductCard({
       name: productName,
       price: price,
       unit: "pcs",
-      image: imageUrl || product.image,
+      image: validImage ? imageUrl : undefined,
       description: undefined,
       supplierId,
       supplierName: ownerName,
@@ -1002,6 +1049,7 @@ function ProductCard({
             alt={productName}
             className="absolute inset-0 h-full w-full object-cover"
             loading="lazy"
+            decoding="async"
             referrerPolicy="no-referrer"
             onError={() => setImgError(true)}
           />
@@ -1035,6 +1083,21 @@ function ProductCard({
       <CardContent className="p-3 flex flex-col gap-2">
         <div className="min-h-[2.5rem]">
           <h3 className="text-sm font-semibold leading-tight line-clamp-2">{productName}</h3>
+          {/* IHUTE: ingredient-style search badges — direct match first, then "contains" */}
+          {((p.search_priority as string) === "direct" || (p.contains_ingredient as string)) && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {(p.search_priority as string) === "direct" && (
+                <span className="inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
+                  Main Ingredient
+                </span>
+              )}
+              {(p.contains_ingredient as string) && (p.search_priority as string) !== "direct" && (
+                <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-700">
+                  Contains: {String(p.contains_ingredient)}
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         <p className="text-xs text-muted-foreground">Quality product</p>
@@ -1048,7 +1111,10 @@ function ProductCard({
         <Button
           size="sm"
           className="mt-1 w-full bg-[#1e3a5f] hover:bg-[#2c4f7c]"
-          onClick={handleAddToCart}
+          onClick={(e) => {
+            e.stopPropagation();
+            handleAddToCart();
+          }}
         >
           {hasTableContext && (isDeliveryShop || isBarOrRestaurant) && (!customerName || !customerAddress)
             ? isBarOrRestaurant

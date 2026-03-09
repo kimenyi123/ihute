@@ -246,6 +246,37 @@ export async function POST(req: NextRequest) {
 
     log(requestId, "Generated status history with", statusHistory.length, "entries")
 
+    const createdAt = data.CREATED_AT || data.createdAt || new Date().toISOString()
+    const createdTime = typeof createdAt === "number" ? createdAt : new Date(createdAt).getTime()
+    const estimatedHours = Number(process.env.ORDER_ESTIMATED_DELIVERY_HOURS) || 2
+    const estimatedDeliveryAt =
+      data.ESTIMATED_DELIVERY_AT != null
+        ? new Date(Number(data.ESTIMATED_DELIVERY_AT)).toISOString()
+        : new Date(createdTime + estimatedHours * 60 * 60 * 1000).toISOString()
+    const driverPhone = data.DRIVER_PHONE ?? data.driver_phone ?? data.DRIVER_TEL ?? undefined
+
+    const rawOrderStatus = (data.ORDER_STATUS || data.order_status || "").toString().trim()
+    const rawPaymentStatus = (data.PAYMENT_STATUS || data.payment_status || "").toString().trim()
+    const orderStatusDisplay = rawOrderStatus || (mappedStatus === "delivered" ? "Delivered" : mappedStatus === "in-transit" ? "In transit" : mappedStatus === "processing" ? "Processing" : mappedStatus === "pending" ? "Pending" : "Open")
+    const paymentStatusDisplay = rawPaymentStatus || (rawOrderStatus ? "" : "Pending")
+    const effectivePaymentStatus = paymentStatusDisplay || "Pending"
+
+    const itemsArray = Array.isArray(data.items)
+      ? data.items.map((item: any) => ({
+          ITEM_CODE: item.ITEM_CODE || item.item_code,
+          ITEM_NAME: item.ITEM_NAME || item.name || "Product",
+          name: item.ITEM_NAME || item.name || "Product",
+          QUANTITY: Number(item.QUANTITY ?? item.qty ?? item.QTY ?? 1),
+          qty: Number(item.QUANTITY ?? item.qty ?? item.QTY ?? 1),
+          UNIT_PRICE: Number(item.UNIT_PRICE ?? item.unitPrice ?? 0),
+          unitPrice: Number(item.UNIT_PRICE ?? item.unitPrice ?? 0),
+          UNIT: item.UNIT || item.unit,
+          unit: item.UNIT || item.unit,
+        }))
+      : []
+    const totalAmount = Number(data.AMOUNT ?? data.total ?? 0)
+    const currency = (data.CURRENCY || "RWF").toString().trim()
+
     const order = {
       orderId: data.ID_ORDER || orderId,
       sellerName: data.SELLER_NAMES || data.SELLER_OWNER || "Unknown Seller",
@@ -254,24 +285,41 @@ export async function POST(req: NextRequest) {
       buyerName: data.BUYER_NAME || data.BUYER_OWNER || undefined,
       buyerPhone: data.BUYER_PHONE || data.BUYER_TEL || undefined,
       buyerLocation: data.DELIVERY_LOCATION || data.BUYER_LOCATION || undefined,
-      items: Array.isArray(data.items)
-        ? data.items.map((item: any) => ({
-            name: item.ITEM_NAME || item.name || "Product",
-            qty: Number(item.QTY || item.qty || item.QUANTITY || 1),
-            unitPrice: Number(item.UNIT_PRICE || item.unitPrice || 0),
-            unit: item.UNIT || item.unit || undefined,
-          }))
-        : [],
-      total: Number(data.AMOUNT || data.total || 0),
+      items: itemsArray,
+      total: totalAmount,
       paymentMethod: data.PAYMENT_NAME || data.paymentMethod || "Unknown",
-      paymentStatus: data.PAYMENT_STATUS || undefined,
+      paymentStatus: effectivePaymentStatus,
       status: mappedStatus,
-      createdAt: data.CREATED_AT || data.createdAt || new Date().toISOString(),
+      createdAt,
       updatedAt: data.UPDATED_AT || data.updatedAt || undefined,
       statusHistory: statusHistory,
+      estimatedDeliveryAt,
+      driverPhone: driverPhone ? String(driverPhone).trim() : undefined,
+      // OrderDetails shape for /orders/[orderId] page
+      ID_ORDER: data.ID_ORDER || Number(orderId) || orderId,
+      SELLER_NAMES: data.SELLER_NAMES || data.SELLER_OWNER || "Unknown Seller",
+      SELLER_PHONE: data.SELLER_PHONE || data.SELLER_TEL || undefined,
+      SELLER_ISHYIGA_ACCOUNT: data.SELLER_ISHYIGA_ACCOUNT || undefined,
+      BUYER_OWNER: data.BUYER_OWNER || data.BUYER_NAME,
+      BUYER_NAME: data.BUYER_NAME || data.BUYER_OWNER,
+      BUYER_PHONE: data.BUYER_PHONE || data.BUYER_TEL,
+      BUYER_EMAIL: data.BUYER_EMAIL,
+      DELIVERY_LOCATION: data.DELIVERY_LOCATION || data.BUYER_LOCATION,
+      BUYER_LOCATION: data.BUYER_LOCATION || data.DELIVERY_LOCATION,
+      PAYMENT_NAME: data.PAYMENT_NAME || data.paymentMethod || "Unknown",
+      PAYMENT_STATUS: effectivePaymentStatus,
+      ORDER_STATUS: orderStatusDisplay,
+      REKISIYO_STATUS: data.REKISIYO_STATUS,
+      REFERENCE: data.REFERENCE,
+      AMOUNT: totalAmount,
+      CURRENCY: currency,
+      CREATED_AT: createdAt,
+      IS_TABLE_COMMAND: Boolean(data.IS_TABLE_COMMAND ?? data.table_command),
+      TABLE_NAME: data.TABLE_NAME || data.table_name,
+      TABLE_LOCATION: data.TABLE_LOCATION || data.table_location,
     }
 
-    log(requestId, "✅ Order tracking SUCCESS - paymentMethod:", order.paymentMethod, "paymentStatus:", order.paymentStatus, "status:", order.status, "history entries:", statusHistory.length)
+    log(requestId, "✅ Order tracking SUCCESS - paymentMethod:", order.paymentMethod, "paymentStatus:", order.PAYMENT_STATUS, "ORDER_STATUS:", order.ORDER_STATUS, "history entries:", statusHistory.length)
     return NextResponse.json({ ok: true, order })
   } catch (error: any) {
     log(requestId, "❌ ERROR:", error?.message)

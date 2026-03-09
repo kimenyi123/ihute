@@ -18,11 +18,20 @@ import { formatPaymentMethod } from "@/lib/payment-utils"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog"
-import { Copy, PhoneCall, CheckCircle2, RotateCcw, MessageCircle, Truck, CreditCard, Wallet, Beer, Users, Lock } from "lucide-react"
+import { Copy, PhoneCall, CheckCircle2, RotateCcw, MessageCircle, Truck, CreditCard, Wallet, Beer, Users, Lock, Tag, MapPin } from "lucide-react"
 import { isBarOrRestaurant } from "@/lib/constants"
 import { useTableCommandStore } from "@/lib/table-command-store"
+import { getSavedAddresses, saveAddress, type SavedAddress } from "@/lib/saved-addresses"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { TableCommandDialog } from "@/components/table-command-dialog"
 import { TableCommandShareModal } from "@/components/table-command-share-modal"
+import { CartSuggestionsPopup } from "@/components/cart-suggestions-popup"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -120,7 +129,7 @@ function CartSummaryBody() {
   // Payment method selection dialog
   const [paymentMethodOpen, setPaymentMethodOpen] = useState(false)
   const [selectedSeller, setSelectedSeller] = useState<string | null>(null)
-  const [paymentMethod, setPaymentMethod] = useState<"momo" | "cod">("momo")
+  const [paymentMethod, setPaymentMethod] = useState<"momo" | "airtel" | "cod">("momo")
 
   // Anonymous checkout mode
   const [checkoutMode, setCheckoutMode] = useState<"login" | "anonymous">(isAuthenticated ? "login" : "anonymous")
@@ -130,34 +139,20 @@ function CartSummaryBody() {
   // Table command mode
   const { isInTableCommand, activeSession, lockTableCommand, canCloseTable, closeTableCommand, createTableCommand, updateTableShareData } = useTableCommandStore()
 
-  // ✅ UPDATED: Pre-fill name from table command session if available
-  useEffect(() => {
-    if (isInTableCommand() && activeSession && !isAuthenticated) {
-      // Priority 1: Use userName if available
-      if (activeSession.userName) {
-        setAnonymousName(activeSession.userName)
-      }
-      // Priority 2: Use tableName if no userName
-      else if (activeSession.tableName && !anonymousName) {
-        setAnonymousName(activeSession.tableName)
-      }
-    }
-  }, [isInTableCommand, activeSession, isAuthenticated, anonymousName])
+  // Do NOT pre-fill "Your Name" for table orders — table name is already shown in "Table Order - ... - Table X".
+  // User must enter their own name so supplier sees who ordered (not the table name as buyer).
 
-  // ✅ FIXED: Pre-fill from tableInfo (customer info from shop-with-me)
+  // Pre-fill from tableInfo only when NOT a table order (e.g. delivery from shop-with-me)
   useEffect(() => {
-    if (checkoutMode === "anonymous" && tableInfo) {
-      // Pre-fill customer name if available
+    if (checkoutMode === "anonymous" && tableInfo && !isInTableCommand()) {
       if (tableInfo.customerName && !anonymousName) {
         setAnonymousName(tableInfo.customerName)
       }
-
-      // Pre-fill delivery location if available
       if (tableInfo.customerAddress && !deliveryLocation) {
         setDeliveryLocation(tableInfo.customerAddress)
       }
     }
-  }, [checkoutMode, tableInfo])
+  }, [checkoutMode, tableInfo, isInTableCommand])
 
   const [tableCommandDialogOpen, setTableCommandDialogOpen] = useState(false)
   const [tableCommandSeller, setTableCommandSeller] = useState<{ id: string; name: string } | null>(null)
@@ -171,19 +166,61 @@ function CartSummaryBody() {
     shareableToken: string
   } | null>(null)
 
-  // MoMo payment dialog
+  // MoMo payment dialog (MTN or Airtel)
   const [momoOpen, setMomoOpen] = useState(false)
   const [momoForSeller, setMomoForSeller] = useState<string | null>(null)
+  const [momoPaymentProvider, setMomoPaymentProvider] = useState<"mtn" | "airtel">("mtn")
+
+  // Cart suggestions popup (before checkout). Skip popup for rest of session once user chose "No thanks" or "Continue to checkout"
+  const [suggestionsPopupOpen, setSuggestionsPopupOpen] = useState(false)
+  const [pendingCheckoutSupplierId, setPendingCheckoutSupplierId] = useState<string | null>(null)
+  const skipSuggestionsSessionKey = "ihute_skip_cart_suggestions"
+  const shouldSkipSuggestions = () => typeof window !== "undefined" && sessionStorage.getItem(skipSuggestionsSessionKey) === "1"
 
   // COD dialog
   const [codOpen, setCodOpen] = useState(false)
   const [codForSeller, setCodForSeller] = useState<string | null>(null)
   const [deliveryLocation, setDeliveryLocation] = useState(user?.location || "")
   const [contactPhone, setContactPhone] = useState(user?.phone || "")
+  const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([])
+  const [promoCode, setPromoCode] = useState("")
+  const [appliedPromo, setAppliedPromo] = useState<{ code: string; percent: number } | null>(null)
+  const [promoError, setPromoError] = useState<string | null>(null)
 
   const groups = getGroupsBySeller()
   const grandTotal = Math.round(getGrandTotal())
+  const discountPercent = appliedPromo?.percent ?? 0
+  const discountAmount = Math.round((grandTotal * discountPercent) / 100)
+  const totalAfterDiscount = grandTotal - discountAmount
   const myPhone = checkoutMode === "anonymous" ? anonymousPhone : (user?.phone || "")
+
+  const applyPromo = async () => {
+    const code = promoCode.trim().toUpperCase()
+    setPromoError(null)
+    if (!code) {
+      setAppliedPromo(null)
+      return
+    }
+    try {
+      const res = await fetch(`/api/promo/validate?code=${encodeURIComponent(code)}`)
+      const data = await res.json().catch(() => ({}))
+      const valid = data?.valid === true
+      const percent = typeof data?.percent === "number" ? data.percent : undefined
+      if (valid && percent != null) {
+        setAppliedPromo({ code, percent })
+      } else {
+        setAppliedPromo(null)
+        setPromoError(data?.message || "Invalid or expired code")
+      }
+    } catch {
+      setAppliedPromo(null)
+      setPromoError("Could not validate code")
+    }
+  }
+
+  useEffect(() => {
+    if (codOpen) setSavedAddresses(getSavedAddresses())
+  }, [codOpen])
 
   const requireLogin = () => {
     // If anonymous mode, don't require login
@@ -305,9 +342,9 @@ function CartSummaryBody() {
       setCodOpen(true)
       setSelectedSeller(null)
     } else {
-      // MoMo - show QR code dialog
       setPaymentMethodOpen(false)
       setMomoForSeller(selectedSeller)
+      setMomoPaymentProvider(paymentMethod === "airtel" ? "airtel" : "mtn")
       setMomoOpen(true)
       setSelectedSeller(null)
     }
@@ -317,7 +354,7 @@ function CartSummaryBody() {
   const placeOrder = async (
     g: ReturnType<typeof getGroupsBySeller>[number],
     opts: {
-      paymentName: "PAID_MTN_MOMO" | "PAY_ON_DELIVERY";
+      paymentName: "PAID_MTN_MOMO" | "PAID_AIRTEL_MOMO" | "PAY_ON_DELIVERY";
       buyerPhone?: string;
       buyerLocation?: string;
       reference?: string;
@@ -347,6 +384,17 @@ function CartSummaryBody() {
         items: items.map((it) => ({ name: it.name, qty: it.qty, NIKI_CODE: it.itemCode, unitPrice: it.unitPrice })),
       })
 
+      // Buyer name: for table orders use user-entered name only (so "Ordered By" shows person, not table name)
+      const isOrderingFromOwnShop = Boolean(user?.ishyigaAccount && g.supplierId && user.ishyigaAccount === g.supplierId);
+      const resolvedBuyerName = isInTableCommand()
+        ? (checkoutMode === "anonymous" ? (anonymousName?.trim() || "Guest") : (user?.name || "Guest"))
+        : (tableInfo?.customerName && String(tableInfo.customerName).trim()) ||
+          (checkoutMode === "anonymous" ? anonymousName : null) ||
+          (isOrderingFromOwnShop ? (tableInfo?.customerName || anonymousName || "Guest") : user?.name) ||
+          anonymousName ||
+          user?.name ||
+          "Guest";
+
       const res = await fetch("/api/orders/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -354,7 +402,7 @@ function CartSummaryBody() {
           buyerEmail: checkoutMode === "anonymous" ? `guest_${Date.now()}@ihute.rw` : user?.email,
           buyerPhone: opts.buyerPhone || (checkoutMode === "anonymous" ? anonymousPhone : user?.phone || ""),
           buyerLocation: opts.buyerLocation || (checkoutMode === "anonymous" ? deliveryLocation : user?.location || "NA"),
-          buyerName: checkoutMode === "anonymous" ? anonymousName : user?.name,
+          buyerName: String(resolvedBuyerName || "").trim() || "Guest",
           sellerAccount: g.supplierId,
           sellerName: g.supplierName,
           sellerPhone: g.phone || "",
@@ -430,7 +478,7 @@ function CartSummaryBody() {
           return
         }
 
-        if (opts.paymentName === "PAID_MTN_MOMO" && orderId) {
+        if ((opts.paymentName === "PAID_MTN_MOMO" || opts.paymentName === "PAID_AIRTEL_MOMO") && orderId) {
           pollPayment(orderId, g.supplierId)
         }
 
@@ -464,16 +512,7 @@ function CartSummaryBody() {
         router.refresh()
       } else {
         setPaymentStatus(g.supplierId, "failed")
-        const errMsg = json?.error || "Unknown error"
-        const isInsufficientStock = /insufficient stock/i.test(errMsg)
-        if (isInsufficientStock) {
-          alert(
-            `Unable to place order: ${errMsg}\n\n` +
-            "Try reducing the quantity, or contact the seller to confirm availability."
-          )
-        } else {
-          alert(`Failed to create order: ${errMsg}`)
-        }
+        alert(`Failed to create order: ${json?.error || "Unknown error"}`)
       }
     } catch (error) {
       console.error("Order creation error:", error)
@@ -518,7 +557,11 @@ function CartSummaryBody() {
     if (!momoForSeller) return
     const g = groups.find(x => x.supplierId === momoForSeller)
     if (!g) { setMomoOpen(false); return }
-    await confirmPayment(g)
+    await placeOrder(g, {
+      paymentName: momoPaymentProvider === "airtel" ? "PAID_AIRTEL_MOMO" : "PAID_MTN_MOMO",
+      reference: `MOMO_${Date.now()}`,
+      paymentId: `MOMO_${Date.now()}`
+    })
     setMomoOpen(false)
     setMomoForSeller(null)
   }
@@ -564,11 +607,18 @@ function CartSummaryBody() {
                 </div>
                 <Separator />
 
-                {/* Primary checkout button */}
+                {/* Primary checkout: if user already dismissed suggestions this session, go straight to payment */}
                 <Button
                   className="w-full"
                   size="lg"
-                  onClick={() => openPaymentMethod(g.supplierId)}
+                  onClick={() => {
+                    setPendingCheckoutSupplierId(g.supplierId)
+                    if (shouldSkipSuggestions()) {
+                      openPaymentMethod(g.supplierId)
+                    } else {
+                      setSuggestionsPopupOpen(true)
+                    }
+                  }}
                   disabled={busy === g.supplierId || status === "paid"}
                 >
                   <CreditCard className="h-4 w-4 mr-2" />
@@ -609,25 +659,86 @@ function CartSummaryBody() {
           )
         })}
 
+        {/* Promo code */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Tag className="h-4 w-4" /> Promo code
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <div className="flex gap-2">
+              <Input
+                value={promoCode}
+                onChange={(e) => { setPromoCode(e.target.value); setPromoError(null) }}
+                placeholder="Enter promo code"
+                className="flex-1"
+              />
+              <Button variant="secondary" onClick={() => applyPromo()}>Apply</Button>
+            </div>
+            {appliedPromo && (
+              <p className="text-sm text-green-600">{appliedPromo.percent}% off applied</p>
+            )}
+            {promoError && <p className="text-sm text-destructive">{promoError}</p>}
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Grand Total</CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-            <div className="text-lg font-bold">{grandTotal.toLocaleString()} RWF</div>
-            <Button variant="outline" onClick={clear} className="w-full sm:w-auto">Clear Cart</Button>
+          <CardContent className="flex flex-col gap-2">
+            {discountAmount > 0 && (
+              <>
+                <div className="flex justify-between text-sm text-muted-foreground">
+                  <span>Subtotal</span>
+                  <span>{grandTotal.toLocaleString()} RWF</span>
+                </div>
+                <div className="flex justify-between text-sm text-green-600">
+                  <span>Discount ({appliedPromo?.percent}%)</span>
+                  <span>-{discountAmount.toLocaleString()} RWF</span>
+                </div>
+              </>
+            )}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-1">
+              <div className="text-lg font-bold">{totalAfterDiscount.toLocaleString()} RWF</div>
+              <Button variant="outline" onClick={clear} className="w-full sm:w-auto">Clear Cart</Button>
+            </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* ✅ UPDATED: Payment method selection dialog with customer info pre-filled */}
+      {/* Smart cart suggestions: show when user clicks Proceed to Checkout, then continue to payment */}
+      <CartSuggestionsPopup
+        open={suggestionsPopupOpen}
+        onOpenChange={setSuggestionsPopupOpen}
+        cartItems={groups.flatMap((g) =>
+          g.items.map((i) => ({
+            product_id: i.id ?? i.itemCode,
+            name: i.name,
+            quantity: i.qty,
+            supplier_id: (i.supplierId ?? g.supplierId)?.toString().trim() || "",
+            supplier_name: g.supplierName,
+          }))
+        )}
+        onContinue={() => {
+          const id = pendingCheckoutSupplierId
+          setPendingCheckoutSupplierId(null)
+          setSuggestionsPopupOpen(false)
+          if (typeof window !== "undefined") sessionStorage.setItem(skipSuggestionsSessionKey, "1")
+          if (id) openPaymentMethod(id)
+        }}
+      />
+
+      {/* ✅ UPDATED: Payment method selection dialog with customer info pre-filled; scrollable on small viewports */}
       <Dialog open={paymentMethodOpen} onOpenChange={setPaymentMethodOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
+        <DialogContent className="max-w-lg max-h-[90vh] flex flex-col overflow-hidden p-0 gap-0">
+          <DialogHeader className="flex-shrink-0 px-6 pt-6 pb-2">
             <DialogTitle>Choose Payment Method</DialogTitle>
             <DialogDescription>Select how you'd like to pay for this order</DialogDescription>
           </DialogHeader>
 
+          <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-4">
           {/* ✅ Customer Info Banner (from shop-with-me) */}
           {tableInfo && tableInfo.customerName && (
             <div className="rounded-lg bg-blue-50 border border-blue-200 p-3">
@@ -681,7 +792,7 @@ function CartSummaryBody() {
             </div>
           )}
 
-          {/* ✅ UPDATED: Anonymous user info collection with pre-fill from shop-with-me */}
+          {/* Anonymous user info: for table orders do NOT pre-fill name — user enters their name so "Ordered By" shows person, not table */}
           {checkoutMode === "anonymous" && (
             <div className="space-y-3 pb-4 border-b">
               <div className="space-y-1">
@@ -689,14 +800,18 @@ function CartSummaryBody() {
                 <Input
                   value={anonymousName}
                   onChange={(e) => setAnonymousName(e.target.value)}
-                  placeholder="Enter your full name"
-                  className={tableInfo?.customerName ? "bg-muted" : ""}
+                  placeholder={isInTableCommand() ? "e.g., John, Alice" : "Enter your full name"}
+                  className={!isInTableCommand() && tableInfo?.customerName ? "bg-muted" : ""}
                 />
-                {tableInfo?.customerName && (
+                {isInTableCommand() ? (
+                  <p className="text-xs text-muted-foreground">
+                    Enter your name so the supplier knows who ordered (table is already shown above).
+                  </p>
+                ) : tableInfo?.customerName ? (
                   <p className="text-xs text-muted-foreground">
                     Pre-filled from shop information
                   </p>
-                )}
+                ) : null}
               </div>
               <div className="space-y-1">
                 <Label className="text-sm font-medium">Phone Number *</Label>
@@ -713,7 +828,7 @@ function CartSummaryBody() {
           )}
 
           {/* Payment method selection */}
-          <RadioGroup value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as "momo" | "cod")}>
+          <RadioGroup value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as "momo" | "airtel" | "cod")}>
             <div className="space-y-3">
               {selectedSeller && (() => {
                 const g = groups.find(x => x.supplierId === selectedSeller)
@@ -732,6 +847,22 @@ function CartSummaryBody() {
                           <div className="font-medium">MTN Mobile Money</div>
                           <div className="text-sm text-muted-foreground">
                             {hasUssdTarget ? 'Pay instantly with MTN MoMo' : 'Not available for this seller'}
+                          </div>
+                        </div>
+                      </Label>
+                    </div>
+
+                    <div
+                      className={`flex items-center space-x-3 border rounded-lg p-4 cursor-pointer hover:bg-accent ${!hasUssdTarget ? 'opacity-50' : ''}`}
+                      onClick={() => hasUssdTarget && setPaymentMethod("airtel")}
+                    >
+                      <RadioGroupItem value="airtel" id="airtel" disabled={!hasUssdTarget} />
+                      <Label htmlFor="airtel" className={`flex items-center gap-2 flex-1 ${hasUssdTarget ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                        <Wallet className="h-5 w-5 text-red-600" />
+                        <div>
+                          <div className="font-medium">Airtel Money</div>
+                          <div className="text-sm text-muted-foreground">
+                            {hasUssdTarget ? 'Pay with Airtel Money' : 'Not available for this seller'}
                           </div>
                         </div>
                       </Label>
@@ -757,7 +888,9 @@ function CartSummaryBody() {
             </div>
           </RadioGroup>
 
-          <DialogFooter className="gap-2">
+          </div>
+
+          <DialogFooter className="flex-shrink-0 gap-2 border-t bg-background px-6 py-4">
             <Button variant="outline" onClick={() => setPaymentMethodOpen(false)}>Cancel</Button>
             <Button onClick={proceedWithPayment}>Continue</Button>
           </DialogFooter>
@@ -871,6 +1004,34 @@ function CartSummaryBody() {
               if (!isPangolins && !isInTableCommand()) {
                 return (
                   <div className="space-y-3">
+                    {savedAddresses.length > 0 && (
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium flex items-center gap-1">
+                          <MapPin className="h-4 w-4" /> Saved addresses
+                        </label>
+                        <Select
+                          value=""
+                          onValueChange={(id) => {
+                            const addr = savedAddresses.find((a) => a.id === id)
+                            if (addr) {
+                              setDeliveryLocation(addr.address)
+                              if (addr.phone) setContactPhone(addr.phone)
+                            }
+                          }}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Choose a saved address" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {savedAddresses.map((a) => (
+                              <SelectItem key={a.id} value={a.id}>
+                                {a.label} — {a.address}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
                     <div className="space-y-1">
                       <label className="text-sm font-medium">Delivery location *</label>
                       <Input
@@ -894,6 +1055,19 @@ function CartSummaryBody() {
                           placeholder="+2507…"
                         />
                       </div>
+                    )}
+                    {deliveryLocation.trim() && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const label = `Address ${savedAddresses.length + 1}`
+                          setSavedAddresses(saveAddress({ label, address: deliveryLocation.trim(), phone: contactPhone.trim() || undefined }))
+                        }}
+                      >
+                        <MapPin className="h-4 w-4 mr-1" /> Save this address
+                      </Button>
                     )}
                   </div>
                 )
@@ -923,7 +1097,9 @@ function CartSummaryBody() {
       <Dialog open={momoOpen} onOpenChange={setMomoOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Pay with MTN Mobile Money</DialogTitle>
+            <DialogTitle>
+              {momoPaymentProvider === "airtel" ? "Pay with Airtel Money" : "Pay with MTN Mobile Money"}
+            </DialogTitle>
             <DialogDescription>Complete payment to confirm your order</DialogDescription>
           </DialogHeader>
 

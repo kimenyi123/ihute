@@ -17,6 +17,7 @@ import { subscribeToPushNotifications } from "@/lib/notification-service"
 export function NotificationPrompt() {
   const [showPrompt, setShowPrompt] = useState(false)
   const [isSubscribing, setIsSubscribing] = useState(false)
+  const [showBlockedHint, setShowBlockedHint] = useState(false)
 
   useEffect(() => {
     // Check if we should show the prompt
@@ -83,12 +84,29 @@ export function NotificationPrompt() {
       if (subscription) {
         console.log("[Notifications] ✅ Subscribed successfully!")
         setShowPrompt(false)
-        // Show success message
+        setShowBlockedHint(false)
         alert("✅ Notifications enabled! You'll now receive alerts for price drops, new products, and more.")
-      } else {
-        console.warn("[Notifications] Subscription returned null")
-        throw new Error("Subscription failed - no subscription object returned")
+        return
       }
+
+      // Graceful handling when no subscription object is returned
+      console.warn("[Notifications] Subscription returned null")
+
+      if (typeof window !== "undefined" && Notification.permission === "denied") {
+        setShowBlockedHint(true)
+        return
+      }
+
+      let reason = "Notifications are not available in this environment."
+      if (typeof window !== "undefined") {
+        if (!("Notification" in window) || !("PushManager" in window)) {
+          reason = "This browser does not support web push notifications. Please try Chrome, Edge, or Firefox."
+        } else if (Notification.permission !== "denied") {
+          reason = "Push subscription could not be created. This is often due to a missing or invalid server key (VAPID) in the backend."
+        }
+      }
+      alert("Failed to enable notifications. " + reason)
+      return
     } catch (error: any) {
       console.error("[Notifications] Error subscribing:", error)
       
@@ -117,6 +135,7 @@ export function NotificationPrompt() {
 
   function handleDismiss() {
     setShowPrompt(false)
+    setShowBlockedHint(false)
     localStorage.setItem("notification_prompt_dismissed", Date.now().toString())
   }
 
@@ -141,39 +160,53 @@ export function NotificationPrompt() {
           </div>
           <div className="flex-1">
             <h3 className="font-semibold text-gray-900 dark:text-white text-sm">
-              Stay Updated
+              {showBlockedHint ? "Notifications blocked" : "Stay Updated"}
             </h3>
-            <p className="text-gray-600 dark:text-gray-300 text-xs mt-1">
-              Get notified when products you&apos;re interested in are available, 
-              on sale, or back in stock.
-            </p>
-            
-            {/* Benefits list */}
-            <ul className="text-xs text-gray-500 dark:text-gray-400 mt-2 space-y-1">
-              <li>✓ Price drop alerts</li>
-              <li>✓ New products matching your searches</li>
-              <li>✓ Updates from favorite suppliers</li>
-            </ul>
 
-            {/* Buttons */}
-            <div className="flex gap-2 mt-3">
-              <Button
-                size="sm"
-                onClick={handleEnable}
-                disabled={isSubscribing}
-                className="bg-blue-600 hover:bg-blue-700 text-white text-xs"
-              >
-                {isSubscribing ? "Enabling..." : "Enable Notifications"}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={handleDismiss}
-                className="text-gray-500 text-xs"
-              >
-                Not now
-              </Button>
-            </div>
+            {showBlockedHint ? (
+              <>
+                <p className="text-gray-600 dark:text-gray-300 text-xs mt-1">
+                  To enable: click the <strong>lock or info icon</strong> in the address bar → <strong>Site settings</strong> → set <strong>Notifications</strong> to Allow.
+                </p>
+                <div className="flex gap-2 mt-3">
+                  <Button
+                    size="sm"
+                    onClick={() => window.location.reload()}
+                    className="bg-blue-600 hover:bg-blue-700 text-white text-xs"
+                  >
+                    Refresh & try again
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={handleDismiss} className="text-gray-500 text-xs">
+                    Not now
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-gray-600 dark:text-gray-300 text-xs mt-1">
+                  Get notified when products you&apos;re interested in are available, 
+                  on sale, or back in stock.
+                </p>
+                <ul className="text-xs text-gray-500 dark:text-gray-400 mt-2 space-y-1">
+                  <li>✓ Price drop alerts</li>
+                  <li>✓ New products matching your searches</li>
+                  <li>✓ Updates from favorite suppliers</li>
+                </ul>
+                <div className="flex gap-2 mt-3">
+                  <Button
+                    size="sm"
+                    onClick={handleEnable}
+                    disabled={isSubscribing}
+                    className="bg-blue-600 hover:bg-blue-700 text-white text-xs"
+                  >
+                    {isSubscribing ? "Enabling..." : "Enable Notifications"}
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={handleDismiss} className="text-gray-500 text-xs">
+                    Not now
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>

@@ -104,12 +104,40 @@ export async function POST(req: NextRequest) {
 
     // Handle multipart/form-data (Excel upload)
     if (contentType.includes('multipart/form-data')) {
-      console.log(`[SUPPLIER-STOCK] Handling multipart upload for action: ${action}`)
-      
+      // For importExcel, stream body to backend to avoid buffering the whole file in Node
+      const account = searchParams.get("account")
+      if (action === "importExcel" && account) {
+        const urlWithAccount = `${STOCK_SERVLET_URL}?action=importExcel&account=${encodeURIComponent(account)}`
+        headers["Content-Type"] = contentType
+        const streamResp = await fetch(urlWithAccount, {
+          method: "POST",
+          headers: { ...headers, Cookie: req.headers.get("cookie") || "" },
+          body: req.body as BodyInit,
+          signal: controller.signal,
+          cache: "no-store",
+          duplex: "half",
+        } as RequestInit)
+        const responseText = await streamResp.text()
+        let data: unknown
+        try {
+          data = JSON.parse(responseText)
+        } catch {
+          return NextResponse.json(
+            { ok: false, error: "Invalid response from backend" },
+            { status: 500 }
+          )
+        }
+        if (!streamResp.ok || (data as { ok?: boolean }).ok === false) {
+          return NextResponse.json(
+            { ok: false, error: (data as { error?: string }).error || "Import failed" },
+            { status: streamResp.status || 500 }
+          )
+        }
+        clearTimeout(timeout)
+        return NextResponse.json(data)
+      }
       const formData = await req.formData()
       body = formData
-      
-      // Don't set content-type header - let fetch set it with boundary
     } 
     // Handle JSON body (regular API calls)
     else if (contentType.includes('application/json')) {

@@ -5,6 +5,16 @@ import { getSessionId, getRecentInteractions, type Interaction } from "./interac
 import { useAuthStore } from "./auth-store"
 import { getCacheDuration } from "./recommendation-config"
 
+/** Shuffle array (Fisher–Yates) and return new array, so personalization order changes each time. */
+export function shuffle<T>(arr: T[]): T[] {
+  const out = [...arr]
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]]
+  }
+  return out
+}
+
 /**
  * Smart Recommendation Service
  * Implements Amazon-style recommendation algorithm with intelligent caching
@@ -177,13 +187,13 @@ export async function getSmartRecommendations(
         if (cached) {
             const cacheAge = Date.now() - cached.timestamp
 
-            // Use cache if context hasn't changed significantly
+            // Use cache if context hasn't changed significantly (shuffle so order varies)
             if (!hasContextChanged(cached.context, currentContext)) {
-                console.log(`[Recommendations] Using cached (age: ${Math.round(cacheAge / 1000)}s)`)
+                console.log(`[Recommendations] Using cached (age: ${Math.round(cacheAge / 1000)}s), shuffled`)
                 return {
-                    products: cached.products,
-                    suppliers: cached.suppliers,
-                    categories: cached.categories,
+                    products: shuffle(cached.products),
+                    suppliers: shuffle(cached.suppliers),
+                    categories: shuffle(cached.categories),
                     source: "cache",
                     cacheAge,
                 }
@@ -231,14 +241,14 @@ export async function getSmartRecommendations(
             const suppliers = Array.isArray(data.suppliers) ? data.suppliers : []
             const categories = Array.isArray(data.categories) ? data.categories : []
 
-            // Cache for future use
+            // Cache raw order for consistency when reading from cache; return shuffled so UI varies
             cacheRecommendations(products, suppliers, categories, currentContext)
 
-            console.log("[Recommendations] Fetched fresh from backend")
+            console.log("[Recommendations] Fetched fresh from backend, shuffled")
             return {
-                products,
-                suppliers,
-                categories,
+                products: shuffle(products),
+                suppliers: shuffle(suppliers),
+                categories: shuffle(categories),
                 source: "backend",
             }
         }
@@ -247,14 +257,14 @@ export async function getSmartRecommendations(
     } catch (error) {
         console.error("[Recommendations] Error fetching:", error)
 
-        // Fallback to cache even if expired
+        // Fallback to cache even if expired (shuffle so order varies)
         const cached = getCachedRecommendations()
         if (cached) {
-            console.log("[Recommendations] Using stale cache as fallback")
+            console.log("[Recommendations] Using stale cache as fallback, shuffled")
             return {
-                products: cached.products,
-                suppliers: cached.suppliers,
-                categories: cached.categories,
+                products: shuffle(cached.products),
+                suppliers: shuffle(cached.suppliers),
+                categories: shuffle(cached.categories),
                 source: "cache",
                 cacheAge: Date.now() - cached.timestamp,
             }
@@ -317,7 +327,8 @@ export async function getCollaborativeRecommendations(
         const data = await res.json()
 
         if (data.ok && data.products) {
-            return Array.isArray(data.products) ? data.products : []
+            const list = Array.isArray(data.products) ? data.products : []
+            return shuffle(list)
         }
 
         return []

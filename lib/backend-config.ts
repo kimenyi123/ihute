@@ -28,7 +28,7 @@ export function getOrdersUrl(): string {
 }
 
 export function getSellerOrdersUrl(): string {
-  return process.env.JAVA_SELLER_ORDERS_URL || `${getBackendBase()}/SellerOrdersServlet`
+  return process.env.JAVA_SELLER_ORDERS_URL || `${getBackendBase()}/Kaos/SellerOrdersServlet`
 }
 
 export function getSupplierUrl(): string {

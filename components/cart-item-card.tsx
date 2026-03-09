@@ -5,6 +5,7 @@ import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { useCartStore, CartItem } from "@/lib/cart-store"
 import { Minus, Plus, Trash2 } from "lucide-react"
+import { getProductImageSrc, isValidImageUrl } from "@/lib/image-utils"
 
 const PLACEHOLDER = "/placeholder.svg?height=64&width=64"
 
@@ -14,17 +15,14 @@ export function CartItemCard({ item }: { item: CartItem }) {
   const remove = useCartStore((s) => s.remove)
   const [imgError, setImgError] = useState(false)
 
-  const rawImage = item.image ?? (item as Record<string, unknown>).image_url ?? (item as Record<string, unknown>).item_image_url
-  const imageStr = rawImage != null ? String(rawImage).trim() : ""
-  const validImage =
-    imageStr !== "" &&
-    (imageStr.startsWith("http://") || imageStr.startsWith("https://") || imageStr.startsWith("/"))
-  const src = !imgError && validImage ? imageStr : PLACEHOLDER
+  const resolvedUrl = getProductImageSrc(item as Record<string, unknown>, PLACEHOLDER)
+  const hasValidUrl = resolvedUrl !== PLACEHOLDER && isValidImageUrl(resolvedUrl)
+  const src = !imgError && hasValidUrl ? resolvedUrl : PLACEHOLDER
   const isRemote = /^https?:\/\//i.test(src)
 
   useEffect(() => {
     setImgError(false)
-  }, [item.image])
+  }, [resolvedUrl])
 
   return (
     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4 rounded-lg border p-3">

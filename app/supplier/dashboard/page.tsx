@@ -16,6 +16,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Plus,
   Package,
   TrendingUp,
@@ -60,6 +68,15 @@ function SupplierDashboard() {
   const [showBarOrRestaurantOption, setShowBarOrRestaurantOption] = useState(false);
   const [tableNameOrNumber, setTableNameOrNumber] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
+  const [analytics, setAnalytics] = useState<{
+    dailySalesTotal: number;
+    dailyOrdersCount: number;
+    bestSelling: Array<{ name: string; quantity: number; total: number }>;
+  } | null>(null);
+  const [bulkPriceOpen, setBulkPriceOpen] = useState(false);
+  const [bulkPriceSelected, setBulkPriceSelected] = useState<Set<string>>(new Set());
+  const [bulkPricePercent, setBulkPricePercent] = useState("");
+  const [bulkPriceSubmitting, setBulkPriceSubmitting] = useState(false);
 
   useEffect(() => {
     if (typeof window !== "undefined") setBaseUrl(window.location.origin);
@@ -207,14 +224,9 @@ function SupplierDashboard() {
             };
           } else {
             // Handle database format (fallback)
-const price = parsePrice(
-  p.selling_price ?? (
-    p.price ||
-    p.UNITY_PRICE ||
-    p.SALE_PRICE_INCLUSIVE ||
-    0
-  )
-);
+            const price = parsePrice(
+              p.selling_price ?? (p.price || p.UNITY_PRICE || p.SALE_PRICE_INCLUSIVE || 0)
+            );
 
             mapped = {
               ...p, // Keep all original fields
@@ -269,6 +281,16 @@ const price = parsePrice(
         setLoading(false);
       });
   }, [isAuthenticated, user?.ishyigaAccount, user?.role, router]);
+
+  useEffect(() => {
+    if (!user?.ishyigaAccount) return;
+    fetch(`/api/supplier/analytics?account=${encodeURIComponent(user.ishyigaAccount)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.ok) setAnalytics(data);
+      })
+      .catch(() => {});
+  }, [user?.ishyigaAccount]);
 
   const handleLogout = () => {
     logout();
@@ -493,6 +515,68 @@ const price = parsePrice(
           </Card>
         </div>
 
+        {/* Low stock alerts */}
+        {(() => {
+          const lowStockList = supplierProducts.filter((p) => p.stock <= 10 && p.stock > 0).slice(0, 5);
+          if (lowStockList.length === 0) return null;
+          return (
+            <Card className="bg-white shadow-md mb-6">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-yellow-700">Low stock alerts</CardTitle>
+                <Button variant="ghost" size="sm" onClick={() => setStatusFilter("low")}>
+                  View all ({lowStock})
+                </Button>
+              </CardHeader>
+              <CardContent>
+                <ul className="text-sm space-y-1">
+                  {lowStockList.map((p) => (
+                    <li key={p.itemCode || p.ITEM_CODE} className="flex justify-between">
+                      <span className="truncate">{p.itemName || p.ITEM_NAME}</span>
+                      <span className="text-yellow-700 font-medium">{p.stock ?? p.STOCK} left</span>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          );
+        })()}
+
+        {/* Daily sales & best-selling */}
+        {analytics && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+            <Card className="bg-white shadow-md">
+              <CardHeader>
+                <CardTitle className="text-sm font-medium text-slate-600">Today&apos;s sales</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-slate-900">
+                  {analytics.dailySalesTotal.toLocaleString()} RWF
+                </div>
+                <p className="text-xs text-slate-500 mt-1">{analytics.dailyOrdersCount} orders today</p>
+              </CardContent>
+            </Card>
+            <Card className="bg-white shadow-md">
+              <CardHeader>
+                <CardTitle className="text-sm font-medium text-slate-600">Best selling</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {analytics.bestSelling.length === 0 ? (
+                  <p className="text-sm text-slate-500">No orders today</p>
+                ) : (
+                  <ul className="text-sm space-y-1">
+                    {analytics.bestSelling.slice(0, 5).map((item, i) => (
+                      <li key={i} className="flex justify-between">
+                        <span className="truncate">{item.name}</span>
+                        <span className="font-medium">{item.quantity} sold</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
         {/* Shop With Me QR Code — collapsible so original dashboard stays primary */}
         <Card className="bg-white shadow-md mb-8">
           <CardHeader
@@ -556,10 +640,10 @@ const price = parsePrice(
               </div>
               {showBarOrRestaurantOption && isBarOrRestaurant && (
                 <div className="space-y-2 max-w-xs">
-                  <Label htmlFor="table-name">Default table name or number (optional)</Label>
+                  <Label htmlFor="table-name">Table name (for QR link)</Label>
                   <Input
                     id="table-name"
-                    placeholder="e.g. Table 5"
+                    placeholder="e.g. TEST ISHYIGA2 or Table 5"
                     value={tableNameOrNumber}
                     onChange={(e) => setTableNameOrNumber(e.target.value)}
                   />
@@ -628,6 +712,17 @@ const price = parsePrice(
                     <Package className="h-4 w-4" />
                     Bulk Upload
                   </Link>
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setBulkPriceOpen(true);
+                    setBulkPriceSelected(new Set());
+                    setBulkPricePercent("");
+                  }}
+                  className="gap-2"
+                >
+                  Bulk price update
                 </Button>
                 <Button
                   onClick={() => {
@@ -941,6 +1036,94 @@ const price = parsePrice(
             )}
           </CardContent>
         </Card>
+
+        {/* Bulk price update modal */}
+        <Dialog open={bulkPriceOpen} onOpenChange={setBulkPriceOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Bulk price update</DialogTitle>
+              <DialogDescription>
+                Select products and apply a percentage change to their prices. Prices are updated via your stock API.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label>Percentage change (%)</Label>
+                <Input
+                  type="number"
+                  placeholder="e.g. 10 or -5"
+                  value={bulkPricePercent}
+                  onChange={(e) => setBulkPricePercent(e.target.value)}
+                />
+                <p className="text-xs text-slate-500">Positive = increase, negative = decrease</p>
+              </div>
+              <div className="max-h-48 overflow-y-auto border rounded p-2 space-y-2">
+                {filteredProducts.slice(0, 50).map((p) => {
+                  const code = p.itemCode || p.ITEM_CODE || "";
+                  const selected = bulkPriceSelected.has(code);
+                  return (
+                    <label key={code} className="flex items-center gap-2 cursor-pointer">
+                      <Checkbox
+                        checked={selected}
+                        onCheckedChange={(checked) => {
+                          setBulkPriceSelected((prev) => {
+                            const next = new Set(prev);
+                            if (checked) next.add(code);
+                            else next.delete(code);
+                            return next;
+                          });
+                        }}
+                      />
+                      <span className="text-sm truncate flex-1">{p.itemName || p.ITEM_NAME}</span>
+                      <span className="text-xs text-slate-500">{p.price ?? p.UNITY_PRICE} RWF</span>
+                    </label>
+                  );
+                })}
+                {filteredProducts.length > 50 && (
+                  <p className="text-xs text-slate-500">Showing first 50. Use filters to narrow.</p>
+                )}
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setBulkPriceOpen(false)}>Cancel</Button>
+              <Button
+                disabled={bulkPriceSubmitting || bulkPriceSelected.size === 0 || !bulkPricePercent.trim()}
+                onClick={async () => {
+                  const percent = parseFloat(bulkPricePercent);
+                  if (!Number.isFinite(percent) || !user?.ishyigaAccount) return;
+                  setBulkPriceSubmitting(true);
+                  try {
+                    const res = await fetch("/api/supplier/stock", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        action: "bulkPriceUpdate",
+                        account: user.ishyigaAccount,
+                        itemCodes: Array.from(bulkPriceSelected),
+                        percentChange: percent,
+                      }),
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (data?.ok) {
+                      setBulkPriceOpen(false);
+                      setBulkPriceSelected(new Set());
+                      setBulkPricePercent("");
+                      window.location.reload();
+                    } else {
+                      alert(data?.error || "Update failed");
+                    }
+                  } catch (e) {
+                    alert("Request failed");
+                  } finally {
+                    setBulkPriceSubmitting(false);
+                  }
+                }}
+              >
+                {bulkPriceSubmitting ? "Updating…" : "Apply"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Add Product Modal */}
         <AddProductModal

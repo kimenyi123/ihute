@@ -6,7 +6,7 @@ import { ProductCard } from "./product-card"
 import { TrendingUp, ArrowRight, Store } from "lucide-react"
 import { useAuthStore } from "@/lib/auth-store"
 import { getSessionId } from "@/lib/interaction-tracker"
-import { getSmartRecommendations } from "@/lib/recommendation-service"
+import { getSmartRecommendations, shuffle } from "@/lib/recommendation-service"
 import Link from "next/link"
 
 const BURROWS_NICKNAME = "burrows"
@@ -188,7 +188,8 @@ export function PersonalizedSections() {
       const data = await res.json()
 
       if (data.ok && data.products) {
-        const trendingProducts = await fetchProductDetails(data.products)
+        const list = Array.isArray(data.products) ? data.products : []
+        const trendingProducts = await fetchProductDetails(shuffle(list))
         // Limit to 6 products max
         const limitedProducts = trendingProducts.slice(0, 6)
 
