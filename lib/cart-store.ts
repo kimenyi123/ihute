@@ -142,16 +142,25 @@ export const useCartStore = create<CartState>()(
             const matching = state.items.filter(keyMatch)
             const totalQty = matching.reduce((sum, x) => sum + x.qty, 0) + qty
             const first = matching[0]
+            // Keep the highest price among matching lines when merging (in case one had 0 and another had real price)
+            const bestPrice = matching.reduce((best, x) => {
+              const p = typeof x.price === "number" && Number.isFinite(x.price) ? x.price : 0
+              return p > best ? p : best
+            }, typeof first.price === "number" && Number.isFinite(first.price) ? first.price : 0)
             const mergedLine: CartItem = {
               ...first,
               qty: totalQty,
+              price: bestPrice,
               itemCode: (first.itemCode ?? item.itemCode ?? first.id ?? item.id).toString().trim() || first.itemCode,
             }
             return {
               items: state.items.filter((x) => !keyMatch(x)).concat([mergedLine]),
             }
           }
-          const withCode = { ...item, selectedUnit, qty, itemCode: (item.itemCode ?? item.id).toString().trim() || undefined }
+          // Ensure price is always a number (API may send string or omit)
+          const rawPrice = item.price
+          const priceNum = typeof rawPrice === "number" && Number.isFinite(rawPrice) ? rawPrice : Number(String(rawPrice ?? "").replace(/[^\d.-]/g, "")) || 0
+          const withCode = { ...item, price: priceNum, selectedUnit, qty, itemCode: (item.itemCode ?? item.id).toString().trim() || undefined }
           return { items: [...state.items, withCode] }
         })
 

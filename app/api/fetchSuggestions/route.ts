@@ -56,10 +56,11 @@ async function forward(req: NextRequest) {
     }
 
     const outBody = await resp.text()
-    
-    // Validate JSON response
+
+    // Validate JSON response and log where results come from (redis vs database) based on product.source
+    let parsed: any
     try {
-      JSON.parse(outBody)
+      parsed = JSON.parse(outBody)
     } catch (e) {
       console.error("Invalid JSON from backend:", outBody.substring(0, 200))
       return new Response(JSON.stringify({ 
@@ -80,7 +81,22 @@ async function forward(req: NextRequest) {
       })
     }
 
-    return new Response(outBody, {
+    if (parsed && Array.isArray(parsed.products)) {
+      const sources = parsed.products
+        .map((p: any) => String(p?.source || "").toLowerCase() || "unknown")
+      const total = sources.length
+      const redisCount = sources.filter(s => s.includes("redis")).length
+      const dbCount = sources.filter(s => s.includes("database") || s.includes("stock") || s.includes("niki")).length
+      const otherCount = total - redisCount - dbCount
+      console.log("[fetchSuggestions] source summary:", {
+        totalProducts: total,
+        redisCount,
+        dbCount,
+        otherCount,
+      })
+    }
+
+    return new Response(JSON.stringify(parsed ?? {}), {
       status: resp.status,
       headers: {
         "content-type": "application/json",

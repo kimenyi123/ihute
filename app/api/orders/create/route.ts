@@ -154,6 +154,8 @@ export async function POST(req: Request) {
             form.set("tableName", shared.tableName)
             form.set("tableLocation", shared.tableLocation)
           }
+          // Skip quantity/stock check so orders are created without validating stock
+          form.set("skipStockCheck", "true")
 
           const controller = new AbortController()
           const timeoutId = setTimeout(() => controller.abort(), 15000)

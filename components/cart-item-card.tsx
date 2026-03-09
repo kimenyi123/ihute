@@ -56,7 +56,9 @@ export function CartItemCard({ item }: { item: CartItem }) {
             {item.supplierLocation ? ` · ${item.supplierLocation}` : ""}
           </div>
           <div className="text-sm mt-1">
-            {item.price.toLocaleString()} {item.unit ? ` / ${item.unit}` : ""}
+            {Number(item.price) > 0
+              ? `${Number(item.price).toLocaleString()} ${item.unit ? ` / ${item.unit}` : "RWF"}`
+              : "Price not available"}
           </div>
         </div>
       </div>
@@ -86,7 +88,9 @@ export function CartItemCard({ item }: { item: CartItem }) {
 
         <div className="flex items-center gap-2">
           <div className="w-20 sm:w-24 text-right font-semibold">
-            {(item.price * item.qty).toLocaleString()}
+            {Number(item.price) > 0
+              ? (Number(item.price) * item.qty).toLocaleString()
+              : "—"}
           </div>
 
           <Button
