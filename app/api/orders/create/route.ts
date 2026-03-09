@@ -64,8 +64,10 @@ export async function POST(req: Request) {
     const validPaymentMethods = [
       "PAY_ON_DELIVERY",
       "PAID_MTN_MOMO",
+      "PAID_AIRTEL_MOMO",
       "PAID_CARD",
       "MTN_MOMO",
+      "AIRTEL_MOMO",
       "MOMO",
       "CARD",
     ]
@@ -79,7 +81,7 @@ export async function POST(req: Request) {
 
     let paymentId = String(bodyIn.paymentId ?? "")
     if (!paymentId) {
-      if (paymentName.includes("MOMO")) paymentId = `MOMO_${Date.now()}`
+      if (paymentName.includes("MOMO") || paymentName.includes("AIRTEL")) paymentId = `MOMO_${Date.now()}`
       else if (paymentName.includes("CARD")) paymentId = `CARD_${Date.now()}`
       else paymentId = `COD_${Date.now()}`
     }
@@ -154,7 +156,7 @@ export async function POST(req: Request) {
           }
 
           const controller = new AbortController()
-          const timeoutId = setTimeout(() => controller.abort(), 30000)
+          const timeoutId = setTimeout(() => controller.abort(), 15000)
 
           res = await fetch(url, {
             method: "POST",
@@ -212,7 +214,7 @@ export async function POST(req: Request) {
           "Could not connect to order processing service",
         last: lastErr,
         ordersUrl: url,
-        hint: "Check Java backend. Set JAVA_ORDERS_URL or NEXT_PUBLIC_API_URL in .env / .env.local",
+        hint: "Check Java backend is running. Set JAVA_BACKEND_BASE in .env.local to match your Tomcat context (e.g. http://localhost:8080/Trading or http://localhost:8080/kaos if deployed as kaos.war).",
       },
       { status: 502 }
     )

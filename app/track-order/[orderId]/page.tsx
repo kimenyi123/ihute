@@ -11,6 +11,7 @@ import { Truck, CheckCircle, Clock, Package, MessageCircle, ArrowLeft, CreditCar
 import { formatPaymentMethod } from "@/lib/payment-utils"
 import { RatingModal } from "@/components/RatingModal"
 import { useOrderTracking } from "@/hooks/useOrderTracking"
+import { DeliveryCountdown } from "@/components/delivery-countdown"
 
 // Updated to match supplier statuses
 type OrderStatus = "open" | "processing" | "invoice" | "delivered" | "pending" | "in-transit"
@@ -18,7 +19,7 @@ type OrderStatus = "open" | "processing" | "invoice" | "delivered" | "pending" |
 type OrderDetail = {
   orderId: string
   sellerName: string
-  sellerAccount?: string  // Added missing property
+  sellerAccount?: string
   sellerPhone?: string
   buyerName?: string
   buyerPhone?: string
@@ -34,6 +35,8 @@ type OrderDetail = {
   paymentStatus?: string
   status: OrderStatus
   createdAt: string
+  estimatedDeliveryAt?: string
+  driverPhone?: string
 }
 
 function statusIcon(status: OrderStatus) {
@@ -514,6 +517,50 @@ export default function TrackOrderPage() {
               )}
             </CardContent>
           </Card>
+
+          {/* Estimated delivery countdown */}
+          {order.estimatedDeliveryAt && order.status !== "delivered" && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Truck className="h-5 w-5" />
+                  Estimated delivery
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <DeliveryCountdown
+                  estimatedAt={order.estimatedDeliveryAt}
+                  status={order.status}
+                />
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Driver contact (when in transit) */}
+          {(order.status === "in-transit" && (order.driverPhone || order.sellerPhone)) && (
+            <Card className="border-blue-100">
+              <CardHeader>
+                <CardTitle>Delivery contact</CardTitle>
+                <CardDescription>
+                  {order.driverPhone
+                    ? "Contact the driver for delivery updates."
+                    : "Contact the seller for delivery updates."}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="font-mono text-lg">
+                  {order.driverPhone || order.sellerPhone}
+                </p>
+                {(order.driverPhone || order.sellerPhone) && (
+                  <Button className="mt-2" variant="outline" asChild>
+                    <a href={`tel:${(order.driverPhone || order.sellerPhone || "").replace(/\s/g, "")}`}>
+                      Call
+                    </a>
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           {/* Tracking Timeline */}
           <Card>

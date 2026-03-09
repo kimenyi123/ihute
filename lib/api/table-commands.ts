@@ -3,11 +3,19 @@
  *
  * Provides clean API methods for interacting with the refactored backend.
  * Handles table creation, joining, sending, and closing operations.
- *
- * @author Gilbert (Frontend Integration)
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw/Trading";
+import { getBackendBase } from "@/lib/backend-config";
+
+function getApiBase(): string {
+  try {
+    return getBackendBase();
+  } catch {
+    return process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw/Trading";
+  }
+}
+
+const API_BASE = getApiBase();
 
 export interface TableStatus {
   ok: boolean;
@@ -71,7 +79,7 @@ export async function checkTableStatus(
   userEmail?: string
 ): Promise<TableStatus> {
   try {
-    const url = new URL(`${API_BASE}/OrdersServlet`);
+    const url = new URL(`${API_BASE}/Kaos/OrdersServlet`);
     url.searchParams.set("action", "checkTableStatus");
     url.searchParams.set("tableName", tableName);
     url.searchParams.set("locationId", locationId);
@@ -119,7 +127,7 @@ export async function createTableCommandApi(params: {
   userName?: string;
 }): Promise<CreateTableCommandResponse> {
   try {
-    const response = await fetch(`${API_BASE}/OrdersServlet?action=createTableCommand`, {
+    const response = await fetch(`${API_BASE}/Kaos/OrdersServlet?action=createTableCommand`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -149,7 +157,7 @@ export async function getActiveTables(
   search?: string
 ): Promise<{ ok: boolean; tables: any[]; error?: string }> {
   try {
-    const url = new URL(`${API_BASE}/OrdersServlet`);
+    const url = new URL(`${API_BASE}/Kaos/OrdersServlet`);
     url.searchParams.set("action", "getActiveTables");
     url.searchParams.set("locationId", locationId);
     if (search) {
@@ -196,7 +204,7 @@ export async function createOrder(orderData: {
   tableLocation?: string;
 }): Promise<CreateOrderResponse> {
   try {
-    const response = await fetch(`${API_BASE}/OrdersServlet?action=createOrder`, {
+    const response = await fetch(`${API_BASE}/Kaos/OrdersServlet?action=createOrder`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -231,7 +239,7 @@ export async function sendTableOrder(
   userEmail: string
 ): Promise<SendTableOrderResponse> {
   try {
-    const url = new URL(`${API_BASE}/OrdersServlet`);
+    const url = new URL(`${API_BASE}/Kaos/OrdersServlet`);
     url.searchParams.set("action", "sendTableOrder");
     url.searchParams.set("tableName", tableName);
     url.searchParams.set("locationId", locationId);
@@ -267,7 +275,7 @@ export async function closeTable(
   userEmail: string
 ): Promise<{ ok: boolean; message?: string; error?: string }> {
   try {
-    const url = new URL(`${API_BASE}/OrdersServlet`);
+    const url = new URL(`${API_BASE}/Kaos/OrdersServlet`);
     url.searchParams.set("action", "closeTable");
     url.searchParams.set("tableName", tableName);
     url.searchParams.set("locationId", locationId);
@@ -298,7 +306,7 @@ export async function removeOrderFromTable(
   userEmail: string
 ): Promise<RemoveOrderResponse> {
   try {
-    const url = new URL(`${API_BASE}/OrdersServlet`);
+    const url = new URL(`${API_BASE}/Kaos/OrdersServlet`);
     url.searchParams.set("action", "removeOrderFromTable");
     url.searchParams.set("orderId", orderId.toString());
     url.searchParams.set("tableName", tableName);
@@ -327,7 +335,7 @@ export async function removeOrderFromTable(
  */
 export async function getTableOrders(tableName: string, locationId: string) {
   try {
-    const url = new URL(`${API_BASE}/OrdersServlet`);
+    const url = new URL(`${API_BASE}/Kaos/OrdersServlet`);
     url.searchParams.set("action", "getTableOrders");
     url.searchParams.set("tableName", tableName);
     url.searchParams.set("locationId", locationId);
@@ -355,7 +363,7 @@ export async function completeTableOrder(
   userEmail: string
 ): Promise<{ ok: boolean; message?: string; error?: string }> {
   try {
-    const url = new URL(`${API_BASE}/OrdersServlet`);
+    const url = new URL(`${API_BASE}/Kaos/OrdersServlet`);
     url.searchParams.set("action", "completeTableOrder");
     url.searchParams.set("tableName", tableName);
     url.searchParams.set("locationId", locationId);
@@ -416,7 +424,7 @@ export async function validateStock(
   sellerAccount: string
 ): Promise<StockValidationResponse> {
   try {
-    const response = await fetch(`${API_BASE}/OrdersServlet?action=validateStock`, {
+    const response = await fetch(`${API_BASE}/Kaos/OrdersServlet?action=validateStock`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -451,7 +459,7 @@ export async function reserveStock(
   orderId?: number
 ): Promise<StockReservationResponse> {
   try {
-    const response = await fetch(`${API_BASE}/OrdersServlet?action=reserveStock`, {
+    const response = await fetch(`${API_BASE}/Kaos/OrdersServlet?action=reserveStock`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -494,7 +502,7 @@ export async function getStockStatus(
   error?: string;
 }> {
   try {
-    const response = await fetch(`${API_BASE}/OrdersServlet?action=getStockStatus`, {
+    const response = await fetch(`${API_BASE}/Kaos/OrdersServlet?action=getStockStatus`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -568,7 +576,7 @@ export async function getPaymentStatus(
   error?: string;
 }> {
   try {
-    const url = new URL(`${API_BASE}/OrdersServlet`);
+    const url = new URL(`${API_BASE}/Kaos/OrdersServlet`);
     url.searchParams.set("action", "paymentStatus");
     url.searchParams.set("orderId", orderId.toString());
 

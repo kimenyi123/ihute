@@ -159,7 +159,7 @@ export default function SupplierOrderDetailsPage() {
   const totalOf = (it: any) => Math.round(qtyOf(it) * unitPriceOf(it))
   const n = (v: number) => Number(v || 0).toLocaleString()
 
-  const { order, buyer, items, created, currency, grandTotal, paymentInfo, orderStatus, isGuestBuyer } = useMemo(() => {
+  const { order, buyer, items, created, currency, grandTotal, paymentInfo, orderStatus, isGuestBuyer, displayBuyerName } = useMemo(() => {
     const order = detail?.order
     const buyer = detail?.buyer
     const items = detail?.items ?? []
@@ -174,11 +174,16 @@ export default function SupplierOrderDetailsPage() {
     const orderStatus = getOrderStatus(order, paymentInfo)
 
     // Detect if buyer is a guest (anonymous checkout)
-    // Guest buyers have email like "guest_timestamp@ihute.rw" or no BUYER_ISHYIGA_ACCOUNT
     const buyerEmail = order?.BUYER_EMAIL || buyer?.EMAIL || ""
     const isGuestBuyer = buyerEmail.startsWith("guest_") || !order?.BUYER_ISHYIGA_ACCOUNT
 
-    return { order, buyer, items, created, currency, grandTotal, paymentInfo, orderStatus, isGuestBuyer }
+    // Never show seller name as buyer (fix for wrong data or seller placing test order)
+    const rawBuyer = (order?.BUYER_OWNER ?? order?.BUYER_NAME ?? buyer?.OWNER ?? buyer?.NAMES ?? "Guest Buyer").toString().trim()
+    const sellerName = (order?.SELLER_NAMES ?? detail?.seller?.OWNER ?? "").toString().trim()
+    const sameAsSeller = sellerName && rawBuyer && sellerName.toLowerCase() === rawBuyer.toLowerCase()
+    const displayBuyerName = sameAsSeller ? (order?.TABLE_NAME ? `Table: ${order.TABLE_NAME}` : "Guest Buyer") : (rawBuyer || "Guest Buyer")
+
+    return { order, buyer, items, created, currency, grandTotal, paymentInfo, orderStatus, isGuestBuyer, displayBuyerName }
   }, [detail])
 
   const sellerMomo = (detail?.seller?.momo ?? "").toString().trim()
@@ -293,7 +298,7 @@ export default function SupplierOrderDetailsPage() {
                 <CardContent className="space-y-2">
                   <div className="flex items-center gap-2 text-slate-800">
                     <User2 className="h-4 w-4" />
-                    <span className="font-medium">{order?.BUYER_OWNER || order?.BUYER_NAME || buyer?.OWNER || buyer?.NAMES || "Guest Buyer"}</span>
+                    <span className="font-medium">{displayBuyerName}</span>
                   </div>
                   <div className="flex items-center gap-2 text-slate-700">
                     <Phone className="h-4 w-4" />

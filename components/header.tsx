@@ -10,12 +10,14 @@ import {
   ShoppingCart,
   User,
   Heart,
+  Eye,
   Truck,
   PackageSearch,
   PackageCheck,
   Users,
   BarChart3,
   LogOut,
+  Barcode,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -39,6 +41,7 @@ import { useOrdersStore } from "@/lib/orders-store"
 import { useTranslation } from "@/hooks/use-translation"
 import { TableCommandBanner } from "@/components/table-command-banner"
 import { LocationBadge } from "@/components/location-badge"
+import { BarcodeAddToCart } from "@/components/barcode-add-to-cart"
 
 export function Header() {
   const router = useRouter()
@@ -53,6 +56,7 @@ export function Header() {
 
   const pendingCount = useOrdersStore((s) => s.getPendingCount())
   const [sellerCount, setSellerCount] = useState<number>(0)
+  const [barcodeOpen, setBarcodeOpen] = useState(false)
 
   useEffect(() => {
     let ignore = false
@@ -241,6 +245,12 @@ export function Header() {
                 )}
               </Link>
             </Button>
+            {/* Watched prices */}
+            <Button asChild variant="ghost" size="icon" className="h-9 w-9" title="Watched prices">
+              <Link href="/price-watch">
+                <Eye className="h-5 w-5" />
+              </Link>
+            </Button>
             {/* Reorder */}
             <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Reorder Items">
               <Link href="/reorder">
@@ -256,6 +266,10 @@ export function Header() {
               </Link>
             </Button>
 
+            {/* Barcode add to cart */}
+            <Button variant="ghost" size="icon" className="h-9 w-9" title="Add by barcode" onClick={() => setBarcodeOpen(true)}>
+              <Barcode className="h-5 w-5" />
+            </Button>
             {/* Cart */}
             <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Cart">
               <Link href="/cart">
@@ -281,6 +295,7 @@ export function Header() {
         </div>
       </div>
       <TableCommandBanner />
+      <BarcodeAddToCart open={barcodeOpen} onOpenChange={setBarcodeOpen} />
     </header>
   )
 }

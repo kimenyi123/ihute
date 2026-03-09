@@ -1,5 +1,11 @@
 // lib/constants.ts
 
+/** Default currency for display (e.g. cart, suggestions). Override via env or context if needed. */
+export const DEFAULT_CURRENCY = process.env.NEXT_PUBLIC_DEFAULT_CURRENCY ?? "RWF"
+
+/** Default product image placeholder path (used when no image_url). */
+export const DEFAULT_PLACEHOLDER_IMAGE = "/placeholder.svg?height=300&width=300"
+
 export const RWANDA_DISTRICTS = [
   // Eastern Province
   "Bugesera", "Gatsibo", "Kayonza", "Kirehe", "Ngoma", "Nyagatare", "Rwamagana",

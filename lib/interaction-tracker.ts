@@ -37,6 +37,10 @@ const STORAGE_KEY = "ihute-interactions"
 const SESSION_KEY = "ihute-session-id"
 const MAX_LOCAL_INTERACTIONS = 500 // Limit local storage size
 
+// Throttle backend sync to avoid infinite/heavy loading (max 1 request per 3s)
+const TRACK_THROTTLE_MS = 3000
+let lastTrackSyncAt = 0
+
 /**
  * Generate a browser fingerprint for session isolation
  * This ensures each browser/device gets a unique session ID
@@ -239,7 +243,11 @@ export async function trackInteraction(
   // Notify listeners that interactions have changed (only once)
   notifyInteractionChange()
 
-  // Sync with backend (fire and forget)
+  // Sync with backend: throttle to avoid request flood (max 1 per TRACK_THROTTLE_MS)
+  const now = Date.now()
+  if (now - lastTrackSyncAt < TRACK_THROTTLE_MS) return
+  lastTrackSyncAt = now
+
   try {
     const response = await fetch("/api/personalization/track", {
       method: "POST",
@@ -250,13 +258,10 @@ export async function trackInteraction(
         ...interaction,
       }),
     })
-
     if (!response.ok) {
       console.warn("Failed to sync interaction to backend")
     }
-    // Removed second notification - recommendations will update on next user action
   } catch (error) {
-    // Silently fail - interactions are stored locally
     console.warn("Error syncing interaction:", error)
   }
 }

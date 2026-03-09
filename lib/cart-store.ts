@@ -3,6 +3,7 @@
 import { create } from "zustand"
 import { persist, createJSONStorage } from "zustand/middleware"
 import { trackClick } from "./interaction-tracker"
+import { getPublicApiUrl } from "./backend-config"
 
 export type CartItem = {
   id: string
@@ -77,6 +78,8 @@ type CartState = {
   remove: (id: string, selectedUnit?: string) => void
   clear: () => void
   clearCart: () => void
+  /** Replace cart with items from sync API (account-based cart sync). */
+  replaceItemsFromSync: (items: CartItem[]) => void
   removeGroupBySeller: (supplierId: string) => void
   /** Merge duplicate lines (same supplier + same product code or name) into one line with summed qty */
   mergeDuplicateCartLines: () => void
@@ -152,9 +155,14 @@ export const useCartStore = create<CartState>()(
           return { items: [...state.items, withCode] }
         })
 
-        // Track cart activity for abandoned cart reminders
+        // Track cart activity for abandoned cart reminders (throttled: max once per 10s to avoid load)
         try {
-          // Get email from auth store
+          if (typeof window === 'undefined') return
+          const throttleKey = 'abandoned-cart-last-track'
+          const throttleMs = 10_000
+          const last = parseInt(sessionStorage.getItem(throttleKey) || '0', 10)
+          if (Date.now() - last < throttleMs) return
+
           let userEmail: string | null = null
           try {
             const authStorage = localStorage.getItem('auth-storage')
@@ -162,49 +170,29 @@ export const useCartStore = create<CartState>()(
               const authData = JSON.parse(authStorage)
               userEmail = authData?.state?.user?.email || null
             }
-          } catch (e) {
-            console.error('[Abandoned Cart] Error reading auth storage:', e)
+          } catch {
+            // ignore
           }
 
-          console.log('[Abandoned Cart] Tracking attempt:', {
-            email: userEmail,
-            hasEmail: !!userEmail,
-            itemId: item.id,
-            itemName: item.name
-          })
+          if (!userEmail) return
 
-          if (userEmail && typeof window !== 'undefined') {
-            // Get current cart state
-            const currentItems = get().items
-            const cartTotal = currentItems.reduce((sum, i) => sum + (i.price * i.qty), 0)
-
-            console.log('[Abandoned Cart] Calling trackCartActivity for:', userEmail)
-
-            fetch(`${BACKEND_URL}/OrdersServlet?action=trackCartActivity`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-              body: new URLSearchParams({
-                buyerEmail: userEmail,
-                itemCount: currentItems.length.toString(),
-                cartValue: cartTotal.toString(),
-                currency: 'RWF'
-              })
+          sessionStorage.setItem(throttleKey, String(Date.now()))
+          const currentItems = get().items
+          const cartTotal = currentItems.reduce((sum, i) => sum + (i.price * i.qty), 0)
+          const base = getPublicApiUrl()
+          const url = `${base}/Kaos/OrdersServlet?action=trackCartActivity`
+          fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+              buyerEmail: userEmail,
+              itemCount: currentItems.length.toString(),
+              cartValue: cartTotal.toString(),
+              currency: 'RWF'
             })
-              .then(response => {
-                console.log('[Abandoned Cart] Response status:', response.status)
-                return response.json()
-              })
-              .then(data => {
-                console.log('[Abandoned Cart] Success:', data)
-              })
-              .catch(error => {
-                console.error('[Abandoned Cart] Error:', error)
-              })
-          } else {
-            console.warn('[Abandoned Cart] No user email found in storage')
-          }
-        } catch (error) {
-          console.error('[Abandoned Cart] Exception:', error)
+          }).catch(() => { /* fire-and-forget */ })
+        } catch {
+          // avoid breaking add-to-cart
         }
       },
 
@@ -275,6 +263,7 @@ export const useCartStore = create<CartState>()(
         })),
 
       clear: () => set({ items: [], payment: {}, tableInfo: null }),  // ✅ Clear table info too
+      replaceItemsFromSync: (items) => set({ items: Array.isArray(items) ? items : [] }),
 
       // ✅ Alias for clear() to match checkout form usage
       clearCart: () => {

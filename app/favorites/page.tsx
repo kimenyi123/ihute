@@ -11,8 +11,9 @@ import { Badge } from "@/components/ui/badge"
 import { useFavoritesStore } from "@/lib/favorites-store"
 import { useAuthStore } from "@/lib/auth-store"
 import { useCartStore } from "@/lib/cart-store"
+import { usePriceWatchStore } from "@/lib/price-watch-store"
 import { fetchFavorites, flattenFavoriteGroups, removeFavoriteApi, trackFavoriteEvent } from "@/lib/favorites-api"
-import { Heart, Store, MapPin, Star, ShieldCheck, Clock } from "lucide-react"
+import { Heart, Store, MapPin, Star, ShieldCheck, Clock, EyeOff } from "lucide-react"
 
 export default function FavoritesPage() {
   const favorites = useFavoritesStore((s) => s.favorites)
@@ -26,6 +27,8 @@ export default function FavoritesPage() {
 
   const groups = useMemo(() => getGroupsBySeller(), [getGroupsBySeller, favorites])
   const total = favorites.length
+  const watchedPrices = usePriceWatchStore((s) => s.getItems())
+  const removeWatch = usePriceWatchStore((s) => s.removeWatch)
 
   useEffect(() => {
     if (!isAuthenticated) return
@@ -104,6 +107,30 @@ export default function FavoritesPage() {
             {total} {total === 1 ? "item" : "items"} saved
           </p>
         </div>
+
+        {watchedPrices.length > 0 && (
+          <section className="mb-8 rounded-lg border bg-card p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <EyeOff className="h-5 w-5" />
+                Watched prices
+              </h2>
+              <Button variant="ghost" size="sm" asChild>
+                <Link href="/price-watch">View all</Link>
+              </Button>
+            </div>
+            <p className="text-sm text-muted-foreground mb-3">We&apos;ll notify you when a price drops below what you saw.</p>
+            <ul className="space-y-2">
+              {watchedPrices.map((w) => (
+                <li key={`${w.productId}-${w.supplierId}`} className="flex items-center justify-between text-sm py-2 border-b last:border-0">
+                  <span className="truncate flex-1">{w.name}</span>
+                  <span className="text-muted-foreground shrink-0 mx-2">Watched at {w.priceWhenWatched.toLocaleString()} RWF</span>
+                  <Button variant="ghost" size="sm" onClick={() => removeWatch(w.productId, w.supplierId)}>Remove</Button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         {total === 0 ? (
           <div className="text-center py-16">

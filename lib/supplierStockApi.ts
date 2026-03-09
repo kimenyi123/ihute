@@ -62,14 +62,16 @@ export interface UpsertResponse {
 const API_BASE = '/api/supplier/stock';
 
 /**
- * Import Excel file to database and Redis
+ * Import Excel file to database and Redis.
+ * Sends account in URL so the proxy can stream the file without buffering.
  */
 export async function importStockExcel(file: File, account: string): Promise<ImportResult> {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('account', account);
 
-  const response = await fetch(`${API_BASE}?action=importExcel`, {
+  const params = new URLSearchParams({ action: 'importExcel', account });
+  const response = await fetch(`${API_BASE}?${params.toString()}`, {
     method: 'POST',
     body: formData,
   });

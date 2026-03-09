@@ -167,7 +167,12 @@ export default function SupplierOrdersPage() {
         createdAt: t.CREATED_AT ?? t.created_at ?? t.heure ?? new Date().toISOString(),
         buyerTIN: t.BUYER_TIN ?? t.buyer_tin ?? "",
         SUPPLIER_TIN: t.SELLER_TIN ?? t.seller_tin ?? "",
-        buyerName: (t.BUYER_NAME ?? t.BUYER_OWNER_NAME ?? t.BUYER_OWNER ?? t.BUYER_ISHYIGA_ACCOUNT ?? t.buyer_name ?? "").toString().trim() || "Guest Buyer",
+        buyerName: (() => {
+          const raw = (t.BUYER_NAME ?? t.BUYER_OWNER_NAME ?? t.BUYER_OWNER ?? t.BUYER_ISHYIGA_ACCOUNT ?? t.buyer_name ?? "").toString().trim() || "Guest Buyer"
+          const seller = (t.SELLER_NAMES ?? t.SELLER_OWNER ?? "").toString().trim()
+          if (seller && raw && seller.toLowerCase() === raw.toLowerCase()) return (t.TABLE_NAME ? `Table: ${t.TABLE_NAME}` : "Guest Buyer")
+          return raw
+        })(),
         paymentStatus: /(pay[_\s-]*on[_\s-]*delivery|cod)/i.test(String(t.PAYMENT_NAME ?? t.payment_name ?? "")) ? "unpaid" : "paid"
       }))
 

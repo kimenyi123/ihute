@@ -5,6 +5,7 @@ import { useSession } from '@/hooks/use-session'
 import { useAuthStore } from '@/lib/auth-store'
 import { useFavoritesStore } from "@/lib/favorites-store"
 import { fetchFavorites, flattenFavoriteGroups, mergeFavoritesApi } from "@/lib/favorites-api"
+import { CartSyncEffect } from "@/components/cart-sync-effect"
 
 interface SessionProviderProps {
   children: React.ReactNode
@@ -98,5 +99,10 @@ export function SessionProvider({ children }: SessionProviderProps) {
     }
   }, [isAuthenticated, updateActivity])
 
-  return <>{children}</>
+  return (
+    <>
+      <CartSyncEffect />
+      {children}
+    </>
+  )
 }
