@@ -6,11 +6,11 @@ import { MapPin, Loader2, AlertCircle, CheckCircle, Navigation } from 'lucide-re
 import { Button } from '@/components/ui/button'
 import { useGeolocation } from '@/hooks/use-geolocation'
 
-// Dynamically import map components to avoid SSR issues
-const MapContainer = dynamic(() => import('react-leaflet').then(mod => mod.MapContainer), { ssr: false })
-const TileLayer = dynamic(() => import('react-leaflet').then(mod => mod.TileLayer), { ssr: false })
-const Marker = dynamic(() => import('react-leaflet').then(mod => mod.Marker), { ssr: false })
-const useMapEvents = dynamic(() => import('react-leaflet').then(mod => mod.useMapEvents), { ssr: false })
+// Load map in a separate client-only component so Leaflet mounts once (avoids "container already initialized")
+const GPSCaptureMapInner = dynamic(
+  () => import('@/components/gps-capture-map').then((m) => m.GPSCaptureMapInner),
+  { ssr: false }
+)
 
 // Rwanda bounds for validation
 const RWANDA_BOUNDS = {
@@ -29,17 +29,6 @@ interface GPSCaptureProps {
     initialLng?: number
 }
 
-// Map component for handling click events
-function LocationMarker({ position, setPosition }: any) {
-    useMapEvents({
-        click(e) {
-            setPosition(e.latlng)
-        }
-    })
-
-    return position ? <Marker position={position} /> : null
-}
-
 export function GPSCapture({ onLocationSet, initialLat, initialLng }: GPSCaptureProps) {
     const { location: gpsLocation, loading: gpsLoading, error: gpsError, denied: gpsDenied } = useGeolocation()
     const [position, setPosition] = useState<{ lat: number, lng: number } | null>(
@@ -47,21 +36,19 @@ export function GPSCapture({ onLocationSet, initialLat, initialLng }: GPSCapture
     )
     const [accuracy, setAccuracy] = useState<number | null>(null)
     const [mapReady, setMapReady] = useState(false)
+    const [canRenderMap, setCanRenderMap] = useState(false)
     const [capturing, setCapturing] = useState(false)
 
-    // Fix Leaflet icons in Next.js
     useEffect(() => {
-        if (typeof window !== 'undefined') {
-            const L = require('leaflet')
-            delete (L.Icon.Default.prototype as any)._getIconUrl
-            L.Icon.Default.mergeOptions({
-                iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-                iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-                shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-            })
-            setMapReady(true)
-        }
+        setMapReady(typeof window !== 'undefined')
     }, [])
+
+    // Delay map mount until after Strict Mode so Leaflet only inits once
+    useEffect(() => {
+        if (!mapReady) return
+        const t = setTimeout(() => setCanRenderMap(true), 200)
+        return () => clearTimeout(t)
+    }, [mapReady])
 
     // Update position when GPS location changes
     useEffect(() => {
@@ -176,7 +163,7 @@ export function GPSCapture({ onLocationSet, initialLat, initialLng }: GPSCapture
                 )}
             </div>
 
-            {/* Map Preview */}
+            {/* Map Preview - only mount map after canRenderMap to avoid double-init in Strict Mode */}
             {mapReady && (
                 <div className="space-y-2">
                     <label className="block text-sm font-medium text-gray-700">
@@ -184,18 +171,15 @@ export function GPSCapture({ onLocationSet, initialLat, initialLng }: GPSCapture
                         <span className="text-xs text-gray-500 ml-2">(Click map or drag pin to adjust)</span>
                     </label>
                     <div className="h-[400px] rounded-lg overflow-hidden border-2 border-gray-300 relative z-0">
-                        <MapContainer
-                            center={position || KIGALI_CENTER}
-                            zoom={13}
-                            style={{ height: '100%', width: '100%' }}
-                            key={position ? `${position.lat}-${position.lng}` : 'default'}
-                        >
-                            <TileLayer
-                                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                            />
-                            <LocationMarker position={position} setPosition={setPosition} />
-                        </MapContainer>
+                        {canRenderMap && (
+                            <div className="h-full w-full">
+                                <GPSCaptureMapInner
+                                    center={position || KIGALI_CENTER}
+                                    position={position}
+                                    setPosition={(latlng) => setPosition({ lat: latlng.lat, lng: latlng.lng })}
+                                />
+                            </div>
+                        )}
                     </div>
                     <p className="text-xs text-gray-500">
                         💡 Tip: Click anywhere on the map or drag the pin to set your exact business location

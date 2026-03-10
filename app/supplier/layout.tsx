@@ -22,6 +22,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
     { name: "Dashboard", href: "/supplier/dashboard" },
     // { name: "My Products", href: "/supplier/products" },
     { name: "Orders", href: "/supplier/orders" },
+    { name: "Tables", href: "/supplier/tables" },
     { name: "Ratings", href: "/supplier/ratings" },
     { name: "B2B Procurement / Kurangura byinshi", href: "/supplier/b2b" },
     { name: "Expenses", href: "/supplier/expenses" },

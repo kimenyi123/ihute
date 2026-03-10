@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
@@ -39,8 +39,13 @@ const log = (tag: string, msg: string, data?: any) => {
 export default function RegisterPage() {
   const router = useRouter()
   const login = useAuthStore((state) => state.login)
+  const [mounted, setMounted] = useState(false)
   const [role, setRole] = useState<FormRole>("buyer")
   const [currentStep, setCurrentStep] = useState(1)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
   const [formData, setFormData] = useState({
     // shared
     name: "", email: "", phone: "", password: "", location: "",
@@ -187,6 +192,16 @@ export default function RegisterPage() {
   )
 
   // ── Render ────────────────────────────────────────────────────────────────
+  if (!mounted) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 p-4">
+        <div className="w-full max-w-2xl flex items-center justify-center min-h-[320px]">
+          <p className="text-slate-500">Loading...</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 p-4">
       <div className="w-full max-w-2xl space-y-4">
