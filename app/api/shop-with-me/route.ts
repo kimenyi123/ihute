@@ -31,11 +31,15 @@ export async function GET(request: NextRequest) {
     }
     console.log('[API shop-with-me] Fetching from backend:', backendUrl);
 
+    const headers: Record<string, string> = {
+      'Accept': 'application/json',
+    };
+    if (productSearch.trim()) {
+      headers['X-Product-Search'] = productSearch.trim();
+    }
     const response = await fetch(backendUrl, {
       cache: 'no-store',
-      headers: {
-        'Accept': 'application/json',
-      },
+      headers,
     });
 
     console.log('[API shop-with-me] Backend response status:', response.status);
