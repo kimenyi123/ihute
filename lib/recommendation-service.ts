@@ -178,7 +178,9 @@ export async function getSmartRecommendations(
     source: "cache" | "backend"
     cacheAge?: number
 }> {
+    console.log("[Recommendations] getSmartRecommendations called", { limit, forceRefresh })
     const currentContext = getRecommendationContext()
+    console.log("[Recommendations] context", { products: currentContext.products.length, categories: currentContext.categories.length, suppliers: currentContext.suppliers.length })
 
     // Check cache first
     if (!forceRefresh) {
@@ -234,6 +236,7 @@ export async function getSmartRecommendations(
             },
         })
 
+        console.log("[Recommendations] backend response", { status: res.status, ok: res.ok })
         const data = await res.json()
 
         if (data.ok && data.products) {
@@ -244,7 +247,7 @@ export async function getSmartRecommendations(
             // Cache raw order for consistency when reading from cache; return shuffled so UI varies
             cacheRecommendations(products, suppliers, categories, currentContext)
 
-            console.log("[Recommendations] Fetched fresh from backend, shuffled")
+            console.log("[Recommendations] Fetched fresh from backend, shuffled", { productCount: products.length, productNames: products.slice(0, 6) })
             return {
                 products: shuffle(products),
                 suppliers: shuffle(suppliers),

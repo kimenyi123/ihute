@@ -246,9 +246,10 @@ export default function DiscoverPage() {
 
             if (seenIds.has(productId)) continue
             seenIds.add(productId)
-            
+
             const price = parseFloat(p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? p.price ?? "0")
-            
+            const rawCategory = p.FAMILLE || p.famille || p.category || ""
+
             allProducts.push({
               id: productId,
               name: p.ITEM_NAME || p.item_commercial_name || p.name || productName,
@@ -260,7 +261,7 @@ export default function DiscoverPage() {
               supplierName: p.SELLER_NAMES || p.supplier_name || "",
               supplierLocation: p.LOCATION || p.supplier_location || "",
               momo: p.momo || undefined,
-              category: category || undefined,
+              category: rawCategory ? String(rawCategory) : undefined,
               inStock: true,
             })
 

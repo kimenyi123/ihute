@@ -15,6 +15,7 @@ import { useState, useEffect } from "react"
 import { Users, Send, XCircle, CheckCircle, AlertCircle, Clock, PhoneCall, Copy } from "lucide-react"
 import dynamic from "next/dynamic"
 import { SendTableButton } from "./table-command-send-button"
+import { buildMoMoUssd } from "@/lib/momo-ussd"
 
 interface TableInfo {
   tableName: string
@@ -270,7 +271,7 @@ const QRCode = dynamic(() => import("react-qr-code"), { ssr: false })
 function MomoQRDialog({ data, onClose }: { data: { tableName: string; amount: number; momo: string }; onClose: () => void }) {
   const momoTarget = (data.momo || "").trim()
   const hasTarget = momoTarget.length > 0
-  const payload = hasTarget ? `*182*8*1*${momoTarget}*${data.amount}#` : ""
+  const payload = hasTarget ? buildMoMoUssd(momoTarget, data.amount) : ""
   const telHref = hasTarget ? `tel:${encodeURIComponent(payload)}` : ""
 
   return (

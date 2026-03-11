@@ -133,13 +133,7 @@ export default function SupplierStockUploadPage() {
               </h2>
               <ul className="space-y-2 text-sm text-blue-800">
                 <li>• <strong>Supported formats</strong>: Excel (.xlsx) or CSV (.csv)</li>
-                <li>• <strong>NAME</strong>: Product name (required)</li>
-                <li>• <strong>QTE</strong>: Quantity/stock level (required)</li>
-                <li>• <strong>SALES</strong>: Price (required)</li>
-                <li>• <strong>CODE</strong>: Product code/SKU — <span className="text-blue-600 font-semibold">optional</span>, auto-generated from name if blank</li>
-                <li>• <strong>DESCRIPTION</strong>: Product description (optional)</li>
-                <li className="pt-2 border-t border-blue-200 mt-2">Compatible with Scan Menu export:</li>
-                <li>• <strong>Category</strong>, <strong>Subcategory</strong>, <strong>Item</strong>, <strong>Price</strong>, <strong>Currency</strong>, <strong>Dietary</strong>, <strong>Image</strong> (optional)</li>
+                <li>• <strong>General format</strong>: CATEGORY, SUBCATEGORY, ITEM, QTE, PRICE (RWF), COST PRICE, FRENCH, KINYARWANDA, IMAGE LINK, KEYWORDS — required: ITEM, QTE, PRICE; others can be left empty</li>
               </ul>
               <div className="mt-4 text-sm text-blue-700">
                 <strong>Limits:</strong> Max 5MB file size, 10,000 rows
@@ -244,7 +238,7 @@ export default function SupplierStockUploadPage() {
                         )}
                         {result.backupKey && result.backupKey !== 'none' && (
                           <p className="text-xs text-green-700 mt-2">
-                            Backup created: {result.backupKey}
+                            Backup created
                           </p>
                         )}
                       </div>
@@ -270,19 +264,15 @@ export default function SupplierStockUploadPage() {
             )}
 
             {/* Download Template Link */}
-            <div className="mt-8 text-center">
+            <div className="mt-8 text-center space-y-2">
               <p className="text-sm text-gray-600">
                 Need a template?{' '}
-                <a
-                  href="/supplier/stock/template"
-                  className="text-blue-600 hover:underline font-medium"
-                  download
-                >
-                  Download CSV Template
+                <a href="/supplier/stock/template" className="text-blue-600 hover:underline font-medium" download>
+                  Download general format (CSV)
                 </a>
               </p>
-              <p className="text-xs text-gray-500 mt-1">
-                (Can be opened and edited in Excel)
+              <p className="text-xs text-gray-500">
+                CSV — can be opened in Excel. Optional columns can be left empty.
               </p>
             </div>
           </div>

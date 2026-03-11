@@ -93,6 +93,26 @@ const SECTOR_OPTIONS = [
 ]
 const QUICK_LOCATIONS = ["Kigali", "Musanze", "Rubavu", "Huye", "Muhanga", "Rusizi"]
 
+/** Derive data source from API response for console logging. */
+function getDataSourceLabel(data: {
+  source?: string
+  fromNiki?: boolean
+  products?: Array<{ source?: string }>
+}): string {
+  if (data.source === "redis" || data.fromNiki === true) return "redis"
+  if (data.source === "database" || data.fromNiki === false) return "database"
+  const products = data.products ?? []
+  if (products.length === 0) return "unknown"
+  const redisCount = products.filter((p) => String(p?.source ?? "").toLowerCase().includes("redis")).length
+  const dbCount = products.filter((p) =>
+    String(p?.source ?? "").toLowerCase().match(/database|stock|niki/)
+  ).length
+  if (redisCount > 0 && dbCount > 0) return "mixed"
+  if (redisCount > 0) return "redis"
+  if (dbCount > 0) return "database"
+  return "unknown"
+}
+
 /** Infer sector from query so food/drink searches don't return pharmacy. Backend uses sector to filter. */
 function inferSectorFromQuery(q: string): string {
   if (!q || q.length < 2) return ""
@@ -113,26 +133,21 @@ function extractNumericPrice(value: any): number {
 }
 
 function toCardProduct(p: Product & { search_priority?: string; contains_ingredient?: string }) {
+  // Image: image_url (Redis) or IMAGE_URL (DB stock column)
   const image =
     p.image ||
     p.image_url ||
+    (p as any).IMAGE_URL ||
     p.item_image_url ||
     "/placeholder.svg?height=300&width=300"
   // Debug: see which image fields we actually have when rendering cards
   const src = (p as any).source
-  console.log("[search] product image debug", {
-    item_code: p.item_code,
-    name: p.item_commercial_name,
-    image,
-    image_field: p.image,
-    image_url: p.image_url,
-    item_image_url: p.item_image_url,
-    source: src,
-    note: src === "redis" ? "it's redis" : src === "database" ? "it's database" : "source unknown",
-  })
-  const priceFromEmballage = extractNumericPrice(p.item_emballage)
-  const priceFromSelling = extractNumericPrice(p.selling_price)
-  const price = priceFromEmballage > 0 ? priceFromEmballage : priceFromSelling
+  // Price: selling_price (Redis) or SALE_PRICE_INCLUSIVE/price (DB). item_emballage is not price.
+  const price =
+    extractNumericPrice(p.selling_price) ||
+    extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) ||
+    extractNumericPrice((p as any).price) ||
+    0
   return {
     id: p.item_code || p.item_key_words || `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`,
     name: p.item_commercial_name || "Product",
@@ -162,7 +177,7 @@ function normalizeSupplierProductsResponse(
   const supplier_account = supplierAccount
   const supplier_name = supplierName
 
-  // Redis shape: { key: "supplier_ALG000017701", data: [ product1, product2, ... ] } — flat array in .data
+  // Redis format: { key: "supplier_<account>", data: [ ... ] }; item_emballage as-is (empty remains empty); price from selling_price
   if (typeof data === "object" && Array.isArray(data.data)) {
     return normalizeSupplierProductsResponse(data.data, supplierAccount, supplierName)
   }
@@ -205,7 +220,7 @@ function normalizeSupplierProductsResponse(
           item_code: q.item_key_words ?? q.item_code ?? q.ITEM_CODE ?? "",
           item_commercial_name: q.item_commercial_name ?? q.item_name ?? q.ITEM_NAME ?? "Product",
           item_packet: q.item_packet ?? q.UNIT,
-          item_emballage: q.item_emballage ?? q.price ?? q.SALE_PRICE_INCLUSIVE ?? "",
+          item_emballage: q.item_emballage ?? "",
           item_key_words: q.item_key_words,
           item_key_words_french: q.item_key_words_french,
           item_key_words_kinyarwanda: q.item_key_words_kinyarwanda,
@@ -217,7 +232,7 @@ function normalizeSupplierProductsResponse(
           image: img ?? undefined,
           image_url: img ?? undefined,
           item_image_url: img ?? undefined,
-          selling_price: q.selling_price ?? q.SALE_PRICE_INCLUSIVE ?? (typeof q.item_emballage === "number" ? q.item_emballage : extractNumericPrice(q.item_emballage)),
+          selling_price: q.selling_price ?? q.SALE_PRICE_INCLUSIVE ?? q.price,
           cost_price: q.cost_price,
           currency: q.currency,
           momo: q.momo,
@@ -282,7 +297,7 @@ export default function SearchPage() {
   const [suggestionTerms, setSuggestionTerms] = useState<string[]>([])
 
   function toQuickViewProduct(p: Product): QuickViewProduct {
-    const price = extractNumericPrice(p.item_emballage) || extractNumericPrice(p.selling_price)
+    const price = extractNumericPrice(p.selling_price) || extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) || extractNumericPrice((p as any).price) || 0
     return {
       id: p.item_code || p.item_key_words || "",
       name: p.item_commercial_name || "Product",
@@ -317,18 +332,12 @@ export default function SearchPage() {
     const itemCode = (p.item_code || p.item_key_words || "").toString().trim()
     const id = itemCode || `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`
     const unit = p.item_packet || ""
-    // Use same price resolution as toCardProduct: item_emballage first, then selling_price, then API-specific keys
-    const priceFromEmballage = extractNumericPrice(p.item_emballage)
-    const priceFromSelling = extractNumericPrice(p.selling_price)
-    const priceFromApi = extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE)
+    // Price: selling_price (Redis) or SALE_PRICE_INCLUSIVE/price (DB). item_emballage is not price.
     const price =
-      priceFromEmballage > 0
-        ? priceFromEmballage
-        : priceFromSelling > 0
-          ? priceFromSelling
-          : priceFromApi > 0
-            ? priceFromApi
-            : 0
+      extractNumericPrice(p.selling_price) ||
+      extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) ||
+      extractNumericPrice((p as any).price) ||
+      0
     const supplierId = (p.supplier_account || "unknown").toString().trim()
     const supplierName = p.supplier_name || p.supplier_account || "Supplier"
     const baseItem = {
@@ -342,7 +351,7 @@ export default function SearchPage() {
       supplierId,
       supplierName,
       supplierLocation: p.supplier_location,
-      image: p.image || p.image_url || p.item_image_url || "/placeholder.svg?height=300&width=300",
+      image: p.image || p.image_url || (p as any).IMAGE_URL || p.item_image_url || "/placeholder.svg?height=300&width=300",
       momo: p.momo || (p as any)?.seller_momo || "",
     }
 
@@ -482,6 +491,17 @@ export default function SearchPage() {
           : { suppliersByName: [], suppliersByProduct: [], products: [], query: debouncedQ }
 
         if (!cancelled) {
+          // Log data source (Redis vs DB) for debugging
+          const dataSource = getDataSourceLabel(data)
+          const productSources = (data.products ?? []).map((p: Product & { source?: string }) => p?.source ?? "?")
+          console.log("[Search] Data source:", dataSource, "| Query:", debouncedQ, "| Products:", data.products?.length ?? 0, "| source:", data.source, "fromNiki:", data.fromNiki, "| Product sources:", productSources.slice(0, 5))
+          if (dataSource === "unknown") {
+            const responseKeys = Object.keys(data as object)
+            const firstProduct = (data.products ?? [])[0] as Record<string, unknown> | undefined
+            const firstProductKeys = firstProduct ? Object.keys(firstProduct) : []
+            console.warn("[Search] DEBUG data source unknown: backend did not set source/fromNiki or product.source. Response keys:", responseKeys, "| First product keys (sample):", firstProductKeys.slice(0, 20))
+          }
+
           // ✅ FIX: Trust backend - it already handles translation!
           // No client-side filtering for products since backend does the work
           const filteredProducts = data.products || []
@@ -592,6 +612,18 @@ export default function SearchPage() {
         const res = await fetch(url.toString(), { cache: "no-store" })
         const data = res.ok ? await res.json() : null
         if (cancelled) return
+
+      
+        const dataSource = data ? getDataSourceLabel(data) : "no response"
+        const productCount = Array.isArray(data?.products) ? data.products.length : 0
+        const productSources = (data?.products ?? []).map((p: { source?: string }) => p?.source ?? "?")
+        console.log("[Search] Supplier-scoped | Query:", JSON.stringify(query), "| Supplier:", supplierAccount, "| Data source:", dataSource, "| Products returned:", productCount, "| Product sources:", productSources)
+        if (dataSource === "unknown" && data) {
+          const responseKeys = Object.keys(data)
+          const firstProduct = (data.products ?? [])[0] as Record<string, unknown> | undefined
+          console.warn("[Search] DEBUG supplier-scoped source unknown: backend response keys:", responseKeys, "| First product keys:", firstProduct ? Object.keys(firstProduct).slice(0, 15) : "none")
+        }
+
         setSupplierSearchResults(
           Array.isArray(data?.products)
             ? normalizeSupplierProductsResponse(data.products, supplierAccount, supplierName)
@@ -608,17 +640,36 @@ export default function SearchPage() {
   }, [debouncedSupplierSearch, selectedShop])
 
   // Products to show in "Products from X" panel: filter by price then sort.
+  // Fallback: when backend returns 0 for supplier-scoped search, filter loaded catalog client-side (e.g. "inkoko" in item_key_words_kinyarwanda).
   const displayedSupplierProducts = useMemo(() => {
-    const raw = debouncedSupplierSearch.trim()
-      ? (supplierSearchResults ?? [])
-      : shopProducts
+    const query = debouncedSupplierSearch.trim()
+    let raw: Product[]
+    if (!query) {
+      raw = shopProducts
+    } else if (Array.isArray(supplierSearchResults) && supplierSearchResults.length > 0) {
+      raw = supplierSearchResults
+    } else if (shopProducts.length > 0) {
+      // Backend returned 0; filter loaded catalog by name/keywords/kinyarwanda/french
+      const q = query.toLowerCase()
+      raw = shopProducts.filter((p) => {
+        const name = (p.item_commercial_name ?? "").toLowerCase()
+        const kw = (p.item_key_words ?? "").toLowerCase()
+        const kr = ((p as any).item_key_words_kinyarwanda ?? "").toLowerCase()
+        const fr = ((p as any).item_key_words_french ?? "").toLowerCase()
+        const desc = ((p as any).description ?? "").toLowerCase()
+        return [name, kw, kr, fr, desc].some((s) => s.includes(q))
+      })
+      if (raw.length > 0) {
+        console.log("[Search] Supplier-scoped fallback: backend returned 0, client-side match found", raw.length, "products for", JSON.stringify(query))
+      }
+    } else {
+      raw = supplierSearchResults ?? []
+    }
     const filtered = raw.filter(p => {
-      const priceFromEmballage = extractNumericPrice(p.item_emballage)
-      const priceFromSelling = extractNumericPrice(p.selling_price)
-      const price = priceFromEmballage > 0 ? priceFromEmballage : priceFromSelling
+      const price = extractNumericPrice(p.selling_price) || extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) || extractNumericPrice((p as any).price)
       return price > 0
     })
-    const price = (p: Product) => extractNumericPrice(p.item_emballage) || extractNumericPrice(p.selling_price)
+    const price = (p: Product) => extractNumericPrice(p.selling_price) || extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) || extractNumericPrice((p as any).price)
     if (supplierProductSort === "price-asc") return [...filtered].sort((a, b) => price(a) - price(b))
     if (supplierProductSort === "price-desc") return [...filtered].sort((a, b) => price(b) - price(a))
     return filtered
@@ -628,14 +679,15 @@ export default function SearchPage() {
   const searchProductsWithPrice = useMemo(() => {
     const list = searchResult?.products ?? []
     const filtered = list.filter(p => {
-      const price = extractNumericPrice(p.item_emballage) || extractNumericPrice(p.selling_price)
+      const price = extractNumericPrice(p.selling_price) || extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) || extractNumericPrice((p as any).price)
       return price > 0
     })
+    const priceNum = (p: Product) => extractNumericPrice(p.selling_price) || extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) || extractNumericPrice((p as any).price)
     if (productSort === "price-asc") {
-      return [...filtered].sort((a, b) => (extractNumericPrice(a.item_emballage) || extractNumericPrice(a.selling_price)) - (extractNumericPrice(b.item_emballage) || extractNumericPrice(b.selling_price)))
+      return [...filtered].sort((a, b) => priceNum(a) - priceNum(b))
     }
     if (productSort === "price-desc") {
-      return [...filtered].sort((a, b) => (extractNumericPrice(b.item_emballage) || extractNumericPrice(b.selling_price)) - (extractNumericPrice(a.item_emballage) || extractNumericPrice(a.selling_price)))
+      return [...filtered].sort((a, b) => priceNum(b) - priceNum(a))
     }
     return filtered
   }, [searchResult?.products, productSort])
@@ -669,7 +721,7 @@ export default function SearchPage() {
       const key = `${id}|${sid}`
       if (!id || seen.has(key)) return
       seen.add(key)
-      const price = extractNumericPrice(p.item_emballage) || extractNumericPrice(p.selling_price)
+      const price = extractNumericPrice(p.selling_price) || extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) || extractNumericPrice((p as any).price)
       if (price <= 0) return
       out.push({
         productId: id,

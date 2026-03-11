@@ -24,7 +24,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
     { name: "Orders", href: "/supplier/orders" },
     { name: "Tables", href: "/supplier/tables" },
     { name: "Ratings", href: "/supplier/ratings" },
-    { name: "B2B Procurement / Kurangura byinshi", href: "/supplier/b2b" },
+    { name: "Rekizisiyo / Kurangura byinshi", href: "/supplier/b2b" },
     { name: "Expenses", href: "/supplier/expenses" },
     { name: "Add Product", href: "/supplier/products/add" },
     { name: "Scan Menu", href: "/supplier/scan-menu" },

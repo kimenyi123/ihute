@@ -315,7 +315,7 @@ export default function SupplierOrderDetailPage() {
                 Order #{order.id}
               </h1>
               <p className="text-slate-600 mt-2">
-                {isB2B ? "B2B Procurement Order" : "Regular Order"}
+                {isB2B ? "Rekizisiyo Order" : "Regular Order"}
               </p>
             </div>
             <div className="flex items-center gap-3">

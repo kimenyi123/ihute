@@ -36,6 +36,7 @@ import {
   ChevronRight,
   Share2,
   Copy,
+  User,
 } from "lucide-react";
 import Link from "next/link";
 import AddProductModal, { ProductFormData } from "@/components/supplier/AddProductModal";
@@ -191,15 +192,15 @@ function SupplierDashboard() {
         const mappedProducts = products.map((p: any, index: number) => {
           console.log(`Product ${index}:`, p);
 
-          // Check if this is Redis format (your format)
-          const isRedisFormat = p.item_commercial_name && p.item_key_words && p.item_packet && p.item_emballage;
+          // Check if this is Redis format (your format); item_emballage can be empty
+          const isRedisFormat = p.item_commercial_name && p.item_key_words && p.item_packet;
 
           let mapped;
 
           if (isRedisFormat) {
-            // Handle Redis format (your format)
+            // Handle Redis format: price only from selling_price; item_emballage passed through as-is (empty remains empty)
             const stock = parseIntSafe(p.item_packet);
-            const price = parsePriceFromRedis(p.item_emballage);
+            const price = p.selling_price != null ? parsePrice(String(p.selling_price)) : 0;
 
             mapped = {
               ...p, // Keep all original Redis fields
@@ -434,10 +435,18 @@ function SupplierDashboard() {
               {user?.businessCategory || "Supplier Panel"} • Account: {user?.ishyigaAccount}
             </p>
           </div>
-          <Button variant="outline" onClick={handleLogout} className="gap-2">
-            <LogOut className="h-4 w-4" />
-            Logout
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" asChild className="gap-2">
+              <Link href="/account">
+                <User className="h-4 w-4" />
+                My profile
+              </Link>
+            </Button>
+            <Button variant="outline" onClick={handleLogout} className="gap-2">
+              <LogOut className="h-4 w-4" />
+              Logout
+            </Button>
+          </div>
         </div>
       </header>
 

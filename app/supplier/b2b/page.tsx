@@ -111,7 +111,7 @@ export default function B2BDashboard() {
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">B2B Procurement</h1>
+        <h1 className="text-3xl font-bold text-gray-900">Rekizisiyo</h1>
         <p className="mt-2 text-gray-600">
           Manage your business-to-business orders and negotiations
         </p>

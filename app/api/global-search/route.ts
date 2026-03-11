@@ -1,16 +1,45 @@
 // app/api/global-search/route.ts
 import type { NextRequest } from "next/server"
 import { getBackendBase } from "@/lib/backend-config"
+import {
+  buildCacheKey,
+  getCached,
+  setCached,
+  SUGGESTIONS_TTL_SEC,
+} from "@/lib/redis-cache"
 
 function withTrailingSlash(u: string) { return u.endsWith("/") ? u : u + "/" }
+
+function paramsToRecord(searchParams: URLSearchParams): Record<string, string> {
+  const out: Record<string, string> = {}
+  searchParams.forEach((v, k) => { out[k] = v })
+  return out
+}
 
 async function forward(req: NextRequest) {
   const backendBase = withTrailingSlash(getBackendBase())
   const incoming = new URL(req.url)
   const target = new URL("/fetchSuggestions", backendBase)
 
-  // copy query params
+  // copy query params (backend must always search Redis first, then DB)
   incoming.searchParams.forEach((v, k) => target.searchParams.append(k, v))
+
+  // Redis first (this app): same response cache as /api/fetchSuggestions
+  const cacheKey = buildCacheKey("fetchSuggestions", paramsToRecord(incoming.searchParams))
+  const cached = await getCached(cacheKey)
+  if (cached) {
+    console.log("[global-search] Redis cache hit")
+    return new Response(cached, {
+      status: 200,
+      headers: {
+        "content-type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "X-Cache": "HIT",
+      },
+    })
+  }
 
   const method = req.method
   const headers: Record<string,string> = {}
@@ -19,7 +48,7 @@ async function forward(req: NextRequest) {
 
   const body = method === "GET" || method === "HEAD" ? undefined : await req.text()
 
-  console.log("[proxy] ->", target.toString(), method)
+  console.log("[global-search] Redis miss ->", target.toString(), method)
 
   const controller = new AbortController()
   const t = setTimeout(() => controller.abort(), 15000) // 15s safety
@@ -28,6 +57,14 @@ async function forward(req: NextRequest) {
     const resp = await fetch(target.toString(), { method, headers, body, signal: controller.signal, cache: "no-store" })
     const outBody = await resp.text()
     const contentType = resp.headers.get("content-type") ?? "application/json"
+    if (resp.ok) {
+      try {
+        JSON.parse(outBody)
+        await setCached(cacheKey, outBody, SUGGESTIONS_TTL_SEC)
+      } catch {
+        // not JSON, don't cache
+      }
+    }
     return new Response(outBody, {
       status: resp.status,
       headers: {

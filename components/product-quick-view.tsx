@@ -59,7 +59,7 @@ export function ProductQuickView({ product, open, onOpenChange, onAddToCart }: P
         <DialogHeader>
           <DialogTitle className="line-clamp-2">{product.name}</DialogTitle>
           {product.supplierName && (
-            <DialogDescription>Sold by {product.supplierName}</DialogDescription>
+            <DialogDescription>Seller: {product.supplierName}</DialogDescription>
           )}
         </DialogHeader>
         <div className="space-y-4">

@@ -945,7 +945,7 @@ function ProductCard({
 
   const itemCode = getItemCode(product);
   const p = product as Record<string, unknown>;
-  // API returns normalized format: item_commercial_name, item_emballage, item_key_words, item_state, famille, item_packet, image_url
+  // API/Redis format: item_commercial_name, item_emballage (as-is), item_key_words, item_packet, image_url; price from selling_price
   const productName = String(p.item_commercial_name ?? p.item_name ?? p.ITEM_NAME ?? p.ITEM_COMMERCIAL_NAME ?? "").trim() || "Product";
   const priceRaw = p.selling_price ?? p.price ?? p.UNITY_PRICE ?? p.SALE_PRICE_INCLUSIVE;
   const price = extractNumericPrice(priceRaw);

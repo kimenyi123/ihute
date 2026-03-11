@@ -197,7 +197,7 @@ export default function B2BQuickBuyPage() {
       // Success! Clear cart and redirect
       setCart([]);
       alert(
-        `✅ Order Created Successfully!\n\n` +
+        `✅ Order Sent Successfully!\n\n` +
         `Parent Order ID: ${result.parentOrderId}\n` +
         `Child Orders: ${result.childOrders.length}\n\n` +
         `${result.message}`

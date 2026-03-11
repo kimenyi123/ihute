@@ -17,6 +17,14 @@ export interface User {
   ishyigaAccount?: string
   /** Owner name (e.g. for orders list) */
   owner?: string
+  /** Mobile Money (MoMo) payment code */
+  momo?: string
+  /** Preferred currency (e.g. RWF, USD) */
+  currency?: string
+  /** Profile or business description */
+  description?: string
+  /** Display nickname (e.g. for Shop with Me URL) */
+  nickname?: string
 }
 
 interface AuthState {

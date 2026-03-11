@@ -56,6 +56,7 @@ export function PersonalizedSections() {
   const hasInteractionRef = useRef(false)
 
   useEffect(() => {
+    console.log("[PersonalizedSections] useEffect: mount or user changed", { user: user?.email ?? "anonymous" })
     checkInteractionHistory().then(() => {
       loadPersonalizedSections()
     })
@@ -68,22 +69,35 @@ export function PersonalizedSections() {
       const has = recentIds.length >= 3
       hasInteractionRef.current = has
       setHasInteractionHistory(has)
-    } catch {
+      console.log("[PersonalizedSections] checkInteractionHistory:", { recentCount: recentIds.length, hasHistory: has, recentIds: recentIds.slice(0, 5) })
+    } catch (e) {
       hasInteractionRef.current = false
       setHasInteractionHistory(false)
+      console.log("[PersonalizedSections] checkInteractionHistory: failed", e)
     }
+  }
+
+  /** Extract numeric price from any backend field (same logic as shop-with-me). */
+  function extractNumericPrice(value: any): number {
+    if (typeof value === "number") return isNaN(value) ? 0 : value
+    const n = String(value ?? "").replace(/[^\d.,]/g, "").replace(",", ".")
+    const parsed = parseFloat(n)
+    return Number.isFinite(parsed) ? parsed : 0
   }
 
   /** Single fast request: load Burrows products with images (shop-with-me). */
   async function fetchBurrowsProducts(limit = 6): Promise<Product[]> {
+    console.log("[PersonalizedSections] fetchBurrowsProducts: start", { limit })
     try {
       const res = await fetch(
         `/api/shop-with-me?nickname=${encodeURIComponent(BURROWS_NICKNAME)}`,
         { cache: "no-store", headers: { "Cache-Control": "no-cache" } }
       )
+      console.log("[PersonalizedSections] fetchBurrowsProducts: response", { status: res.status, ok: res.ok })
       if (!res.ok) return []
       const data = await res.json()
       const sellers = data.sellers || []
+      console.log("[PersonalizedSections] fetchBurrowsProducts: sellers count", sellers.length)
       const products: Product[] = []
       const seen = new Set<string>()
       for (const seller of sellers) {
@@ -95,7 +109,15 @@ export function PersonalizedSections() {
           const code = p.item_code || p.ITEM_CODE || p.item_commercial_name || ""
           if (seen.has(code)) continue
           seen.add(code)
-          const price = parsePrice(p.item_emballage ?? p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? "0")
+          // Match shop-with-me price extraction so Burrows always gets a numeric price
+          const rawPrice =
+            p.selling_price ??
+            p.price ??
+            p.item_emballage ??
+            p.SALE_PRICE_INCLUSIVE ??
+            (p as any).SALE_PRICE_EXCLUSIVE ??
+            (p as any).PRICE
+          const price = extractNumericPrice(rawPrice)
           if (price <= 0) continue
           const img = p.image_url ?? p.item_image_url ?? p.image ?? p.IMAGE_URL
           products.push({
@@ -114,9 +136,11 @@ export function PersonalizedSections() {
           })
         }
       }
-      return products.slice(0, limit)
+      const out = products.slice(0, limit)
+      console.log("[PersonalizedSections] fetchBurrowsProducts: done", { productCount: out.length, productNames: out.map((p) => p.name) })
+      return out
     } catch (e) {
-      console.warn("[PersonalizedSections] Burrows fetch failed:", e)
+      console.warn("[PersonalizedSections] fetchBurrowsProducts: failed", e)
       return []
     }
   }
@@ -129,10 +153,12 @@ export function PersonalizedSections() {
   }
 
   async function loadPersonalizedSections() {
+    console.log("[PersonalizedSections] loadPersonalizedSections: start")
     setLoading(true)
 
     // 1) Load Burrows first (one fast request with images) so the page shows content quickly
     const burrowsProducts = await fetchBurrowsProducts(6)
+    console.log("[PersonalizedSections] loadPersonalizedSections: Burrows result", { count: burrowsProducts.length })
     if (burrowsProducts.length > 0) {
       setSections([
         {
@@ -143,22 +169,35 @@ export function PersonalizedSections() {
           loading: false,
         },
       ])
+      console.log("[PersonalizedSections] loadPersonalizedSections: set sections (Burrows only)")
+    } else {
+      console.log("[PersonalizedSections] loadPersonalizedSections: no Burrows products, sections stay empty for now")
     }
     setLoading(false)
 
     // 2) In background: load personalized recommendations and append section when ready
     const hasHistory = hasInteractionRef.current
+    console.log("[PersonalizedSections] loadPersonalizedSections: requesting getSmartRecommendations(12), hasHistory:", hasHistory)
     getSmartRecommendations(12)
       .then(async ({ products: productNames, source }) => {
-        if (!productNames?.length) return
-        console.log(`[PersonalizedSections] Recommendations from ${source}`)
+        console.log("[PersonalizedSections] getSmartRecommendations resolved", { source, productNamesCount: productNames?.length ?? 0, productNames: productNames?.slice(0, 6) })
+        if (!productNames?.length) {
+          console.log("[PersonalizedSections] no recommendation names, skipping For You / Trending section")
+          return
+        }
         const recommendedProducts = await fetchProductDetails(productNames)
-        if (recommendedProducts.length === 0) return
+        console.log("[PersonalizedSections] fetchProductDetails done", { requested: productNames.length, resolved: recommendedProducts.length, names: recommendedProducts.map((p) => p.name) })
+        if (recommendedProducts.length === 0) {
+          console.log("[PersonalizedSections] no resolved products, skipping For You / Trending section")
+          return
+        }
         const limited = recommendedProducts.slice(0, 6)
+        const sectionTitle = hasHistory ? "For You" : "Trending Now"
+        console.log("[PersonalizedSections] appending section", { title: sectionTitle, productCount: limited.length })
         setSections((prev) => {
           const next = prev.filter((s) => !s.title.startsWith("For You") && !s.title.startsWith("Trending Now"))
           next.push({
-            title: hasHistory ? "For You" : "Trending Now",
+            title: sectionTitle,
             subtitle: hasHistory ? "Based on your browsing" : "Popular this week",
             icon: <TrendingUp className="h-5 w-5" />,
             products: limited,
@@ -167,7 +206,9 @@ export function PersonalizedSections() {
           return next
         })
       })
-      .catch((err) => console.error("Error loading personalized sections:", err))
+      .catch((err) => {
+        console.error("[PersonalizedSections] getSmartRecommendations / fetchProductDetails error:", err)
+      })
   }
 
   async function loadTrendingSections() {
@@ -213,15 +254,13 @@ export function PersonalizedSections() {
 
 
   async function fetchProductDetails(productNames: string[]): Promise<Product[]> {
+    console.log("[PersonalizedSections] fetchProductDetails: start", { count: productNames.length, names: productNames.slice(0, 6) })
     if (productNames.length === 0) return []
 
     try {
       // Search for products by name using fetchSuggestions API
-      // We'll search for each product name and collect unique results
       const allProducts: Product[] = []
       const seenIds = new Set<string>()
-
-      // Search for up to 12 products (limit to avoid too many requests)
       const searchLimit = Math.min(productNames.length, 12)
 
       for (let i = 0; i < searchLimit; i++) {
@@ -240,10 +279,16 @@ export function PersonalizedSections() {
             }
           )
 
-          if (!res.ok) continue
+          if (!res.ok) {
+            console.log("[PersonalizedSections] fetchProductDetails: search failed for", productName, res.status)
+            continue
+          }
 
           const data = await res.json()
           const products = data.products || []
+          if (products.length === 0) {
+            console.log("[PersonalizedSections] fetchProductDetails: no products for", productName)
+          }
 
           // Map to Product interface
           for (const p of products) {
@@ -254,6 +299,7 @@ export function PersonalizedSections() {
             seenIds.add(productId)
             
             const price = parseFloat(p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? p.price ?? "0")
+            const rawCategory = p.FAMILLE || p.famille || p.category || ""
             
             allProducts.push({
               id: productId,
@@ -266,7 +312,7 @@ export function PersonalizedSections() {
               supplierName: p.SELLER_NAMES || p.supplier_name || "",
               supplierLocation: p.LOCATION || p.supplier_location || "",
               momo: p.momo || undefined,
-              category: category || undefined,
+              category: rawCategory ? String(rawCategory) : undefined,
               inStock: true,
             })
 
@@ -280,6 +326,7 @@ export function PersonalizedSections() {
       }
 
       const limited = allProducts.slice(0, 12)
+      console.log("[PersonalizedSections] fetchProductDetails: collected", { total: allProducts.length, limited: limited.length })
 
       // Prefer keeping personalized sections within a dominant category
       if (limited.length > 0) {
@@ -292,18 +339,22 @@ export function PersonalizedSections() {
         const mainCategory = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0]
         if (mainCategory) {
           const filtered = limited.filter((p) => (p.category || "").trim() === mainCategory)
-          if (filtered.length > 0) return filtered
+          if (filtered.length > 0) {
+            console.log("[PersonalizedSections] fetchProductDetails: filtered by dominant category", { mainCategory, count: filtered.length })
+            return filtered
+          }
         }
       }
 
       return limited
     } catch (error) {
-      console.error("Error fetching product details:", error)
+      console.error("[PersonalizedSections] fetchProductDetails: error", error)
       return []
     }
   }
 
   if (loading) {
+    console.log("[PersonalizedSections] render: loading")
     return (
       <div className="container mx-auto px-4 py-8">
         <div className="text-center text-muted-foreground">Loading personalized recommendations...</div>
@@ -312,8 +363,11 @@ export function PersonalizedSections() {
   }
 
   if (sections.length === 0) {
+    console.log("[PersonalizedSections] render: no sections, return null")
     return null // Don't show anything if no sections
   }
+
+  console.log("[PersonalizedSections] render: sections", sections.length, sections.map((s) => ({ title: s.title, productCount: s.products.length })))
 
   /**
    * WHEN PRODUCTS REFRESH/DISAPPEAR:

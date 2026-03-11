@@ -25,7 +25,7 @@ export async function POST(req: Request) {
         latitude, longitude,
       } = body
 
-      const sellerPayload = {
+      const sellerPayload: Record<string, string> = {
         email:           String(email || ""),
         owner:           [firstName, lastName].filter(Boolean).join(" "),
         company_name:    String(companyName || ""),
@@ -37,6 +37,11 @@ export async function POST(req: Request) {
         delivery_mode:   String(deliveryMode || "").toLowerCase(),
         momo_code:       String(momoCode || ""),
       }
+      if (latitude != null && longitude != null) {
+        sellerPayload.latitude = String(latitude)
+        sellerPayload.longitude = String(longitude)
+      }
+      if (body.gpsAccuracy != null) sellerPayload.gpsAccuracy = String(body.gpsAccuracy)
 
       console.log(`[RID ${rid}] -> POST ${JAVA_SUPPLIERS_URL} (seller registration)`, sellerPayload)
 
@@ -48,10 +53,17 @@ export async function POST(req: Request) {
       })
 
       const text = await res.text()
+      const trimmed = text.trim().replace(/^\uFEFF/, "") // strip BOM
       let json: any
-      try { json = JSON.parse(text) } catch {
+      try { json = JSON.parse(trimmed || "{}") } catch {
         console.error(`[RID ${rid}] Bad JSON from InsertSuppliers. Status=${res.status} Body: ${text.slice(0, 800)}`)
-        return NextResponse.json({ ok: false, error: "Bad JSON from supplier server", rid }, { status: 502 })
+        const preview = text.slice(0, 200).replace(/\s+/g, " ")
+        return NextResponse.json({
+          ok: false,
+          error: "Supplier server returned invalid response. Check backend is running and returns JSON.",
+          rawPreview: preview,
+          rid,
+        }, { status: 502 })
       }
 
       // 201 = created successfully

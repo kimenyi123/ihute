@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getShopWithMeUrl } from '@/lib/backend-config';
+import { buildCacheKey, getCached, setCached, DATA_TTL_SEC } from '@/lib/redis-cache';
 
 /**
  * Shop-with-me API: forwards to Java backend with nickname only.
- * Frontend URLs can be dynamic, e.g.:
- *   /shop-with-me?nickname=burrows&table=table%204
- *   /shop-with-me/burrows?table=table%204
- * Backend is called with nickname only: .../shop_with_me?nickname=burrows
+ * Redis first: check cache, then backend (DB).
  */
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -22,6 +20,23 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  const params: Record<string, string> = { nickname: nickname.trim() };
+  if (productSearch.trim()) params.productSearch = productSearch.trim();
+  const cacheKey = buildCacheKey('shop-with-me', params);
+
+  const cached = await getCached(cacheKey);
+  if (cached) {
+    console.log('[API shop-with-me] Redis cache hit');
+    try {
+      const data = JSON.parse(cached);
+      return NextResponse.json(data, {
+        headers: { 'X-Cache': 'HIT' },
+      });
+    } catch {
+      // invalid cache, fall through to backend
+    }
+  }
+
   try {
     const base = getShopWithMeUrl().replace(/\?.*$/, '').replace(/\/+$/, '');
     const normalizedNickname = nickname.trim();
@@ -29,7 +44,7 @@ export async function GET(request: NextRequest) {
     if (productSearch.trim()) {
       backendUrl += `&productSearch=${encodeURIComponent(productSearch.trim())}`;
     }
-    console.log('[API shop-with-me] Fetching from backend:', backendUrl);
+    console.log('[API shop-with-me] Redis miss, fetching from backend:', backendUrl);
 
     const headers: Record<string, string> = {
       'Accept': 'application/json',
@@ -54,7 +69,8 @@ export async function GET(request: NextRequest) {
     }
 
     const data = await response.json();
-    console.log('[API shop-with-me] Success! Returning data');
+    await setCached(cacheKey, JSON.stringify(data), DATA_TTL_SEC);
+    console.log('[API shop-with-me] Success! Cached in Redis');
 
     return NextResponse.json(data);
   } catch (error: any) {

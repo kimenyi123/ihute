@@ -2,7 +2,7 @@
 "use client"
 
 import dynamic from "next/dynamic"
-import { useMemo, useState, useEffect } from "react"
+import { useMemo, useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { useAuthStore } from "@/lib/auth-store"
 import { useCartStore } from "@/lib/cart-store"
@@ -45,6 +45,7 @@ import {
 
 const QRCode = dynamic(() => import("react-qr-code"), { ssr: false })
 const CUR = "RWF"
+import { buildMoMoUssd } from "@/lib/momo-ussd"
 
 // ---------- helpers ----------
 function normalizePhone(raw?: string | null): string {
@@ -170,6 +171,8 @@ function CartSummaryBody() {
   const [momoOpen, setMomoOpen] = useState(false)
   const [momoForSeller, setMomoForSeller] = useState<string | null>(null)
   const [momoPaymentProvider, setMomoPaymentProvider] = useState<"mtn" | "airtel">("mtn")
+  // Fallback: fetch supplier MoMo from profile when cart items don't have it (e.g. Burrows has momo in account_signup)
+  const [supplierMomoFallback, setSupplierMomoFallback] = useState<Record<string, string>>({})
 
   // Cart suggestions popup (before checkout). Skip popup for rest of session once user chose "No thanks" or "Continue to checkout"
   const [suggestionsPopupOpen, setSuggestionsPopupOpen] = useState(false)
@@ -189,6 +192,28 @@ function CartSummaryBody() {
 
   const groups = getGroupsBySeller()
   const grandTotal = Math.round(getGrandTotal())
+
+  // Resolve MoMo for a group: from cart items first, then fallback from profile API
+  const getMomoForGroup = (g: { supplierId: string; momo?: string | null }) =>
+    (g.momo ?? "").trim() || (supplierMomoFallback[g.supplierId] ?? "").trim()
+
+  // Fetch supplier profile (momo) when group has no momo so QR code can still show (e.g. PANGOLIN'S BURROWS)
+  const requestedMomoRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    groups.forEach((g) => {
+      const account = (g.supplierId ?? "").trim()
+      if (!account || (g.momo ?? "").trim()) return
+      if (requestedMomoRef.current.has(account)) return
+      requestedMomoRef.current.add(account)
+      fetch(`/api/account/profile?account=${encodeURIComponent(account)}`)
+        .then((res) => res.json())
+        .then((data) => {
+          const momo = (data?.ok && data?.profile?.momo) ? String(data.profile.momo).trim() : ""
+          if (momo) setSupplierMomoFallback((prev) => ({ ...prev, [account]: momo }))
+        })
+        .catch(() => {})
+    })
+  }, [groups])
   const discountPercent = appliedPromo?.percent ?? 0
   const discountAmount = Math.round((grandTotal * discountPercent) / 100)
   const totalAfterDiscount = grandTotal - discountAmount
@@ -251,7 +276,7 @@ function CartSummaryBody() {
   // WhatsApp prefill per seller
   const sellerWhatsData = useMemo(() => {
     return groups.map((g) => {
-      const chosenPhone = orderPhones[g.supplierId] || g.phone || g.momo || ""
+      const chosenPhone = orderPhones[g.supplierId] || g.phone || getMomoForGroup(g) || ""
       const phone = normalizePhone(chosenPhone)
       const items: WhatsItem[] = g.items.map((it) => {
         const name = stripTrailingPriceParen(it.name || "Product")
@@ -260,7 +285,7 @@ function CartSummaryBody() {
         return [name, qty, amount]
       })
       const orderId = orderIds[g.supplierId]
-      const hasUssdTarget = Boolean((g.momo ?? "").trim())
+      const hasUssdTarget = Boolean(getMomoForGroup(g))
       const isPaid = getPaymentStatus(g.supplierId) === "paid"
       const message = buildWhatsAppMessageStyled({
         shop: g.supplierName,
@@ -309,7 +334,7 @@ function CartSummaryBody() {
     }
 
     // Otherwise proceed with regular checkout
-    const hasUssdTarget = Boolean((g.momo ?? "").trim())
+    const hasUssdTarget = Boolean(getMomoForGroup(g))
     setSelectedSeller(supplierId)
     // Default to momo if available, otherwise cod
     setPaymentMethod(hasUssdTarget ? "momo" : "cod")
@@ -573,7 +598,7 @@ function CartSummaryBody() {
           const status = getPaymentStatus(g.supplierId)
           const wa = sellerWhatsData.find(x => x.supplierId === g.supplierId)
 
-          const momoTarget = (g.momo ?? "").trim()
+          const momoTarget = getMomoForGroup(g)
           const hasUssdTarget = momoTarget.length > 0
           const unmark = () => setPaymentStatus(g.supplierId, "unpaid")
 
@@ -660,7 +685,7 @@ function CartSummaryBody() {
         })}
 
         {/* Promo code */}
-        <Card>
+        {/*<Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base flex items-center gap-2">
               <Tag className="h-4 w-4" /> Promo code
@@ -682,7 +707,7 @@ function CartSummaryBody() {
             {promoError && <p className="text-sm text-destructive">{promoError}</p>}
           </CardContent>
         </Card>
-
+*/}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Grand Total</CardTitle>
@@ -832,7 +857,7 @@ function CartSummaryBody() {
             <div className="space-y-3">
               {selectedSeller && (() => {
                 const g = groups.find(x => x.supplierId === selectedSeller)
-                const hasUssdTarget = g ? Boolean((g.momo ?? "").trim()) : false
+                const hasUssdTarget = g ? Boolean(getMomoForGroup(g)) : false
 
                 return (
                   <>
@@ -1107,9 +1132,9 @@ function CartSummaryBody() {
             const g = groups.find(x => x.supplierId === momoForSeller)
             if (!g) return null
 
-            const momoTarget = (g.momo ?? "").trim()
+            const momoTarget = getMomoForGroup(g)
             const hasUssdTarget = momoTarget.length > 0
-            const payload = `*182*8*1*${momoTarget}*${g.subtotal}#`
+            const payload = buildMoMoUssd(momoTarget, g.subtotal)
             const telHref = `tel:${encodeURIComponent(payload)}`
 
             return (
@@ -1132,7 +1157,11 @@ function CartSummaryBody() {
                       <div className="bg-white p-4 rounded-lg inline-block border-2">
                         <QRCode value={payload} size={200} />
                       </div>
-                      <p className="text-xs text-muted-foreground">Or dial manually: {payload}</p>
+                      <p className="text-xs font-semibold text-slate-800">USSD code (dial on your phone):</p>
+                      <p className="font-mono text-sm bg-white border rounded px-2 py-1 break-all select-all" title="Copy or dial">
+                        {payload}
+                      </p>
+                      <p className="text-xs text-muted-foreground">Or tap &quot;Dial now&quot; below to open your dialer with this code.</p>
                     </div>
 
                     <div className="flex gap-2">
@@ -1206,7 +1235,7 @@ function CartSummaryBody() {
             if (!open && isInTableCommand() && tableCommandSeller) {
               const g = groups.find(x => x.supplierId === tableCommandSeller.id)
               if (g) {
-                const hasUssdTarget = Boolean((g.momo ?? "").trim())
+                const hasUssdTarget = Boolean(getMomoForGroup(g))
                 setSelectedSeller(tableCommandSeller.id)
                 setPaymentMethod(hasUssdTarget ? "momo" : "cod")
                 setPaymentMethodOpen(true)
@@ -1218,7 +1247,7 @@ function CartSummaryBody() {
             if (tableCommandSeller) {
               const g = groups.find(x => x.supplierId === tableCommandSeller.id)
               if (g) {
-                const hasUssdTarget = Boolean((g.momo ?? "").trim())
+                const hasUssdTarget = Boolean(getMomoForGroup(g))
                 setSelectedSeller(tableCommandSeller.id)
                 setPaymentMethod(hasUssdTarget ? "momo" : "cod")
                 setPaymentMethodOpen(true)
