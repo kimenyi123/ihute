@@ -86,10 +86,11 @@ export function CartContent() {
               Continue Shopping
             </Link>
           </Button>
-          <Button variant="outline" className="gap-2" onClick={() => setBarcodeOpen(true)}>
+          {/*<Button variant="outline" className="gap-2" onClick={() => setBarcodeOpen(true)}>
             <ScanBarcode className="h-4 w-4" />
             Scan barcode
           </Button>
+          */}
         </div>
         <BarcodeScanner open={barcodeOpen} onOpenChange={setBarcodeOpen} onScan={handleBarcodeScan} />
       </div>

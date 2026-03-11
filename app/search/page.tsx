@@ -613,7 +613,7 @@ export default function SearchPage() {
         const data = res.ok ? await res.json() : null
         if (cancelled) return
 
-        // Log data source for supplier-scoped search (e.g. "inkoko" under IWACU BAR)
+      
         const dataSource = data ? getDataSourceLabel(data) : "no response"
         const productCount = Array.isArray(data?.products) ? data.products.length : 0
         const productSources = (data?.products ?? []).map((p: { source?: string }) => p?.source ?? "?")
