@@ -240,18 +240,25 @@ export async function sendTableOrder(
   userEmail: string
 ): Promise<SendTableOrderResponse> {
   try {
-    const url = new URL(`${API_BASE}/Kaos/OrdersServlet`);
-    url.searchParams.set("action", "sendTableOrder");
-    url.searchParams.set("tableName", tableName);
-    url.searchParams.set("locationId", locationId);
-    url.searchParams.set("userEmail", userEmail);
-
-    const response = await fetch(url.toString(), {
+    // Use Next.js API route (same origin) to avoid CORS when frontend and backend are on different domains
+    const response = await fetch("/api/table-commands/send", {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tableName, locationId, userEmail }),
     });
 
     const data = await response.json();
-    return data;
+    // Normalize to SendTableOrderResponse shape
+    return {
+      ok: data.ok ?? false,
+      masterOrderId: data.masterOrderId ?? 0,
+      tableName: data.tableName ?? tableName,
+      childOrderCount: data.childOrderCount ?? data.orderCount ?? 0,
+      totalAmount: data.totalAmount ?? 0,
+      sentBy: data.sentBy ?? "",
+      childOrders: data.childOrders ?? data.orders ?? [],
+      error: data.error,
+    };
   } catch (error) {
     console.error("❌ sendTableOrder error:", error);
     return {

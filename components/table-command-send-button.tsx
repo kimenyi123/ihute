@@ -41,8 +41,6 @@ export function SendTableButton({
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<any>(null)
 
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw/Trading"
-
   // Only show for ACTIVE tables and table creator
   if (!isCreator || tableStatus !== "ACTIVE") {
     return null
@@ -54,22 +52,11 @@ export function SendTableButton({
     setSuccess(null)
 
     try {
-      // ✅ Backend API: /OrdersServlet?action=sendTableOrder
-      const url = new URL(`${API_BASE}/OrdersServlet`)
-      url.searchParams.set("action", "sendTableOrder")
-      url.searchParams.set("tableName", tableName)
-      url.searchParams.set("locationId", locationId)
-      url.searchParams.set("userEmail", userEmail)
-
-      console.log("📤 Sending table order:", {
-        tableName,
-        locationId,
-        userEmail,
-        url: url.toString()
-      })
-
-      const response = await fetch(url.toString(), {
+      // Use Next.js API route (same origin) to avoid CORS
+      const response = await fetch("/api/table-commands/send", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tableName, locationId, userEmail }),
       })
 
       const result = await response.json()
