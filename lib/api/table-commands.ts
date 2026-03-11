@@ -127,7 +127,8 @@ export async function createTableCommandApi(params: {
   userName?: string;
 }): Promise<CreateTableCommandResponse> {
   try {
-    const response = await fetch(`${API_BASE}/Kaos/OrdersServlet?action=createTableCommand`, {
+    // Use Next.js API route (same origin) to avoid CORS when frontend and backend are on different domains
+    const response = await fetch("/api/table-commands/create", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
