@@ -1,5 +1,5 @@
 // app/supplier/b2b/api/route.ts
-// Proxy for B2B Procurement Servlet (Java/Tomcat)
+// Proxy for Rekizisiyo Servlet (Java/Tomcat)
 
 import { NextRequest, NextResponse } from "next/server";
 

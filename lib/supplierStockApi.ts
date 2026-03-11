@@ -1,14 +1,34 @@
 /**
  * Supplier Stock API Client
  * TypeScript client for Redis-based stock management
+ *
+ * Redis format (used across search, dashboard, cart, shop-with-me):
+ *   Key: "supplier_<account>" (e.g. supplier_ALGG0000187)
+ *   Value: { key: "supplier_<account>", data: [ {...}, ... ] }
+ *
+ * Each item in data can have:
+ *   item_commercial_name, item_packet, item_emballage (value or "" — pass through as-is; empty remains empty),
+ *   selling_price (use this for price; item_emballage is not price), cost_price,
+ *   item_key_words, item_state, famille, last_sync_time, lot,
+ *   item_key_words_french, item_key_words_kinyarwanda, image_url
  */
 
 export interface StockItem {
   item_commercial_name: string;
   item_packet: string;
-  item_emballage: string;
+  /** Pass through as-is; empty remains empty. Not used for price — use selling_price. */
+  item_emballage?: string;
   item_key_words: string;
-  item_state: string;
+  item_state?: string;
+  selling_price?: number | string;
+  cost_price?: number | string;
+  famille?: string;
+  last_sync_time?: string;
+  lot?: string;
+  item_key_words_french?: string;
+  item_key_words_kinyarwanda?: string;
+  image_url?: string;
+  item_image_url?: string;
 }
 
 export interface StockData {

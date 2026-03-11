@@ -5,7 +5,7 @@ import Image from "next/image"
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Star } from "lucide-react"
-import { RotateCcw, History, RefreshCcw } from "lucide-react"
+import { RotateCcw, ScrollText, RefreshCcw } from "lucide-react"
 import {
   ShoppingCart,
   User,
@@ -191,7 +191,7 @@ export function Header() {
                   <>
                     <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Orders">
                       <Link href="/buyer/orders">
-                        <Truck className="h-5 w-5" />
+                        <ScrollText className="h-5 w-5" />
                         {pendingCount > 0 && (
                           <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">
                             {pendingCount}
@@ -251,10 +251,10 @@ export function Header() {
                 <Eye className="h-5 w-5" />
               </Link>
             </Button>
-            {/* Reorder */}
+            {/* Reorder (use orders-style icon) */}
             <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Reorder Items">
               <Link href="/reorder">
-                <RotateCcw className="h-5 w-5" />
+                <PackageSearch className="h-5 w-5" />
               </Link>
             </Button>
 
@@ -267,7 +267,7 @@ export function Header() {
             </Button>
 
             {/* Barcode add to cart */}
-            <Button variant="ghost" size="icon" className="h-9 w-9" title="Add by barcode" onClick={() => setBarcodeOpen(true)}>
+            {/*<Button variant="ghost" size="icon" className="h-9 w-9" title="Add by barcode" onClick={() => setBarcodeOpen(true)}>
               <Barcode className="h-5 w-5" />
             </Button>
             {/* Cart */}

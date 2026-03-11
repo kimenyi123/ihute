@@ -74,12 +74,16 @@ export default function SupplierEditProductPage() {
             const productId = foundProduct.item_key_words || foundProduct.ITEM_CODE || foundProduct.id
             const productName = foundProduct.item_commercial_name || foundProduct.ITEM_NAME || foundProduct.name
             
-            // Parse price from Redis format (e.g., "5000.0RWF") or database format
+            // Prefer selling_price (Redis); then item_emballage; then DB/API price
             let productPrice = 0
-            if (foundProduct.item_emballage) {
+            if (foundProduct.selling_price != null) {
+              productPrice = typeof foundProduct.selling_price === "number" ? foundProduct.selling_price : parseFloat(String(foundProduct.selling_price)) || 0
+            }
+            if (productPrice <= 0 && foundProduct.item_emballage) {
               const priceStr = foundProduct.item_emballage.replace(/RWF/gi, '').trim()
               productPrice = parseFloat(priceStr) || 0
-            } else {
+            }
+            if (productPrice <= 0) {
               productPrice = parseFloat(foundProduct.price || foundProduct.SALE_PRICE_INCLUSIVE || 0)
             }
             

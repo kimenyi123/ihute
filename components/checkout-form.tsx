@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { CheckoutSummary } from "@/components/checkout-summary"
-import { CreditCard, Smartphone, ArrowLeft, Check, MapPin } from "lucide-react"
+import { CreditCard, Smartphone, ArrowLeft, Check, MapPin, Users } from "lucide-react"
 import Link from "next/link"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -18,10 +18,10 @@ import * as z from "zod"
 
 const checkoutSchema = z.object({
   fullName: z.string().min(2, "Name must be at least 2 characters"),
-  email: z.string().email("Invalid email address"),
+  email: z.string().email("Invalid email address").optional().or(z.literal("")),
   phone: z.string().min(10, "Phone number must be at least 10 digits"),
-  address: z.string().min(5, "Address must be at least 5 characters"),
-  city: z.string().min(2, "City is required"),
+  address: z.string().min(2, "Address must be at least 2 characters"),
+  city: z.string().min(2, "City is required").optional().or(z.literal("")),
   notes: z.string().optional(),
   paymentMethod: z.enum(["momo", "card"]),
   momoPhone: z.string().optional(),
@@ -35,10 +35,14 @@ type CheckoutFormData = z.infer<typeof checkoutSchema>
 
 export function CheckoutForm() {
   const router = useRouter()
-  const { items, getTotalPrice, clearCart, getTableInfo } = useCartStore()
+  const { items, getTotalPrice, clearCart, tableInfo } = useCartStore()
   const [isProcessing, setIsProcessing] = useState(false)
   const [showReview, setShowReview] = useState(false)
   const [showMap, setShowMap] = useState(false)
+
+  // Check if this is a table order
+  const hasTableNumber = tableInfo?.tableNumber && tableInfo.tableNumber.trim() !== ""
+  const isTableOrder = hasTableNumber
 
   const {
     register,
@@ -55,58 +59,43 @@ export function CheckoutForm() {
 
   const paymentMethod = watch("paymentMethod")
 
-  // ✅ Pre-fill customer info from cart store tableInfo
+  // ✅ IMPROVED: Pre-fill form with table info
   useEffect(() => {
-    const tableInfo = getTableInfo()
-    console.log("[CheckoutForm] tableInfo from cart store:", tableInfo)
-
-    // 1️⃣ Preferred: use explicit fields when available
-    if (tableInfo?.customerName || tableInfo?.customerAddress) {
-      if (tableInfo.customerName) {
-        console.log("[CheckoutForm] Using customerName:", tableInfo.customerName)
-        setValue("fullName", tableInfo.customerName)
-      }
-      if (tableInfo.customerAddress) {
-        console.log("[CheckoutForm] Using customerAddress:", tableInfo.customerAddress)
-        setValue("address", tableInfo.customerAddress)
-      }
-      return
-    }
-
-    // 2️⃣ Backwards compatibility: parse tableNumber "Name | Address"
     if (tableInfo?.tableNumber) {
-      console.log("[CheckoutForm] Found tableNumber:", tableInfo.tableNumber)
+      const tableNum = tableInfo.tableNumber.trim()
 
-      const parts = tableInfo.tableNumber.split("|").map((p) => p.trim())
-      console.log("[CheckoutForm] Parsed into parts:", parts)
-
-      if (parts.length >= 2) {
-        const [name, address] = parts
-        console.log("[CheckoutForm] Setting fullName:", name)
-        console.log("[CheckoutForm] Setting address:", address)
-
-        setValue("fullName", name)
-        setValue("address", address)
-      } else if (parts.length === 1 && parts[0]) {
-        console.log("[CheckoutForm] Only one part found, using as fullName:", parts[0])
-        setValue("fullName", parts[0])
+      // Check if tableNumber contains "Name | Address" format
+      if (tableNum.includes("|")) {
+        const parts = tableNum.split("|").map(p => p.trim())
+        if (parts.length >= 2) {
+          const [name, address] = parts
+          setValue("fullName", name)
+          setValue("address", address)
+        }
+      } else {
+        // If it's just a table number, use it for both name and address
+        setValue("fullName", tableNum)
+        setValue("address", tableNum)
       }
-    } else {
-      console.log("[CheckoutForm] No tableInfo or tableNumber found")
+
+      // Set city to shop name for context
+      if (tableInfo.shopName) {
+        setValue("city", tableInfo.shopName)
+      }
     }
-  }, [getTableInfo, setValue])
+  }, [tableInfo, setValue])
 
   if (items.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center">
         <h2 className="text-2xl font-bold text-foreground mb-2">No items in cart</h2>
         <p className="text-muted-foreground mb-6">Add some products before checking out</p>
-        <Button className="gap-2" asChild>
-          <Link href="/">
+        <Link href="/">
+          <Button className="gap-2">
             <ArrowLeft className="h-4 w-4" />
             Continue Shopping
-          </Link>
-        </Button>
+          </Button>
+        </Link>
       </div>
     )
   }
@@ -133,10 +122,14 @@ export function CheckoutForm() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          buyerEmail: data.email,
+          buyerEmail: data.email || "",
           buyerName: data.fullName,
           buyerPhone: data.phone,
-          buyerLocation: `${data.address}, ${data.city}`,
+          buyerLocation: data.city ? `${data.address}, ${data.city}` : data.address,
+
+          // ✅ Include table info if available
+          tableNumber: isTableOrder ? tableInfo?.tableNumber : undefined,
+          shopId: isTableOrder ? tableInfo?.shopId : undefined,
 
           sellerAccount: items[0]?.supplierId || "",
           sellerName: items[0]?.supplierName || "",
@@ -153,10 +146,9 @@ export function CheckoutForm() {
 
           items: items.map((it) => ({
             name: it.name,
-            qty: it.qty,
+            qty: it.quantity, // ✅ Fixed: use quantity instead of qty
             unitPrice: it.price,
             unit: it.unit || "pcs",
-            itemCode: it.itemCode ?? it.id,
           })),
 
           subtotal: getTotalPrice(),
@@ -188,6 +180,25 @@ export function CheckoutForm() {
     <form onSubmit={handleSubmit(onSubmit)}>
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
+          {/* Table Order Info Banner */}
+          {isTableOrder && (
+            <Card className="border-primary bg-primary/5">
+              <CardContent className="py-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
+                    <Users className="h-5 w-5 text-primary" />
+                  </div>
+                  <div>
+                    <p className="font-semibold">Table Order</p>
+                    <p className="text-sm text-muted-foreground">
+                      {tableInfo?.shopName} - {tableInfo?.tableNumber}
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Customer Information */}
           <Card>
             <CardHeader>
@@ -195,14 +206,27 @@ export function CheckoutForm() {
                 <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
                   1
                 </span>
-                Customer Information
+                {isTableOrder ? "Table Information" : "Customer Information"}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
-                  <Label htmlFor="fullName">Full Name *</Label>
-                  <Input id="fullName" placeholder="John Doe" {...register("fullName")} disabled={showReview} />
+                  <Label htmlFor="fullName">
+                    {isTableOrder ? "Table Number / Name" : "Full Name"} *
+                  </Label>
+                  <Input
+                    id="fullName"
+                    placeholder={isTableOrder ? "Table 5" : "John Doe"}
+                    {...register("fullName")}
+                    disabled={showReview || isTableOrder}
+                    className={isTableOrder ? "bg-muted" : ""}
+                  />
+                  {isTableOrder && (
+                    <p className="text-xs text-muted-foreground">
+                      Pre-filled from your table selection
+                    </p>
+                  )}
                   {errors.fullName && <p className="text-sm text-destructive">{errors.fullName.message}</p>}
                 </div>
 
@@ -220,7 +244,9 @@ export function CheckoutForm() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="email">Email Address *</Label>
+                <Label htmlFor="email">
+                  Email Address {isTableOrder ? "(Optional)" : "*"}
+                </Label>
                 <Input
                   id="email"
                   type="email"
@@ -232,29 +258,38 @@ export function CheckoutForm() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="address">Delivery Address *</Label>
+                <Label htmlFor="address">
+                  {isTableOrder ? "Table Location" : "Delivery Address"} *
+                </Label>
                 <div className="flex gap-2">
                   <Input
                     id="address"
-                    placeholder="Street address, building, apartment"
+                    placeholder={isTableOrder ? "Table 5" : "Street address, building, apartment"}
                     {...register("address")}
-                    disabled={showReview}
-                    className="flex-1"
+                    disabled={showReview || isTableOrder}
+                    className={`flex-1 ${isTableOrder ? "bg-muted" : ""}`}
                   />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    onClick={() => setShowMap(!showMap)}
-                    disabled={showReview}
-                  >
-                    <MapPin className="h-4 w-4" />
-                  </Button>
+                  {!isTableOrder && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setShowMap(!showMap)}
+                      disabled={showReview}
+                    >
+                      <MapPin className="h-4 w-4" />
+                    </Button>
+                  )}
                 </div>
+                {isTableOrder && (
+                  <p className="text-xs text-muted-foreground">
+                    Your order will be delivered to this table
+                  </p>
+                )}
                 {errors.address && <p className="text-sm text-destructive">{errors.address.message}</p>}
               </div>
 
-              {showMap && (
+              {showMap && !isTableOrder && (
                 <div className="rounded-lg border bg-muted/50 p-4">
                   <p className="text-sm text-muted-foreground mb-2">Click on the map to select your location</p>
                   <div className="aspect-video rounded-lg bg-muted flex items-center justify-center">
@@ -267,17 +302,34 @@ export function CheckoutForm() {
                 </div>
               )}
 
-              <div className="space-y-2">
-                <Label htmlFor="city">City *</Label>
-                <Input id="city" placeholder="Kigali" {...register("city")} disabled={showReview} />
-                {errors.city && <p className="text-sm text-destructive">{errors.city.message}</p>}
-              </div>
+              {!isTableOrder && (
+                <div className="space-y-2">
+                  <Label htmlFor="city">City *</Label>
+                  <Input id="city" placeholder="Kigali" {...register("city")} disabled={showReview} />
+                  {errors.city && <p className="text-sm text-destructive">{errors.city.message}</p>}
+                </div>
+              )}
+
+              {isTableOrder && (
+                <div className="space-y-2">
+                  <Label htmlFor="city">Restaurant/Bar</Label>
+                  <Input
+                    id="city"
+                    placeholder={tableInfo?.shopName}
+                    {...register("city")}
+                    disabled={showReview || isTableOrder}
+                    className="bg-muted"
+                  />
+                </div>
+              )}
 
               <div className="space-y-2">
-                <Label htmlFor="notes">Delivery Notes (Optional)</Label>
+                <Label htmlFor="notes">
+                  {isTableOrder ? "Special Requests (Optional)" : "Delivery Notes (Optional)"}
+                </Label>
                 <Textarea
                   id="notes"
-                  placeholder="Any special instructions for delivery..."
+                  placeholder={isTableOrder ? "Any special requests for your order..." : "Any special instructions for delivery..."}
                   rows={3}
                   {...register("notes")}
                   disabled={showReview}
@@ -309,7 +361,7 @@ export function CheckoutForm() {
                     <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
                       <Smartphone className="h-5 w-5 text-primary" />
                     </div>
-                    <div>
+                    <div>Mobile Money (MoMo Pay)
                       <p className="font-semibold">Mobile Money (MoMo Pay)</p>
                       <p className="text-sm text-muted-foreground">Pay with MTN or Airtel Money</p>
                     </div>
@@ -383,19 +435,27 @@ export function CheckoutForm() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="rounded-lg bg-muted/50 p-4 space-y-2">
-                  <h4 className="font-semibold text-sm">Delivery Information</h4>
+                  <h4 className="font-semibold text-sm">
+                    {isTableOrder ? "Table Information" : "Delivery Information"}
+                  </h4>
                   <div className="text-sm space-y-1">
                     <p>
-                      <span className="text-muted-foreground">Name:</span> {formData.fullName}
+                      <span className="text-muted-foreground">
+                        {isTableOrder ? "Table:" : "Name:"}
+                      </span> {formData.fullName}
                     </p>
                     <p>
                       <span className="text-muted-foreground">Phone:</span> {formData.phone}
                     </p>
+                    {formData.email && (
+                      <p>
+                        <span className="text-muted-foreground">Email:</span> {formData.email}
+                      </p>
+                    )}
                     <p>
-                      <span className="text-muted-foreground">Email:</span> {formData.email}
-                    </p>
-                    <p>
-                      <span className="text-muted-foreground">Address:</span> {formData.address}, {formData.city}
+                      <span className="text-muted-foreground">
+                        {isTableOrder ? "Location:" : "Address:"}
+                      </span> {formData.address}{formData.city && `, ${formData.city}`}
                     </p>
                     {formData.notes && (
                       <p>

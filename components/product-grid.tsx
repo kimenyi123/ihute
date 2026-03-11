@@ -57,7 +57,7 @@ function toRouteCategoryId(raw?: string): string | undefined {
     .replace(/[^a-z0-9-]/g, "");
 }
 
-// Normalize any product shape coming from API
+// Normalize any product shape from API (Redis format: supplier_<account> / data[]; item_emballage as-is, price from selling_price)
 function normalizeProduct(
   p: any,
   fallbacks?: { account?: string; sellerName?: string; sellerLoc?: string }

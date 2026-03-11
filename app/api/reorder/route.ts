@@ -6,12 +6,19 @@ import { getBackendBase } from "@/lib/backend-config";
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const JAVA_API_URL = process.env.JAVA_API_URL || getBackendBase().replace(/\/Trading\/?$/, "") || "https://ihute.rw";
+    // Java servlet is mapped as @WebServlet("/api/reorder")
+    // and is deployed under the same base as other Trading endpoints.
+    // getBackendBase() already includes the "/Trading" suffix (e.g. http://host:8080/Trading),
+    // so the full URL becomes "<base>/api/reorder".
+    const JAVA_API_URL =
+      process.env.JAVA_API_URL ||
+      getBackendBase() ||
+      "https://ihute.rw/Trading";
 
-    console.log('Proxying request to:', `${JAVA_API_URL}/Trading/re_order`);
+    console.log("Proxying request to:", `${JAVA_API_URL}/api/reorder`);
     console.log('Request body:', body);
 
-    const response = await fetch(`${JAVA_API_URL}/Trading/re_order`, {
+    const response = await fetch(`${JAVA_API_URL}/api/reorder`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

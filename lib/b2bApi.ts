@@ -1,6 +1,6 @@
 /**
  * B2B Procurement API Client
- * Handles all communication with B2B Procurement Servlet
+ * Handles all communication with B2B Procurement/Rekizisiyo Servlet
  */
 
 export interface B2BProduct {

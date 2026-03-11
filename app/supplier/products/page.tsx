@@ -73,11 +73,12 @@ export default function MyProductsPage() {
   const name = p.item_commercial_name || p.ITEM_NAME || p.name || ""
   const id   = p.item_key_words || p.ITEM_CODE || p.id || ""
 
-  // ✅ Handle Redis price format "5000RWF" or plain number
+  // Price: selling_price (Redis) or SALE_PRICE_INCLUSIVE/price (DB). item_emballage is not price.
   let price = 0
-  if (p.item_emballage) {
-    price = parseFloat(p.item_emballage.replace(/RWF/gi, "").trim()) || 0
-  } else {
+  if (p.selling_price != null) {
+    price = typeof p.selling_price === "number" ? p.selling_price : parseFloat(String(p.selling_price).replace(/[^0-9.-]/g, "")) || 0
+  }
+  if (price <= 0) {
     price = parseFloat(p.price || p.SALE_PRICE_INCLUSIVE || 0)
   }
 

@@ -384,8 +384,19 @@ export function GlobalSearch({
         const supplierThreshold = filteredProducts.length > 0 ? 8 : 20
         const filteredSuppliers = filterSuppliersByRelevance(validSuppliers, q.trim(), supplierThreshold)
 
+        // Deduplicate suppliers that appear in both suppliersByName and suppliersByProduct
+        const dedupedSuppliers: typeof filteredSuppliers = []
+        const seenSupplierKeys = new Set<string>()
+        for (const sup of filteredSuppliers) {
+          const key = `${sup.supplier_account || sup.item_seller_account || ""}|${sup.supplier_name || ""}`.trim()
+          if (!key) continue
+          if (seenSupplierKeys.has(key)) continue
+          seenSupplierKeys.add(key)
+          dedupedSuppliers.push(sup)
+        }
+
         const p = filteredProducts.slice(0, maxSuggestions)
-        const s = filteredSuppliers.slice(0, Math.max(4, Math.floor(maxSuggestions * 0.3)))
+        const s = dedupedSuppliers.slice(0, Math.max(4, Math.floor(maxSuggestions * 0.3)))
 
         console.log("[GlobalSearch] Filtered results:", {
           products: p.length,
@@ -846,13 +857,8 @@ export function GlobalSearch({
                                   {p.item_packet || ""}
                                 </div>
                                 <div className="mt-1 text-sm font-semibold text-green-600">
-                                  {p.item_emballage || "Price N/A"}
+                                  {p.item_emballage ?? ""}
                                 </div>
-                                {p.finalScore && p.finalScore > 0 && (
-                                  <div className="mt-1 text-[10px] text-gray-400">
-                                    Score: {Math.round(p.finalScore)}
-                                  </div>
-                                )}
                                 <div className="mt-1 text-[11px] text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
                                   Add & go to cart →
                                 </div>

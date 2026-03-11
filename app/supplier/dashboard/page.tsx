@@ -191,15 +191,15 @@ function SupplierDashboard() {
         const mappedProducts = products.map((p: any, index: number) => {
           console.log(`Product ${index}:`, p);
 
-          // Check if this is Redis format (your format)
-          const isRedisFormat = p.item_commercial_name && p.item_key_words && p.item_packet && p.item_emballage;
+          // Check if this is Redis format (your format); item_emballage can be empty
+          const isRedisFormat = p.item_commercial_name && p.item_key_words && p.item_packet;
 
           let mapped;
 
           if (isRedisFormat) {
-            // Handle Redis format (your format)
+            // Handle Redis format: price only from selling_price; item_emballage passed through as-is (empty remains empty)
             const stock = parseIntSafe(p.item_packet);
-            const price = parsePriceFromRedis(p.item_emballage);
+            const price = p.selling_price != null ? parsePrice(String(p.selling_price)) : 0;
 
             mapped = {
               ...p, // Keep all original Redis fields

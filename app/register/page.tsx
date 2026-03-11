@@ -117,7 +117,11 @@ export default function RegisterPage() {
         throw new Error(`Bad JSON: ${text.substring(0, 200)}`)
       })
 
-      if (!res.ok || !json?.ok) throw new Error(json?.error || "Registration failed")
+      if (!res.ok || !json?.ok) {
+        const msg = json?.error || "Registration failed"
+        const detail = json?.rawPreview ? ` Server response: ${json.rawPreview}` : ""
+        throw new Error(msg + detail)
+      }
 
       if (role === "seller") {
         setShowPendingModal(true)

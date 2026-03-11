@@ -49,7 +49,7 @@ export function CartContent() {
         return
       }
       const name = first.item_commercial_name ?? first.ITEM_NAME ?? "Product"
-      const price = Number(first.item_emballage ?? first.selling_price ?? first.UNIT_PRICE ?? 0) || 0
+      const price = Number(first.selling_price ?? first.UNIT_PRICE ?? 0) || 0
       const code = first.item_key_words ?? first.item_code ?? first.ITEM_CODE ?? first.id ?? barcode
       const supplierId = (first.supplier_account ?? first.seller_account ?? "unknown").toString().trim()
       const supplierName = first.supplier_name ?? first.OWNER ?? "Supplier"

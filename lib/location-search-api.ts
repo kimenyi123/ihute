@@ -1,9 +1,16 @@
 // API service for location-based searches
 
 // Use environment variable for backend URL (client-side needs NEXT_PUBLIC_ prefix)
-// Full path includes /Kaos for fetchSuggestions servlet
-const BACKEND_BASE = process.env.NEXT_PUBLIC_JAVA_BACKEND_BASE || 'http://localhost:8080/Trading';
-const API_BASE_URL = `${BACKEND_BASE}/Kaos`;
+// Prefer NEXT_PUBLIC_API_BASE so it stays consistent with the rest of the app.
+// If NEXT_PUBLIC_API_BASE is not set, fall back to the older JAVA_BACKEND_BASE-style default.
+const BACKEND_BASE =
+  process.env.NEXT_PUBLIC_API_BASE ||
+  process.env.NEXT_PUBLIC_JAVA_BACKEND_BASE ||
+  "http://localhost:8080/Trading"
+
+// If NEXT_PUBLIC_API_BASE already points directly to the Kaos path, you can set it to
+// e.g. http://localhost:8080/Trading/Kaos and this will just append `/fetchSuggestions`.
+const API_BASE_URL = BACKEND_BASE.endsWith("/Kaos") ? BACKEND_BASE : `${BACKEND_BASE}/Kaos`;
 
 export interface NearbySupplier {
     supplier_id: string;

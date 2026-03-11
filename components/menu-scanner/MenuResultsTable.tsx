@@ -175,11 +175,11 @@ export function MenuResultsTable({
     alert(
       `Excel file downloaded!\n\n` +
         `Total items: ${items.length}\n` +
-        `Columns: NAME, QTE, SALES, CODE, DESCRIPTION, Category, etc.\n\n` +
+        `Columns: NAME, QTE, SALES, CODE, DESCRIPTION (+ optional Category, French, Kinyarwanda, Image, etc.)\n\n` +
         `Next steps:\n` +
         `1. Open the Excel file\n` +
-        `2. Review and fill optional fields (SUPPLIER_ID, COST_PRICE, etc.)\n` +
-        `3. Upload to: http://localhost:3000/supplier/products/add\n\n` +
+        `2. Review and fill optional fields if needed\n` +
+        `3. Upload at Supplier → Add products (Excel/CSV)\n\n` +
         `The file is ready for bulk upload.`
     );
   };
