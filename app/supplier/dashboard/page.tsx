@@ -36,6 +36,7 @@ import {
   ChevronRight,
   Share2,
   Copy,
+  User,
 } from "lucide-react";
 import Link from "next/link";
 import AddProductModal, { ProductFormData } from "@/components/supplier/AddProductModal";
@@ -434,10 +435,18 @@ function SupplierDashboard() {
               {user?.businessCategory || "Supplier Panel"} • Account: {user?.ishyigaAccount}
             </p>
           </div>
-          <Button variant="outline" onClick={handleLogout} className="gap-2">
-            <LogOut className="h-4 w-4" />
-            Logout
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" asChild className="gap-2">
+              <Link href="/account">
+                <User className="h-4 w-4" />
+                My profile
+              </Link>
+            </Button>
+            <Button variant="outline" onClick={handleLogout} className="gap-2">
+              <LogOut className="h-4 w-4" />
+              Logout
+            </Button>
+          </div>
         </div>
       </header>
 

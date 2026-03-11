@@ -93,6 +93,26 @@ const SECTOR_OPTIONS = [
 ]
 const QUICK_LOCATIONS = ["Kigali", "Musanze", "Rubavu", "Huye", "Muhanga", "Rusizi"]
 
+/** Derive data source from API response for console logging. */
+function getDataSourceLabel(data: {
+  source?: string
+  fromNiki?: boolean
+  products?: Array<{ source?: string }>
+}): string {
+  if (data.source === "redis" || data.fromNiki === true) return "redis"
+  if (data.source === "database" || data.fromNiki === false) return "database"
+  const products = data.products ?? []
+  if (products.length === 0) return "unknown"
+  const redisCount = products.filter((p) => String(p?.source ?? "").toLowerCase().includes("redis")).length
+  const dbCount = products.filter((p) =>
+    String(p?.source ?? "").toLowerCase().match(/database|stock|niki/)
+  ).length
+  if (redisCount > 0 && dbCount > 0) return "mixed"
+  if (redisCount > 0) return "redis"
+  if (dbCount > 0) return "database"
+  return "unknown"
+}
+
 /** Infer sector from query so food/drink searches don't return pharmacy. Backend uses sector to filter. */
 function inferSectorFromQuery(q: string): string {
   if (!q || q.length < 2) return ""
@@ -122,16 +142,6 @@ function toCardProduct(p: Product & { search_priority?: string; contains_ingredi
     "/placeholder.svg?height=300&width=300"
   // Debug: see which image fields we actually have when rendering cards
   const src = (p as any).source
-  console.log("[search] product image debug", {
-    item_code: p.item_code,
-    name: p.item_commercial_name,
-    image,
-    image_field: p.image,
-    image_url: p.image_url,
-    item_image_url: p.item_image_url,
-    source: src,
-    note: src === "redis" ? "it's redis" : src === "database" ? "it's database" : "source unknown",
-  })
   // Price: selling_price (Redis) or SALE_PRICE_INCLUSIVE/price (DB). item_emballage is not price.
   const price =
     extractNumericPrice(p.selling_price) ||
@@ -481,6 +491,17 @@ export default function SearchPage() {
           : { suppliersByName: [], suppliersByProduct: [], products: [], query: debouncedQ }
 
         if (!cancelled) {
+          // Log data source (Redis vs DB) for debugging
+          const dataSource = getDataSourceLabel(data)
+          const productSources = (data.products ?? []).map((p: Product & { source?: string }) => p?.source ?? "?")
+          console.log("[Search] Data source:", dataSource, "| Query:", debouncedQ, "| Products:", data.products?.length ?? 0, "| source:", data.source, "fromNiki:", data.fromNiki, "| Product sources:", productSources.slice(0, 5))
+          if (dataSource === "unknown") {
+            const responseKeys = Object.keys(data as object)
+            const firstProduct = (data.products ?? [])[0] as Record<string, unknown> | undefined
+            const firstProductKeys = firstProduct ? Object.keys(firstProduct) : []
+            console.warn("[Search] DEBUG data source unknown: backend did not set source/fromNiki or product.source. Response keys:", responseKeys, "| First product keys (sample):", firstProductKeys.slice(0, 20))
+          }
+
           // ✅ FIX: Trust backend - it already handles translation!
           // No client-side filtering for products since backend does the work
           const filteredProducts = data.products || []
@@ -591,6 +612,18 @@ export default function SearchPage() {
         const res = await fetch(url.toString(), { cache: "no-store" })
         const data = res.ok ? await res.json() : null
         if (cancelled) return
+
+        // Log data source for supplier-scoped search (e.g. "inkoko" under IWACU BAR)
+        const dataSource = data ? getDataSourceLabel(data) : "no response"
+        const productCount = Array.isArray(data?.products) ? data.products.length : 0
+        const productSources = (data?.products ?? []).map((p: { source?: string }) => p?.source ?? "?")
+        console.log("[Search] Supplier-scoped | Query:", JSON.stringify(query), "| Supplier:", supplierAccount, "| Data source:", dataSource, "| Products returned:", productCount, "| Product sources:", productSources)
+        if (dataSource === "unknown" && data) {
+          const responseKeys = Object.keys(data)
+          const firstProduct = (data.products ?? [])[0] as Record<string, unknown> | undefined
+          console.warn("[Search] DEBUG supplier-scoped source unknown: backend response keys:", responseKeys, "| First product keys:", firstProduct ? Object.keys(firstProduct).slice(0, 15) : "none")
+        }
+
         setSupplierSearchResults(
           Array.isArray(data?.products)
             ? normalizeSupplierProductsResponse(data.products, supplierAccount, supplierName)
@@ -607,10 +640,31 @@ export default function SearchPage() {
   }, [debouncedSupplierSearch, selectedShop])
 
   // Products to show in "Products from X" panel: filter by price then sort.
+  // Fallback: when backend returns 0 for supplier-scoped search, filter loaded catalog client-side (e.g. "inkoko" in item_key_words_kinyarwanda).
   const displayedSupplierProducts = useMemo(() => {
-    const raw = debouncedSupplierSearch.trim()
-      ? (supplierSearchResults ?? [])
-      : shopProducts
+    const query = debouncedSupplierSearch.trim()
+    let raw: Product[]
+    if (!query) {
+      raw = shopProducts
+    } else if (Array.isArray(supplierSearchResults) && supplierSearchResults.length > 0) {
+      raw = supplierSearchResults
+    } else if (shopProducts.length > 0) {
+      // Backend returned 0; filter loaded catalog by name/keywords/kinyarwanda/french
+      const q = query.toLowerCase()
+      raw = shopProducts.filter((p) => {
+        const name = (p.item_commercial_name ?? "").toLowerCase()
+        const kw = (p.item_key_words ?? "").toLowerCase()
+        const kr = ((p as any).item_key_words_kinyarwanda ?? "").toLowerCase()
+        const fr = ((p as any).item_key_words_french ?? "").toLowerCase()
+        const desc = ((p as any).description ?? "").toLowerCase()
+        return [name, kw, kr, fr, desc].some((s) => s.includes(q))
+      })
+      if (raw.length > 0) {
+        console.log("[Search] Supplier-scoped fallback: backend returned 0, client-side match found", raw.length, "products for", JSON.stringify(query))
+      }
+    } else {
+      raw = supplierSearchResults ?? []
+    }
     const filtered = raw.filter(p => {
       const price = extractNumericPrice(p.selling_price) || extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) || extractNumericPrice((p as any).price)
       return price > 0

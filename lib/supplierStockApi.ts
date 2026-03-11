@@ -2,15 +2,29 @@
  * Supplier Stock API Client
  * TypeScript client for Redis-based stock management
  *
- * Redis format (used across search, dashboard, cart, shop-with-me):
- *   Key: "supplier_<account>" (e.g. supplier_ALGG0000187)
- *   Value: { key: "supplier_<account>", data: [ {...}, ... ] }
+ * Backend (fetchSuggestions, etc.) must always search Redis first; when no data, search DB.
  *
- * Each item in data can have:
- *   item_commercial_name, item_packet, item_emballage (value or "" — pass through as-is; empty remains empty),
- *   selling_price (use this for price; item_emballage is not price), cost_price,
- *   item_key_words, item_state, famille, last_sync_time, lot,
- *   item_key_words_french, item_key_words_kinyarwanda, image_url
+ * Redis value format (used across search, dashboard, cart, shop-with-me):
+ *   {
+ *     "key": "supplier_<account>",   // e.g. "supplier_ALGG0000187"
+ *     "data": [
+ *       {
+ *         "item_commercial_name": string,
+ *         "item_packet": string,
+ *         "item_emballage": string,  // pass through as-is; empty "" allowed
+ *         "selling_price": string,   // use for price (not item_emballage)
+ *         "cost_price": string,
+ *         "item_key_words": string,
+ *         "item_state": string,     // e.g. expiry date; can be ""
+ *         "famille": string,        // optional, e.g. "DRUG"
+ *         "last_sync_time": string, // e.g. "2026-01-27 14:30:00"
+ *         "lot": string,
+ *         "item_key_words_french": string,
+ *         "item_key_words_kinyarwanda": string,
+ *         "image_url": string
+ *       }
+ *     ]
+ *   }
  */
 
 export interface StockItem {

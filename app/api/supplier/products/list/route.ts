@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server"
 
 import { getSupplierUrl } from "@/lib/backend-config"
+import { buildCacheKey, getCached, setCached, DATA_TTL_SEC } from "@/lib/redis-cache"
 
 const JAVA_SUPPLIER_URL = getSupplierUrl()
 
 /**
  * GET /api/supplier/products/list
  *
- * Fetches supplier products from Redis (fast cache) first, then falls back to database
+ * Redis first: check cache, then backend (DB).
  *
  * Query Parameters:
  * - account: Supplier's ISHYIGA_ACCOUNT (required)
@@ -30,6 +31,23 @@ export async function GET(req: Request) {
         { ok: false, error: "Supplier account is required" },
         { status: 400 }
       )
+    }
+
+    const cacheParams: Record<string, string> = { account, limit, offset }
+    if (category) cacheParams.category = category
+    if (status) cacheParams.status = status
+    const cacheKey = buildCacheKey("supplier-products-list", cacheParams)
+
+    const cached = await getCached(cacheKey)
+    if (cached) {
+      try {
+        const json = JSON.parse(cached)
+        return NextResponse.json(json, {
+          headers: { "X-Cache": "HIT" },
+        })
+      } catch {
+        // invalid cache, fall through
+      }
     }
 
     // Mock response if backend not configured
@@ -82,6 +100,7 @@ export async function GET(req: Request) {
       )
     }
 
+    await setCached(cacheKey, JSON.stringify(json), DATA_TTL_SEC)
     return NextResponse.json(json)
   } catch (e: any) {
     console.error("[Supplier Products] Error:", e)

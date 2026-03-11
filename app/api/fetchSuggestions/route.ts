@@ -1,18 +1,49 @@
 // app/api/fetchSuggestions/route.ts
 import type { NextRequest } from "next/server"
 import { getFetchSuggestionsUrl, getProxyTimeoutMs } from "@/lib/backend-config"
+import {
+  buildCacheKey,
+  getCached,
+  setCached,
+  SUGGESTIONS_TTL_SEC,
+} from "@/lib/redis-cache"
 
 const DEFAULT_TIMEOUT_MS = Math.max(30000, getProxyTimeoutMs())
+
+function paramsToRecord(searchParams: URLSearchParams): Record<string, string> {
+  const out: Record<string, string> = {}
+  searchParams.forEach((v, k) => {
+    out[k] = v
+  })
+  return out
+}
 
 async function forward(req: NextRequest) {
   const incoming = new URL(req.url)
   const target = new URL(getFetchSuggestionsUrl())
 
-  // Copy query params
+  // Copy query params. Backend must always search Redis first, then DB (see docs/backend-redis-search.md).
   incoming.searchParams.forEach((v, k) => target.searchParams.append(k, v))
 
-  // Log so you can confirm the exact URL hit by Kaos (check terminal where Next runs)
-  console.log("[fetchSuggestions] Forwarding to backend:", target.toString())
+  // Redis first (this app): check our response cache before calling backend (DB)
+  const cacheKey = buildCacheKey("fetchSuggestions", paramsToRecord(incoming.searchParams))
+  const cached = await getCached(cacheKey)
+  if (cached) {
+    console.log("[fetchSuggestions] Redis cache hit")
+    return new Response(cached, {
+      status: 200,
+      headers: {
+        "content-type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "X-Cache": "HIT",
+      },
+    })
+  }
+
+  // Cache miss: call backend (DB), then store in Redis
+  console.log("[fetchSuggestions] Redis miss, forwarding to backend:", target.toString())
 
   const method = req.method
   const headers: Record<string, string> = {
@@ -85,16 +116,19 @@ async function forward(req: NextRequest) {
       const sources = parsed.products
         .map((p: any) => String(p?.source || "").toLowerCase() || "unknown")
       const total = sources.length
-      const redisCount = sources.filter(s => s.includes("redis")).length
-      const dbCount = sources.filter(s => s.includes("database") || s.includes("stock") || s.includes("niki")).length
+      const redisCount = sources.filter((s: string) => s.includes("redis")).length
+      const dbCount = sources.filter((s: string) => s.includes("database") || s.includes("stock") || s.includes("niki")).length
       const otherCount = total - redisCount - dbCount
-      console.log("[fetchSuggestions] source summary:", {
-        totalProducts: total,
-        redisCount,
-        dbCount,
-        otherCount,
-      })
+      const dataSource = redisCount > 0 && dbCount === 0 ? "redis" : dbCount > 0 && redisCount === 0 ? "database" : redisCount > 0 && dbCount > 0 ? "mixed" : "unknown"
+      const supplierParam = incoming.searchParams.get("supplier") || ""
+      console.log("[fetchSuggestions] Data source:", dataSource, "| Products:", total, "| redis:", redisCount, "db:", dbCount, "other:", otherCount, supplierParam ? "| supplier=" + supplierParam : "")
+    } else if (parsed) {
+      const supplierParam = incoming.searchParams.get("supplier") || ""
+      console.log("[fetchSuggestions] Data source: unknown (no products array) | supplier=" + (supplierParam || "n/a"))
     }
+
+    // Store in Redis for next time (Redis first, then DB)
+    await setCached(cacheKey, JSON.stringify(parsed ?? {}), SUGGESTIONS_TTL_SEC)
 
     return new Response(JSON.stringify(parsed ?? {}), {
       status: resp.status,

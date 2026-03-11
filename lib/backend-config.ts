@@ -27,6 +27,14 @@ export function getOrdersUrl(): string {
   )
 }
 
+/** Java post_orders endpoint (XML transaction payload). */
+export function getPostOrdersUrl(): string {
+  return (
+    process.env.JAVA_POST_ORDERS_URL ||
+    `${getBackendBase()}/post_orders`
+  )
+}
+
 export function getSellerOrdersUrl(): string {
   return process.env.JAVA_SELLER_ORDERS_URL || `${getBackendBase()}/Kaos/SellerOrdersServlet`
 }
@@ -54,6 +62,11 @@ export function getShopWithMeUrl(): string {
 
 export function getAuthUrl(): string {
   return process.env.JAVA_AUTH_URL || `${getBackendBase()}/Kaos/user-auth`
+}
+
+/** Account profile (account_signup): GET by email/account, PUT to update. */
+export function getAccountProfileUrl(): string {
+  return process.env.JAVA_ACCOUNT_PROFILE_URL || `${getBackendBase()}/Api/AccountProfile`
 }
 /** Umusada Excel upload – proxies to Java backend when UMUSADA_EXCEL_USE_JAVA_BACKEND=true */
 export function getUmusadaExcelUrl(): string {

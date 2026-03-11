@@ -149,6 +149,12 @@ export function Header() {
                       </div>
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
+                    {user?.role === "supplier" && (
+                      <DropdownMenuItem onSelect={() => router.push("/account")}>
+                        <User className="mr-2 h-4 w-4" />
+                        My profile
+                      </DropdownMenuItem>
+                    )}
                     <DropdownMenuItem
                       onSelect={() =>
                         router.push(
