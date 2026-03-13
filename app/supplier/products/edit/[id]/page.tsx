@@ -3,6 +3,7 @@
 import { useParams, useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 import { useAuthStore } from "@/lib/auth-store"
+import { useToast } from "@/components/ui/use-toast"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -25,12 +26,14 @@ type Product = {
   price: number
   stock: number
   category?: string
+  imageUrl?: string
 }
 
 export default function SupplierEditProductPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
   const { user } = useAuthStore()
+  const { toast } = useToast()
 
   const [product, setProduct] = useState<Product | null>(null)
   const [loading, setLoading] = useState(true)
@@ -41,6 +44,7 @@ export default function SupplierEditProductPage() {
 
   const [price, setPrice] = useState("")
   const [stock, setStock] = useState("")
+  const [imageUrl, setImageUrl] = useState("")
 
   // Fetch product from API
   useEffect(() => {
@@ -63,15 +67,17 @@ export default function SupplierEditProductPage() {
             name: p.item_commercial_name || p.ITEM_NAME
           })))
 
-          const foundProduct = json.products.find((p: any) => 
-            (p.item_key_words || p.ITEM_CODE || p.id) === id
-          )
+          const foundProduct = json.products.find((p: any) => {
+            const code = (p.item_key_words ?? p.ITEM_CODE ?? p.itemCode ?? p.id)?.toString().trim()
+            const matchId = (id ?? "").toString().trim()
+            return code === matchId
+          })
 
           console.log('[EDIT-PRODUCT] Found product:', foundProduct)
 
           if (foundProduct) {
             // Handle both Redis format and database format
-            const productId = foundProduct.item_key_words || foundProduct.ITEM_CODE || foundProduct.id
+            const productId = foundProduct.item_key_words || foundProduct.ITEM_CODE || foundProduct.itemCode || foundProduct.id
             const productName = foundProduct.item_commercial_name || foundProduct.ITEM_NAME || foundProduct.name
             
             // Prefer selling_price (Redis); then item_emballage; then DB/API price
@@ -95,16 +101,19 @@ export default function SupplierEditProductPage() {
               productStock = parseInt(foundProduct.stock || foundProduct.QUANTITY || 0)
             }
 
+            const productImageUrl = foundProduct.item_image_url || foundProduct.image_url || foundProduct.IMAGE_URL || ""
             const mapped: Product = {
               id: productId,
               name: productName,
               price: productPrice,
               stock: productStock,
               category: foundProduct.category || "uncategorized",
+              imageUrl: productImageUrl,
             }
             setProduct(mapped)
             setPrice(String(mapped.price))
             setStock(String(mapped.stock))
+            setImageUrl(productImageUrl || "")
           } else {
             console.error('[EDIT-PRODUCT] Product not found in list')
           }
@@ -127,6 +136,7 @@ export default function SupplierEditProductPage() {
       setSaving(true)
       setError(null)
 
+      const stockNum = Number(stock || 0)
       const res = await fetch(`/api/supplier/stock`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -135,14 +145,21 @@ export default function SupplierEditProductPage() {
           account: user.ishyigaAccount,
           itemCode: product.id,
           price: Number(price || 0),
-          stock: Number(stock || 0),
+          stock: stockNum,
+          quantity: stockNum,
+          item_packet: String(stockNum),
+          imageUrl: imageUrl.trim(),
         }),
       })
 
       const json = await res.json()
 
       if (json.ok) {
-        router.push("/supplier/products")
+        toast({
+          title: "Product updated",
+          description: "Your changes have been saved.",
+        })
+        router.back()
       } else {
         setError(json.error || "Failed to update product")
       }
@@ -169,7 +186,7 @@ export default function SupplierEditProductPage() {
       const json = await res.json()
 
       if (json.ok) {
-        router.push("/supplier/products")
+        router.back()
       } else {
         setError(json.error || json.message || "Failed to delete product")
         setShowDeleteDialog(false)
@@ -219,7 +236,7 @@ export default function SupplierEditProductPage() {
       <Card className="max-w-xl">
         <CardHeader>
           <CardTitle>Edit {product.name}</CardTitle>
-          <CardDescription>Update price and stock</CardDescription>
+          <CardDescription>Update price, stock, and image</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {error && (
@@ -249,6 +266,17 @@ export default function SupplierEditProductPage() {
               type="number" 
               value={stock} 
               onChange={(e) => setStock(e.target.value)}
+              disabled={saving || deleting}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Image URL</Label>
+            <Input 
+              type="url"
+              placeholder="https://..."
+              value={imageUrl} 
+              onChange={(e) => setImageUrl(e.target.value)}
               disabled={saving || deleting}
             />
           </div>

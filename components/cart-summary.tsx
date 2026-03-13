@@ -320,14 +320,13 @@ function CartSummaryBody() {
     const g = groups.find(x => x.supplierId === supplierId)
     if (!g) return
 
-    // Bar/resto: from name/location keywords OR from shop-with-me (DEPARTMENT / PREFERRED_CATEGORIES) — enables table command + autofill
+    // Bar/resto: from name/location keywords OR from shop-with-me — always show create/join table option (whether already in a table or not)
     const isBar =
       g.isBarResto === true ||
       isBarOrRestaurant(g.supplierName) ||
       isBarOrRestaurant(g.supplierLocation || "")
 
-    // If it's a bar/restaurant and user is not already in a table command for this location
-    if (isBar && !isInTableCommand()) {
+    if (isBar) {
       setTableCommandSeller({ id: supplierId, name: g.supplierName })
       setTableCommandDialogOpen(true)
       return
@@ -780,7 +779,7 @@ function CartSummaryBody() {
 
           {/* ✅ Table Info Banner */}
           {isInTableCommand() && activeSession && (
-            <div className="rounded-lg bg-primary/5 border border-primary/20 p-3">
+            <div className="rounded-lg bg-primary/5 border border-primary/20 p-3 space-y-3">
               <div className="flex items-center gap-2">
                 <Users className="h-4 w-4 text-primary" />
                 <div className="flex-1">
@@ -790,6 +789,18 @@ function CartSummaryBody() {
                   </p>
                 </div>
               </div>
+              {/* Close table: visible for creator when table is SENT so all orders are merged/final */}
+              {activeSession.status === "SENT" && canCloseTable() && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full gap-2 border-orange-300 text-orange-700 hover:bg-orange-50 hover:text-orange-800"
+                  onClick={() => setShowCloseTableDialog(true)}
+                >
+                  <Lock className="h-4 w-4" />
+                  Close table (merge all orders — no one can add more)
+                </Button>
+              )}
             </div>
           )}
 
@@ -1276,11 +1287,11 @@ function CartSummaryBody() {
               Close Table Command?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              You just sent an order for table "{activeSession?.tableName}".
+              Table &quot;{activeSession?.tableName}&quot; — closing merges and finalizes all orders.
               <div className="mt-3 space-y-2">
                 <p className="font-medium text-foreground">Do you want to close this table?</p>
                 <ul className="text-sm space-y-1 ml-4 list-disc">
-                  <li><strong>Close Table:</strong> No one can add more items. Table is finished.</li>
+                  <li><strong>Close Table:</strong> No one can add more items. All orders are merged and the table is finished.</li>
                   <li><strong>Keep Open:</strong> You or others can still add items and send another order.</li>
                 </ul>
               </div>
