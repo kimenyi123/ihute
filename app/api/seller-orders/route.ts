@@ -44,7 +44,7 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({} as any))
     const sellerAccount = String(body?.sellerAccount ?? "").trim()
     const page = Math.max(1, Number(body?.page ?? 1))
-    const pageSize = Math.min(100, Math.max(1, Number(body?.pageSize ?? 20)))
+    const pageSize = Math.min(500, Math.max(1, Number(body?.pageSize ?? 100)))
 
     console.log(`[${reqId}] POST /api/seller-orders — sellerAccount=${sellerAccount || "(empty)"} page=${page} pageSize=${pageSize}`)
 
@@ -101,7 +101,7 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url)
     const sellerAccount = String(searchParams.get("sellerAccount") ?? "").trim()
     const page = Math.max(1, Number(searchParams.get("page") ?? 1))
-    const pageSize = Math.min(100, Math.max(1, Number(searchParams.get("pageSize") ?? 20)))
+    const pageSize = Math.min(500, Math.max(1, Number(searchParams.get("pageSize") ?? 100)))
 
     if (!sellerAccount) {
       return NextResponse.json({ ok: false, error: "sellerAccount required" }, { status: 400 })

@@ -355,12 +355,13 @@ export default function SupplierOrderDetailPage() {
             </CardHeader>
             <CardContent>
               <p className="font-semibold text-slate-900">
-                {order.createdAt ? new Date(order.createdAt).toLocaleDateString("en-US", {
+                {order.createdAt ? new Date(order.createdAt).toLocaleString("en-US", {
                   year: "numeric",
                   month: "long",
                   day: "numeric",
                   hour: "2-digit",
                   minute: "2-digit",
+                  second: "2-digit",
                 }) : "N/A"}
               </p>
               {order.importFileName && (

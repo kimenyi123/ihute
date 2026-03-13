@@ -71,6 +71,23 @@ function getOrderStatus(order: any, paymentInfo: any) {
   return { status: 'pending', displayName: 'Pending' }
 }
 
+/** Display timestamp as YYYY-MM-DD HH:mm:ss (no ISO T/Z or milliseconds). */
+function formatOrderDate(value: unknown): string {
+  if (value == null || value === "") return ""
+  const s = String(value).trim()
+  if (!s) return ""
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(s)) return s.replace(/\.\d+Z?$/i, "").slice(0, 19)
+  const d = new Date(s)
+  if (Number.isNaN(d.getTime())) return s
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, "0")
+  const day = String(d.getDate()).padStart(2, "0")
+  const h = String(d.getHours()).padStart(2, "0")
+  const min = String(d.getMinutes()).padStart(2, "0")
+  const sec = String(d.getSeconds()).padStart(2, "0")
+  return `${y}-${m}-${day} ${h}:${min}:${sec}`
+}
+
 export default function SupplierOrderDetailsPage() {
   const { orderId } = useParams<{ orderId: string }>()
   const router = useRouter()
@@ -162,11 +179,33 @@ export default function SupplierOrderDetailsPage() {
   const { order, buyer, items, created, currency, grandTotal, paymentInfo, orderStatus, isGuestBuyer, displayBuyerName } = useMemo(() => {
     const order = detail?.order
     const buyer = detail?.buyer
-    const items = detail?.items ?? []
+    const rawItems = detail?.items ?? []
     const created = order?.CREATED_AT
       ? new Date(typeof order.CREATED_AT === "number" ? order.CREATED_AT : order.CREATED_AT)
       : null
     const currency = order?.CURRENCY || "RWF"
+
+    // Combine items that share the same code, name, and ordered-by user
+    const groupedMap = new Map<string, any>()
+    rawItems.forEach((it: any, index: number) => {
+      const code = it.ITEM_CODE ?? it.code ?? `${index}`
+      const name = it.ITEM_NAME ?? it.name ?? "-"
+      const orderedBy = (it.ORDERED_BY ?? buyer?.OWNER ?? "").toString().trim()
+      const key = `${code}||${name}||${orderedBy}`
+      const existing = groupedMap.get(key)
+      if (existing) {
+        const merged = { ...existing }
+        const newQty = qtyOf(existing) + qtyOf(it)
+        if ("QUANTITY" in merged) merged.QUANTITY = newQty
+        if ("qty" in merged) merged.qty = newQty
+        if ("quantity" in merged) merged.quantity = newQty
+        groupedMap.set(key, merged)
+      } else {
+        groupedMap.set(key, { ...it })
+      }
+    })
+
+    const items = Array.from(groupedMap.values())
     const grandTotal = items.reduce((sum, it) => sum + totalOf(it), 0)
 
     // Get payment and order status
@@ -253,7 +292,7 @@ export default function SupplierOrderDetailsPage() {
                       </Badge>
                     </div>
                   </div>
-                  <CardDescription>{created ? created.toLocaleString() : ""}</CardDescription>
+                  <CardDescription>{formatOrderDate(order?.CREATED_AT ?? order?.created_at ?? order?.heure) || ""}</CardDescription>
                 </CardHeader>
                 <CardContent className="grid sm:grid-cols-3 gap-3">
                   <div className="rounded-md border p-3">
@@ -342,7 +381,7 @@ export default function SupplierOrderDetailsPage() {
                   </thead>
 
                   <tbody className="divide-y">
-                    {items.map((it: any, i: number) => {
+                  {items.map((it: any, i: number) => {
                       const code = it.ITEM_CODE ?? it.code ?? `${i}`
                       const name = it.ITEM_NAME ?? it.name ?? "-"
                       const qty = qtyOf(it)
@@ -351,7 +390,7 @@ export default function SupplierOrderDetailsPage() {
                       const orderedBy = (it.ORDERED_BY ?? buyer?.OWNER ?? "").toString().trim()
 
                       return (
-                        <tr key={code}>
+                        <tr key={`${code}-${name}-${orderedBy || "anon"}`}>
                           <td className="py-2 px-3 pl-0 align-middle">{code}</td>
                           <td className="py-2 px-3 align-middle">{name}</td>
                           <td className="py-2 px-3 align-middle text-sm text-slate-700">

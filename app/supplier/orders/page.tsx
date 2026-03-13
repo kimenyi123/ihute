@@ -8,9 +8,11 @@ import { useOrdersStore, type Order } from "@/lib/orders-store"
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { ChevronDown, CheckCircle, Truck, Clock, RotateCw, Check, X } from "lucide-react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Search, RotateCw, Calendar } from "lucide-react"
 
 // ===========================================
 // Constants
@@ -26,6 +28,23 @@ const SUPPLIER_STATUS = [
 type SupplierStatusKey = typeof SUPPLIER_STATUS[number]["key"]
 
 const ORDER_STATUS_URL = "/api/orders/update-status"
+
+/** Display timestamp as YYYY-MM-DD HH:mm:ss (no ISO T/Z or milliseconds). */
+function formatOrderDate(value: unknown): string {
+  if (value == null || value === "") return "—"
+  const s = String(value).trim()
+  if (!s) return "—"
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(s)) return s.replace(/\.\d+Z?$/i, "").slice(0, 19)
+  const d = new Date(s)
+  if (Number.isNaN(d.getTime())) return s
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, "0")
+  const day = String(d.getDate()).padStart(2, "0")
+  const h = String(d.getHours()).padStart(2, "0")
+  const min = String(d.getMinutes()).padStart(2, "0")
+  const sec = String(d.getSeconds()).padStart(2, "0")
+  return `${y}-${m}-${day} ${h}:${min}:${sec}`
+}
 
 // ===========================================
 // Inline Status Picker Component
@@ -91,8 +110,14 @@ export default function SupplierOrdersPage() {
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(10)
+  const [pageSize, setPageSize] = useState(25)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
+  const [loadPageSize, setLoadPageSize] = useState(500)
+  const [searchQuery, setSearchQuery] = useState("")
+  const [dateFrom, setDateFrom] = useState("")
+  const [dateTo, setDateTo] = useState("")
+  const [paymentFilter, setPaymentFilter] = useState<"all" | "paid" | "unpaid">("all")
+  const [statusFilter, setStatusFilter] = useState<string>("all")
 
   // Wait for persisted auth (localStorage) so link-with-account can "auto" show orders when already logged in on this device
   useEffect(() => {
@@ -141,8 +166,8 @@ export default function SupplierOrdersPage() {
     setLoading(true)
     setErr(null)
 
-    const payload = { action: "listSellerOrders", sellerAccount }
-    console.log("[Supplier Orders] 📤 Fetching orders — sellerAccount:", sellerAccount)
+    const payload = { sellerAccount, page: 1, pageSize: loadPageSize }
+    console.log("[Supplier Orders] 📤 Fetching orders — sellerAccount:", sellerAccount, "pageSize:", loadPageSize)
     try {
       const res = await fetch("/api/seller-orders", {
         method: "POST",
@@ -155,7 +180,12 @@ export default function SupplierOrdersPage() {
       if (!res.ok) throw new Error(json?.error || "Failed to load orders")
 
       const rawOrders = json.orders ?? json.data ?? []
-      const mapped: Order[] = (Array.isArray(rawOrders) ? rawOrders : []).map((t: any) => ({
+      const sortedRaw: any[] = (Array.isArray(rawOrders) ? [...rawOrders] : []).sort((a, b) => {
+        const aId = Number(a.ID_ORDER ?? a.id_order ?? a.id ?? 0)
+        const bId = Number(b.ID_ORDER ?? b.id_order ?? b.id ?? 0)
+        return bId - aId
+      })
+      const mapped: Order[] = sortedRaw.map((t: any) => ({
         id: String(t.ID_ORDER ?? t.id_order ?? t.id ?? ""),
         sellerId: String(t.SELLER_ISHYIGA_ACCOUNT ?? t.seller_ishyiga_account ?? ""),
         sellerName: t.SELLER_NAMES ?? t.SELLER_OWNER ?? t.seller_names ?? "Supplier",
@@ -183,7 +213,7 @@ export default function SupplierOrdersPage() {
     } finally {
       setLoading(false)
     }
-  }, [user?.ishyigaAccount, setOrders])
+  }, [user?.ishyigaAccount, setOrders, loadPageSize])
 
   useEffect(() => {
     if (!isAuthenticated || !user) return
@@ -206,8 +236,56 @@ export default function SupplierOrdersPage() {
     return () => clearInterval(timer)
   }, [loadOrders, user?.ishyigaAccount])
 
-  const totalPages = useMemo(() => Math.max(1, Math.ceil(orders.length / pageSize)), [orders.length, pageSize])
-  const pagedOrders = useMemo(() => orders.slice((page - 1) * pageSize, page * pageSize), [orders, page, pageSize])
+  useEffect(() => {
+    setPage(1)
+  }, [searchQuery, dateFrom, dateTo, paymentFilter, statusFilter])
+
+  const filteredOrders = useMemo(() => {
+    let list = orders
+    const q = searchQuery.trim().toLowerCase()
+    if (q) {
+      list = list.filter(
+        (o) =>
+          (o.id && o.id.toLowerCase().includes(q)) ||
+          (o.buyerName && o.buyerName.toLowerCase().includes(q)) ||
+          (o.createdAt && String(o.createdAt).toLowerCase().includes(q)) ||
+          (o.subtotal != null && String(o.subtotal).includes(q)) ||
+          (o.paymentStatus && o.paymentStatus.toLowerCase().includes(q)) ||
+          (o.status && o.status.toLowerCase().includes(q))
+      )
+    }
+    if (dateFrom) {
+      const from = dateFrom.slice(0, 10)
+      list = list.filter((o) => {
+        const d = o.createdAt ? String(o.createdAt).slice(0, 10) : ""
+        return d >= from
+      })
+    }
+    if (dateTo) {
+      const to = dateTo.slice(0, 10)
+      list = list.filter((o) => {
+        const d = o.createdAt ? String(o.createdAt).slice(0, 10) : ""
+        return d <= to
+      })
+    }
+    if (paymentFilter !== "all") {
+      list = list.filter((o) => (o.paymentStatus || "").toLowerCase() === paymentFilter)
+    }
+    if (statusFilter !== "all") {
+      list = list.filter((o) => (o.status || o.supplierStatus || "").toLowerCase() === statusFilter.toLowerCase())
+    }
+    return list
+  }, [orders, searchQuery, dateFrom, dateTo, paymentFilter, statusFilter])
+
+  const displayPageSize = pageSize === -1 ? filteredOrders.length : Math.max(1, pageSize)
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(filteredOrders.length / displayPageSize)),
+    [filteredOrders.length, displayPageSize]
+  )
+  const pagedOrders = useMemo(
+    () => (pageSize === -1 ? filteredOrders : filteredOrders.slice((page - 1) * pageSize, page * pageSize)),
+    [filteredOrders, page, pageSize]
+  )
   const supplierOrderLink = (orderId: number | string) => `/supplier/orders/${orderId}`
 
   // Wait for auth to hydrate from localStorage so existing session counts as "logged in"
@@ -251,6 +329,105 @@ export default function SupplierOrdersPage() {
         {err && <div className="mb-4 p-2 bg-red-50 border border-red-300 rounded text-sm">{err}</div>}
         {loading && <div className="mb-4 p-2 text-sm">Loading...</div>}
 
+        <div className="mb-4 flex flex-col gap-4 rounded-lg border bg-white p-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="relative flex-1 min-w-[200px] max-w-sm">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search by order #, customer, date, total, payment, status..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
+              <span className="text-sm text-muted-foreground whitespace-nowrap">Search by dates</span>
+              <Input
+                type="date"
+                aria-label="From date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="w-[140px]"
+              />
+              <span className="text-muted-foreground">–</span>
+              <Input
+                type="date"
+                aria-label="To date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="w-[140px]"
+              />
+            </div>
+            <Select value={paymentFilter} onValueChange={(v) => setPaymentFilter(v as "all" | "paid" | "unpaid")}>
+              <SelectTrigger className="w-[130px]">
+                <SelectValue placeholder="Payment" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All payment</SelectItem>
+                <SelectItem value="paid">Paid</SelectItem>
+                <SelectItem value="unpaid">Unpaid</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-[130px]">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All status</SelectItem>
+                {SUPPLIER_STATUS.map((opt) => (
+                  <SelectItem key={opt.key} value={opt.key}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
+              value={pageSize === -1 ? "all" : String(pageSize)}
+              onValueChange={(v) => {
+                setPageSize(v === "all" ? -1 : Number(v))
+                setPage(1)
+              }}
+            >
+              <SelectTrigger className="w-[110px]">
+                <SelectValue placeholder="Per page" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="10">10 per page</SelectItem>
+                <SelectItem value="25">25 per page</SelectItem>
+                <SelectItem value="50">50 per page</SelectItem>
+                <SelectItem value="100">100 per page</SelectItem>
+                <SelectItem value="all">Show all</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setLoadPageSize(500)
+                loadOrders()
+              }}
+              disabled={loading}
+              className="gap-2"
+            >
+              <RotateCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+              Load all orders
+            </Button>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Showing{" "}
+            {filteredOrders.length === 0
+              ? "0"
+              : pageSize === -1
+                ? 1
+                : (page - 1) * pageSize + 1}
+            –
+            {filteredOrders.length === 0 ? 0 : pageSize === -1 ? filteredOrders.length : Math.min(page * pageSize, filteredOrders.length)} of{" "}
+            {filteredOrders.length} order{filteredOrders.length !== 1 ? "s" : ""}
+            {orders.length > 0 && filteredOrders.length !== orders.length && " (filtered)"}
+          </p>
+        </div>
+
         <div className="rounded-lg border bg-white overflow-x-auto">
           <Table className="min-w-[1000px]">
             <TableHeader>
@@ -268,7 +445,9 @@ export default function SupplierOrdersPage() {
               {!loading && !err && pagedOrders.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                    No orders yet. Orders from customers will appear here.
+                    {orders.length === 0
+                      ? "No orders yet. Orders from customers will appear here."
+                      : "No orders match your search or filters. Try different criteria."}
                   </TableCell>
                 </TableRow>
               ) : (
@@ -276,7 +455,7 @@ export default function SupplierOrdersPage() {
                   <TableRow key={order.id}>
                     <TableCell>{order.id}</TableCell>
                     <TableCell>{order.buyerName}</TableCell>
-                    <TableCell>{new Date(order.createdAt).toLocaleDateString()}</TableCell>
+                    <TableCell>{formatOrderDate(order.createdAt)}</TableCell>
                     <TableCell>{order.subtotal.toLocaleString()} RWF</TableCell>
                     <TableCell>{order.paymentStatus}</TableCell>
                     <TableCell>

@@ -499,7 +499,7 @@ function CartSummaryBody() {
             shareableToken: json.tableCommand.shareableToken,
           })
           setShareModalOpen(true)
-          // Don't redirect - user needs to see the share modal
+          clear()
           return
         }
 
@@ -507,11 +507,10 @@ function CartSummaryBody() {
           pollPayment(orderId, g.supplierId)
         }
 
-        // Lock table command if in table mode
+        // Lock table command if in table mode: clear cart but stay on page so user can add more items
         if (isInTableCommand() && activeSession?.isCreator) {
-          // Just show a success toast or alert
+          clear()
           alert(`Order #${orderId} added to table "${activeSession.tableName}". Add more items or send the complete table order.`)
-          // Don't redirect - user needs to stay to use "Send Complete Table Order" button
           return
         }
 
