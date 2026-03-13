@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { filterSuppliersByRelevance } from "@/lib/search-utils"
 import { getTranslations } from "@/lib/keyword-mapping"
-import { MapPin, Store } from "lucide-react"
+import { MapPin, Store, ChevronLeft, ChevronRight } from "lucide-react"
 import { useTableCommandStore } from "@/lib/table-command-store"
 import { useLocationStoreEnhanced } from "@/lib/location-store-enhanced"
 import { LocationBadge } from "@/components/location-badge"
@@ -295,6 +295,8 @@ export default function SearchPage() {
   const [quickViewProduct, setQuickViewProduct] = useState<Product | null>(null)
   const [quickViewOpen, setQuickViewOpen] = useState(false)
   const [suggestionTerms, setSuggestionTerms] = useState<string[]>([])
+  const [supplierProductPage, setSupplierProductPage] = useState(1)
+  const [supplierProductsPerPage, setSupplierProductsPerPage] = useState(15)
 
   function toQuickViewProduct(p: Product): QuickViewProduct {
     const price = extractNumericPrice(p.selling_price) || extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) || extractNumericPrice((p as any).price) || 0
@@ -675,6 +677,11 @@ export default function SearchPage() {
     return filtered
   }, [debouncedSupplierSearch, supplierSearchResults, shopProducts, supplierProductSort])
 
+  // Reset supplier products page when list or sort changes
+  useEffect(() => {
+    setSupplierProductPage(1)
+  }, [displayedSupplierProducts.length, supplierProductSort, debouncedSupplierSearch])
+
   // Main search products (global): exclude 0 price, then sort
   const searchProductsWithPrice = useMemo(() => {
     const list = searchResult?.products ?? []
@@ -932,55 +939,58 @@ export default function SearchPage() {
               </Button>
             </div>
 
-            {/* Sector picker (compact) */}
-            <div className="flex items-center gap-2 bg-gray-50 rounded-full px-3 py-1.5 border">
-              <span className="text-sm">🗂️</span>
-              <select
-                aria-label="Select sector"
-                className="bg-transparent outline-none text-sm w-48"
-                value={sectorDraft}
-                onChange={(e) => {
-                  const val = e.target.value
-                  setSectorDraft(val)
-                  applySector(val)
-                }}
-              >
-                <option value="">Select sector…</option>
-                {SECTOR_OPTIONS.map((s) => (
-                  <option key={s} value={s}>
-                    {s.replace("-", " ")}
-                  </option>
-                ))}
-              </select>
-              {sectorParam && (
-                <button
-                  className="text-xs text-gray-500 hover:text-gray-800"
-                  onClick={clearSector}
-                  title="Clear sector"
-                >
-                  ✕
-                </button>
-              )}
-            </div>
+            {/* Sector picker and quick location chips: hidden when a supplier is selected */}
+            {!selectedShop && (
+              <>
+                <div className="flex items-center gap-2 bg-gray-50 rounded-full px-3 py-1.5 border">
+                  <span className="text-sm">🗂️</span>
+                  <select
+                    aria-label="Select sector"
+                    className="bg-transparent outline-none text-sm w-48"
+                    value={sectorDraft}
+                    onChange={(e) => {
+                      const val = e.target.value
+                      setSectorDraft(val)
+                      applySector(val)
+                    }}
+                  >
+                    <option value="">Select sector…</option>
+                    {SECTOR_OPTIONS.map((s) => (
+                      <option key={s} value={s}>
+                        {s.replace("-", " ")}
+                      </option>
+                    ))}
+                  </select>
+                  {sectorParam && (
+                    <button
+                      className="text-xs text-gray-500 hover:text-gray-800"
+                      onClick={clearSector}
+                      title="Clear sector"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
 
-            {/* Quick location chips */}
-            <div className="flex items-center gap-1 flex-wrap">
-              {QUICK_LOCATIONS.map((city) => (
-                <button
-                  key={city}
-                  className={`text-xs px-3 py-1 rounded-full border ${
-                    locationParam === city ? "bg-blue-600 text-white border-blue-600" : "hover:bg-gray-100"
-                  }`}
-                  onClick={() => {
-                    setLocationDraft(city)
-                    pushWith({ location: city })
-                  }}
-                  title={`Filter by ${city}`}
-                >
-                  {city}
-                </button>
-              ))}
-            </div>
+                <div className="flex items-center gap-1 flex-wrap">
+                  {QUICK_LOCATIONS.map((city) => (
+                    <button
+                      key={city}
+                      className={`text-xs px-3 py-1 rounded-full border ${
+                        locationParam === city ? "bg-blue-600 text-white border-blue-600" : "hover:bg-gray-100"
+                      }`}
+                      onClick={() => {
+                        setLocationDraft(city)
+                        pushWith({ location: city })
+                      }}
+                      title={`Filter by ${city}`}
+                    >
+                      {city}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
 
           {/* Active context / filters (badges) */}
@@ -1154,39 +1164,126 @@ export default function SearchPage() {
                   <div className="py-8 text-center text-gray-500 text-sm">Searching…</div>
                 ) : displayedSupplierProducts.length > 0 ? (
                   <>
-                    <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                      <p className="text-sm text-gray-500">
-                        {displayedSupplierProducts.length} product{displayedSupplierProducts.length !== 1 ? "s" : ""}
-                        {debouncedSupplierSearch.trim() ? ` matching "${debouncedSupplierSearch.trim()}"` : ""}
-                      </p>
-                      <Select value={supplierProductSort} onValueChange={(v: "relevance" | "price-asc" | "price-desc") => setSupplierProductSort(v)}>
-                        <SelectTrigger className="w-[140px] h-9">
-                          <SelectValue placeholder="Sort by" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="relevance">Relevance</SelectItem>
-                          <SelectItem value="price-asc">Price: Low to High</SelectItem>
-                          <SelectItem value="price-desc">Price: High to Low</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-                      {displayedSupplierProducts.map((p, index) => (
-                        <div key={`${p.item_code}-${p.supplier_account || ""}-${index}`} className="relative">
-                          <div role="button" tabIndex={0} onClick={() => addProductToCart(p)} onKeyDown={(e) => onTileKey(e, p)} title="Click to add to cart">
-                            <ProductCard product={toCardProduct(p)} />
+                    {(() => {
+                      const total = displayedSupplierProducts.length
+                      const totalPages = Math.max(1, Math.ceil(total / supplierProductsPerPage))
+                      const page = Math.min(Math.max(1, supplierProductPage), totalPages)
+                      const startIndex = (page - 1) * supplierProductsPerPage
+                      const endIndex = Math.min(startIndex + supplierProductsPerPage, total)
+                      const paginatedProducts = displayedSupplierProducts.slice(startIndex, endIndex)
+                      return (
+                        <>
+                          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                            <p className="text-sm text-gray-500">
+                              {total} product{total !== 1 ? "s" : ""}
+                              {debouncedSupplierSearch.trim() ? ` matching "${debouncedSupplierSearch.trim()}"` : ""}
+                            </p>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Select value={supplierProductSort} onValueChange={(v: "relevance" | "price-asc" | "price-desc") => setSupplierProductSort(v)}>
+                                <SelectTrigger className="w-[140px] h-9">
+                                  <SelectValue placeholder="Sort by" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="relevance">Relevance</SelectItem>
+                                  <SelectItem value="price-asc">Price: Low to High</SelectItem>
+                                  <SelectItem value="price-desc">Price: High to Low</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <span className="text-sm text-gray-500">
+                                Showing {startIndex + 1}–{endIndex} of {total}
+                              </span>
+                            </div>
                           </div>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="absolute bottom-2 right-2 text-xs z-10"
-                            onClick={(e) => { e.stopPropagation(); setQuickViewProduct(p); setQuickViewOpen(true); }}
-                          >
-                            Quick view
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
+                          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                            {paginatedProducts.map((p, index) => (
+                              <div key={`${p.item_code}-${p.supplier_account || ""}-${startIndex + index}`} className="relative">
+                                <div role="button" tabIndex={0} onClick={() => addProductToCart(p)} onKeyDown={(e) => onTileKey(e, p)} title="Click to add to cart">
+                                  <ProductCard product={toCardProduct(p)} />
+                                </div>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="absolute bottom-2 right-2 text-xs z-10"
+                                  onClick={(e) => { e.stopPropagation(); setQuickViewProduct(p); setQuickViewOpen(true); }}
+                                >
+                                  Quick view
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                          {totalPages > 1 && (
+                            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-4 pt-4 border-t border-gray-200">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm text-gray-500">Show</span>
+                                <Select
+                                  value={String(supplierProductsPerPage)}
+                                  onValueChange={(v) => {
+                                    setSupplierProductsPerPage(Number(v))
+                                    setSupplierProductPage(1)
+                                  }}
+                                >
+                                  <SelectTrigger className="w-[72px] h-8">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="10">10</SelectItem>
+                                    <SelectItem value="15">15</SelectItem>
+                                    <SelectItem value="24">24</SelectItem>
+                                    <SelectItem value="48">48</SelectItem>
+                                    <SelectItem value="96">96</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                <span className="text-sm text-gray-500">per page</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm text-gray-500">
+                                  Page {page} of {totalPages}
+                                </span>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 gap-1"
+                                  onClick={() => setSupplierProductPage((p) => Math.max(1, p - 1))}
+                                  disabled={page <= 1}
+                                >
+                                  <ChevronLeft className="h-4 w-4" />
+                                  Previous
+                                </Button>
+                                <div className="flex items-center gap-1">
+                                  {Array.from({ length: totalPages }, (_, i) => i + 1)
+                                    .filter((pNum) => pNum === 1 || pNum === totalPages || Math.abs(pNum - page) <= 1)
+                                    .map((pNum, i, arr) => (
+                                      <div key={pNum} className="flex items-center gap-1">
+                                        {i > 0 && arr[i - 1] !== pNum - 1 && (
+                                          <span className="text-gray-400 px-1">…</span>
+                                        )}
+                                        <Button
+                                          variant={page === pNum ? "default" : "outline"}
+                                          size="sm"
+                                          className="h-8 w-8 p-0 min-w-8"
+                                          onClick={() => setSupplierProductPage(pNum)}
+                                        >
+                                          {pNum}
+                                        </Button>
+                                      </div>
+                                    ))}
+                                </div>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 gap-1"
+                                  onClick={() => setSupplierProductPage((p) => Math.min(totalPages, p + 1))}
+                                  disabled={page >= totalPages}
+                                >
+                                  Next
+                                  <ChevronRight className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )
+                    })()}
                   </>
                 ) : (
                   <div className="text-center py-6 text-gray-500">
@@ -1198,8 +1295,8 @@ export default function SearchPage() {
               </section>
             )}
 
-            {/* Products */}
-            {searchResult && searchProductsWithPrice.length > 0 && (
+            {/* Products matching query — hidden when a supplier is selected (products from that supplier show above) */}
+            {!selectedShop && searchResult && searchProductsWithPrice.length > 0 && (
               <section className="bg-white rounded-xl border p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                   <h2 className="font-semibold text-lg">
@@ -1275,8 +1372,8 @@ export default function SearchPage() {
               </section>
             )}
 
-            {/* Suppliers */}
-            {allSuppliers.length > 0 && (
+            {/* Suppliers — hidden when a supplier is already selected for cleaner UI */}
+            {!selectedShop && allSuppliers.length > 0 && (
               <section className="bg-white rounded-xl border p-4">
                 <div className="flex items-center justify-between mb-3">
                   <h2 className="font-semibold text-lg">Suppliers</h2>

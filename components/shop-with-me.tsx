@@ -16,7 +16,10 @@ import {
   ShoppingCart,
   ChevronDown,
   ChevronUp,
+  ChevronLeft,
+  ChevronRight,
   User,
+  LayoutGrid,
 } from "lucide-react";
 import Image from "next/image";
 import {
@@ -259,6 +262,8 @@ export default function ShopWithMePage() {
   const [productSearchQuery, setProductSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState("featured");
   const [categories, setCategories] = useState<CategorySection[]>([]);
+  const [itemsPerPage, setItemsPerPage] = useState(12);
+  const [categoryPages, setCategoryPages] = useState<Record<string, number>>({});
 
   const cartItems = useCartStore((s) => s.items);
   const cartItemCount = cartItems.reduce((sum, item) => sum + item.qty, 0);
@@ -511,10 +516,15 @@ export default function ShopWithMePage() {
     });
 
     setCategories(categorySections);
+    setCategoryPages({});
   }, [currentSeller]);
 
   const toggleCategory = (categoryName: string) => {
     setCategories((prev) => prev.map((cat) => (cat.name === categoryName ? { ...cat, expanded: !cat.expanded } : cat)));
+  };
+
+  const setCategoryPage = (categoryName: string, page: number) => {
+    setCategoryPages((prev) => ({ ...prev, [categoryName]: page }));
   };
 
   // When we have a backend search (debouncedProductSearch), the API was called with productSearch — trust backend result (no client-side filter).
@@ -792,45 +802,164 @@ export default function ShopWithMePage() {
 
                   if (sortedProducts.length === 0) return null;
 
+                  const totalInCategory = sortedProducts.length;
+                  const totalPages = Math.max(1, Math.ceil(totalInCategory / itemsPerPage));
+                  const currentPage = Math.min(Math.max(1, categoryPages[category.name] ?? 1), totalPages);
+                  const startIndex = (currentPage - 1) * itemsPerPage;
+                  const endIndex = Math.min(startIndex + itemsPerPage, totalInCategory);
+                  const paginatedProducts = sortedProducts.slice(startIndex, endIndex);
+
                   return (
-                    <div key={category.name} className="space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <h2 className="text-xl font-bold">{category.name}</h2>
-                          <Badge variant="secondary">{sortedProducts.length}</Badge>
+                    <Card
+                      key={category.name}
+                      className="overflow-hidden border-l-4 border-l-primary/60 bg-card shadow-sm hover:shadow-md transition-shadow"
+                    >
+                      <div
+                        className={cn(
+                          "flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-5 sm:py-4",
+                          "bg-muted/30 border-b border-border/50"
+                        )}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="flex items-center justify-center h-9 w-9 rounded-lg bg-primary/10 flex-shrink-0">
+                            <LayoutGrid className="h-4 w-4 text-primary" />
+                          </div>
+                          <div className="min-w-0">
+                            <h2 className="text-lg font-semibold tracking-tight text-foreground truncate">
+                              {category.name}
+                            </h2>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              {totalInCategory} product{totalInCategory !== 1 ? "s" : ""}
+                            </p>
+                          </div>
+                          <Badge variant="secondary" className="font-medium tabular-nums flex-shrink-0">
+                            {totalInCategory}
+                          </Badge>
                         </div>
-                        <Button variant="ghost" size="sm" onClick={() => toggleCategory(category.name)} className="gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => toggleCategory(category.name)}
+                          className="gap-1.5 text-muted-foreground hover:text-foreground"
+                        >
                           {category.expanded ? (
                             <>
-                              Show Less <ChevronUp className="h-4 w-4" />
+                              Collapse <ChevronUp className="h-4 w-4" />
                             </>
                           ) : (
                             <>
-                              Show More <ChevronDown className="h-4 w-4" />
+                              Expand <ChevronDown className="h-4 w-4" />
                             </>
                           )}
                         </Button>
                       </div>
 
                       {category.expanded && (
-                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-                          {sortedProducts.map((product, idx) => (
-                            <ProductCard
-                              key={`${category.name}-${idx}`}
-                              product={product}
-                              ownerName={currentSeller.OWNER || currentSeller.SELLER_NAMES || currentSeller.NICKNAME}
-                              supplierId={currentSeller.ISHYIGA_ACCOUNT || ""}
-                              isDeliveryShop={isDeliveryShop}
-                              isBarOrRestaurant={isBarOrRestaurant}
-                              hasTableContext={hasTableContext}
-                              customerName={customerName}
-                              customerAddress={customerAddress}
-                              onCustomerInfoRequired={() => setShowCustomerDialog(true)}
-                            />
-                          ))}
-                        </div>
+                        <CardContent className="p-4 sm:p-5 space-y-5">
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                            <div className="flex items-center gap-3 flex-wrap">
+                              <span className="text-sm text-muted-foreground whitespace-nowrap">Show</span>
+                              <Select
+                                value={String(itemsPerPage)}
+                                onValueChange={(v) => {
+                                  setItemsPerPage(Number(v));
+                                  setCategoryPages({});
+                                }}
+                              >
+                                <SelectTrigger className="w-[72px] h-8">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="8">8</SelectItem>
+                                  <SelectItem value="12">12</SelectItem>
+                                  <SelectItem value="24">24</SelectItem>
+                                  <SelectItem value="48">48</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <span className="text-sm text-muted-foreground">per section</span>
+                            </div>
+                            <p className="text-sm text-muted-foreground tabular-nums">
+                              Showing{" "}
+                              <span className="font-medium text-foreground">
+                                {startIndex + 1}–{endIndex}
+                              </span>{" "}
+                              of <span className="font-medium text-foreground">{totalInCategory}</span> products
+                            </p>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5">
+                            {paginatedProducts.map((product, idx) => (
+                              <ProductCard
+                                key={`${category.name}-${startIndex + idx}`}
+                                product={product}
+                                ownerName={currentSeller.OWNER || currentSeller.SELLER_NAMES || currentSeller.NICKNAME}
+                                supplierId={currentSeller.ISHYIGA_ACCOUNT || ""}
+                                isDeliveryShop={isDeliveryShop}
+                                isBarOrRestaurant={isBarOrRestaurant}
+                                hasTableContext={hasTableContext}
+                                customerName={customerName}
+                                customerAddress={customerAddress}
+                                onCustomerInfoRequired={() => setShowCustomerDialog(true)}
+                              />
+                            ))}
+                          </div>
+
+                          {totalPages > 1 && (
+                            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2 border-t border-border/50">
+                              <p className="text-sm text-muted-foreground order-2 sm:order-1">
+                                Page {currentPage} of {totalPages}
+                              </p>
+                              <div className="flex items-center gap-1.5 order-1 sm:order-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => setCategoryPage(category.name, currentPage - 1)}
+                                  disabled={currentPage <= 1}
+                                  className="gap-1 h-8"
+                                >
+                                  <ChevronLeft className="h-4 w-4" />
+                                  Previous
+                                </Button>
+                                <div className="flex items-center gap-1">
+                                  {Array.from({ length: totalPages }, (_, i) => i + 1)
+                                    .filter(
+                                      (p) =>
+                                        p === 1 ||
+                                        p === totalPages ||
+                                        Math.abs(p - currentPage) <= 1
+                                    )
+                                    .map((p, i, arr) => (
+                                      <div key={p} className="flex items-center gap-1">
+                                        {i > 0 && arr[i - 1] !== p - 1 && (
+                                          <span className="text-muted-foreground px-1">…</span>
+                                        )}
+                                        <Button
+                                          variant={currentPage === p ? "default" : "outline"}
+                                          size="sm"
+                                          onClick={() => setCategoryPage(category.name, p)}
+                                          className="h-8 w-8 p-0 min-w-8"
+                                        >
+                                          {p}
+                                        </Button>
+                                      </div>
+                                    ))}
+                                </div>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => setCategoryPage(category.name, currentPage + 1)}
+                                  disabled={currentPage >= totalPages}
+                                  className="gap-1 h-8"
+                                >
+                                  Next
+                                  <ChevronRight className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+                        </CardContent>
                       )}
-                    </div>
+                    </Card>
                   );
                 })}
 

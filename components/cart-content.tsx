@@ -107,10 +107,11 @@ export function CartContent() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-bold text-foreground">Shopping Cart</h1>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="gap-2" onClick={() => setBarcodeOpen(true)}>
+          {/*<Button variant="outline" size="sm" className="gap-2" onClick={() => setBarcodeOpen(true)}>
             <ScanBarcode className="h-4 w-4" />
             Add by barcode
           </Button>
+*/}
           <p className="text-sm text-muted-foreground">{items.length} items</p>
         </div>
       </div>

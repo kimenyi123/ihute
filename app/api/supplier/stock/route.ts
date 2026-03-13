@@ -86,17 +86,15 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const controller = new AbortController()
   const searchParams = req.nextUrl.searchParams
-  const action = searchParams.get("action")
+  let effectiveAction = searchParams.get("action")
   // Excel import can take minutes (parse + DB batch + Redis per item); use 5 min for importExcel
   const timeoutMs =
-    action === "importExcel"
+    effectiveAction === "importExcel"
       ? Number(process.env.SUPPLIER_STOCK_IMPORT_TIMEOUT_MS) || 300000 // 5 min default
       : 30000
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
 
   try {
-    console.log(`[SUPPLIER-STOCK] POST action: ${action}`)
-
     const contentType = req.headers.get('content-type') || ''
 
     let body: any
@@ -106,7 +104,7 @@ export async function POST(req: NextRequest) {
     if (contentType.includes('multipart/form-data')) {
       // For importExcel, stream body to backend to avoid buffering the whole file in Node
       const account = searchParams.get("account")
-      if (action === "importExcel" && account) {
+      if (effectiveAction === "importExcel" && account) {
         const urlWithAccount = `${STOCK_SERVLET_URL}?action=importExcel&account=${encodeURIComponent(account)}`
         headers["Content-Type"] = contentType
         const streamResp = await fetch(urlWithAccount, {
@@ -142,7 +140,9 @@ export async function POST(req: NextRequest) {
     // Handle JSON body (regular API calls)
     else if (contentType.includes('application/json')) {
       const jsonData = await req.json()
-      body = JSON.stringify({ ...jsonData, action: action || jsonData.action || "getProducts" })
+      // Use action from body when not in query (e.g. edit page sends action in body only)
+      if (!effectiveAction) effectiveAction = jsonData?.action || "getProducts"
+      body = JSON.stringify({ ...jsonData, action: effectiveAction })
       headers['Content-Type'] = 'application/json'
       headers['Accept'] = 'application/json'
     }
@@ -153,13 +153,13 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Build URL with action parameter for multipart requests
+    // Build URL with action parameter so backend receives updateProduct/addProduct etc.
     let url = STOCK_SERVLET_URL
-    if (action) {
-      url += `?action=${encodeURIComponent(action)}`
+    if (effectiveAction) {
+      url += `?action=${encodeURIComponent(effectiveAction)}`
     }
 
-    console.log(`[SUPPLIER-STOCK] Calling backend: ${url}`)
+    console.log(`[SUPPLIER-STOCK] POST action: ${effectiveAction}, calling backend: ${url}`)
 
     // Forward cookies from the incoming request to the backend
     const cookieHeader = req.headers.get('cookie');
