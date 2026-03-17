@@ -133,16 +133,7 @@ function extractNumericPrice(value: any): number {
 }
 
 function toCardProduct(p: Product & { search_priority?: string; contains_ingredient?: string }) {
-  // Image: image_url (Redis) or IMAGE_URL (DB stock column)
-  const image =
-    p.image ||
-    p.image_url ||
-    (p as any).IMAGE_URL ||
-    p.item_image_url ||
-    "/placeholder.svg?height=300&width=300"
-  // Debug: see which image fields we actually have when rendering cards
-  const src = (p as any).source
-  // Price: selling_price (Redis) or SALE_PRICE_INCLUSIVE/price (DB). item_emballage is not price.
+  // Image: ProductCard will call getProductImageSrc(product); pass raw fields so it can build KAOS URLs and fallback to backend image_url
   const price =
     extractNumericPrice(p.selling_price) ||
     extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) ||
@@ -154,14 +145,21 @@ function toCardProduct(p: Product & { search_priority?: string; contains_ingredi
     description: undefined,
     price,
     currency: p.currency || "RWF",
-    unit: "",
+    unit: p.item_packet ?? "",
     inStock: true,
     rating: 4,
     supplierId: p.supplier_account,
     supplierName: p.supplier_name || p.supplier_account || "Supplier",
     supplierLocation: p.supplier_location,
     momo: p.momo,
-    image,
+    itemCode: p.item_code || p.item_key_words,
+    item_key_words: p.item_key_words,
+    item_code: p.item_code,
+    famille: (p as any).famille ?? (p as any).FAMILLE,
+    image: p.image,
+    image_url: p.image_url,
+    item_image_url: p.item_image_url,
+    IMAGE_URL: (p as any).IMAGE_URL,
     searchPriority: (p.search_priority === "direct" || p.search_priority === "contains" ? p.search_priority : undefined) as "direct" | "contains" | undefined,
     containsIngredient: typeof p.contains_ingredient === "string" ? p.contains_ingredient : undefined,
   }
@@ -210,6 +208,7 @@ function normalizeSupplierProductsResponse(
             image_url: img ?? undefined,
             item_image_url: img ?? undefined,
             momo: item.momo ?? (p as any).momo,
+            famille: (item as any).famille ?? (p as any).famille ?? (item as any).FAMILLE ?? (p as any).FAMILLE,
           })
         }
       } else {
@@ -236,6 +235,7 @@ function normalizeSupplierProductsResponse(
           cost_price: q.cost_price,
           currency: q.currency,
           momo: q.momo,
+          famille: (q as any).famille ?? (q as any).FAMILLE,
         })
       }
     }

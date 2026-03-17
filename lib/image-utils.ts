@@ -14,6 +14,9 @@ export type ProductImageSource = {
 
 const IMAGE_KEYS = ["image_url", "item_image_url", "IMAGE_URL", "image"] as const
 
+/** URL to show when no product image is available (KAOS "no image" graphic). Use this instead of a grey placeholder. */
+export const NO_IMAGE_URL = "https://ishyiga.rw/images_kaos_beta/no_image_found.jpg"
+
 /**
  * Get the first non-empty image URL from a product-like object.
  * Tries all known backend field names and normalizes the result.
@@ -62,7 +65,74 @@ export function getProductImageSrc(
   source: ProductImageSource | null | undefined,
   placeholder: string = "/placeholder.svg?height=300&width=300"
 ): string {
+  const KAOS_BASE = "https://ishyiga.rw/images_kaos_beta/"
+  let kaosPrimary: string | null = null
+  let kaosSecondary: string | null = null
+
+  if (source && typeof source === "object") {
+    const rawFamille = (source as any).famille ?? (source as any).FAMILLE
+    const rawNiki =
+      (source as any).item_key_words ??
+      (source as any).itemCode ??
+      (source as any).item_code ??
+      (source as any).ITEM_CODE
+
+    const famille = typeof rawFamille === "string" ? rawFamille.trim() : String(rawFamille ?? "").trim()
+    const nikiCode = typeof rawNiki === "string" ? rawNiki.trim() : String(rawNiki ?? "").trim()
+
+    if (nikiCode) {
+      // Secondary: flat path without famille
+      kaosSecondary = `${KAOS_BASE}${nikiCode}.jpg`
+      // Primary: famille-based folder when available
+      if (famille) {
+        const famillePath = famille.replace(/\s+/g, "_")
+        kaosPrimary = `${KAOS_BASE}${famillePath}/${nikiCode}.jpg`
+      }
+
+      try {
+        const debugId =
+          (source as any).item_code ??
+          (source as any).ITEM_CODE ??
+          (source as any).item_key_words ??
+          (source as any).id ??
+          ""
+        // Lightweight console for debugging which KAOS URL we are using
+        console.debug("[ImageSrc] KAOS candidate", {
+          id: debugId,
+          famille,
+          nikiCode,
+          kaosPrimary,
+          kaosSecondary,
+        })
+      } catch {
+        // avoid breaking rendering if console fails
+      }
+    }
+  }
+
+  // Prefer famille-based path, then flat NIKI code path
+  if (kaosPrimary) {
+    return kaosPrimary
+  }
+  if (kaosSecondary) {
+    return kaosSecondary
+  }
+
   const url = getProductImageUrl(source)
-  if (url && isValidImageUrl(url)) return normalizeImageUrl(url) ?? placeholder
-  return placeholder
+  if (url && isValidImageUrl(url)) {
+    try {
+      console.debug("[ImageSrc] backend URL fallback", { url })
+    } catch {
+      // ignore
+    }
+    return normalizeImageUrl(url) ?? NO_IMAGE_URL
+  }
+
+  try {
+    console.debug("[ImageSrc] final fallback no_image_found", { placeholder, noImageUrl: NO_IMAGE_URL })
+  } catch {
+    // ignore
+  }
+
+  return NO_IMAGE_URL
 }
