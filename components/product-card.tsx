@@ -13,7 +13,7 @@ import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { useToast } from "@/components/ui/use-toast"
 import { PriceWatchButton } from "@/components/price-watch-button"
-import { getProductImageSrc, isValidImageUrl } from "@/lib/image-utils"
+import { getProductImageSrc, getProductImageUrl, isValidImageUrl, NO_IMAGE_URL } from "@/lib/image-utils"
 
 type Product = {
   id: string
@@ -32,6 +32,11 @@ type Product = {
   image?: string
   image_url?: string
   item_image_url?: string
+  /** Raw API fields so getProductImageSrc can build KAOS URLs and fallback to backend */
+  item_key_words?: string
+  item_code?: string
+  famille?: string
+  IMAGE_URL?: string
   /** IHUTE: direct match vs contains — from backend search ranking */
   searchPriority?: "direct" | "contains"
   containsIngredient?: string
@@ -71,17 +76,47 @@ export function ProductCard({
   const fav = isFavorite(id)
   const checkPriceDrop = usePriceWatchStore((s) => s.checkPriceDrop)
   const [imgError, setImgError] = useState(false)
+  const [fallbackSrc, setFallbackSrc] = useState<string | null>(null)
   const placeholder = "/placeholder.svg?height=300&width=300"
 
-  // Resolve from any backend field (image, image_url, item_image_url) so display is consistent
+  // Primary: KAOS-based URL (famille + item_key_words, then flat NIKI code, then backend URL, then KAOS no_image)
   const resolvedUrl = getProductImageSrc(product, placeholder)
-  const hasValidUrl = resolvedUrl !== placeholder && isValidImageUrl(resolvedUrl)
-  const src = !imgError && hasValidUrl ? resolvedUrl : placeholder
+  // Secondary: raw backend image_url/item_image_url/IMAGE_URL/image (used if KAOS path 404s)
+  const backendUrl = getProductImageUrl(product as any) || null
+
+  const activeSrc = fallbackSrc || resolvedUrl
+  const hasValidUrl = activeSrc !== placeholder && isValidImageUrl(activeSrc)
+  // When no image or load error, show KAOS "no image" graphic instead of grey placeholder
+  const src = !imgError && hasValidUrl ? activeSrc : NO_IMAGE_URL
   const isRemote = /^https?:\/\//i.test(src)
 
   useEffect(() => {
+    // Reset error and fallback when product or primary URL changes
     setImgError(false)
-  }, [resolvedUrl])
+    setFallbackSrc(null)
+
+    // Debug log to inspect image resolution for this product
+    try {
+      // Only log in browser
+      if (typeof window !== "undefined") {
+        // @ts-expect-error debug
+        const famille = (product as any).famille ?? (product as any).FAMILLE
+        // @ts-expect-error debug
+        const niki = (product as any).item_key_words ?? (product as any).itemCode ?? (product as any).item_code ?? (product as any).ITEM_CODE
+        // eslint-disable-next-line no-console
+        console.log("[ProductCard][image-debug]", {
+          id,
+          name,
+          famille,
+          niki,
+          resolvedUrl,
+          backendUrl,
+        })
+      }
+    } catch {
+      // ignore logging failures
+    }
+  }, [resolvedUrl, id])
 
   // Track product view when component mounts
   useEffect(() => {
@@ -115,7 +150,14 @@ export function ProductCard({
             loading="lazy"
             decoding="async"
             referrerPolicy="no-referrer"
-            onError={() => setImgError(true)}
+            onError={() => {
+              if (!fallbackSrc && backendUrl && backendUrl !== resolvedUrl && isValidImageUrl(backendUrl)) {
+                setFallbackSrc(backendUrl)
+                setImgError(false)
+              } else {
+                setImgError(true)
+              }
+            }}
           />
         ) : (
           <Image
@@ -123,8 +165,15 @@ export function ProductCard({
             src={src}
             alt={name}
             className="object-cover"
-            onError={() => setImgError(true)}
-            unoptimized={src === placeholder}
+            onError={() => {
+              if (!fallbackSrc && backendUrl && backendUrl !== resolvedUrl && isValidImageUrl(backendUrl)) {
+                setFallbackSrc(backendUrl)
+                setImgError(false)
+              } else {
+                setImgError(true)
+              }
+            }}
+            unoptimized={src === NO_IMAGE_URL || src === placeholder}
           />
         )}
 

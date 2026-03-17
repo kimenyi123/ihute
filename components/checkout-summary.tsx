@@ -5,7 +5,7 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/componen
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { useCartStore, type CartItem } from "@/lib/cart-store"
-import { getProductImageSrc, isValidImageUrl } from "@/lib/image-utils"
+import { getProductImageSrc, isValidImageUrl, NO_IMAGE_URL } from "@/lib/image-utils"
 import { Lock } from "lucide-react"
 import Image from "next/image"
 
@@ -15,7 +15,7 @@ function CheckoutSummaryItemRow({ item, lineTotal }: { item: CartItem; lineTotal
   const [imgError, setImgError] = useState(false)
   const resolvedUrl = getProductImageSrc(item as Record<string, unknown>, PLACEHOLDER)
   const hasValidUrl = resolvedUrl !== PLACEHOLDER && isValidImageUrl(resolvedUrl)
-  const src = !imgError && hasValidUrl ? resolvedUrl : PLACEHOLDER
+  const src = !imgError && hasValidUrl ? resolvedUrl : NO_IMAGE_URL
   const isRemote = /^https?:\/\//i.test(src)
 
   useEffect(() => {
@@ -41,7 +41,7 @@ function CheckoutSummaryItemRow({ item, lineTotal }: { item: CartItem; lineTotal
             fill
             className="object-cover"
             onError={() => setImgError(true)}
-            unoptimized={src === PLACEHOLDER}
+            unoptimized={src === PLACEHOLDER || src === NO_IMAGE_URL}
           />
         )}
       </div>

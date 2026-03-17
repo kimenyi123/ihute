@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Eye } from "lucide-react"
 import { getRecentInteractions } from "@/lib/interaction-tracker"
 import { getCollaborativeRecommendations } from "@/lib/recommendation-service"
+import { getProductImageSrc } from "@/lib/image-utils"
 
 /**
  * "Because You Viewed X" Recommendation Section
@@ -87,7 +88,7 @@ export function BecauseYouViewed({ className, limit = 6 }: BecauseYouViewedProps
                         id: item.ITEM_CODE || id,
                         name: item.ITEM_NAME || id,
                         price: parseFloat(item.SALE_PRICE_INCLUSIVE || "0") || undefined,
-                        image: item.image_url ?? item.item_image_url ?? item.image ?? item.IMAGE_URL,
+                        image: getProductImageSrc(item as Record<string, unknown>),
                         supplierName: item.SELLER_NAMES,
                     })
                 }

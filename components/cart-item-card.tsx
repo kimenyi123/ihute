@@ -5,7 +5,7 @@ import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { useCartStore, CartItem } from "@/lib/cart-store"
 import { Minus, Plus, Trash2 } from "lucide-react"
-import { getProductImageSrc, isValidImageUrl } from "@/lib/image-utils"
+import { getProductImageSrc, isValidImageUrl, NO_IMAGE_URL } from "@/lib/image-utils"
 
 const PLACEHOLDER = "/placeholder.svg?height=64&width=64"
 
@@ -17,7 +17,8 @@ export function CartItemCard({ item }: { item: CartItem }) {
 
   const resolvedUrl = getProductImageSrc(item as Record<string, unknown>, PLACEHOLDER)
   const hasValidUrl = resolvedUrl !== PLACEHOLDER && isValidImageUrl(resolvedUrl)
-  const src = !imgError && hasValidUrl ? resolvedUrl : PLACEHOLDER
+  // When no image or load error, show KAOS "no image" graphic instead of grey placeholder
+  const src = !imgError && hasValidUrl ? resolvedUrl : NO_IMAGE_URL
   const isRemote = /^https?:\/\//i.test(src)
 
   useEffect(() => {
@@ -44,7 +45,7 @@ export function CartItemCard({ item }: { item: CartItem }) {
               alt={item.name}
               className="object-cover"
               onError={() => setImgError(true)}
-              unoptimized={src === PLACEHOLDER}
+              unoptimized={src === PLACEHOLDER || src === NO_IMAGE_URL}
             />
           )}
         </div>
