@@ -1,13 +1,24 @@
 // components/personalized-sections.tsx
 "use client"
 
-import { useEffect, useState, useRef } from "react"
+import { useEffect, useState, useRef, useMemo } from "react"
 import { ProductCard } from "./product-card"
 import { TrendingUp, ArrowRight, Store } from "lucide-react"
 import { useAuthStore } from "@/lib/auth-store"
 import { getSessionId } from "@/lib/interaction-tracker"
 import { getSmartRecommendations, shuffle } from "@/lib/recommendation-service"
+import { useProductFiltersStore } from "@/lib/product-filters-store"
 import Link from "next/link"
+
+/** Brand id -> label for name matching (same as product-filters-sheet BRANDS). */
+const BRAND_LABELS: Record<string, string> = {
+  heineken: "Heineken",
+  leffe: "Leffe",
+  primus: "Primus",
+  mutzig: "Mutzig",
+  "coca-cola": "Coca-Cola",
+  pepsi: "Pepsi",
+}
 
 const BURROWS_NICKNAME = "burrows"
 const BURROWS_DISPLAY_NAME = "PANGOLIN'S BURROWS"
@@ -24,6 +35,12 @@ interface Product {
   supplierLocation?: string
   momo?: string
   category?: string
+  /** From niki_items.item_fabricant — use for brand filter when present */
+  brand?: string
+  /** From niki_items.bus_category_id (e.g. BAR, LIQUOR STORE) — use for sector filter */
+  sector?: string
+  /** From niki_items.category_id (e.g. Beer) — use for category filter when present */
+  categoryId?: string
   inStock?: boolean
   rating?: number
 }
@@ -49,11 +66,14 @@ interface PersonalizedSection {
  */
 export function PersonalizedSections() {
   const { user } = useAuthStore()
+  const { sector, category, brand, priceMin, priceMax, hasActiveFilters } = useProductFiltersStore()
   const [sections, setSections] = useState<PersonalizedSection[]>([])
   const [loading, setLoading] = useState(true)
   const [hasInteractionHistory, setHasInteractionHistory] = useState(false)
 
   const hasInteractionRef = useRef(false)
+  const priceMinNum = parseInt(priceMin, 10) || 0
+  const priceMaxNum = parseInt(priceMax, 10) || 0
 
   useEffect(() => {
     console.log("[PersonalizedSections] useEffect: mount or user changed", { user: user?.email ?? "anonymous" })
@@ -77,6 +97,70 @@ export function PersonalizedSections() {
     }
   }
 
+  /** Map niki_items.bus_category_id to app sector slugs (product-filters-sheet). */
+  const BUS_CATEGORY_TO_SECTOR_SLUG: Record<string, string> = {
+    BAR: "bar-resto",
+    RESTAURANT: "bar-resto",
+    "LIQUOR STORE": "liquor-store",
+    PHARMACY: "pharmacy",
+    SUPERMARKET: "supermarket",
+    BOUTIQUE: "boutique",
+    "COFFEE-SHOP": "coffee-shop",
+    BEAUTY: "beauty",
+    GENERAL: "general",
+  }
+
+  /** Client-side filter: prefer niki_items (brand, category_id, bus_category_id) when present; else fall back to name/category text. */
+  function productMatchesFilters(
+    p: Product,
+    sector: string,
+    category: string,
+    brand: string,
+    priceMinNum: number,
+    priceMaxNum: number
+  ): boolean {
+    if (priceMinNum > 0 && p.price < priceMinNum) return false
+    if (priceMaxNum > 0 && p.price > priceMaxNum) return false
+    const name = (p.name ?? "").toLowerCase()
+    const cat = (p.category ?? "").toString().toLowerCase()
+    const catId = (p.categoryId ?? "").toString().toLowerCase()
+    const searchable = [name, cat, catId].join(" ")
+
+    if (category.trim()) {
+      const slug = category.trim().toLowerCase()
+      if (p.categoryId != null && p.categoryId !== "") {
+        if (catId !== slug && !catId.includes(slug) && !slug.includes(catId)) return false
+      } else if (!searchable.includes(slug) && !name.includes(slug)) return false
+    }
+    if (brand.trim()) {
+      const label = BRAND_LABELS[brand.trim().toLowerCase()] ?? brand.trim()
+      if (p.brand != null && p.brand !== "") {
+        if (p.brand.toLowerCase() !== label.toLowerCase() && !p.brand.toLowerCase().includes(label.toLowerCase())) return false
+      } else if (!label || !name.includes(label.toLowerCase())) return false
+    }
+    if (sector.trim()) {
+      const wantedSlug = sector.trim().toLowerCase()
+      if (p.sector != null && p.sector !== "") {
+        const productSectorSlug = BUS_CATEGORY_TO_SECTOR_SLUG[p.sector.toUpperCase()] ?? p.sector.toLowerCase().replace(/\s+/g, "-")
+        if (productSectorSlug !== wantedSlug) return false
+      } else {
+        const sectorKeywords: Record<string, string[]> = {
+          "liquor-store": ["beer", "wine", "liquor", "leffe", "heineken", "desperados", "corona", "vodka"],
+          pharmacy: ["drug", "medicine", "pharma"],
+          "bar-resto": ["beer", "wine", "liquor", "drink"],
+          supermarket: ["food", "beverage", "household"],
+          "coffee-shop": ["coffee", "tea"],
+          boutique: ["cosmetic", "beauty"],
+          beauty: ["cosmetic", "beauty"],
+          general: [],
+        }
+        const keywords = sectorKeywords[wantedSlug] ?? [wantedSlug.replace(/-/g, " ")]
+        if (keywords.length && !keywords.some((k) => searchable.includes(k))) return false
+      }
+    }
+    return true
+  }
+
   /** Extract numeric price from any backend field (same logic as shop-with-me). */
   function extractNumericPrice(value: any): number {
     if (typeof value === "number") return isNaN(value) ? 0 : value
@@ -84,6 +168,16 @@ export function PersonalizedSections() {
     const parsed = parseFloat(n)
     return Number.isFinite(parsed) ? parsed : 0
   }
+
+  const sectionsWithFilters = useMemo(() => {
+    if (!hasActiveFilters()) return sections
+    return sections.map((sec) => ({
+      ...sec,
+      products: sec.products.filter((p) =>
+        productMatchesFilters(p, sector, category, brand, priceMinNum, priceMaxNum)
+      ),
+    }))
+  }, [sections, sector, category, brand, priceMinNum, priceMaxNum])
 
   /** Single fast request: load Burrows products with images (shop-with-me). */
   async function fetchBurrowsProducts(limit = 6): Promise<Product[]> {
@@ -132,6 +226,9 @@ export function PersonalizedSections() {
             supplierLocation: seller.loc_cell ?? seller.supplier_location ?? "",
             momo: seller.momo ?? p.momo,
             category: p.famille ?? p.FAMILLE ?? p.item_department,
+            brand: (p as any).item_fabricant ?? (p as any).brand,
+            sector: (p as any).bus_category_id ?? (p as any).sector,
+            categoryId: (p as any).category_id ?? (p as any).categoryId,
             inStock: true,
           })
         }
@@ -386,9 +483,9 @@ export function PersonalizedSections() {
 
   return (
     <div className="py-8 bg-slate-50/50">
-      {sections.map((section, idx) => (
+      {sectionsWithFilters.map((section, idx) => (
         <section key={idx} className="container mx-auto px-4">
-          <div className="mb-4 flex items-center justify-between">
+          <div className="mb-4 flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-2">
               <div className="text-primary">{section.icon}</div>
               <div>
@@ -398,6 +495,18 @@ export function PersonalizedSections() {
                 )}
               </div>
             </div>
+            {hasActiveFilters() && (
+              <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                {sector && <span className="rounded bg-muted px-2 py-0.5">Sector: {sector}</span>}
+                {category && <span className="rounded bg-muted px-2 py-0.5">Category: {category}</span>}
+                {brand && <span className="rounded bg-muted px-2 py-0.5">Brand: {BRAND_LABELS[brand] ?? brand}</span>}
+                {(priceMin || priceMax) && (
+                  <span className="rounded bg-muted px-2 py-0.5">
+                    {priceMin || "0"}–{priceMax || "∞"} RWF
+                  </span>
+                )}
+              </div>
+            )}
             <div className="flex items-center gap-3">
               {section.title.includes(BURROWS_DISPLAY_NAME) && (
                 <Link
@@ -420,9 +529,9 @@ export function PersonalizedSections() {
 
           {section.products.length > 0 ? (
             <>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8">
                 {section.products.map((product) => (
-                  <ProductCard key={product.id} product={product} />
+                  <ProductCard key={product.id} product={product} compact />
                 ))}
               </div>
               {/* Mobile "See More" link */}
@@ -438,7 +547,16 @@ export function PersonalizedSections() {
             </>
           ) : (
             <div className="text-center py-8 text-muted-foreground text-sm">
-              No products available in this section
+              {hasActiveFilters() ? (
+                <>
+                  <p className="font-medium">No products match your filters.</p>
+                  <Link href="/search" className="mt-2 inline-block text-sm text-primary hover:underline">
+                    Try search or clear filters
+                  </Link>
+                </>
+              ) : (
+                "No products available in this section"
+              )}
             </div>
           )}
         </section>

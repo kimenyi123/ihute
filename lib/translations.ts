@@ -1,7 +1,7 @@
   export const translations = {
     en: {
       // Header
-      searchPlaceholder: "Search products...",
+      searchPlaceholder: "🔍 Search products, brands, or scan barcode...",
       login: "Login",
       logout: "Logout",
       allLocations: "All Locations",
@@ -146,7 +146,7 @@
     },
     fr: {
       // Header
-      searchPlaceholder: "Rechercher des produits...",
+      searchPlaceholder: "🔍 Rechercher produits, marques ou scanner un code-barres...",
       login: "Connexion",
       logout: "Déconnexion",
       allLocations: "Tous les emplacements",
@@ -292,7 +292,7 @@
     },
     rw: {
       // Header
-      searchPlaceholder: "Shakisha ibicuruzwa...",
+      searchPlaceholder: "🔍 Shakisha ibicuruzwa, amabara, cyangwa scan barcode...",
       login: "Injira",
       logout: "Sohoka",
       allLocations: "Ahantu hose",

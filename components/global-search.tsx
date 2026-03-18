@@ -88,7 +88,7 @@ function groupProductsBySupplier(products: GlobalResult[]): Map<string, GlobalRe
 }
 
 export function GlobalSearch({
-  placeholder = "Search products from multiple sellers...",
+  placeholder = "🔍 Search products, brands, or scan barcode...",
   className,
   maxSuggestions = 15,
 }: {
@@ -543,6 +543,8 @@ export function GlobalSearch({
   const productsBySupplier = groupProductsBySupplier(productsWithDistance)
   const supplierCount = productsBySupplier.size
 
+  const TRENDING_SUGGESTIONS = ["cheap beer", "pharmacy near me", "Leffe", "wine"]
+
   return (
     <>
       <div ref={wrapRef} className={cn("relative w-full", className)}>
@@ -553,9 +555,9 @@ export function GlobalSearch({
           placeholder={placeholder}
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          onFocus={() => q.trim() && setOpen(true)}
+          onFocus={() => setOpen(true)}
           onKeyDown={onKeyDown}
-          className="pl-10 pr-3 h-9"
+          className="pl-10 pr-3 h-9 transition-shadow focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary"
         />
       </div>
 
@@ -582,6 +584,28 @@ export function GlobalSearch({
 
           {err && !loading && (
             <div className="px-3 py-2 text-sm text-destructive">{err}</div>
+          )}
+
+          {/* Try / trending suggestions when query empty */}
+          {!loading && !err && q.trim().length === 0 && (
+            <div className="p-3 border-b">
+              <p className="text-[10px] text-muted-foreground mb-1.5">Try:</p>
+              <div className="flex flex-wrap gap-1">
+                {TRENDING_SUGGESTIONS.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    className="text-xs px-2 py-0.5 rounded-full bg-muted hover:bg-primary/10 text-foreground transition-colors"
+                    onClick={() => {
+                      setQ(s)
+                      onSubmit(s)
+                    }}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
 
           {/* Recent Searches Suggestions */}

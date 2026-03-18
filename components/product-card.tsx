@@ -14,6 +14,8 @@ import { cn } from "@/lib/utils"
 import { useToast } from "@/components/ui/use-toast"
 import { PriceWatchButton } from "@/components/price-watch-button"
 import { getProductImageSrc, getProductImageUrl, isValidImageUrl, NO_IMAGE_URL } from "@/lib/image-utils"
+import { ProductBadges, ProductTrustSignals } from "@/components/product-badges"
+import type { ProductBadgeType } from "@/components/product-badges"
 
 type Product = {
   id: string
@@ -32,23 +34,37 @@ type Product = {
   image?: string
   image_url?: string
   item_image_url?: string
-  /** Raw API fields so getProductImageSrc can build KAOS URLs and fallback to backend */
   item_key_words?: string
   item_code?: string
   famille?: string
   IMAGE_URL?: string
-  /** IHUTE: direct match vs contains — from backend search ranking */
   searchPriority?: "direct" | "contains"
   containsIngredient?: string
+  /** Commerce intelligence: badges (Best Price, Nearby, Low Stock, etc.) */
+  badges?: ProductBadgeType[]
+  /** Why this result: e.g. "Recommended near you", "Popular in this sector" */
+  whyShown?: string
+  /** Trust: review count, verified seller */
+  reviewCount?: number
+  verifiedSeller?: boolean
+  /** For discount display */
+  oldPrice?: number
+  /** For "Only N left" badge */
+  stockQuantity?: number
+  /** For "X% margin" badge */
+  marginPercent?: number
+  /** e.g. "1.2km away" */
+  distanceLabel?: string
 }
 
 export function ProductCard({
   product,
   navigateAfterAdd = false,
+  compact = false,
 }: {
   product: Product
-  /** If true, "Buy" navigates to /cart after adding. If false, only adds to cart and shows a toast so user can keep adding. */
   navigateAfterAdd?: boolean
+  compact?: boolean
 }) {
   const router = useRouter()
   const addOrInc = useCartStore((s) => s.addOrInc ?? s.addItem)
@@ -71,6 +87,15 @@ export function ProductCard({
     image,
     searchPriority,
     containsIngredient,
+    badges = [],
+    whyShown,
+    reviewCount,
+    verifiedSeller,
+    oldPrice,
+    rating,
+    stockQuantity,
+    marginPercent,
+    distanceLabel,
   } = product
 
   const fav = isFavorite(id)
@@ -140,8 +165,8 @@ export function ProductCard({
   }, [id, supplierId, price, name, checkPriceDrop, toast])
 
   return (
-    <Card className="group h-full overflow-hidden transition-all hover:shadow-lg">
-      <div className="relative w-full aspect-square bg-muted">
+    <Card className={cn("group h-full overflow-hidden transition-all hover:shadow-lg", compact && "border shadow-sm")}>
+      <div className={cn("relative w-full bg-muted", compact ? "aspect-[4/5]" : "aspect-square")}>
         {isRemote ? (
           <img
             src={src}
@@ -203,19 +228,19 @@ export function ProductCard({
             })
           }}
           className={cn(
-            "absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white/90 backdrop-blur transition",
-            "hover:bg-white",
+            "absolute inline-flex items-center justify-center rounded-full border bg-white/90 backdrop-blur transition hover:bg-white",
+            compact ? "right-1 top-1 h-6 w-6" : "right-2 top-2 h-8 w-8",
             fav ? "text-red-600" : "text-muted-foreground"
           )}
           title={fav ? "Remove from favorites" : "Add to favorites"}
         >
-          <Heart className={cn("h-4 w-4", fav && "fill-current")} />
+          <Heart className={cn(fav && "fill-current", compact ? "h-3 w-3" : "h-4 w-4")} />
         </button>
       </div>
 
-      <CardContent className="p-3 flex flex-col gap-2">
-        <div className="min-h-[38px]">
-          <h3 className="text-sm font-semibold leading-tight line-clamp-2">{name}</h3>
+      <CardContent className={cn("flex flex-col gap-2", compact ? "p-2" : "p-3")}>
+        <div className={compact ? "min-h-[32px]" : "min-h-[38px]"}>
+          <h3 className={cn("font-semibold leading-tight line-clamp-2", compact ? "text-xs" : "text-sm")}>{name}</h3>
           {(searchPriority === "direct" || containsIngredient) && (
             <div className="mt-1 flex flex-wrap gap-1">
               {searchPriority === "direct" && (
@@ -238,22 +263,48 @@ export function ProductCard({
           </p>
         )}
 
-        <div className="text-sm">
-          <div className="font-semibold">
-            {price.toLocaleString()} {currency}
+        <div className={compact ? "text-xs" : "text-sm"}>
+          <div className="flex items-baseline gap-2">
+            <span className="font-semibold">
+              {price.toLocaleString()} {currency}
+            </span>
+            {oldPrice != null && oldPrice > price && (
+              <span className="text-[10px] text-muted-foreground line-through">
+                {oldPrice.toLocaleString()}
+              </span>
+            )}
           </div>
           {supplierName && (
-            <div className="text-xs text-muted-foreground">
-              {supplierName}
-              {supplierLocation ? ` — ${supplierLocation}` : ""}
-            </div>
+            <p className={cn("mt-0.5 text-muted-foreground font-normal", compact ? "text-[10px]" : "text-xs")}>
+              {supplierName.toUpperCase()} <span className="text-amber-500" aria-hidden>⭐⭐⭐</span>
+            </p>
           )}
         </div>
 
-        <div className="mt-1 flex flex-wrap gap-1">
+        <ProductBadges
+          badges={badges}
+          max={4}
+          className={compact ? "mt-0.5" : "mt-1"}
+          stockQuantity={stockQuantity}
+          marginPercent={marginPercent}
+          distanceLabel={distanceLabel}
+        />
+        {whyShown && (
+          <p className={cn("text-[10px] text-muted-foreground italic", compact ? "mt-0.5" : "mt-1")}>
+            {whyShown}
+          </p>
+        )}
+        <ProductTrustSignals
+          rating={rating}
+          reviewCount={reviewCount}
+          verifiedSeller={verifiedSeller}
+          className={compact ? "mt-0.5" : "mt-1"}
+        />
+
+        <div className={cn("flex flex-wrap gap-1", compact ? "mt-0.5" : "mt-1")}>
         <Button
-          size="sm"
-          className="flex-1 min-w-0"
+          size={compact ? "sm" : "sm"}
+          className={cn("flex-1 min-w-0", compact && "h-7 text-xs px-2")}
           onClick={(e) => {
             e.stopPropagation()
             trackClick("product", id, name)
@@ -284,7 +335,7 @@ export function ProductCard({
             }
           }}
         >
-          Buy
+          ⚡ Buy Now
         </Button>
         <PriceWatchButton
           productId={id}
@@ -293,8 +344,9 @@ export function ProductCard({
           currentPrice={price}
           supplierName={supplierName}
           image={image}
-          size="sm"
+          size={compact ? "sm" : "sm"}
           variant="outline"
+          className={compact ? "h-7 text-xs px-2" : undefined}
         />
         </div>
       </CardContent>

@@ -23,6 +23,8 @@ async function forward(req: NextRequest) {
   const target = new URL(getFetchSuggestionsUrl())
 
   // Copy query params. Backend must always search Redis first, then DB (see docs/backend-redis-search.md).
+  // Category, brand, price: frontend sends category, brand, priceMin, priceMax; backend can filter by them.
+  // See docs/backend-category-price-filters.md for SQL/API guidance.
   incoming.searchParams.forEach((v, k) => target.searchParams.append(k, v))
 
   // Redis first (this app): check our response cache before calling backend (DB)

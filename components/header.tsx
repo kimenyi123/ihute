@@ -33,6 +33,8 @@ import {
 import { LanguageSelector } from "@/components/language-selector"
 import { GlobalSearch } from "@/components/global-search"
 import { NotificationBell } from "@/components/notification-bell"
+import { SlidersHorizontal } from "lucide-react"
+import { ProductFiltersSheet } from "@/components/product-filters-sheet"
 
 import { useCartStore } from "@/lib/cart-store"
 import { useFavoritesStore } from "@/lib/favorites-store"
@@ -57,6 +59,10 @@ export function Header() {
   const pendingCount = useOrdersStore((s) => s.getPendingCount())
   const [sellerCount, setSellerCount] = useState<number>(0)
   const [barcodeOpen, setBarcodeOpen] = useState(false)
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => setMounted(true), [])
 
   useEffect(() => {
     let ignore = false
@@ -110,10 +116,20 @@ export function Header() {
             />
           </Link>
 
-          {/* Global Search - Desktop */}
-          <div className="hidden lg:flex flex-1 max-w-md relative items-center gap-2">
-            <GlobalSearch placeholder={t("searchPlaceholder")} className="w-full" />
-            <LocationBadge />
+          {/* Global Search + Location filter + Filters - same line */}
+          <div className="hidden lg:flex flex-1 max-w-xl relative items-center gap-2">
+            <GlobalSearch placeholder={t("searchPlaceholder")} className="min-w-0 flex-1" />
+            <LocationBadge compact />
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-9 w-9 shrink-0"
+              onClick={() => setFiltersOpen(true)}
+              title="Filters"
+              aria-label="Open filters"
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+            </Button>
           </div>
 
           {/* Actions */}
@@ -183,7 +199,7 @@ export function Header() {
                   <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Orders (Seller)">
                     <Link href="/supplier/orders">
                       <PackageSearch className="h-5 w-5" />
-                      {sellerCount > 0 && (
+                      {mounted && sellerCount > 0 && (
                         <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-amber-600 text-xs font-bold text-white">
                           {sellerCount}
                         </span>
@@ -198,11 +214,11 @@ export function Header() {
                     <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Orders">
                       <Link href="/buyer/orders">
                         <ScrollText className="h-5 w-5" />
-                        {pendingCount > 0 && (
-                          <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">
-                            {pendingCount}
-                          </span>
-                        )}
+                        {mounted && pendingCount > 0 && (
+                            <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">
+                              {pendingCount}
+                            </span>
+                          )}
                       </Link>
                     </Button>
 
@@ -244,7 +260,7 @@ export function Header() {
             <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Favorites">
               <Link href="/favorites">
                 <Heart className="h-5 w-5" />
-                {favoritesCount > 0 && (
+                {mounted && favoritesCount > 0 && (
                   <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs font-bold text-white">
                     {favoritesCount}
                   </span>
@@ -280,7 +296,7 @@ export function Header() {
             <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Cart">
               <Link href="/cart">
                 <ShoppingCart className="h-5 w-5" />
-                {totalItems > 0 && (
+                {mounted && totalItems > 0 && (
                   <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-green-600 text-xs font-bold text-white">
                     {totalItems}
                   </span>
@@ -290,18 +306,27 @@ export function Header() {
           </div>
         </div>
 
-        {/* Mobile Search + Location */}
-        <div className="pb-3 space-y-2 lg:hidden">
-          <div className="relative w-full">
-            <GlobalSearch placeholder={t("searchPlaceholder")} className="w-full" />
-          </div>
-          <div className="flex items-center justify-center">
-            <LocationBadge />
+        {/* Mobile: Search + Location + Filters on one row */}
+        <div className="pb-3 flex flex-col gap-2 lg:hidden">
+          <div className="flex items-center gap-2 w-full">
+            <GlobalSearch placeholder={t("searchPlaceholder")} className="flex-1 min-w-0" />
+            <LocationBadge compact />
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-9 w-9 shrink-0"
+              onClick={() => setFiltersOpen(true)}
+              title="Filters"
+              aria-label="Open filters"
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+            </Button>
           </div>
         </div>
       </div>
       <TableCommandBanner />
       <BarcodeAddToCart open={barcodeOpen} onOpenChange={setBarcodeOpen} />
+      <ProductFiltersSheet open={filtersOpen} onOpenChange={setFiltersOpen} />
     </header>
   )
 }

@@ -15,15 +15,13 @@ import {
 } from "@/components/ui/alert-dialog"
 import { useLocationStoreEnhanced } from "@/lib/location-store-enhanced"
 import { LocationCaptureDialog } from "@/components/location-capture-dialog"
+import { cn } from "@/lib/utils"
 import { useState } from "react"
 
-export function LocationBadge() {
-  const { location, clearLocation, hasAskedForLocation, isLocationExpired } = useLocationStoreEnhanced()
+export function LocationBadge({ compact = false }: { compact?: boolean }) {
+  const { location, clearLocation } = useLocationStoreEnhanced()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [confirmClearOpen, setConfirmClearOpen] = useState(false)
-
-  // Don't auto-open dialog - only show when user clicks the button
-  // This prevents the popup from appearing on every page refresh
 
   const handleClearLocation = () => {
     clearLocation()
@@ -35,12 +33,13 @@ export function LocationBadge() {
       <>
         <Button
           variant="outline"
-          size="sm"
+          size={compact ? "icon" : "sm"}
           onClick={() => setDialogOpen(true)}
-          className="text-xs"
+          className={compact ? "h-9 w-9 shrink-0" : "text-xs"}
+          title="Set location"
         >
-          <MapPin className="h-3 w-3 mr-1" />
-          Set Location
+          <MapPin className={compact ? "h-4 w-4" : "h-3 w-3 mr-1"} />
+          {!compact && <span>Set Location</span>}
         </Button>
         <LocationCaptureDialog open={dialogOpen} onOpenChange={setDialogOpen} />
       </>
@@ -49,17 +48,26 @@ export function LocationBadge() {
 
   return (
     <>
-      <Badge variant="secondary" className="gap-1 px-2 py-1">
+      <Badge
+        variant="secondary"
+        className={cn(
+          "gap-1 shrink-0 cursor-pointer",
+          compact ? "h-9 px-2 py-0 gap-1" : "px-2 py-1"
+        )}
+        onClick={() => setDialogOpen(true)}
+      >
         <MapPin className="h-3 w-3" />
-        <span className="text-xs">
-          Near {location.district}
-          {location.cell && `, ${location.cell}`}
+        <span className="text-xs max-w-[100px] truncate">
+          {compact ? `Near ${location.district}` : `Near ${location.district}${location.cell ? `, ${location.cell}` : ""}`}
         </span>
         <Button
           variant="ghost"
           size="sm"
-          className="h-4 w-4 p-0 hover:bg-transparent"
-          onClick={() => setConfirmClearOpen(true)}
+          className="h-4 w-4 p-0 hover:bg-transparent shrink-0"
+          onClick={(e) => {
+            e.stopPropagation()
+            setConfirmClearOpen(true)
+          }}
         >
           <X className="h-3 w-3" />
         </Button>
