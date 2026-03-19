@@ -5,7 +5,8 @@ import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { useCartStore, CartItem } from "@/lib/cart-store"
 import { Minus, Plus, Trash2 } from "lucide-react"
-import { getProductImageSrc, isValidImageUrl } from "@/lib/image-utils"
+import { getProductImageCandidates, isValidImageUrl, NO_IMAGE_URL } from "@/lib/image-utils"
+import { DEFAULT_CART_CURRENCY, displayUnitForPrice } from "@/lib/cart-display-utils"
 
 const PLACEHOLDER = "/placeholder.svg?height=64&width=64"
 
@@ -13,16 +14,30 @@ export function CartItemCard({ item }: { item: CartItem }) {
   const inc = useCartStore((s) => s.inc)
   const dec = useCartStore((s) => s.dec)
   const remove = useCartStore((s) => s.remove)
-  const [imgError, setImgError] = useState(false)
 
-  const resolvedUrl = getProductImageSrc(item as Record<string, unknown>, PLACEHOLDER)
+  const imageCandidates = ((): string[] => {
+    // Try same ordered fallback chain we use everywhere else:
+    // KAOS famille/NIKI → flat NIKI → backend image fields → NO_IMAGE_URL
+    try {
+      return getProductImageCandidates(item as any)
+    } catch {
+      return [NO_IMAGE_URL]
+    }
+  })()
+
+  const candidatesSignature = imageCandidates.join("\x1e")
+  const [candidateIdx, setCandidateIdx] = useState(0)
+  const resolvedUrl = imageCandidates[Math.min(candidateIdx, imageCandidates.length - 1)] ?? NO_IMAGE_URL
   const hasValidUrl = resolvedUrl !== PLACEHOLDER && isValidImageUrl(resolvedUrl)
-  const src = !imgError && hasValidUrl ? resolvedUrl : PLACEHOLDER
+  // When no image or load error, show KAOS "no image" graphic instead of grey placeholder
+  const src = hasValidUrl ? resolvedUrl : NO_IMAGE_URL
   const isRemote = /^https?:\/\//i.test(src)
 
   useEffect(() => {
-    setImgError(false)
-  }, [resolvedUrl])
+    setCandidateIdx(0)
+  }, [candidatesSignature, item.id, item.selectedUnit])
+
+  const unitLabel = displayUnitForPrice(item.unit ?? item.selectedUnit)
 
   return (
     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4 rounded-lg border p-3">
@@ -30,21 +45,35 @@ export function CartItemCard({ item }: { item: CartItem }) {
         <div className="relative h-16 w-16 flex-shrink-0 rounded bg-muted overflow-hidden">
           {isRemote ? (
             <img
+              key={src}
               src={src}
               alt={item.name}
               className="absolute inset-0 h-full w-full object-cover"
               loading="lazy"
               referrerPolicy="no-referrer"
-              onError={() => setImgError(true)}
+              onError={() => {
+                if (candidateIdx + 1 < imageCandidates.length) {
+                  setCandidateIdx((i) => i + 1)
+                } else {
+                  setCandidateIdx(imageCandidates.length - 1)
+                }
+              }}
             />
           ) : (
             <Image
               fill
+              key={src}
               src={src}
               alt={item.name}
               className="object-cover"
-              onError={() => setImgError(true)}
-              unoptimized={src === PLACEHOLDER}
+              onError={() => {
+                if (candidateIdx + 1 < imageCandidates.length) {
+                  setCandidateIdx((i) => i + 1)
+                } else {
+                  setCandidateIdx(imageCandidates.length - 1)
+                }
+              }}
+              unoptimized={src === PLACEHOLDER || src === NO_IMAGE_URL}
             />
           )}
         </div>
@@ -56,9 +85,18 @@ export function CartItemCard({ item }: { item: CartItem }) {
             {item.supplierLocation ? ` · ${item.supplierLocation}` : ""}
           </div>
           <div className="text-sm mt-1">
-            {Number(item.price) > 0
-              ? `${Number(item.price).toLocaleString()} ${item.unit ? ` / ${item.unit}` : "RWF"}`
-              : "Price not available"}
+            {Number(item.price) > 0 ? (
+              <>
+                <span className="font-medium">
+                  {Number(item.price).toLocaleString()} {DEFAULT_CART_CURRENCY}
+                </span>
+                {unitLabel ? (
+                  <span className="text-muted-foreground"> · {unitLabel}</span>
+                ) : null}
+              </>
+            ) : (
+              "Price not available"
+            )}
           </div>
         </div>
       </div>
@@ -87,9 +125,9 @@ export function CartItemCard({ item }: { item: CartItem }) {
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="w-20 sm:w-24 text-right font-semibold">
+          <div className="w-24 sm:w-28 text-right font-semibold text-sm">
             {Number(item.price) > 0
-              ? (Number(item.price) * item.qty).toLocaleString()
+              ? `${(Number(item.price) * item.qty).toLocaleString()} ${DEFAULT_CART_CURRENCY}`
               : "—"}
           </div>
 

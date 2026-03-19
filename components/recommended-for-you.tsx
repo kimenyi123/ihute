@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { TrendingUp, Sparkles } from "lucide-react"
 import { getSmartRecommendations } from "@/lib/recommendation-service"
 import { trackABTestEvent } from "@/lib/recommendation-config"
+import { getProductImageSrc } from "@/lib/image-utils"
 
 /**
  * Personalized "Recommended for You" Section
@@ -90,7 +91,7 @@ export function RecommendedForYou({ className, limit = 12 }: RecommendedForYouPr
                         id: productId,
                         name: item.ITEM_NAME || id,
                         price: parseFloat(item.SALE_PRICE_INCLUSIVE || "0") || undefined,
-                        image: item.image_url ?? item.item_image_url ?? item.image ?? item.IMAGE_URL,
+                        image: getProductImageSrc(item as Record<string, unknown>),
                         supplierName: item.SELLER_NAMES,
                         category: item.FAMILLE || item.CATEGORY,
                     })

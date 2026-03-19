@@ -40,15 +40,23 @@ function toUserRole(r?: string): UserRole {
 }
 
 function normalizeToStoreUser(payload: ApiLoginOK): User {
+  const u = (payload as any).user ?? {}
+  const email = String(u.email ?? (payload as any).email ?? "").trim()
+  if (!email) {
+    throw new Error("Login succeeded but profile data is incomplete. Check Java user-auth JSON (user.email).")
+  }
   return {
-    id: payload.user.email,
-    email: payload.user.email,
-    name: [payload.user.firstName, payload.user.lastName].filter(Boolean).join(" ") || payload.user.owner || payload.user.email,
-    role: toUserRole(payload.role),
-    phone: payload.user.tel || "",
-    location: payload.user.location || "",
+    id: email,
+    email,
+    name:
+      [u.firstName, u.lastName].filter(Boolean).join(" ") ||
+      String(u.owner ?? "").trim() ||
+      email,
+    role: toUserRole(String((payload as any).role ?? "")),
+    phone: String(u.tel ?? "").trim(),
+    location: String(u.location ?? "").trim(),
     ishyigaAccount: payload.ishyiga || undefined,
-    businessName: payload.user.owner || undefined,
+    businessName: u.owner ? String(u.owner).trim() : undefined,
   }
 }
 
@@ -75,10 +83,11 @@ export default function LoginPage() {
     try {
       log("LOGIN", `Sending to /api/auth/login`)
 
+      const emailTrimmed = email.trim()
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email: emailTrimmed, password }),
       })
 
       log("LOGIN", `HTTP Status: ${res.status}`)
@@ -92,7 +101,10 @@ export default function LoginPage() {
       log("LOGIN", `Response:`, json)
 
       if (!res.ok || !json?.ok) {
-        throw new Error(json?.error || `Login failed (${res.status})`)
+        const ref = json?.javaRid || json?.rid
+        const code = json?.code ? ` [${json.code}]` : ""
+        const detail = [json?.error, ref ? `(Java ref: ${ref})` : "", code].filter(Boolean).join(" ")
+        throw new Error(detail || `Login failed (${res.status})`)
       }
 
       const user: User = normalizeToStoreUser(json as ApiLoginOK)

@@ -4,6 +4,7 @@ import { create } from "zustand"
 import { persist, createJSONStorage } from "zustand/middleware"
 import { trackClick } from "./interaction-tracker"
 import { getPublicApiUrl } from "./backend-config"
+import { isConcreteProductImageUrl } from "./image-utils"
 
 export type CartItem = {
   id: string
@@ -11,9 +12,16 @@ export type CartItem = {
   price: number
   unit?: string
   image?: string
+  /** Backend product image fields — kept so cart can resolve images after merge / refresh */
+  image_url?: string
+  item_image_url?: string
+  IMAGE_URL?: string
 
   /** Item code / NIKI code (e.g. item_key_words) — sent in order transaction */
   itemCode?: string
+  /** Optional: used only for image URL resolution in cart (KAOS paths) */
+  item_key_words?: string
+  famille?: string
 
   // seller info
   supplierId: string
@@ -103,6 +111,19 @@ type CartState = {
   setPaymentStatus: (supplierId: string, status: PayState) => void
 }
 
+/** Prefer a real product image URL when merging duplicate cart lines. */
+function pickBestCartImage(...candidates: (string | undefined)[]): string | undefined {
+  for (const c of candidates) {
+    const s = typeof c === "string" ? c.trim() : ""
+    if (isConcreteProductImageUrl(s)) return s
+  }
+  for (const c of candidates) {
+    const s = typeof c === "string" ? c.trim() : ""
+    if (s) return s
+  }
+  return undefined
+}
+
 export const useCartStore = create<CartState>()(
   persist(
     (set, get) => ({
@@ -155,9 +176,28 @@ export const useCartStore = create<CartState>()(
               qty: totalQty,
               price: bestPrice,
               itemCode: (first.itemCode ?? item.itemCode ?? first.id ?? item.id).toString().trim() || first.itemCode,
-              // If the existing line was created before we had these fields,
-              // "upgrade" it with the latest values from the incoming add.
-              image: first.image ?? item.image,
+              image: pickBestCartImage(
+                first.image,
+                item.image,
+                ...matching.map((m) => m.image)
+              ),
+              image_url: pickBestCartImage(
+                first.image_url,
+                item.image_url,
+                ...matching.map((m) => m.image_url)
+              ),
+              item_image_url: pickBestCartImage(
+                first.item_image_url,
+                item.item_image_url,
+                ...matching.map((m) => m.item_image_url)
+              ),
+              IMAGE_URL: pickBestCartImage(
+                first.IMAGE_URL,
+                item.IMAGE_URL,
+                ...matching.map((m) => m.IMAGE_URL)
+              ),
+              item_key_words: first.item_key_words ?? item.item_key_words,
+              famille: first.famille ?? item.famille,
               momo: first.momo ?? item.momo,
               sellerPhone: first.sellerPhone ?? item.sellerPhone,
             }
@@ -250,9 +290,28 @@ export const useCartStore = create<CartState>()(
               ...first,
               qty: totalQty,
               itemCode: (first.itemCode ?? item.itemCode ?? first.id ?? item.id).toString().trim() || first.itemCode,
-              // If the existing line was created before we had these fields,
-              // "upgrade" it with the latest values from the incoming add.
-              image: first.image ?? item.image,
+              image: pickBestCartImage(
+                first.image,
+                item.image,
+                ...matching.map((m) => m.image)
+              ),
+              image_url: pickBestCartImage(
+                first.image_url,
+                item.image_url,
+                ...matching.map((m) => m.image_url)
+              ),
+              item_image_url: pickBestCartImage(
+                first.item_image_url,
+                item.item_image_url,
+                ...matching.map((m) => m.item_image_url)
+              ),
+              IMAGE_URL: pickBestCartImage(
+                first.IMAGE_URL,
+                item.IMAGE_URL,
+                ...matching.map((m) => m.IMAGE_URL)
+              ),
+              item_key_words: first.item_key_words ?? item.item_key_words,
+              famille: first.famille ?? item.famille,
               momo: first.momo ?? item.momo,
               sellerPhone: first.sellerPhone ?? item.sellerPhone,
             }
@@ -324,6 +383,12 @@ export const useCartStore = create<CartState>()(
                 ...cur,
                 qty: cur.qty + it.qty,
                 itemCode: (cur.itemCode ?? it.itemCode ?? cur.id ?? it.id).toString().trim() || cur.itemCode,
+                image: pickBestCartImage(cur.image, it.image),
+                image_url: pickBestCartImage(cur.image_url, it.image_url),
+                item_image_url: pickBestCartImage(cur.item_image_url, it.item_image_url),
+                IMAGE_URL: pickBestCartImage(cur.IMAGE_URL, it.IMAGE_URL),
+                item_key_words: cur.item_key_words ?? it.item_key_words,
+                famille: cur.famille ?? it.famille,
               }
             } else {
               merged.push({ ...it, itemCode: (it.itemCode ?? it.id).toString().trim() || it.itemCode })

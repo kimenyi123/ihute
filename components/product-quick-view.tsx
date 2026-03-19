@@ -11,8 +11,9 @@ import {
 import { Button } from "@/components/ui/button"
 import { ShoppingCart } from "lucide-react"
 import Image from "next/image"
+import { useMemo, useState, useEffect } from "react"
 import { usePriceDropToasts } from "@/lib/use-price-drop-toasts"
-import { getProductImageSrc } from "@/lib/image-utils"
+import { getProductImageCandidates, getProductImageSrc, NO_IMAGE_URL, isValidImageUrl } from "@/lib/image-utils"
 
 export type QuickViewProduct = {
   id: string
@@ -51,7 +52,30 @@ export function ProductQuickView({ product, open, onOpenChange, onAddToCart }: P
   if (!product) return null
 
   const placeholder = "/placeholder.svg?height=300&width=300"
-  const src = getProductImageSrc(product as Record<string, unknown>, placeholder)
+
+  const candidates = useMemo(() => {
+    try {
+      return getProductImageCandidates(product as any)
+    } catch {
+      return [NO_IMAGE_URL]
+    }
+  }, [
+    product.id,
+    product.image,
+    (product as any).image_url,
+    (product as any).item_image_url,
+    (product as any).IMAGE_URL,
+    (product as any).item_key_words,
+    (product as any).famille,
+  ])
+
+  const [candidateIdx, setCandidateIdx] = useState(0)
+  useEffect(() => {
+    setCandidateIdx(0)
+  }, [candidates.join("\x1e")])
+
+  const candidateSrc = candidates[Math.min(candidateIdx, candidates.length - 1)] ?? NO_IMAGE_URL
+  const src = isValidImageUrl(candidateSrc) ? candidateSrc : getProductImageSrc(product as any, placeholder)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -66,19 +90,27 @@ export function ProductQuickView({ product, open, onOpenChange, onAddToCart }: P
           <div className="relative aspect-square w-full rounded-lg bg-muted overflow-hidden">
             {src.startsWith("http") ? (
               <img
+                key={src}
                 src={src}
                 alt={product.name}
                 className="object-cover w-full h-full"
                 loading="lazy"
                 decoding="async"
+                onError={() => {
+                  if (candidateIdx + 1 < candidates.length) setCandidateIdx((i) => i + 1)
+                }}
               />
             ) : (
               <Image
+                key={src}
                 src={src}
                 alt={product.name}
                 fill
                 className="object-cover"
                 unoptimized={src === placeholder}
+                onError={() => {
+                  if (candidateIdx + 1 < candidates.length) setCandidateIdx((i) => i + 1)
+                }}
               />
             )}
           </div>

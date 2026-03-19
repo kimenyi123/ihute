@@ -1,19 +1,26 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Image from "next/image"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { useCartStore } from "@/lib/cart-store"
 import { useFavoritesStore } from "@/lib/favorites-store"
 import { trackProductView, trackClick } from "@/lib/interaction-tracker"
-import { Heart, Eye } from "lucide-react"
+import { Heart, ShoppingCart } from "lucide-react"
 import { usePriceWatchStore } from "@/lib/price-watch-store"
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { useToast } from "@/components/ui/use-toast"
 import { PriceWatchButton } from "@/components/price-watch-button"
-import { getProductImageSrc, isValidImageUrl } from "@/lib/image-utils"
+import {
+  getProductImageSrc,
+  getProductImageUrl,
+  getProductImageCandidates,
+  getNikiCodeFromSource,
+  isValidImageUrl,
+  NO_IMAGE_URL,
+} from "@/lib/image-utils"
 
 type Product = {
   id: string
@@ -32,6 +39,11 @@ type Product = {
   image?: string
   image_url?: string
   item_image_url?: string
+  /** Raw API fields so getProductImageSrc can build KAOS URLs and fallback to backend */
+  item_key_words?: string
+  item_code?: string
+  famille?: string
+  IMAGE_URL?: string
   /** IHUTE: direct match vs contains — from backend search ranking */
   searchPriority?: "direct" | "contains"
   containsIngredient?: string
@@ -47,6 +59,7 @@ export function ProductCard({
 }) {
   const router = useRouter()
   const addOrInc = useCartStore((s) => s.addOrInc ?? s.addItem)
+  const cartItems = useCartStore((s) => s.items)
   const toggleFavorite = useFavoritesStore((s) => s.toggleFavorite)
   const isFavorite = useFavoritesStore((s) => s.isFavorite)
   const { toast } = useToast()
@@ -64,24 +77,89 @@ export function ProductCard({
     supplierLocation,
     momo,
     image,
+    image_url,
+    item_image_url,
+    IMAGE_URL,
     searchPriority,
     containsIngredient,
   } = product
 
   const fav = isFavorite(id)
   const checkPriceDrop = usePriceWatchStore((s) => s.checkPriceDrop)
-  const [imgError, setImgError] = useState(false)
+
+  /** Qty in cart for this product (same seller + code + unit as addOrInc uses) */
+  const cartQty = useMemo(() => {
+    const sid = (supplierId || "unknown").toString().trim()
+    const code = (itemCode ?? id).toString().trim()
+    const unitKey = (unit ?? "").toString().trim()
+    if (!code) return 0
+    return cartItems.reduce((sum, item) => {
+      const itemSid = (item.supplierId || "").toString().trim()
+      const itemCodeKey = (item.itemCode ?? item.id).toString().trim()
+      const itemUnit = (item.selectedUnit ?? item.unit ?? "").toString().trim()
+      if (itemSid !== sid || itemCodeKey !== code) return sum
+      if (unitKey !== itemUnit) return sum
+      return sum + (typeof item.qty === "number" ? item.qty : 0)
+    }, 0)
+  }, [cartItems, supplierId, itemCode, id, unit])
   const placeholder = "/placeholder.svg?height=300&width=300"
 
-  // Resolve from any backend field (image, image_url, item_image_url) so display is consistent
-  const resolvedUrl = getProductImageSrc(product, placeholder)
+  // Same strategy as Shop With Me:
+  // KAOS famille/NIKI → flat NIKI → each backend URL → KAOS no_image, advancing on img onError.
+  const imageCandidates = useMemo(
+    () => getProductImageCandidates(product as any),
+    [
+      id,
+      itemCode,
+      product.famille,
+      (product as any).FAMILLE,
+      product.item_key_words,
+      product.item_code,
+      image,
+      image_url,
+      item_image_url,
+      IMAGE_URL,
+    ]
+  )
+  /** Stable string so we only reset fallback index when the URL list actually changes — NOT when candidateIdx changes. */
+  const candidatesSignature = imageCandidates.join("\x1e")
+  const [candidateIdx, setCandidateIdx] = useState(0)
+  const [imgError, setImgError] = useState(false)
+  const resolvedUrl = imageCandidates[Math.min(candidateIdx, imageCandidates.length - 1)] ?? NO_IMAGE_URL
+
   const hasValidUrl = resolvedUrl !== placeholder && isValidImageUrl(resolvedUrl)
-  const src = !imgError && hasValidUrl ? resolvedUrl : placeholder
+  // When no image or load error, show KAOS "no image" graphic instead of grey placeholder
+  const src = !imgError && hasValidUrl ? resolvedUrl : NO_IMAGE_URL
   const isRemote = /^https?:\/\//i.test(src)
+  /** Same URL shown on the card — pass this to cart/favorites so the line item keeps the working image */
+  const imageUrlForCart = !imgError && src !== NO_IMAGE_URL ? src : getProductImageSrc(product, placeholder)
 
   useEffect(() => {
+    // Reset only when this product's image URL list changes (never tie to resolvedUrl — that flickers with candidateIdx)
     setImgError(false)
-  }, [resolvedUrl])
+    setCandidateIdx(0)
+
+    // Debug log to inspect image resolution for this product
+    try {
+      // Only log in browser
+      if (typeof window !== "undefined") {
+        // @ts-expect-error debug
+        const famille = (product as any).famille ?? (product as any).FAMILLE
+        const niki = getNikiCodeFromSource(product)
+        // eslint-disable-next-line no-console
+        console.log("[ProductCard][image-debug]", {
+          id,
+          name,
+          famille,
+          niki /* NIKI code === item_key_words when from API */,
+          firstCandidate: imageCandidates[0],
+          backendUrl: getProductImageUrl(product as any) || null,
+        })
+      }
+    } catch {
+      // ignore logging failures
+    }
+  }, [candidatesSignature, id])
 
   // Track product view when component mounts
   useEffect(() => {
@@ -106,26 +184,58 @@ export function ProductCard({
 
   return (
     <Card className="group h-full overflow-hidden transition-all hover:shadow-lg">
-      <div className="relative w-full aspect-square bg-muted">
+      <div
+        className={cn(
+          "relative w-full aspect-square bg-muted",
+          cartQty > 0 && "ring-2 ring-emerald-500/90 ring-inset"
+        )}
+      >
         {isRemote ? (
           <img
+            key={resolvedUrl}
             src={src}
             alt={name}
             className="absolute inset-0 h-full w-full object-cover"
             loading="lazy"
             decoding="async"
             referrerPolicy="no-referrer"
-            onError={() => setImgError(true)}
+            onError={() => {
+              if (candidateIdx + 1 < imageCandidates.length) {
+                setCandidateIdx((i) => i + 1)
+                setImgError(false)
+              } else {
+                setImgError(true)
+              }
+            }}
           />
         ) : (
           <Image
+            key={resolvedUrl}
             fill
             src={src}
             alt={name}
             className="object-cover"
-            onError={() => setImgError(true)}
-            unoptimized={src === placeholder}
+            onError={() => {
+              if (candidateIdx + 1 < imageCandidates.length) {
+                setCandidateIdx((i) => i + 1)
+                setImgError(false)
+              } else {
+                setImgError(true)
+              }
+            }}
+            unoptimized={src === NO_IMAGE_URL || src === placeholder}
           />
+        )}
+
+        {/* In-cart badge on image */}
+        {cartQty > 0 && (
+          <div
+            className="absolute bottom-2 left-2 z-10 flex items-center gap-1 rounded-full bg-emerald-600 px-2 py-1 text-[10px] font-bold text-white shadow-md"
+            aria-label={`In cart, quantity ${cartQty}`}
+          >
+            <ShoppingCart className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            <span>{cartQty}</span>
+          </div>
         )}
 
         {/* Heart overlay */}
@@ -140,7 +250,7 @@ export function ProductCard({
               name,
               price,
               unit,
-              image,
+              image: imageUrlForCart,
               description,
               supplierId,
               supplierName,
@@ -215,7 +325,12 @@ export function ProductCard({
                 name,
                 price,
                 unit,
-                image,
+                image: imageUrlForCart,
+                image_url,
+                item_image_url,
+                IMAGE_URL,
+                item_key_words: product.item_key_words,
+                famille: product.famille,
                 supplierId: (supplierId || "unknown").toString().trim(),
                 supplierName: supplierName || "Supplier",
                 supplierLocation,
@@ -243,7 +358,7 @@ export function ProductCard({
           name={name}
           currentPrice={price}
           supplierName={supplierName}
-          image={image}
+          image={imageUrlForCart}
           size="sm"
           variant="outline"
         />
