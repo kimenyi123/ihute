@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import type { KioskOrderStatus } from "@/src/modules/self-order/types"
 
 // ─── Keyword-based category detection to infer BAR or KITCHEN ─────────────────
@@ -73,11 +74,16 @@ function laneStepLabel(s: KioskOrderStatus): string {
 }
 
 export function KioskStatusPage({ orderId }: Props) {
+  const searchParams = useSearchParams()
+  // Enable voice by default; disable with `?voice=0`.
+  const voiceEnabled = searchParams.get("voice") !== "0"
+
   const [status, setStatus] = useState<KioskOrderStatus>("waiting")
   const [orderNumber, setOrderNumber] = useState<string>("")
   const [guestName, setGuestName] = useState<string>("")
   const [tableLabel, setTableLabel] = useState<string>("")
   const [itemNames, setItemNames] = useState<string[]>([])
+  const [speakSeq, setSpeakSeq] = useState<number>(0)
   const [laneBar, setLaneBar] = useState<KioskOrderStatus | null>(null)
   const [laneKitchen, setLaneKitchen] = useState<KioskOrderStatus | null>(null)
   const [failCount, setFailCount] = useState(0)
@@ -123,6 +129,9 @@ export function KioskStatusPage({ orderId }: Props) {
           setLaneBar(null)
           setLaneKitchen(null)
         }
+
+        const seq = typeof data.speak_seq === "number" ? data.speak_seq : 0
+        setSpeakSeq(seq)
 
         // Order number
         const num = data.order_number ?? data.orderNumber
@@ -187,6 +196,63 @@ export function KioskStatusPage({ orderId }: Props) {
   // Sometimes the aggregate ORDER_STATUS lags behind lane pickup tokens, causing
   // “Now Serving” + lane markers Done at the same time.
   const effectiveStatus: KioskOrderStatus = fullOrderDone ? "completed" : status
+
+  const spokenRef = useRef<string | null>(null)
+  const [voiceArmed, setVoiceArmed] = useState(false)
+  const [voiceNeedsTap, setVoiceNeedsTap] = useState(false)
+
+  // Many browsers block `speechSynthesis` until there is a user gesture.
+  // We "arm" once so voice can trigger automatically afterwards.
+  useEffect(() => {
+    if (!voiceEnabled) return
+    if (typeof window === "undefined") return
+    if (voiceArmed) return
+
+    const arm = () => {
+      setVoiceArmed(true)
+      setVoiceNeedsTap(false)
+      window.removeEventListener("pointerdown", arm)
+      window.removeEventListener("keydown", arm)
+    }
+
+    window.addEventListener("pointerdown", arm, { passive: true })
+    window.addEventListener("keydown", arm)
+    return () => {
+      window.removeEventListener("pointerdown", arm)
+      window.removeEventListener("keydown", arm)
+    }
+  }, [voiceEnabled, voiceArmed])
+
+  useEffect(() => {
+    if (!voiceEnabled) return
+    if (effectiveStatus !== "completed") return
+
+    const key = `${orderId}|completed|${speakSeq}`
+    if (spokenRef.current === key) return
+    spokenRef.current = key
+
+    if (typeof window === "undefined") return
+    if (!("speechSynthesis" in window)) return
+
+    try {
+      const parts: string[] = []
+      if (guestName) parts.push(`Order for ${guestName}.`)
+      parts.push(`Order ${displayOrderNumber}.`)
+      if (tableLabel) parts.push(`Table ${tableLabel}.`)
+      parts.push("Ready for pickup.")
+
+      const text = parts.join(" ")
+      const utterance = new SpeechSynthesisUtterance(text)
+      utterance.lang = "en-US"
+      utterance.rate = 1
+      utterance.pitch = 1
+      window.speechSynthesis.cancel()
+      window.speechSynthesis.speak(utterance)
+    } catch {
+      // Ignore speech failures (browser might block audio without user gesture).
+      setVoiceNeedsTap(true)
+    }
+  }, [voiceEnabled, effectiveStatus, orderId, displayOrderNumber, guestName, tableLabel, speakSeq])
 
   const statusText: Record<KioskOrderStatus, string> = {
     waiting: "Order Received — Hang tight!",
@@ -303,6 +369,12 @@ export function KioskStatusPage({ orderId }: Props) {
                 </p>
               )}
             </div>
+          )}
+
+          {voiceEnabled && effectiveStatus === "completed" && voiceNeedsTap && (
+            <p className="text-xs text-amber-200 mt-2">
+              Tap once to enable voice notifications.
+            </p>
           )}
 
           {effectiveStatus === "waiting" && (

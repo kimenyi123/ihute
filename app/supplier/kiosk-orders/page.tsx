@@ -128,15 +128,18 @@ function KioskCategorySection({
   category,
   sectionTitle,
   seenIds,
+  autoHideMinutes,
 }: {
   account: string
   category: KioskCategory
   sectionTitle: string
   seenIds: MutableRefObject<Set<string | number>>
+  autoHideMinutes?: number
 }) {
   const [orders, setOrders] = useState<KioskLiveOrder[]>([])
   const [lastUpdated, setLastUpdated] = useState<string | null>(null)
   const [newIds, setNewIds] = useState<Set<string | number>>(new Set())
+  const autoHideMs = (autoHideMinutes ?? 15) * 60 * 1000
 
   useEffect(() => {
     let cancelled = false
@@ -188,11 +191,17 @@ function KioskCategorySection({
     const w: KioskLiveOrder[] = []
     const k: KioskLiveOrder[] = []
     const p: KioskLiveOrder[] = []
+    const now = Date.now()
     for (const o of orders) {
       if (o.status === "cancelled") continue
       if (o.status === "waiting") w.push(o)
       else if (o.status === "in_kitchen") k.push(o)
-      else if (o.status === "ready" || o.status === "completed") p.push(o)
+      else if (o.status === "ready" || o.status === "completed") {
+        // Hide long-running pickup orders from the TV screen (no DB delete).
+        const createdAtMs = o.created_at ? new Date(o.created_at).getTime() : NaN
+        const tooOld = Number.isFinite(createdAtMs) ? now - createdAtMs > autoHideMs : false
+        if (!tooOld) p.push(o)
+      }
     }
     return { waiting: w, inKitchen: k, pickup: p }
   }, [orders])
@@ -234,7 +243,8 @@ function KioskCategorySection({
           <p className="text-[9px] uppercase tracking-[0.25em] text-slate-500">Live kiosk orders</p>
           <h2 className="text-lg font-bold text-white">{sectionTitle}</h2>
           <p className="text-xs text-slate-500">
-            Completed orders appear here until staff taps <strong>Done</strong> on Self Ordering.
+            Ready/Completed orders appear here until staff taps <strong>Done</strong> on Self Ordering.
+            Pickup orders older than <strong>{autoHideMinutes ?? 15}</strong> minutes are hidden from the TV screen (no DB delete).
           </p>
         </div>
         {nowServing !== null && (
@@ -286,6 +296,7 @@ export default function SupplierKioskOrdersPage() {
   const searchParams = useSearchParams()
   const account = (searchParams.get("account") ?? "").trim()
   const kioskCategoryParam = (searchParams.get("kioskCategory") ?? "").trim()
+  const autoHideMinutes = Number(searchParams.get("autoHideMinutes") ?? 15)
 
   const categories: KioskCategory[] = useMemo(() => {
     const v = kioskCategoryParam.toUpperCase()
@@ -342,6 +353,7 @@ export default function SupplierKioskOrdersPage() {
             category="BAR"
             sectionTitle="Kiosk Order Status — Bar"
             seenIds={seenIds}
+            autoHideMinutes={autoHideMinutes}
           />
         )}
         {showKitchen && (
@@ -350,6 +362,7 @@ export default function SupplierKioskOrdersPage() {
             category="RESTRO"
             sectionTitle="Kiosk Order Status — Kitchen"
             seenIds={seenIds}
+            autoHideMinutes={autoHideMinutes}
           />
         )}
         {!showBar && !showKitchen && categories[0] && (
@@ -358,6 +371,7 @@ export default function SupplierKioskOrdersPage() {
             category={categories[0]}
             sectionTitle={`Kiosk Order Status — ${categories[0]}`}
             seenIds={seenIds}
+            autoHideMinutes={autoHideMinutes}
           />
         )}
       </main>

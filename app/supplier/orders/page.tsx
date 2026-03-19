@@ -118,6 +118,7 @@ export default function SupplierOrdersPage() {
   const [dateTo, setDateTo] = useState("")
   const [paymentFilter, setPaymentFilter] = useState<"all" | "paid" | "unpaid">("all")
   const [statusFilter, setStatusFilter] = useState<string>("all")
+  const [sourceFilter, setSourceFilter] = useState<"all" | "kiosk">("all")
 
   // Wait for persisted auth (localStorage) so link-with-account can "auto" show orders when already logged in on this device
   useEffect(() => {
@@ -185,26 +186,61 @@ export default function SupplierOrdersPage() {
         const bId = Number(b.ID_ORDER ?? b.id_order ?? b.id ?? 0)
         return bId - aId
       })
-      const mapped: Order[] = sortedRaw.map((t: any) => ({
-        id: String(t.ID_ORDER ?? t.id_order ?? t.id ?? ""),
-        sellerId: String(t.SELLER_ISHYIGA_ACCOUNT ?? t.seller_ishyiga_account ?? ""),
-        sellerName: t.SELLER_NAMES ?? t.SELLER_OWNER ?? t.seller_names ?? "Supplier",
-        items: [],
-        itemsCount: undefined,
-        subtotal: Number(t.AMOUNT ?? t.amount ?? 0),
-        status: (t.ORDER_STATUS ?? t.order_status ?? "open")?.toLowerCase() || "open",
-        supplierStatus: (t.ORDER_STATUS ?? t.order_status ?? "open")?.toLowerCase() || "open",
-        createdAt: t.CREATED_AT ?? t.created_at ?? t.heure ?? new Date().toISOString(),
-        buyerTIN: t.BUYER_TIN ?? t.buyer_tin ?? "",
-        SUPPLIER_TIN: t.SELLER_TIN ?? t.seller_tin ?? "",
-        buyerName: (() => {
-          const raw = (t.BUYER_NAME ?? t.BUYER_OWNER_NAME ?? t.BUYER_OWNER ?? t.BUYER_ISHYIGA_ACCOUNT ?? t.buyer_name ?? "").toString().trim() || "Guest Buyer"
-          const seller = (t.SELLER_NAMES ?? t.SELLER_OWNER ?? "").toString().trim()
-          if (seller && raw && seller.toLowerCase() === raw.toLowerCase()) return (t.TABLE_NAME ? `Table: ${t.TABLE_NAME}` : "Guest Buyer")
-          return raw
-        })(),
-        paymentStatus: /(pay[_\s-]*on[_\s-]*delivery|cod)/i.test(String(t.PAYMENT_NAME ?? t.payment_name ?? "")) ? "unpaid" : "paid"
-      }))
+      const mapped: Order[] = sortedRaw.map((t: any) => {
+        const kioskCategoryRaw = String(t.KIOSK_CATEGORY ?? t.kiosk_category ?? "").trim()
+        const internalDataRaw = String(t.INTERNAL_DATA ?? t.internal_data ?? "").trim()
+        const orderNumberRaw = String(t.ORDER_NUMBER ?? t.order_number ?? "").trim()
+        const orderTypeRaw = String(t.ORDER_TYPE ?? t.order_type ?? "").trim().toLowerCase()
+        const internalUpper = internalDataRaw.toUpperCase()
+        const orderNumberUpper = orderNumberRaw.toUpperCase()
+
+        // Heuristic: kiosk orders usually carry KIOSK_* fields/tokens in INTERNAL_DATA.
+        // This lets staff distinguish kiosk self-ordering from regular supplier orders.
+        const isKioskOrder = !!(
+          Boolean(kioskCategoryRaw) ||
+          internalUpper.includes("KIOSK_LANES:") ||
+          internalUpper.includes("KIOSK_PICKUP_DONE") ||
+          internalUpper.includes("KIOSK_SPEAK_SEQ:") ||
+          orderNumberUpper.startsWith("KIOSK") ||
+          (Boolean(orderTypeRaw) &&
+            (orderTypeRaw === "takeaway" || orderTypeRaw === "dine-in") &&
+            internalUpper.includes("KIOSK"))
+        )
+
+        return {
+          id: String(t.ID_ORDER ?? t.id_order ?? t.id ?? ""),
+          sellerId: String(t.SELLER_ISHYIGA_ACCOUNT ?? t.seller_ishyiga_account ?? ""),
+          sellerName: t.SELLER_NAMES ?? t.SELLER_OWNER ?? t.seller_names ?? "Supplier",
+          items: [],
+          itemsCount: undefined,
+          subtotal: Number(t.AMOUNT ?? t.amount ?? 0),
+          status: (t.ORDER_STATUS ?? t.order_status ?? "open")?.toLowerCase() || "open",
+          supplierStatus: (t.ORDER_STATUS ?? t.order_status ?? "open")?.toLowerCase() || "open",
+          createdAt: t.CREATED_AT ?? t.created_at ?? t.heure ?? new Date().toISOString(),
+          buyerTIN: t.BUYER_TIN ?? t.buyer_tin ?? "",
+          SUPPLIER_TIN: t.SELLER_TIN ?? t.seller_tin ?? "",
+          buyerName: (() => {
+            if (isKioskOrder) {
+              const kioskCustomerName = String(t.BUYER_NAMES ?? t.BUYER_NAME ?? t.CUSTOMER_NAME ?? t.customer_name ?? "").toString().trim()
+              const kioskTable = String(t.TABLE_NUMBER ?? t.table_number ?? "").toString().trim()
+              // For self-order, show the guest name they typed (fallback to table if present).
+              if (kioskCustomerName) return kioskCustomerName
+              if (kioskTable) return `Table: ${kioskTable}`
+            }
+
+            const raw =
+              (t.BUYER_NAMES ?? t.BUYER_NAME ?? t.BUYER_OWNER_NAME ?? t.BUYER_OWNER ?? t.BUYER_ISHYIGA_ACCOUNT ?? t.buyer_name ?? "")
+                .toString()
+                .trim() || "Guest Buyer"
+            const seller = (t.SELLER_NAMES ?? t.SELLER_OWNER ?? "").toString().trim()
+            if (seller && raw && seller.toLowerCase() === raw.toLowerCase())
+              return t.TABLE_NAME ? `Table: ${t.TABLE_NAME}` : "Guest Buyer"
+            return raw
+          })(),
+          isKioskOrder,
+          paymentStatus: /(pay[_\s-]*on[_\s-]*delivery|cod)/i.test(String(t.PAYMENT_NAME ?? t.payment_name ?? "")) ? "unpaid" : "paid",
+        }
+      })
 
       setOrders(mapped)
       setLastRefresh(new Date())
@@ -238,7 +274,7 @@ export default function SupplierOrdersPage() {
 
   useEffect(() => {
     setPage(1)
-  }, [searchQuery, dateFrom, dateTo, paymentFilter, statusFilter])
+  }, [searchQuery, dateFrom, dateTo, paymentFilter, statusFilter, sourceFilter])
 
   const filteredOrders = useMemo(() => {
     let list = orders
@@ -274,8 +310,11 @@ export default function SupplierOrdersPage() {
     if (statusFilter !== "all") {
       list = list.filter((o) => (o.status || o.supplierStatus || "").toLowerCase() === statusFilter.toLowerCase())
     }
+    if (sourceFilter === "kiosk") {
+      list = list.filter((o) => !!o.isKioskOrder)
+    }
     return list
-  }, [orders, searchQuery, dateFrom, dateTo, paymentFilter, statusFilter])
+  }, [orders, searchQuery, dateFrom, dateTo, paymentFilter, statusFilter, sourceFilter])
 
   const displayPageSize = pageSize === -1 ? filteredOrders.length : Math.max(1, pageSize)
   const totalPages = useMemo(
@@ -382,6 +421,15 @@ export default function SupplierOrdersPage() {
                 ))}
               </SelectContent>
             </Select>
+            <Select value={sourceFilter} onValueChange={(v) => setSourceFilter(v as "all" | "kiosk")}>
+              <SelectTrigger className="w-[170px]">
+                <SelectValue placeholder="Order source" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All orders</SelectItem>
+                <SelectItem value="kiosk">Self Order (kiosk)</SelectItem>
+              </SelectContent>
+            </Select>
             <Select
               value={pageSize === -1 ? "all" : String(pageSize)}
               onValueChange={(v) => {
@@ -454,7 +502,16 @@ export default function SupplierOrdersPage() {
                 pagedOrders.map(order => (
                   <TableRow key={order.id}>
                     <TableCell>{order.id}</TableCell>
-                    <TableCell>{order.buyerName}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <span>{order.buyerName}</span>
+                        {order.isKioskOrder && (
+                          <span className="text-xs font-semibold rounded-full bg-emerald-600/10 text-emerald-700 px-2 py-0.5">
+                            Self Order (kiosk)
+                          </span>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell>{formatOrderDate(order.createdAt)}</TableCell>
                     <TableCell>{order.subtotal.toLocaleString()} RWF</TableCell>
                     <TableCell>{order.paymentStatus}</TableCell>

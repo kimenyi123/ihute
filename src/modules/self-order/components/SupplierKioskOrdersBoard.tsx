@@ -72,6 +72,8 @@ export function SupplierKioskOrdersBoard({ sellerAccount, kioskCategory }: Props
   const localStatusOverrides = useRef<Record<string, KioskOrderStatus>>({})
 
   const apiLane = laneForCategory(kioskCategory)
+  const SPEAK_AFTER_MINUTES = 15
+  const speakAfterMs = SPEAK_AFTER_MINUTES * 60 * 1000
 
   useEffect(() => {
     let cancelled = false
@@ -185,6 +187,43 @@ export function SupplierKioskOrdersBoard({ sellerAccount, kioskCategory }: Props
     }
   }
 
+  const speakOrderAgain = async (order: KioskLiveOrder) => {
+    try {
+      setWarning(null)
+      // Trigger speak again for any open customer status pages.
+      const res = await fetch(
+        `/api/kiosk/orders/${encodeURIComponent(order.order_id)}/speak`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        },
+      )
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error((data as { error?: string }).error || "Failed to request speak")
+
+      // Also speak locally on the operator browser (best-effort).
+      const guest = formatGuestLabel(order.customer_name)
+      const table = formatTableLabel(order.table_number)
+      const orderNum = order.order_number || order.order_id
+      const parts: string[] = []
+      if (guest) parts.push(`Order for ${guest}.`)
+      parts.push(`Order ${orderNum}.`)
+      if (table) parts.push(`Table ${table}.`)
+      parts.push("Pick up now.")
+      const text = parts.join(" ")
+
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        const utterance = new SpeechSynthesisUtterance(text)
+        utterance.lang = "en-US"
+        window.speechSynthesis.cancel()
+        window.speechSynthesis.speak(utterance)
+      }
+    } catch (e: any) {
+      setWarning(e?.message || "Failed to speak order")
+    }
+  }
+
   const refetchOrders = () => {
     const url = new URL("/api/kiosk/orders", window.location.origin)
     url.searchParams.set("sellerAccount", sellerAccount)
@@ -285,6 +324,13 @@ export function SupplierKioskOrdersBoard({ sellerAccount, kioskCategory }: Props
                   {list.map((o) => {
                     const guest = formatGuestLabel(o.customer_name)
                     const table = formatTableLabel(o.table_number)
+                    const createdAtMs = o.created_at ? new Date(o.created_at).getTime() : NaN
+                    const ageMs = Number.isFinite(createdAtMs) ? Date.now() - createdAtMs : speakAfterMs + 1
+                    const speakEligible = o.status === "completed" && ageMs > speakAfterMs
+                    const speakInMin =
+                      o.status === "completed" && Number.isFinite(createdAtMs)
+                        ? Math.max(1, Math.ceil((speakAfterMs - ageMs) / 60000))
+                        : 0
                     return (
                       <div
                         key={`${o.order_id}-${o.lane ?? apiLane ?? kioskCategory}`}
@@ -341,6 +387,21 @@ export function SupplierKioskOrdersBoard({ sellerAccount, kioskCategory }: Props
                               </div>
                             ))}
                           </div>
+                        )}
+
+                        {o.status === "completed" && (
+                          <button
+                            type="button"
+                            onClick={() => speakOrderAgain(o)}
+                            disabled={!speakEligible}
+                            className={`w-full py-2 rounded-xl text-xs font-bold border transition ${
+                              speakEligible
+                                ? "bg-amber-600 border-amber-700 text-white hover:bg-amber-700"
+                                : "bg-amber-50 border-amber-200 text-amber-900 disabled:opacity-60"
+                            }`}
+                          >
+                            🔊 {speakEligible ? "Speak again (Pick up now)" : `Speak in ${speakInMin}m`}
+                          </button>
                         )}
 
                         <div className="mt-3 space-y-2">

@@ -4,6 +4,7 @@ import type { KioskOrderStatus } from "@/src/modules/self-order/types"
 
 const PICKUP_DONE = "KIOSK_PICKUP_DONE"
 const LANES_PREFIX = "KIOSK_LANES:"
+const SPEAK_SEQ_PREFIX = "KIOSK_SPEAK_SEQ:"
 
 const VALID_LANE: KioskOrderStatus[] = [
   "waiting",
@@ -134,11 +135,23 @@ export async function GET(req: NextRequest) {
     const internalStr = String(data.internalData ?? data.INTERNAL_DATA ?? "")
     const laneStatuses = parseKioskLanesFromInternal(internalStr)
 
+    const speakSeq = (() => {
+      const idx = internalStr.indexOf(SPEAK_SEQ_PREFIX)
+      if (idx < 0) return undefined
+      const start = idx + SPEAK_SEQ_PREFIX.length
+      const end = internalStr.indexOf("|", start)
+      const raw = internalStr.slice(start, end < 0 ? internalStr.length : end).trim()
+      if (!raw) return undefined
+      const n = Number(raw)
+      return Number.isFinite(n) ? n : undefined
+    })()
+
     return NextResponse.json({
       orderId,
       order_number: data.ORDER_NUMBER ?? data.order_number ?? "",
       status: kioskStatus,
       lane_statuses: laneStatuses ?? undefined,
+      speak_seq: speakSeq,
       customer_name: buyerNames && buyerNames !== "NA" ? buyerNames : "",
       table_number:
         tableName && tableName !== "NA" && tableName.toUpperCase() !== "NA" ? tableName : "",
