@@ -26,6 +26,9 @@ export type Order = {
   paymentStatus: "paid" | "pending" | "failed" | "unpaid"
   createdAt: string
 
+  /** True when this order originates from the self-order kiosk flow. */
+  isKioskOrder?: boolean
+
   // ✨ Supplier view fields
   buyerId?: string
   buyerName?: string

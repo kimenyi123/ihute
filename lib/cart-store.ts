@@ -56,6 +56,9 @@ export type TableInfo = {
   /** Optional shop metadata */
   shopName?: string
   shopId?: string
+
+  /** Kiosk self-order: dine-in or takeaway — set by KioskHome and read by KioskCheckoutPage */
+  orderType?: "dine-in" | "takeaway"
 }
 
 export type SellerGroup = {
@@ -195,6 +198,8 @@ export const useCartStore = create<CartState>()(
               ),
               item_key_words: first.item_key_words ?? item.item_key_words,
               famille: first.famille ?? item.famille,
+              momo: first.momo ?? item.momo,
+              sellerPhone: first.sellerPhone ?? item.sellerPhone,
             }
             return {
               items: state.items.filter((x) => !keyMatch(x)).concat([mergedLine]),
@@ -307,6 +312,8 @@ export const useCartStore = create<CartState>()(
               ),
               item_key_words: first.item_key_words ?? item.item_key_words,
               famille: first.famille ?? item.famille,
+              momo: first.momo ?? item.momo,
+              sellerPhone: first.sellerPhone ?? item.sellerPhone,
             }
             return {
               items: state.items.filter((x) => !keyMatch(x)).concat([mergedLine]),
@@ -443,7 +450,9 @@ export const useCartStore = create<CartState>()(
     }),
     {
       name: "cart-storage",
-      storage: createJSONStorage(() => localStorage),
+      // Use sessionStorage so multiple self-order screens opened on the same
+      // POS device (different tabs/windows) don't overwrite each other's cart.
+      storage: createJSONStorage(() => sessionStorage),
     }
   )
 )

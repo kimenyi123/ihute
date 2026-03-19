@@ -20,13 +20,14 @@ export async function POST(req: Request) {
       }
 
       const {
-        email, firstName, lastName, tel, location,
+        email, password, firstName, lastName, tel, location,
         tin, sector, deliveryMode, momoCode, companyName,
         latitude, longitude,
       } = body
 
       const sellerPayload: Record<string, string> = {
         email:           String(email || ""),
+        password:        String(password || ""),
         owner:           [firstName, lastName].filter(Boolean).join(" "),
         company_name:    String(companyName || ""),
         phone:           String(tel || ""),
