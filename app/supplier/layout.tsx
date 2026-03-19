@@ -22,6 +22,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
     { name: "Dashboard", href: "/supplier/dashboard" },
     // { name: "My Products", href: "/supplier/products" },
     { name: "Orders", href: "/supplier/orders" },
+    { name: "Self Ordering", href: "/supplier/self-ordering" },
     { name: "Tables", href: "/supplier/tables" },
     { name: "Ratings", href: "/supplier/ratings" },
     { name: "Rekizisiyo / Kurangura byinshi", href: "/supplier/b2b" },
@@ -50,7 +51,9 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
   }, [sidebarOpen, closeSidebar]);
 
   // When on orders page with ?account=: ensure session reflects that account (auto-login + real seller name)
-  const isOrdersPageWithAccount = pathname === "/supplier/orders" && accountFromUrl.length > 0;
+  const isOrdersPageWithAccount =
+    (pathname === "/supplier/orders" || pathname === "/supplier/kiosk-orders") &&
+    accountFromUrl.length > 0;
   useEffect(() => {
     if (!hasHydrated || !isOrdersPageWithAccount) return;
 
@@ -106,6 +109,11 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
       router.replace("/login");
     }
   }, [hasHydrated, isAuthenticated, user, isOrdersPageWithAccount, router, logout]);
+
+  // ── Full-screen bypass for kiosk customer display ──────────────────────────
+  if (pathname.startsWith("/supplier/kiosk-orders")) {
+    return <div className="min-h-screen bg-slate-900">{children}</div>;
+  }
 
   return (
     <div className="min-h-screen bg-slate-50">

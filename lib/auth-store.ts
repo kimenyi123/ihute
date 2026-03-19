@@ -67,6 +67,7 @@ export const useAuthStore = create<AuthState>()(
         if (typeof window !== "undefined") {
           localStorage.removeItem("auth-storage")
           localStorage.removeItem("cart-storage")
+          sessionStorage.removeItem("cart-storage")
           localStorage.removeItem("favorites-storage")
           localStorage.removeItem("orders-storage")
           localStorage.removeItem("prefs-storage")

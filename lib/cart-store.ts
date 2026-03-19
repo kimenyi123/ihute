@@ -48,6 +48,9 @@ export type TableInfo = {
   /** Optional shop metadata */
   shopName?: string
   shopId?: string
+
+  /** Kiosk self-order: dine-in or takeaway — set by KioskHome and read by KioskCheckoutPage */
+  orderType?: "dine-in" | "takeaway"
 }
 
 export type SellerGroup = {
@@ -152,6 +155,11 @@ export const useCartStore = create<CartState>()(
               qty: totalQty,
               price: bestPrice,
               itemCode: (first.itemCode ?? item.itemCode ?? first.id ?? item.id).toString().trim() || first.itemCode,
+              // If the existing line was created before we had these fields,
+              // "upgrade" it with the latest values from the incoming add.
+              image: first.image ?? item.image,
+              momo: first.momo ?? item.momo,
+              sellerPhone: first.sellerPhone ?? item.sellerPhone,
             }
             return {
               items: state.items.filter((x) => !keyMatch(x)).concat([mergedLine]),
@@ -242,6 +250,11 @@ export const useCartStore = create<CartState>()(
               ...first,
               qty: totalQty,
               itemCode: (first.itemCode ?? item.itemCode ?? first.id ?? item.id).toString().trim() || first.itemCode,
+              // If the existing line was created before we had these fields,
+              // "upgrade" it with the latest values from the incoming add.
+              image: first.image ?? item.image,
+              momo: first.momo ?? item.momo,
+              sellerPhone: first.sellerPhone ?? item.sellerPhone,
             }
             return {
               items: state.items.filter((x) => !keyMatch(x)).concat([mergedLine]),
@@ -372,7 +385,9 @@ export const useCartStore = create<CartState>()(
     }),
     {
       name: "cart-storage",
-      storage: createJSONStorage(() => localStorage),
+      // Use sessionStorage so multiple self-order screens opened on the same
+      // POS device (different tabs/windows) don't overwrite each other's cart.
+      storage: createJSONStorage(() => sessionStorage),
     }
   )
 )

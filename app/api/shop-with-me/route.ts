@@ -20,64 +20,93 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const params: Record<string, string> = { nickname: nickname.trim() };
-  if (productSearch.trim()) params.productSearch = productSearch.trim();
-  const cacheKey = buildCacheKey('shop-with-me', params);
+  const original = nickname.trim();
+  const productSearchTrimmed = productSearch.trim();
 
-  const cached = await getCached(cacheKey);
-  if (cached) {
-    console.log('[API shop-with-me] Redis cache hit');
+  // Some nicknames are stored with/without apostrophes/spaces.
+  // Example: "pangolin's burrows" vs "pangolinsburrows".
+  const candidates: string[] = Array.from(
+    new Set([
+      original,
+      original.toLowerCase(),
+      original.replace(/[’']/g, ''), // remove apostrophes
+      original.replace(/[’']/g, '').replace(/\s+/g, ''), // apostrophes + spaces
+      original.toLowerCase().replace(/[^a-z0-9]/g, ''), // alphanumerics only
+    ]),
+  ).filter(Boolean);
+
+  const base = getShopWithMeUrl().replace(/\?.*$/, '').replace(/\/+$/, '');
+
+  for (const candidate of candidates) {
+    const params: Record<string, string> = { nickname: candidate };
+    if (productSearchTrimmed) params.productSearch = productSearchTrimmed;
+    const cacheKey = buildCacheKey('shop-with-me', params);
+
+    const cached = await getCached(cacheKey);
+    if (cached) {
+      console.log('[API shop-with-me] Redis cache hit for variant');
+      try {
+        const data = JSON.parse(cached);
+        const sellers = Array.isArray(data?.sellers) ? data.sellers : [];
+        if (data?.ok === true && sellers.length > 0) {
+          return NextResponse.json(data, { headers: { 'X-Cache': 'HIT' } });
+        }
+        // If cached result had 0 sellers, try next variant.
+      } catch {
+        // invalid cache, fall through
+      }
+    }
+
     try {
-      const data = JSON.parse(cached);
-      return NextResponse.json(data, {
-        headers: { 'X-Cache': 'HIT' },
+      let backendUrl = `${base}?nickname=${encodeURIComponent(candidate)}`;
+      if (productSearchTrimmed) {
+        backendUrl += `&productSearch=${encodeURIComponent(productSearchTrimmed)}`;
+      }
+
+      console.log('[API shop-with-me] Fetching backend for variant:', candidate, backendUrl);
+
+      const headers: Record<string, string> = {
+        'Accept': 'application/json',
+      };
+      if (productSearchTrimmed) headers['X-Product-Search'] = productSearchTrimmed;
+
+      const response = await fetch(backendUrl, {
+        cache: 'no-store',
+        headers,
       });
+
+      console.log('[API shop-with-me] Backend response status:', response.status);
+
+      if (!response.ok) {
+        // Try next candidate.
+        continue;
+      }
+
+      const data = await response.json();
+      const sellers = Array.isArray(data?.sellers) ? data.sellers : [];
+
+      // Only cache successful non-empty seller results.
+      if (data?.ok === true && sellers.length > 0) {
+        await setCached(cacheKey, JSON.stringify(data), DATA_TTL_SEC);
+        console.log('[API shop-with-me] Success! Cached sellers in Redis');
+        return NextResponse.json(data);
+      }
+
+      // If no sellers for this variant, try next candidate.
     } catch {
-      // invalid cache, fall through to backend
+      // Try next candidate
     }
   }
 
-  try {
-    const base = getShopWithMeUrl().replace(/\?.*$/, '').replace(/\/+$/, '');
-    const normalizedNickname = nickname.trim();
-    let backendUrl = `${base}?nickname=${encodeURIComponent(normalizedNickname)}`;
-    if (productSearch.trim()) {
-      backendUrl += `&productSearch=${encodeURIComponent(productSearch.trim())}`;
-    }
-    console.log('[API shop-with-me] Redis miss, fetching from backend:', backendUrl);
-
-    const headers: Record<string, string> = {
-      'Accept': 'application/json',
-    };
-    if (productSearch.trim()) {
-      headers['X-Product-Search'] = productSearch.trim();
-    }
-    const response = await fetch(backendUrl, {
-      cache: 'no-store',
-      headers,
-    });
-
-    console.log('[API shop-with-me] Backend response status:', response.status);
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[API shop-with-me] Backend error:', errorText);
-      return NextResponse.json(
-        { ok: false, error: `Backend error: ${response.status}` },
-        { status: response.status }
-      );
-    }
-
-    const data = await response.json();
-    await setCached(cacheKey, JSON.stringify(data), DATA_TTL_SEC);
-    console.log('[API shop-with-me] Success! Cached in Redis');
-
-    return NextResponse.json(data);
-  } catch (error: any) {
-    console.error('[API shop-with-me] Fetch error:', error);
-    return NextResponse.json(
-      { ok: false, error: error.message || 'Failed to fetch shop data' },
-      { status: 500 }
-    );
-  }
+  // If all variants failed, return canonical error.
+  return NextResponse.json(
+    {
+      ok: false,
+      error: 'No sellers found with this nickname',
+      sellers: [],
+      count: 0,
+      query: original,
+    },
+    { status: 200 },
+  );
 }
