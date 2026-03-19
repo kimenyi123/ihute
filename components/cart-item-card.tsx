@@ -5,7 +5,8 @@ import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { useCartStore, CartItem } from "@/lib/cart-store"
 import { Minus, Plus, Trash2 } from "lucide-react"
-import { getProductImageSrc, isValidImageUrl, NO_IMAGE_URL } from "@/lib/image-utils"
+import { getCartItemImageSrc, getProductImageSrc, isValidImageUrl, NO_IMAGE_URL } from "@/lib/image-utils"
+import { DEFAULT_CART_CURRENCY, displayUnitForPrice } from "@/lib/cart-display-utils"
 
 const PLACEHOLDER = "/placeholder.svg?height=64&width=64"
 
@@ -14,8 +15,12 @@ export function CartItemCard({ item }: { item: CartItem }) {
   const dec = useCartStore((s) => s.dec)
   const remove = useCartStore((s) => s.remove)
   const [imgError, setImgError] = useState(false)
+  /** If primary URL 404s, retry full resolution (KAOS + backend) without trusting stored `image` */
+  const [retryFullResolution, setRetryFullResolution] = useState(false)
 
-  const resolvedUrl = getProductImageSrc(item as Record<string, unknown>, PLACEHOLDER)
+  const primaryUrl = getCartItemImageSrc(item as Record<string, unknown>, PLACEHOLDER)
+  const fallbackUrl = getProductImageSrc(item as Record<string, unknown>, PLACEHOLDER)
+  const resolvedUrl = retryFullResolution ? fallbackUrl : primaryUrl
   const hasValidUrl = resolvedUrl !== PLACEHOLDER && isValidImageUrl(resolvedUrl)
   // When no image or load error, show KAOS "no image" graphic instead of grey placeholder
   const src = !imgError && hasValidUrl ? resolvedUrl : NO_IMAGE_URL
@@ -23,7 +28,10 @@ export function CartItemCard({ item }: { item: CartItem }) {
 
   useEffect(() => {
     setImgError(false)
-  }, [resolvedUrl])
+    setRetryFullResolution(false)
+  }, [item.id, item.selectedUnit, item.image, item.image_url, item.item_image_url, item.itemCode])
+
+  const unitLabel = displayUnitForPrice(item.unit ?? item.selectedUnit)
 
   return (
     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4 rounded-lg border p-3">
@@ -36,7 +44,14 @@ export function CartItemCard({ item }: { item: CartItem }) {
               className="absolute inset-0 h-full w-full object-cover"
               loading="lazy"
               referrerPolicy="no-referrer"
-              onError={() => setImgError(true)}
+              onError={() => {
+                if (!retryFullResolution && fallbackUrl !== primaryUrl) {
+                  setRetryFullResolution(true)
+                  setImgError(false)
+                } else {
+                  setImgError(true)
+                }
+              }}
             />
           ) : (
             <Image
@@ -44,7 +59,14 @@ export function CartItemCard({ item }: { item: CartItem }) {
               src={src}
               alt={item.name}
               className="object-cover"
-              onError={() => setImgError(true)}
+              onError={() => {
+                if (!retryFullResolution && fallbackUrl !== primaryUrl) {
+                  setRetryFullResolution(true)
+                  setImgError(false)
+                } else {
+                  setImgError(true)
+                }
+              }}
               unoptimized={src === PLACEHOLDER || src === NO_IMAGE_URL}
             />
           )}
@@ -57,9 +79,18 @@ export function CartItemCard({ item }: { item: CartItem }) {
             {item.supplierLocation ? ` · ${item.supplierLocation}` : ""}
           </div>
           <div className="text-sm mt-1">
-            {Number(item.price) > 0
-              ? `${Number(item.price).toLocaleString()} ${item.unit ? ` / ${item.unit}` : "RWF"}`
-              : "Price not available"}
+            {Number(item.price) > 0 ? (
+              <>
+                <span className="font-medium">
+                  {Number(item.price).toLocaleString()} {DEFAULT_CART_CURRENCY}
+                </span>
+                {unitLabel ? (
+                  <span className="text-muted-foreground"> · {unitLabel}</span>
+                ) : null}
+              </>
+            ) : (
+              "Price not available"
+            )}
           </div>
         </div>
       </div>
@@ -88,9 +119,9 @@ export function CartItemCard({ item }: { item: CartItem }) {
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="w-20 sm:w-24 text-right font-semibold">
+          <div className="w-24 sm:w-28 text-right font-semibold text-sm">
             {Number(item.price) > 0
-              ? (Number(item.price) * item.qty).toLocaleString()
+              ? `${(Number(item.price) * item.qty).toLocaleString()} ${DEFAULT_CART_CURRENCY}`
               : "—"}
           </div>
 

@@ -353,7 +353,12 @@ export default function SearchPage() {
       supplierId,
       supplierName,
       supplierLocation: p.supplier_location,
-      image: p.image || p.image_url || (p as any).IMAGE_URL || p.item_image_url || "/placeholder.svg?height=300&width=300",
+      image: getProductImageSrc(p as any, "/placeholder.svg?height=300&width=300"),
+      image_url: p.image_url,
+      item_image_url: p.item_image_url,
+      IMAGE_URL: (p as any).IMAGE_URL,
+      item_key_words: p.item_key_words,
+      famille: (p as any).famille ?? (p as any).FAMILLE,
       momo: p.momo || (p as any)?.seller_momo || "",
     }
 
