@@ -13,7 +13,14 @@ import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { useToast } from "@/components/ui/use-toast"
 import { PriceWatchButton } from "@/components/price-watch-button"
-import { getProductImageSrc, getProductImageUrl, getNikiCodeFromSource, isValidImageUrl, NO_IMAGE_URL } from "@/lib/image-utils"
+import {
+  getProductImageSrc,
+  getProductImageUrl,
+  getProductImageCandidates,
+  getNikiCodeFromSource,
+  isValidImageUrl,
+  NO_IMAGE_URL,
+} from "@/lib/image-utils"
 
 type Product = {
   id: string
@@ -95,27 +102,42 @@ export function ProductCard({
       return sum + (typeof item.qty === "number" ? item.qty : 0)
     }, 0)
   }, [cartItems, supplierId, itemCode, id, unit])
-  const [imgError, setImgError] = useState(false)
-  const [fallbackSrc, setFallbackSrc] = useState<string | null>(null)
   const placeholder = "/placeholder.svg?height=300&width=300"
 
-  // Primary: KAOS-based URL (famille + item_key_words, then flat NIKI code, then backend URL, then KAOS no_image)
-  const resolvedUrl = getProductImageSrc(product, placeholder)
-  // Secondary: raw backend image_url/item_image_url/IMAGE_URL/image (used if KAOS path 404s)
-  const backendUrl = getProductImageUrl(product as any) || null
+  // Same strategy as Shop With Me:
+  // KAOS famille/NIKI → flat NIKI → each backend URL → KAOS no_image, advancing on img onError.
+  const imageCandidates = useMemo(
+    () => getProductImageCandidates(product as any),
+    [
+      id,
+      itemCode,
+      product.famille,
+      (product as any).FAMILLE,
+      product.item_key_words,
+      product.item_code,
+      image,
+      image_url,
+      item_image_url,
+      IMAGE_URL,
+    ]
+  )
+  /** Stable string so we only reset fallback index when the URL list actually changes — NOT when candidateIdx changes. */
+  const candidatesSignature = imageCandidates.join("\x1e")
+  const [candidateIdx, setCandidateIdx] = useState(0)
+  const [imgError, setImgError] = useState(false)
+  const resolvedUrl = imageCandidates[Math.min(candidateIdx, imageCandidates.length - 1)] ?? NO_IMAGE_URL
 
-  const activeSrc = fallbackSrc || resolvedUrl
-  const hasValidUrl = activeSrc !== placeholder && isValidImageUrl(activeSrc)
+  const hasValidUrl = resolvedUrl !== placeholder && isValidImageUrl(resolvedUrl)
   // When no image or load error, show KAOS "no image" graphic instead of grey placeholder
-  const src = !imgError && hasValidUrl ? activeSrc : NO_IMAGE_URL
+  const src = !imgError && hasValidUrl ? resolvedUrl : NO_IMAGE_URL
   const isRemote = /^https?:\/\//i.test(src)
   /** Same URL shown on the card — pass this to cart/favorites so the line item keeps the working image */
-  const imageUrlForCart = fallbackSrc || resolvedUrl
+  const imageUrlForCart = !imgError && src !== NO_IMAGE_URL ? src : getProductImageSrc(product, placeholder)
 
   useEffect(() => {
-    // Reset error and fallback when product or primary URL changes
+    // Reset only when this product's image URL list changes (never tie to resolvedUrl — that flickers with candidateIdx)
     setImgError(false)
-    setFallbackSrc(null)
+    setCandidateIdx(0)
 
     // Debug log to inspect image resolution for this product
     try {
@@ -130,14 +152,14 @@ export function ProductCard({
           name,
           famille,
           niki /* NIKI code === item_key_words when from API */,
-          resolvedUrl,
-          backendUrl,
+          firstCandidate: imageCandidates[0],
+          backendUrl: getProductImageUrl(product as any) || null,
         })
       }
     } catch {
       // ignore logging failures
     }
-  }, [resolvedUrl, id])
+  }, [candidatesSignature, id])
 
   // Track product view when component mounts
   useEffect(() => {
@@ -170,6 +192,7 @@ export function ProductCard({
       >
         {isRemote ? (
           <img
+            key={resolvedUrl}
             src={src}
             alt={name}
             className="absolute inset-0 h-full w-full object-cover"
@@ -177,8 +200,8 @@ export function ProductCard({
             decoding="async"
             referrerPolicy="no-referrer"
             onError={() => {
-              if (!fallbackSrc && backendUrl && backendUrl !== resolvedUrl && isValidImageUrl(backendUrl)) {
-                setFallbackSrc(backendUrl)
+              if (candidateIdx + 1 < imageCandidates.length) {
+                setCandidateIdx((i) => i + 1)
                 setImgError(false)
               } else {
                 setImgError(true)
@@ -187,13 +210,14 @@ export function ProductCard({
           />
         ) : (
           <Image
+            key={resolvedUrl}
             fill
             src={src}
             alt={name}
             className="object-cover"
             onError={() => {
-              if (!fallbackSrc && backendUrl && backendUrl !== resolvedUrl && isValidImageUrl(backendUrl)) {
-                setFallbackSrc(backendUrl)
+              if (candidateIdx + 1 < imageCandidates.length) {
+                setCandidateIdx((i) => i + 1)
                 setImgError(false)
               } else {
                 setImgError(true)

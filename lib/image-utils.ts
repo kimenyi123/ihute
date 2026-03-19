@@ -102,76 +102,84 @@ export function isValidImageUrl(url: string | null | undefined): boolean {
   return s.length > 0 && (s.startsWith("http://") || s.startsWith("https://") || s.startsWith("/"))
 }
 
+/** Every distinct backend image field (not only the first), for multi-step img onError fallbacks. */
+function collectBackendImageUrls(source: ProductImageSource | null | undefined): string[] {
+  const out: string[] = []
+  if (!source || typeof source !== "object") return out
+  const seen = new Set<string>()
+  for (const key of IMAGE_KEYS) {
+    const raw = source[key]
+    if (raw == null) continue
+    const s = typeof raw === "string" ? raw.trim() : String(raw).trim()
+    if (s === "") continue
+    const n = normalizeImageUrl(s)
+    if (!n || !isValidImageUrl(n)) continue
+    if (seen.has(n)) continue
+    seen.add(n)
+    out.push(n)
+  }
+  return out
+}
+
 /**
- * Resolve image URL for display: same as getProductImageUrl but returns
- * placeholder when no valid URL (so callers always get a string).
+ * Ordered URLs to try for a product image (KAOS famille path, flat NIKI, each backend field, then no_image).
+ * Use with onError → next index when the CDN returns 404 (famille folder often wrong while flat path works).
  */
-export function getProductImageSrc(
-  source: ProductImageSource | null | undefined,
-  placeholder: string = "/placeholder.svg?height=300&width=300"
-): string {
+export function getProductImageCandidates(source: ProductImageSource | null | undefined): string[] {
   const KAOS_BASE = "https://ishyiga.rw/images_kaos_beta/"
-  let kaosPrimary: string | null = null
-  let kaosSecondary: string | null = null
+  const seen = new Set<string>()
+  const out: string[] = []
+  const add = (u: string | null | undefined) => {
+    const n = normalizeImageUrl(u ?? null)
+    if (!n || !isValidImageUrl(n)) return
+    if (seen.has(n)) return
+    seen.add(n)
+    out.push(n)
+  }
 
   if (source && typeof source === "object") {
     const rawFamille = (source as any).famille ?? (source as any).FAMILLE
     const nikiCode = getNikiCodeFromSource(source)
-
     const famille = typeof rawFamille === "string" ? rawFamille.trim() : String(rawFamille ?? "").trim()
     const nikiPath = nikiCode ? sanitizeKaosSegment(nikiCode) : ""
 
     if (nikiPath) {
-      // Secondary: flat path without famille
-      kaosSecondary = `${KAOS_BASE}${nikiPath}.jpg`
-      // Primary: famille-based folder when available
       if (famille) {
-        const famillePath = sanitizeKaosSegment(famille)
-        kaosPrimary = `${KAOS_BASE}${famillePath}/${nikiPath}.jpg`
+        add(`${KAOS_BASE}${sanitizeKaosSegment(famille)}/${nikiPath}.jpg`)
       }
-
+      add(`${KAOS_BASE}${nikiPath}.jpg`)
       try {
-        const debugId = getNikiCodeFromSource(source) || String((source as any).id ?? "")
-        // Lightweight console for debugging which KAOS URL we are using
-        console.debug("[ImageSrc] KAOS candidate", {
-          id: debugId,
+        console.debug("[ImageSrc] KAOS candidates", {
+          id: getNikiCodeFromSource(source) || String((source as any).id ?? ""),
           famille,
           nikiCode,
           nikiPath,
-          kaosPrimary,
-          kaosSecondary,
         })
       } catch {
-        // avoid breaking rendering if console fails
+        /* ignore */
       }
     }
   }
 
-  // Prefer famille-based path, then flat NIKI code path
-  if (kaosPrimary) {
-    return kaosPrimary
-  }
-  if (kaosSecondary) {
-    return kaosSecondary
+  for (const u of collectBackendImageUrls(source)) {
+    add(u)
   }
 
-  const url = getProductImageUrl(source)
-  if (url && isValidImageUrl(url)) {
-    try {
-      console.debug("[ImageSrc] backend URL fallback", { url })
-    } catch {
-      // ignore
-    }
-    return normalizeImageUrl(url) ?? NO_IMAGE_URL
-  }
+  add(NO_IMAGE_URL)
 
-  try {
-    console.debug("[ImageSrc] final fallback no_image_found", { placeholder, noImageUrl: NO_IMAGE_URL })
-  } catch {
-    // ignore
-  }
+  return out.length > 0 ? out : [NO_IMAGE_URL]
+}
 
-  return NO_IMAGE_URL
+/**
+ * Resolve image URL for display: first candidate from getProductImageCandidates.
+ * @param placeholder kept for API compatibility; final fallback is NO_IMAGE_URL when nothing else matches.
+ */
+export function getProductImageSrc(
+  source: ProductImageSource | null | undefined,
+  _placeholder: string = "/placeholder.svg?height=300&width=300"
+): string {
+  const candidates = getProductImageCandidates(source)
+  return candidates[0] ?? NO_IMAGE_URL
 }
 
 /**
