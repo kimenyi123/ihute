@@ -2,7 +2,6 @@
 // Enhanced category page – copy of app/category/[categoryId] for AI/enhancements.
 // See docs/category_ai.md for what changed and how to upgrade.
 import { Header } from "@/components/header";
-import { Breadcrumbs } from "@/components/breadcrumbs";
 import { Footer } from "@/components/footer";
 import { CategoryClientAI } from "@/components/category_ai/category-client-ai";
 
@@ -33,7 +32,6 @@ export default async function CategoryAIPage(props: CategoryPageProps) {
     <div className="min-h-screen bg-background flex flex-col">
       <Header />
       <main className="container mx-auto px-4 py-6 flex-1">
-        <Breadcrumbs categoryName={categoryName} />
         <CategoryClientAI categoryId={categoryId} categoryName={categoryName} />
       </main>
       <Footer />

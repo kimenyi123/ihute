@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { useCartStore } from "@/lib/cart-store"
 import { useFavoritesStore } from "@/lib/favorites-store"
 import { trackProductView, trackClick } from "@/lib/interaction-tracker"
-import { Heart, Eye } from "lucide-react"
+import { Heart, Eye, Store } from "lucide-react"
 import { usePriceWatchStore } from "@/lib/price-watch-store"
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
@@ -37,6 +37,8 @@ type Product = {
   item_key_words?: string
   item_code?: string
   famille?: string
+  /** Brand from backend: item_fabricant or id_fabricant */
+  brand?: string
   IMAGE_URL?: string
   searchPriority?: "direct" | "contains"
   containsIngredient?: string
@@ -110,10 +112,11 @@ export function ProductCard({
   const backendUrl = getProductImageUrl(product as any) || null
 
   const activeSrc = fallbackSrc || resolvedUrl
-  const hasValidUrl = activeSrc !== placeholder && isValidImageUrl(activeSrc)
-  // When no image or load error, show KAOS "no image" graphic instead of grey placeholder
+  // Same as shop-with-me: treat NO_IMAGE_URL as no image and show Store icon placeholder
+  const hasValidUrl = activeSrc !== placeholder && activeSrc !== NO_IMAGE_URL && isValidImageUrl(activeSrc)
   const src = !imgError && hasValidUrl ? activeSrc : NO_IMAGE_URL
   const isRemote = /^https?:\/\//i.test(src)
+  const showPlaceholderIcon = !hasValidUrl || imgError
 
   useEffect(() => {
     // Reset error and fallback when product or primary URL changes
@@ -167,7 +170,11 @@ export function ProductCard({
   return (
     <Card className={cn("group h-full overflow-hidden transition-all hover:shadow-lg", compact && "border shadow-sm")}>
       <div className={cn("relative w-full bg-muted", compact ? "aspect-[4/5]" : "aspect-square")}>
-        {isRemote ? (
+        {showPlaceholderIcon ? (
+          <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">
+            <Store className="h-10 w-10 opacity-50" />
+          </div>
+        ) : isRemote ? (
           <img
             src={src}
             alt={name}

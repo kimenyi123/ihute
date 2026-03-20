@@ -1,12 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { ProductCard } from "@/components/product-card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Search, Store, Loader2 } from "lucide-react";
 import { filterProductsByRelevance, filterSuppliersByRelevance } from "@/lib/search-utils";
+import { useTranslation } from "@/hooks/use-translation";
+import type { TranslationKey } from "@/lib/translations";
+import { cn } from "@/lib/utils";
+
+const LIST_SECTOR_SUPPLIERS_LIMIT = 500;
 
 type ServerProduct = {
   item_commercial_name?: string;
@@ -25,7 +31,16 @@ type ServerProduct = {
   type?: string;
   sector?: string;
   category?: string;
+  /** Brand from niki_items: item_fabricant or id_fabricant */
+  brand?: string;
   momo?: string;
+  famille?: string;
+  /** Catalogue / NIKI code for KAOS images and deduping */
+  item_code?: string;
+  ITEM_CODE?: string;
+  image_url?: string;
+  item_image_url?: string;
+  IMAGE_URL?: string;
 };
 
 function extractNumericPrice(value: any): number {
@@ -62,6 +77,25 @@ function normalizeProduct(
   p: any,
   fallbacks?: { account?: string; sellerName?: string; sellerLoc?: string }
 ): ServerProduct {
+  const codeCandidates = [
+    p.ITEM_CODE,
+    p.item_code,
+    p.itemCode,
+    p.NIKI_CODE,
+    p.niki_code,
+    p.CODE,
+    p.code,
+    p.product_code,
+    p.PRODUCT_CODE,
+  ]
+  const code =
+    codeCandidates
+      .map((x) => (typeof x === "string" ? x.trim() : x != null ? String(x).trim() : ""))
+      .find((s) => s.length > 0) || ""
+  const img =
+    p.image ?? p.image_url ?? p.item_image_url ?? p.IMAGE_URL ?? undefined
+  const imgStr = typeof img === "string" ? img.trim() : img != null ? String(img).trim() : ""
+
   return {
     item_commercial_name: p.item_commercial_name ?? p.ITEM_NAME ?? p.name ?? "Product",
     item_packet: p.item_packet ?? p.UNIT ?? p.pack ?? "",
@@ -78,12 +112,21 @@ function normalizeProduct(
       "",
     supplier_name: p.supplier_name ?? p.SELLER_NAMES ?? fallbacks?.sellerName ?? "",
     supplier_location: p.supplier_location ?? p.LOCATION ?? fallbacks?.sellerLoc ?? "",
-    image: p.image ?? p.image_url ?? p.item_image_url ?? p.IMAGE_URL ?? undefined,
+    image: imgStr || undefined,
+    image_url: p.image_url ?? p.IMAGE_URL ?? undefined,
+    item_image_url: p.item_image_url ?? undefined,
+    IMAGE_URL: p.IMAGE_URL ?? p.image_url ?? undefined,
+    item_code: code || undefined,
+    ITEM_CODE: code || undefined,
     momo: p.momo,
     // keep any server-provided category hint
     type: p.type ?? p.TYPE ?? undefined,
     sector: p.sector ?? p.SECTOR ?? undefined,
     category: p.category ?? p.CATEGORY ?? undefined,
+    brand: p.item_fabricant ?? p.id_fabricant ?? p.brand,
+    famille: (p.famille ?? p.FAMILLE ?? p.category ?? p.CATEGORY ?? "")
+      .toString()
+      .trim() || undefined,
   };
 }
 
@@ -92,15 +135,28 @@ export function ProductGrid({
   categoryName,
   selectedSupplier = "all",
   selectedSupplierName = "All Suppliers",
+  /** category_ai item mode: all sector products + family filter */
+  browseMode,
+  /** When true, hide the in-page search box (use header search). Sort + family filters stay. */
+  hideInlineSearch = false,
 }: {
   categoryId: string;
   categoryName: string;
   selectedSupplier?: string;
   selectedSupplierName?: string;
+  browseMode?: "item";
+  hideInlineSearch?: boolean;
 }) {
+  const { t } = useTranslation();
+  const searchParams = useSearchParams();
   const [searchQuery, setSearchQuery] = useState("");
-  const [sortBy, setSortBy] = useState("featured");
+  /** Non–category-item pages: sort is local state. Category "Choose an item" uses `?sort=` (filter sheet). */
+  const [sortByPage, setSortByPage] = useState("featured");
+  const sortBy =
+    browseMode === "item" ? (searchParams.get("sort") || "trending") : sortByPage;
+  const setSortBy = setSortByPage;
   const [displayCount, setDisplayCount] = useState(12);
+  const [familleFilter, setFamilleFilter] = useState<string | null>(null);
   const [serverProducts, setServerProducts] = useState<ServerProduct[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -112,12 +168,18 @@ export function ProductGrid({
     return "";
   }
 
+  useEffect(() => {
+    if (browseMode !== "item") return;
+    setDisplayCount(20);
+    setFamilleFilter(null);
+  }, [browseMode]);
+
   // reset search & pagination when the supplier changes
   useEffect(() => {
     setSearchQuery("");
-    setDisplayCount(12);
+    setDisplayCount(browseMode === "item" ? 20 : 12);
     setGlobalSearchResults([]);
-  }, [selectedSupplier]);
+  }, [selectedSupplier, browseMode]);
 
   // Global search with debounce - searches both PRODUCTS and SUPPLIERS in this category
   useEffect(() => {
@@ -258,32 +320,29 @@ export function ProductGrid({
       setError(null);
       try {
         const base = getApiBase();
+        const sectorListUrl = `${base}/api/fetchSuggestions?listSuppliersWithProducts=${encodeURIComponent(categoryId)}&Currency=RWF&limit=${LIST_SECTOR_SUPPLIERS_LIMIT}`;
 
-        if (selectedSupplier === "all") {
-          // show random products from sellers in this category
-          const res = await fetch(
-            `${base}/api/fetchSuggestions?listSuppliersWithProducts=${encodeURIComponent(categoryId)}&Currency=RWF`,
-            { cache: "no-store" }
-          );
+        const loadAllSectorProducts = async (shuffle: boolean) => {
+          const res = await fetch(sectorListUrl, { cache: "no-store" });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const sellers = (await res.json()) as Array<any>;
-
           const products: ServerProduct[] = [];
           for (const s of sellers || []) {
             const sellerAccount =
               s.seller_account ?? s.SELLER_ISHYIGA_ACCOUNT ?? s.seller_ishyiga_account ?? "";
             const sellerName = s.seller_name ?? s.SELLER_NAMES ?? "";
             const sellerLoc = s.seller_location ?? s.LOCATION ?? "";
-
             for (const p of s.products || []) {
               products.push(normalizeProduct(p, { account: sellerAccount, sellerName, sellerLoc }));
             }
           }
-          products.sort(() => Math.random() - 0.5);
-          if (!isMounted) return;
-          setServerProducts(products);
-        } else {
-          // ONLY the selected supplier's items
+          if (shuffle) {
+            products.sort(() => Math.random() - 0.5);
+          }
+          return products;
+        };
+
+        if (selectedSupplier !== "all") {
           const res = await fetch(
             `${base}/api/fetchSuggestions?supplierProducts=${encodeURIComponent(selectedSupplier)}&limit=50&Currency=RWF`,
             { cache: "no-store" }
@@ -295,9 +354,12 @@ export function ProductGrid({
           );
           if (!isMounted) return;
           setServerProducts(items);
+        } else {
+          const shuffle = browseMode !== "item";
+          const products = await loadAllSectorProducts(shuffle);
+          if (!isMounted) return;
+          setServerProducts(products);
         }
-
-        setDisplayCount(12);
       } catch (e: any) {
         if (isMounted) setError(e?.message || "Failed to load products");
       } finally {
@@ -309,7 +371,7 @@ export function ProductGrid({
     return () => {
       isMounted = false;
     };
-  }, [categoryId, selectedSupplier, selectedSupplierName]);
+  }, [categoryId, selectedSupplier, selectedSupplierName, browseMode]);
 
   const allProducts = useMemo(() => {
     // Use global search results if searching, otherwise use server products
@@ -320,9 +382,12 @@ export function ProductGrid({
         toRouteCategoryId(p.type) ||
         toRouteCategoryId(p.sector) ||
         toRouteCategoryId(p.category);
+      const kw = (p.item_key_words ?? "").toString();
+      const acct = (p.item_seller_account ?? "").toString();
 
+      // Do not set `image` to a local placeholder: getProductImageSrc treats `/placeholder...` as a valid URL and skips KAOS / backend fallbacks.
       return {
-        id: `${categoryId}-${idx}`,
+        id: `${categoryId}-${acct}-${kw}-${idx}`,
         name: p.item_commercial_name || "Product",
         description: undefined,
         price: extractNumericPrice(p.selling_price),
@@ -333,9 +398,16 @@ export function ProductGrid({
         supplierId: p.item_seller_account,
         supplierName: p.supplier_name || p.item_seller_account || "Supplier",
         supplierLocation: p.supplier_location,
-        image: p.image || "/placeholder.svg?height=300&width=300",
+        image: p.image,
+        image_url: p.image_url,
+        item_image_url: p.item_image_url,
+        IMAGE_URL: p.IMAGE_URL,
+        item_code: p.item_code,
+        ITEM_CODE: p.ITEM_CODE,
+        item_key_words: p.item_key_words,
         momo: p.momo,
         _routeCategory: firstCategoryHint,
+        famille: p.famille || "",
       };
     });
   }, [serverProducts, globalSearchResults, searchQuery, categoryId]);
@@ -354,22 +426,33 @@ export function ProductGrid({
     return Array.from(uniq.values());
   }, [allProducts]);
 
+  const familleOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of allProducts) {
+      const f = (p as { famille?: string }).famille?.toString().trim();
+      if (f) set.add(f);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [allProducts]);
+
   const filteredProducts = useMemo(() => {
     let items = allProducts;
 
-    // filter by supplier if chosen
     if (selectedSupplier !== "all") {
       items = items.filter((p) => p.supplierId === selectedSupplier);
-
-      // If supplierProducts includes category hints, keep only items in the current category
       if (items.some((p) => !!p._routeCategory)) {
         items = items.filter((p) => p._routeCategory === categoryId);
       }
     }
 
-    // No need for local text filtering - global search handles it with multilingual support
+    if (browseMode === "item" && familleFilter) {
+      items = items.filter(
+        (p) =>
+          ((p as { famille?: string }).famille || "").toString().trim().toLowerCase() ===
+          familleFilter.toLowerCase()
+      );
+    }
 
-    // sort
     switch (sortBy) {
       case "price-low":
         items = [...items].sort((a, b) => a.price - b.price);
@@ -380,62 +463,128 @@ export function ProductGrid({
       case "rating":
         items = [...items].sort((a, b) => b.rating - a.rating);
         break;
-      // "newest" not available (no timestamp in payload) -> fall through to "featured"
-      // "featured" keeps original order from server/randomization
+      case "trending":
+        // Placeholder: keep API merge order until real trend scores exist
+        break;
+      default:
+        break;
     }
 
     return items;
-  }, [allProducts, selectedSupplier, sortBy, categoryId]);
+  }, [allProducts, selectedSupplier, sortBy, categoryId, browseMode, familleFilter]);
 
   const displayedProducts = filteredProducts.slice(0, displayCount);
+  const loadMoreStep = browseMode === "item" ? 20 : 12;
+
+  const slimCategoryItemHeader = browseMode === "item" && hideInlineSearch;
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">{categoryName}</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            {selectedSupplier === "all" ? "All Suppliers" : selectedSupplierName} — {filteredProducts.length} product
-            {filteredProducts.length !== 1 ? "s" : ""}
-          </p>
-        </div>
-
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              type="search"
-              placeholder={`Search ${categoryName} products or suppliers…`}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10 pr-10"
-            />
-            {searching && (
-              <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-blue-600" />
+        {!slimCategoryItemHeader && (
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">{categoryName}</h1>
+            {browseMode === "item" ? (
+              <div className="mt-1 space-y-1">
+                <p className="text-sm text-muted-foreground">
+                  {t("categoryBrowseAllItemsInSector" as TranslationKey)} —{" "}
+                  <span className="font-semibold text-foreground">{filteredProducts.length}</span>{" "}
+                  product{filteredProducts.length !== 1 ? "s" : ""}
+                </p>
+                <p className="text-xs text-muted-foreground">{t("categoryBrowseTrendingHint" as TranslationKey)}</p>
+                {hideInlineSearch && (
+                  <p className="text-xs text-muted-foreground pt-1 border-t border-border/60 mt-2">
+                    {t("categoryBrowseUseHeaderSearchProducts" as TranslationKey)}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground mt-1">
+                {selectedSupplier === "all" ? "All Suppliers" : selectedSupplierName} — {filteredProducts.length}{" "}
+                product{filteredProducts.length !== 1 ? "s" : ""}
+              </p>
             )}
           </div>
-          <Select value={sortBy} onValueChange={setSortBy}>
-            <SelectTrigger className="w-full sm:w-[200px]">
-              <SelectValue placeholder="Sort by" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="featured">Featured</SelectItem>
-              <SelectItem value="price-low">Price: Low to High</SelectItem>
-              <SelectItem value="price-high">Price: High to Low</SelectItem>
-              <SelectItem value="newest">Newest First</SelectItem>
-              <SelectItem value="rating">Highest Rated</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        )}
 
-        {suppliers.length > 0 && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Store className="h-4 w-4 flex-shrink-0" />
-            <span>
-              {suppliers.length} supplier{suppliers.length !== 1 ? "s" : ""} with products
-            </span>
+        {(!hideInlineSearch || browseMode !== "item") && (
+          <div className="flex flex-col sm:flex-row gap-3">
+            {!hideInlineSearch && (
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  type="search"
+                  placeholder={`Search ${categoryName} products or suppliers…`}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10 pr-10"
+                />
+                {searching && (
+                  <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-blue-600" />
+                )}
+              </div>
+            )}
+            {browseMode !== "item" && (
+              <Select value={sortBy} onValueChange={setSortBy}>
+                <SelectTrigger className={cn("w-full", "sm:w-[200px]")}>
+                  <SelectValue placeholder="Sort by" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="featured">Featured</SelectItem>
+                  <SelectItem value="price-low">Price: Low to High</SelectItem>
+                  <SelectItem value="price-high">Price: High to Low</SelectItem>
+                  <SelectItem value="newest">Newest First</SelectItem>
+                  <SelectItem value="rating">Highest Rated</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
           </div>
         )}
+
+            {browseMode === "item" && !searchQuery.trim() && familleOptions.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-medium text-muted-foreground shrink-0">
+                  {t("categoryBrowseFamily" as TranslationKey)}:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setFamilleFilter(null)}
+                  className={cn(
+                    "px-3 py-1 rounded-full border text-xs font-medium transition-colors",
+                    familleFilter == null
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-background hover:bg-muted border-border"
+                  )}
+                >
+                  {t("categoryBrowseFamilyAny" as TranslationKey)}
+                </button>
+                {familleOptions.map((f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => setFamilleFilter(f)}
+                    className={cn(
+                      "px-3 py-1 rounded-full border text-xs font-medium transition-colors max-w-[200px] truncate",
+                      familleFilter === f
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-background hover:bg-muted border-border"
+                    )}
+                    title={f}
+                  >
+                    {f}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {suppliers.length > 0 && !slimCategoryItemHeader && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Store className="h-4 w-4 flex-shrink-0" />
+                <span>
+                  {suppliers.length} supplier{suppliers.length !== 1 ? "s" : ""} with products
+                </span>
+              </div>
+            )}
       </div>
 
       {loading && <div className="text-center py-12 text-muted-foreground">Loading products…</div>}
@@ -462,7 +611,9 @@ export function ProductGrid({
               <Button
                 variant="outline"
                 size="lg"
-                onClick={() => setDisplayCount((prev) => Math.min(prev + 12, filteredProducts.length))}
+                onClick={() =>
+                  setDisplayCount((prev) => Math.min(prev + loadMoreStep, filteredProducts.length))
+                }
               >
                 Load More Products ({filteredProducts.length - displayCount} remaining)
               </Button>

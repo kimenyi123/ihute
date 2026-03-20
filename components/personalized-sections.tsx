@@ -214,9 +214,20 @@ export function PersonalizedSections() {
           const price = extractNumericPrice(rawPrice)
           if (price <= 0) continue
           const img = p.image_url ?? p.item_image_url ?? p.image ?? p.IMAGE_URL
+          // Brand: only p.brand or item_fabricant (real brand). Do NOT use item_packet — that is packet/unit (e.g. 100 ml).
+          const brand_ai = (p as any).brand ?? (p as any).item_fabricant
+          const productName = p.item_commercial_name ?? p.ITEM_NAME ?? p.item_name ?? "Product"
+          // Category: prefer API-normalized p.category, then backend fields
+          const category_ai =
+            (p as any).category ??
+            p.famille ??
+            p.FAMILLE ??
+            p.item_department
+          const categoryLabel = category_ai && String(category_ai).trim() ? String(category_ai).trim() : "n"
+          const nameWithFamille = `${productName} - ${categoryLabel}`
           products.push({
             id: code || `burrows-${products.length}`,
-            name: p.item_commercial_name ?? p.ITEM_NAME ?? p.item_name ?? "Product",
+            name: nameWithFamille,
             description: undefined,
             price,
             unit: p.item_packet ?? p.UNIT ?? "",
@@ -225,8 +236,8 @@ export function PersonalizedSections() {
             supplierName,
             supplierLocation: seller.loc_cell ?? seller.supplier_location ?? "",
             momo: seller.momo ?? p.momo,
-            category: p.famille ?? p.FAMILLE ?? p.item_department,
-            brand: (p as any).item_fabricant ?? (p as any).brand,
+            category: category_ai ?? undefined,
+            brand: brand_ai ?? undefined,
             sector: (p as any).bus_category_id ?? (p as any).sector,
             categoryId: (p as any).category_id ?? (p as any).categoryId,
             inStock: true,
@@ -254,7 +265,7 @@ export function PersonalizedSections() {
     setLoading(true)
 
     // 1) Load Burrows first (one fast request with images) so the page shows content quickly
-    const burrowsProducts = await fetchBurrowsProducts(6)
+    const burrowsProducts = await fetchBurrowsProducts(8)
     console.log("[PersonalizedSections] loadPersonalizedSections: Burrows result", { count: burrowsProducts.length })
     if (burrowsProducts.length > 0) {
       setSections([
@@ -328,8 +339,8 @@ export function PersonalizedSections() {
       if (data.ok && data.products) {
         const list = Array.isArray(data.products) ? data.products : []
         const trendingProducts = await fetchProductDetails(shuffle(list))
-        // Limit to 6 products max
-        const limitedProducts = trendingProducts.slice(0, 6)
+             // Limit to 8 products max
+        const limitedProducts = trendingProducts.slice(0, 8)
 
         if (limitedProducts.length > 0) {
           setSections([
@@ -410,6 +421,7 @@ export function PersonalizedSections() {
               supplierLocation: p.LOCATION || p.supplier_location || "",
               momo: p.momo || undefined,
               category: rawCategory ? String(rawCategory) : undefined,
+              brand: p.item_fabricant ?? p.id_fabricant ?? p.brand,
               inStock: true,
             })
 
@@ -513,7 +525,7 @@ export function PersonalizedSections() {
                   href={`/shop-with-me/${BURROWS_NICKNAME}`}
                   className="text-sm text-primary hover:underline flex items-center gap-1"
                 >
-                  Browse full menu
+                  View all Burrows items
                   <ArrowRight className="h-4 w-4" />
                 </Link>
               )}

@@ -65,25 +65,31 @@ export function getProductImageSrc(
   source: ProductImageSource | null | undefined,
   placeholder: string = "/placeholder.svg?height=300&width=300"
 ): string {
+  // Prefer explicit backend/API image so enriched URLs (e.g. shop-with-me) are used over KAOS
+  const backendUrl = getProductImageUrl(source)
+  if (backendUrl && isValidImageUrl(backendUrl)) {
+    return normalizeImageUrl(backendUrl) ?? NO_IMAGE_URL
+  }
+
   const KAOS_BASE = "https://ishyiga.rw/images_kaos_beta/"
   let kaosPrimary: string | null = null
   let kaosSecondary: string | null = null
 
   if (source && typeof source === "object") {
     const rawFamille = (source as any).famille ?? (source as any).FAMILLE
+    /** Catalogue / NIKI code for KAOS filenames (e.g. GENUNIB00269.jpg). Must match shop-with-me / orders: ITEM_CODE first — not item_key_words (often a label, not the file name). */
     const rawNiki =
-      (source as any).item_key_words ??
-      (source as any).itemCode ??
+      (source as any).ITEM_CODE ??
       (source as any).item_code ??
-      (source as any).ITEM_CODE
+      (source as any).itemCode ??
+      (source as any).item_key_words
 
     const famille = typeof rawFamille === "string" ? rawFamille.trim() : String(rawFamille ?? "").trim()
     const nikiCode = typeof rawNiki === "string" ? rawNiki.trim() : String(rawNiki ?? "").trim()
 
     if (nikiCode) {
-      // Secondary: flat path without famille
+      // Flat path first — most KAOS assets are https://ishyiga.rw/images_kaos_beta/{CODE}.jpg
       kaosSecondary = `${KAOS_BASE}${nikiCode}.jpg`
-      // Primary: famille-based folder when available
       if (famille) {
         const famillePath = famille.replace(/\s+/g, "_")
         kaosPrimary = `${KAOS_BASE}${famillePath}/${nikiCode}.jpg`
@@ -91,8 +97,8 @@ export function getProductImageSrc(
 
       try {
         const debugId =
-          (source as any).item_code ??
           (source as any).ITEM_CODE ??
+          (source as any).item_code ??
           (source as any).item_key_words ??
           (source as any).id ??
           ""
@@ -110,22 +116,12 @@ export function getProductImageSrc(
     }
   }
 
-  // Prefer famille-based path, then flat NIKI code path
-  if (kaosPrimary) {
-    return kaosPrimary
-  }
+  // Fall back to KAOS paths when no backend URL (flat file name first — matches ishyiga.rw/images_kaos_beta/{NIKI}.jpg)
   if (kaosSecondary) {
     return kaosSecondary
   }
-
-  const url = getProductImageUrl(source)
-  if (url && isValidImageUrl(url)) {
-    try {
-      console.debug("[ImageSrc] backend URL fallback", { url })
-    } catch {
-      // ignore
-    }
-    return normalizeImageUrl(url) ?? NO_IMAGE_URL
+  if (kaosPrimary) {
+    return kaosPrimary
   }
 
   try {

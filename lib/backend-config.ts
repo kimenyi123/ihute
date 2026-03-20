@@ -1,18 +1,20 @@
 /**
  * Central backend API configuration from .env / .env.local.
- * One base is enough for deployment: set NEXT_PUBLIC_API_URL or JAVA_BACKEND_BASE
- * (e.g. https://ihute.rw/Trading or http://localhost:8081/Trading).
- * Optional overrides: JAVA_ORDERS_URL, JAVA_SELLER_ORDERS_URL, JAVA_SUPPLIER_URL, JAVA_DELIVERY_URL, etc.
+ * One base is enough: set BACKEND_URL, JAVA_BACKEND_BASE, or NEXT_PUBLIC_API_URL
+ * (e.g. http://64.225.66.239:8080/trading_ai or https://ihute.rw/Trading).
+ * All servlet URLs (fetchSuggestions, shop_with_me, orders, etc.) are derived from this base.
+ * Optional overrides: JAVA_ORDERS_URL, JAVA_FETCH_SUGGESTIONS_URL, JAVA_SHOP_WITH_ME_URL, etc.
  */
 
 function noTrailingSlash(s: string): string {
   return (s || "").replace(/\/+$/, "")
 }
 
-/** Java backend base URL (no trailing slash). Uses NEXT_PUBLIC_API_URL or JAVA_BACKEND_BASE from env. */
+/** Java backend base URL (no trailing slash). Uses BACKEND_URL, JAVA_BACKEND_BASE, or NEXT_PUBLIC_API_URL from env. */
 export function getBackendBase(): string {
   return noTrailingSlash(
-    process.env.JAVA_BACKEND_BASE ||
+    process.env.BACKEND_URL ||
+      process.env.JAVA_BACKEND_BASE ||
       process.env.NEXT_PUBLIC_API_URL ||
       "https://ihute.rw/Trading"
   )

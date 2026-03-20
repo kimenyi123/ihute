@@ -187,6 +187,7 @@ function toCardProduct(p: Product & { search_priority?: string; contains_ingredi
     IMAGE_URL: (p as any).IMAGE_URL,
     searchPriority: (p.search_priority === "direct" || p.search_priority === "contains" ? p.search_priority : undefined) as "direct" | "contains" | undefined,
     containsIngredient: typeof p.contains_ingredient === "string" ? p.contains_ingredient : undefined,
+    brand: (p as any).item_fabricant ?? (p as any).id_fabricant ?? (p as any).brand,
   }
 }
 
@@ -229,12 +230,13 @@ function normalizeSupplierProductsResponse(
             supplier_name,
             supplier_location: (p as any).supplier_location ?? undefined,
             type: (p as any).type ?? "product",
-            image: img ?? undefined,
-            image_url: img ?? undefined,
-            item_image_url: img ?? undefined,
-            momo: item.momo ?? (p as any).momo,
-            famille: (item as any).famille ?? (p as any).famille ?? (item as any).FAMILLE ?? (p as any).FAMILLE,
-          })
+          image: img ?? undefined,
+          image_url: img ?? undefined,
+          item_image_url: img ?? undefined,
+          momo: item.momo ?? (p as any).momo,
+          famille: (item as any).famille ?? (p as any).famille ?? (item as any).FAMILLE ?? (p as any).FAMILLE,
+          item_fabricant: (item as any).item_fabricant ?? (p as any).item_fabricant ?? (item as any).id_fabricant ?? (p as any).id_fabricant,
+        })
         }
       } else {
             const q = p as any
@@ -261,6 +263,7 @@ function normalizeSupplierProductsResponse(
           currency: q.currency,
           momo: q.momo,
           famille: (q as any).famille ?? (q as any).FAMILLE,
+          item_fabricant: (q as any).item_fabricant ?? (q as any).id_fabricant,
         })
       }
     }

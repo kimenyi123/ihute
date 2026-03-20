@@ -5,18 +5,20 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { CategoryGridAI } from "./category-grid-ai"
 import { CategoryListAI } from "./category-list-ai"
+import { ShopsBySector } from "./shops-by-sector"
 import { BrandListAI } from "./brand-list-ai"
 import { BestDealsSection } from "./best-deals-section"
 import { PersonalizedSections } from "@/components/personalized-sections"
 import { useProductFiltersStore } from "@/lib/product-filters-store"
 
-export type ShopByTab = "sector" | "category" | "brand" | "all" | "opportunities" | "manufacturers" | "high-margin" | "high-demand"
+export type ShopByTab = "sector" | "category" | "shops" | "brand" | "all" | "opportunities" | "manufacturers" | "high-margin" | "high-demand"
 
-/** All tabs use colored emojis per mapping: 🛍️ Shop by, 🏭 Sector, 🔲 Category, 🏷️ Brand, 📦 All items, + opportunities etc. */
+/** All tabs use icons: Sector, Category, Shops (store icons), Brand, All items, etc. */
 const EMOJI = (char: string) => <span className="text-base leading-none" aria-hidden>{char}</span>
 const TABS: { id: ShopByTab; label: string; icon: React.ReactNode }[] = [
   { id: "sector", label: "Sector", icon: EMOJI("🏭") },
   { id: "category", label: "Category", icon: EMOJI("🔲") },
+  { id: "shops", label: "Shops", icon: EMOJI("🏪") },
   { id: "brand", label: "Brand", icon: EMOJI("🏷️") },
   { id: "all", label: "All items", icon: EMOJI("📦") },
   { id: "opportunities", label: "Smart Picks", icon: EMOJI("⚡") },
@@ -25,7 +27,7 @@ const TABS: { id: ShopByTab; label: string; icon: React.ReactNode }[] = [
   { id: "high-demand", label: "Running Out Fast", icon: EMOJI("📈") },
 ]
 
-const VALID_SHOP_BY: ShopByTab[] = ["sector", "category", "brand", "all", "opportunities", "manufacturers", "high-margin", "high-demand"]
+const VALID_SHOP_BY: ShopByTab[] = ["sector", "category", "shops", "brand", "all", "opportunities", "manufacturers", "high-margin", "high-demand"]
 
 /**
  * Menu bar: Shop by [Sector | Category | Brand | All items].
@@ -90,6 +92,7 @@ export function ShopByMenu() {
       <div className="container mx-auto px-4">
         {activeTab === "sector" && <CategoryGridAI showHeading={false} />}
         {activeTab === "category" && <CategoryListAI />}
+        {activeTab === "shops" && <ShopsBySector />}
         {activeTab === "brand" && <BrandListAI />}
         {activeTab === "all" && <PersonalizedSections />}
         {activeTab === "high-margin" && <BestDealsSection />}

@@ -10,10 +10,16 @@ export function BusinessList({
   categoryId,
   selectedSupplier = "all",
   onSelect = () => {},
+  hideHeader = false,
+  shopSelectionOnly = false,
 }: {
   categoryId: string
   selectedSupplier?: string
   onSelect?: (id: string, name: string) => void
+  /** When true, only the horizontal shop pills are shown (parent supplies context). */
+  hideHeader?: boolean
+  /** Hide “All suppliers”; user must pick one shop (Browse by shop). */
+  shopSelectionOnly?: boolean
 }) {
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [loading, setLoading] = useState(false)
@@ -65,12 +71,14 @@ export function BusinessList({
 
   return (
     <div>
-      <div className="mb-4">
-        <h2 className="text-xl font-semibold">Businesses in this category</h2>
-        <p className="text-sm text-muted-foreground">
-          Pick a business to see their products — or view all.
-        </p>
-      </div>
+      {!hideHeader && (
+        <div className="mb-4">
+          <h2 className="text-xl font-semibold">Businesses in this category</h2>
+          <p className="text-sm text-muted-foreground">
+            Pick a business to see their products — or view all.
+          </p>
+        </div>
+      )}
 
       <div className="relative">
         {/* left arrow */}
@@ -97,17 +105,19 @@ export function BusinessList({
             if (e.key === "ArrowRight") scrollByAmount("right")
           }}
         >
-          <button
-            onClick={() => onSelect("all", "All Suppliers")}
-            className={cn(
-              "px-3 py-1.5 rounded-full border text-sm flex-shrink-0",
-              selectedSupplier === "all"
-                ? "bg-primary text-primary-foreground border-primary"
-                : "bg-background hover:bg-accent"
-            )}
-          >
-            All Suppliers
-          </button>
+          {!shopSelectionOnly && (
+            <button
+              onClick={() => onSelect("all", "All Suppliers")}
+              className={cn(
+                "px-3 py-1.5 rounded-full border text-sm flex-shrink-0",
+                selectedSupplier === "all"
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-background hover:bg-accent"
+              )}
+            >
+              All Suppliers
+            </button>
+          )}
 
           {loading && <span className="text-sm text-muted-foreground px-3">Loading…</span>}
           {error && <span className="text-sm text-destructive px-3">Failed: {error}</span>}
