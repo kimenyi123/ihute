@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/auth-store";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,9 +22,11 @@ const QRCode = dynamic(() => import("react-qr-code"), { ssr: false });
 
 export default function SupplierSelfOrderingPage() {
     const { user } = useAuthStore();
+    const router = useRouter();
 
     const [preferredCategoriesRaw, setPreferredCategoriesRaw] = useState("");
     const [isBarOrRestaurant, setIsBarOrRestaurant] = useState(false);
+    const [profileChecked, setProfileChecked] = useState(false);
     const [baseUrl, setBaseUrl] = useState("");
 
     // Nickname used only to build self-order menu QRs
@@ -58,10 +61,21 @@ export default function SupplierSelfOrderingPage() {
                         .pop() ?? "";               // take last word
                     setMenuNickname(suggested);
                 }
+                setProfileChecked(true);
             })
-            .catch(() => { });
+            .catch(() => {
+                setProfileChecked(true);
+            });
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [user?.ishyigaAccount, user?.role]);
+
+    useEffect(() => {
+        if (!profileChecked) return;
+        if (!user?.ishyigaAccount) return;
+        if (user?.role !== "supplier") return;
+        if (isBarOrRestaurant) return;
+        router.replace("/supplier/dashboard");
+    }, [profileChecked, isBarOrRestaurant, router, user?.ishyigaAccount, user?.role]);
 
     // ── Derived values ──────────────────────────────────────────────────────────
     const selfOrderCategories: KioskCategory[] = (() => {

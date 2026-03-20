@@ -354,7 +354,8 @@ export default function RegisterPage() {
                     </div>
                     <GPSCapture onLocationSet={handleLocationSet}
                       initialLat={formData.latitude ?? undefined}
-                      initialLng={formData.longitude ?? undefined} />
+                      initialLng={formData.longitude ?? undefined}
+                      fallbackDistrict={formData.location} />
                   </div>
                 ) : (
                   <div className="text-center py-8">

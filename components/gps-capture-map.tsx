@@ -1,5 +1,7 @@
 "use client"
 
+import "leaflet/dist/leaflet.css"
+
 import { useEffect, useRef } from "react"
 
 const KIGALI_CENTER = { lat: -1.9536, lng: 30.0606 }
@@ -33,6 +35,10 @@ export function GPSCaptureMapInner({
 
     const map = L.map(container).setView([center.lat, center.lng], 13)
     mapRef.current = map
+
+    // Leaflet sometimes computes incorrect dimensions when mounted after layout changes.
+    // Force a recalculation right after init so tiles look sharp.
+    setTimeout(() => map.invalidateSize(), 0)
 
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
