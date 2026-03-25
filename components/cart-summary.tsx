@@ -5,7 +5,7 @@ import dynamic from "next/dynamic"
 import { useMemo, useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { useAuthStore } from "@/lib/auth-store"
-import { useCartStore } from "@/lib/cart-store"
+import { useCartStore, type CartItem } from "@/lib/cart-store"
 import { trackClick } from "@/lib/interaction-tracker"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -46,8 +46,62 @@ import {
 const QRCode = dynamic(() => import("react-qr-code"), { ssr: false })
 const CUR = "RWF"
 import { buildMoMoUssd } from "@/lib/momo-ussd"
+import { parseErxFromNotes } from "@/lib/erx-prescription"
 
 // ---------- helpers ----------
+function formatErxLinesForShare(it: CartItem): string[] {
+  const erx = it.erx ?? parseErxFromNotes(it.notes ?? undefined)
+  if (!erx) return []
+  const out: string[] = []
+  out.push(`📋 ${erx.measurement} · ${erx.every}`)
+  if (erx.toBeTakenDays) out.push(`   Duration: ${erx.toBeTakenDays} days`)
+  if (erx.quantityOnce) out.push(`   Per dose: ${erx.quantityOnce}`)
+  out.push(`   ${erx.route} · Refill: ${erx.refill}`)
+  if (erx.instructionNotes?.trim()) {
+    const n = erx.instructionNotes.trim()
+    out.push(`   Note: ${n.length > 140 ? `${n.slice(0, 137)}…` : n}`)
+  }
+  return out
+}
+
+/** Readable multi-line text for wa.me/?text= (newlines → %0A). */
+function buildWhatsAppCartShareText(
+  g: { supplierName: string; supplierLocation?: string; items: CartItem[]; subtotal: number },
+  link: string
+): string {
+  const shop = g.supplierName || "Shop"
+  const loc = g.supplierLocation?.trim()
+  const lines: string[] = [
+    "🛒 *IHUTE — shared cart*",
+    "",
+    loc ? `*${shop}*` + `\n📍 _${loc}_` : `*${shop}*`,
+    "",
+    "───────────────",
+  ]
+  g.items.forEach((it, idx) => {
+    const name = stripTrailingPriceParen(it.name || "Product")
+    const q = Math.max(1, it.qty || 1)
+    const unit = Math.round(it.price || 0)
+    const lineTotal = unit * q
+    lines.push("")
+    lines.push(`*${idx + 1}. ${name}*`)
+    lines.push(`   ${q} × ${unit.toLocaleString()} ${CUR} = *${lineTotal.toLocaleString()} ${CUR}*`)
+    const rx = formatErxLinesForShare(it)
+    if (rx.length) lines.push(...rx)
+  })
+  lines.push(
+    "",
+    "───────────────",
+    "",
+    `💰 *Total:* ${Math.round(g.subtotal).toLocaleString()} ${CUR}`,
+    "",
+    "🔗 *Open in browser to pay:*",
+    link,
+    "",
+    "_If the link is long, tap it once to open your cart on IHUTE._"
+  )
+  return lines.join("\n")
+}
 function normalizePhone(raw?: string | null): string {
   let v = (raw || "").replace(/\s|-/g, "")
   if (!v) return ""
@@ -365,18 +419,16 @@ function CartSummaryBody() {
     return `${base}/shop-with-me/${encodeURIComponent(shopSlug)}?${params.toString()}`;
   };
 
-  const buildGroupShareText = (g: ReturnType<typeof getGroupsBySeller>[number], link: string) => {
-    const lines = g.items.map((it) => `- ${stripTrailingPriceParen(it.name)} x${it.qty} (${Math.round(it.price)} RWF)`);
-    return [
-      `Cart from ${g.supplierName}`,
-      "",
-      ...lines,
-      "",
-      `Total: ${Math.round(g.subtotal).toLocaleString()} RWF`,
-      "",
-      `Continue & pay here: ${link}`,
-    ].join("\n");
-  };
+  const buildGroupShareText = (g: ReturnType<typeof getGroupsBySeller>[number], link: string) =>
+    buildWhatsAppCartShareText(
+      {
+        supplierName: g.supplierName,
+        supplierLocation: g.supplierLocation,
+        items: g.items,
+        subtotal: g.subtotal,
+      },
+      link
+    );
 
   if (groups.length === 0) {
     return (
@@ -469,6 +521,7 @@ function CartSummaryBody() {
         unitPrice: it.price,
         unit: it.unit ?? "",
         itemCode: it.itemCode ?? it.id,
+        notes: it.notes ?? "",
       }))
 
       const paymentId = opts.paymentId || `${opts.paymentName}_${Date.now()}`
@@ -1125,6 +1178,20 @@ function CartSummaryBody() {
                           {item.unit && (
                             <div className="text-xs text-muted-foreground">Unit: {item.unit}</div>
                           )}
+                          {(() => {
+                            const erx = (item as CartItem).erx ?? parseErxFromNotes(item.notes ?? undefined)
+                            if (!erx) return null
+                            return (
+                              <div className="text-xs text-muted-foreground space-y-0.5 mt-1">
+                                <div className="font-medium text-foreground">Prescription</div>
+                                <div>Measurement: {erx.measurement} · Every: {erx.every}</div>
+                                {erx.toBeTakenDays ? <div>Duration (days): {erx.toBeTakenDays}</div> : null}
+                                {erx.quantityOnce ? <div>Qty (once): {erx.quantityOnce}</div> : null}
+                                <div>Route: {erx.route} · Refill: {erx.refill}</div>
+                                {erx.instructionNotes ? <div>Instructions: {erx.instructionNotes}</div> : null}
+                              </div>
+                            )
+                          })()}
                         </div>
                         <div className="flex items-center gap-4">
                           <div className="text-sm text-muted-foreground">

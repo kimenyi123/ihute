@@ -11,7 +11,7 @@ const useCartStore = () => ({
   ],
   getTotalPrice: () => 4000,
   clearCart: () => console.log("Clear cart"),
-  remove: (id: number, unit: string) => console.log("Remove", id, unit)
+  remove: (id: number, unit: string, _lineSig?: string) => console.log("Remove", id, unit)
 })
 
 const useTableCommandStore = () => ({
@@ -237,7 +237,10 @@ export default function TableCommandCartFixed() {
 
           <div className="flex flex-col gap-4 py-4 flex-1 overflow-y-auto">
             {items.map((item) => (
-              <div key={`${item.id}-${item.selectedUnit}`} className="flex items-center justify-between gap-4 border-b pb-3">
+              <div
+                key={`${item.id}-${item.selectedUnit}-${item.lineSignature ?? item.notes ?? ""}`}
+                className="flex items-center justify-between gap-4 border-b pb-3"
+              >
                 <div className="flex-1">
                   <h4 className="font-medium">{item.name}</h4>
                   <p className="text-sm text-gray-500">
@@ -251,7 +254,13 @@ export default function TableCommandCartFixed() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => remove(item.id, item.selectedUnit)}
+                    onClick={() =>
+                      remove(
+                        item.id,
+                        item.selectedUnit,
+                        (item as { lineSignature?: string }).lineSignature
+                      )
+                    }
                   >
                     <Trash2 className="h-4 w-4 text-red-500" />
                   </Button>

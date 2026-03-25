@@ -15,12 +15,15 @@ export type ShopByTab = "sector" | "category" | "shops" | "brand" | "all" | "opp
 
 /** All tabs use icons: Sector, Category, Shops (store icons), Brand, All items, etc. */
 const EMOJI = (char: string) => <span className="text-base leading-none" aria-hidden>{char}</span>
-const TABS: { id: ShopByTab; label: string; icon: React.ReactNode }[] = [
+const SHOP_BY_TABS: { id: ShopByTab; label: string; icon: React.ReactNode }[] = [
   { id: "sector", label: "Sector", icon: EMOJI("🏭") },
   { id: "category", label: "Category", icon: EMOJI("🔲") },
   { id: "shops", label: "Shops", icon: EMOJI("🏪") },
   { id: "brand", label: "Brand", icon: EMOJI("🏷️") },
-  { id: "all", label: "All items", icon: EMOJI("📦") },
+  { id: "all", label: "Items", icon: EMOJI("📦") },
+]
+
+const COOL_SEARCH_TABS: { id: ShopByTab; label: string; icon: React.ReactNode }[] = [
   { id: "opportunities", label: "Smart Picks", icon: EMOJI("⚡") },
   { id: "manufacturers", label: "Trending Near You", icon: EMOJI("🏭") },
   { id: "high-margin", label: "Best Deals", icon: EMOJI("💰") },
@@ -68,7 +71,33 @@ export function ShopByMenu() {
               <span className="text-base leading-none">🛍️</span>
               Shop by:
             </span>
-            {TABS.map((tab) => (
+            {SHOP_BY_TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => handleTabChange(tab.id)}
+                className={cn(
+                  "px-4 py-2 rounded-md text-sm font-medium transition-colors inline-flex items-center gap-2",
+                  activeTab === tab.id
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                )}
+                aria-pressed={activeTab === tab.id}
+              >
+                {tab.icon}
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="border-t" />
+
+          <div className="flex flex-wrap items-center gap-2 py-3">
+            <span className="text-sm font-medium text-muted-foreground mr-2 flex items-center gap-1.5">
+              <span className="text-base leading-none" aria-hidden>😎</span>
+              Cool search:
+            </span>
+            {COOL_SEARCH_TABS.map((tab) => (
               <button
                 key={tab.id}
                 type="button"

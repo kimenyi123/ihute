@@ -4,6 +4,8 @@ import { create } from "zustand"
 import { persist, createJSONStorage } from "zustand/middleware"
 import { trackClick } from "./interaction-tracker"
 import { getPublicApiUrl } from "./backend-config"
+import type { ErxPrescription } from "./erx-prescription"
+import { prescriptionLineKey } from "./erx-prescription"
 
 export type CartItem = {
   id: string
@@ -11,6 +13,12 @@ export type CartItem = {
   price: number
   unit?: string
   image?: string
+  /** Free text or JSON (e.g. ihute_erx_v1) for DB / order APIs */
+  notes?: string
+  /** Structured eRx when added from pharmacy flow */
+  erx?: ErxPrescription
+  /** Distinguishes lines with same product code but different prescriptions */
+  lineSignature?: string
 
   /** Item code / NIKI code (e.g. item_key_words) — sent in order transaction */
   itemCode?: string
@@ -73,9 +81,9 @@ type CartState = {
   addItem: (item: Omit<CartItem, "qty">, qty?: number) => void
   add: (item: Omit<CartItem, "qty">, qty?: number) => void
   addOrInc: (item: Omit<CartItem, "qty">, qty?: number) => void
-  inc: (id: string, selectedUnit?: string) => void
-  dec: (id: string, selectedUnit?: string) => void
-  remove: (id: string, selectedUnit?: string) => void
+  inc: (id: string, selectedUnit?: string, lineSignature?: string) => void
+  dec: (id: string, selectedUnit?: string, lineSignature?: string) => void
+  remove: (id: string, selectedUnit?: string, lineSignature?: string) => void
   clear: () => void
   clearCart: () => void
   /** Replace cart with items from sync API (account-based cart sync). */
@@ -113,20 +121,27 @@ export const useCartStore = create<CartState>()(
           const selectedUnit = item.selectedUnit ?? item.unit
           const productCode = (item.itemCode ?? item.id).toString().trim()
           const nameKey = (item.name ?? "").toString().trim().toLowerCase()
+          const incomingSig = prescriptionLineKey({ erx: item.erx, notes: item.notes })
           const sid = (item.supplierId ?? "").toString().trim()
+
+          const sigOf = (x: CartItem) => x.lineSignature ?? prescriptionLineKey({ erx: x.erx, notes: x.notes })
 
           const matchExact = (x: CartItem) => {
             const xCode = (x.itemCode ?? x.id).toString().trim()
-            const xUnit = (x.selectedUnit ?? x.unit) ?? ""
-            return (x.supplierId ?? "").toString().trim() === sid && xCode === productCode && (x.selectedUnit ?? x.unit) === selectedUnit
+            return (
+              (x.supplierId ?? "").toString().trim() === sid &&
+              xCode === productCode &&
+              (x.selectedUnit ?? x.unit) === selectedUnit &&
+              sigOf(x) === incomingSig
+            )
           }
           const matchByCode = (x: CartItem) => {
             const xCode = (x.itemCode ?? x.id).toString().trim()
-            return (x.supplierId ?? "").toString().trim() === sid && xCode === productCode
+            return (x.supplierId ?? "").toString().trim() === sid && xCode === productCode && sigOf(x) === incomingSig
           }
           const matchByName = (x: CartItem) => {
             const xName = (x.name ?? "").toString().trim().toLowerCase()
-            return (x.supplierId ?? "").toString().trim() === sid && xName === nameKey && nameKey !== ""
+            return (x.supplierId ?? "").toString().trim() === sid && xName === nameKey && nameKey !== "" && sigOf(x) === incomingSig
           }
 
           const existing = state.items.find(matchExact) ?? state.items.find(matchByCode) ?? state.items.find(matchByName)
@@ -152,6 +167,9 @@ export const useCartStore = create<CartState>()(
               qty: totalQty,
               price: bestPrice,
               itemCode: (first.itemCode ?? item.itemCode ?? first.id ?? item.id).toString().trim() || first.itemCode,
+              notes: first.notes ?? item.notes,
+              erx: first.erx ?? item.erx,
+              lineSignature: first.lineSignature ?? incomingSig,
             }
             return {
               items: state.items.filter((x) => !keyMatch(x)).concat([mergedLine]),
@@ -160,7 +178,14 @@ export const useCartStore = create<CartState>()(
           // Ensure price is always a number (API may send string or omit)
           const rawPrice = item.price
           const priceNum = typeof rawPrice === "number" && Number.isFinite(rawPrice) ? rawPrice : Number(String(rawPrice ?? "").replace(/[^\d.-]/g, "")) || 0
-          const withCode = { ...item, price: priceNum, selectedUnit, qty, itemCode: (item.itemCode ?? item.id).toString().trim() || undefined }
+          const withCode: CartItem = {
+            ...item,
+            price: priceNum,
+            selectedUnit,
+            qty,
+            itemCode: (item.itemCode ?? item.id).toString().trim() || undefined,
+            lineSignature: incomingSig,
+          }
           return { items: [...state.items, withCode] }
         })
 
@@ -213,19 +238,27 @@ export const useCartStore = create<CartState>()(
           const selectedUnit = item.selectedUnit ?? item.unit
           const productCode = (item.itemCode ?? item.id).toString().trim()
           const nameKey = (item.name ?? "").toString().trim().toLowerCase()
+          const incomingSig = prescriptionLineKey({ erx: item.erx, notes: item.notes })
           const sid = (item.supplierId ?? "").toString().trim()
+
+          const sigOf = (x: CartItem) => x.lineSignature ?? prescriptionLineKey({ erx: x.erx, notes: x.notes })
 
           const matchExact = (x: CartItem) => {
             const xCode = (x.itemCode ?? x.id).toString().trim()
-            return (x.supplierId ?? "").toString().trim() === sid && xCode === productCode && (x.selectedUnit ?? x.unit) === selectedUnit
+            return (
+              (x.supplierId ?? "").toString().trim() === sid &&
+              xCode === productCode &&
+              (x.selectedUnit ?? x.unit) === selectedUnit &&
+              sigOf(x) === incomingSig
+            )
           }
           const matchByCode = (x: CartItem) => {
             const xCode = (x.itemCode ?? x.id).toString().trim()
-            return (x.supplierId ?? "").toString().trim() === sid && xCode === productCode
+            return (x.supplierId ?? "").toString().trim() === sid && xCode === productCode && sigOf(x) === incomingSig
           }
           const matchByName = (x: CartItem) => {
             const xName = (x.name ?? "").toString().trim().toLowerCase()
-            return (x.supplierId ?? "").toString().trim() === sid && xName === nameKey && nameKey !== ""
+            return (x.supplierId ?? "").toString().trim() === sid && xName === nameKey && nameKey !== "" && sigOf(x) === incomingSig
           }
 
           const idx = state.items.findIndex(matchExact)
@@ -242,33 +275,55 @@ export const useCartStore = create<CartState>()(
               ...first,
               qty: totalQty,
               itemCode: (first.itemCode ?? item.itemCode ?? first.id ?? item.id).toString().trim() || first.itemCode,
+              notes: first.notes ?? item.notes,
+              erx: first.erx ?? item.erx,
+              lineSignature: first.lineSignature ?? incomingSig,
             }
             return {
               items: state.items.filter((x) => !keyMatch(x)).concat([mergedLine]),
             }
           }
-          const withCode = { ...item, selectedUnit, qty, itemCode: (item.itemCode ?? item.id).toString().trim() || undefined }
+          const withCode: CartItem = {
+            ...item,
+            selectedUnit,
+            qty,
+            itemCode: (item.itemCode ?? item.id).toString().trim() || undefined,
+            lineSignature: incomingSig,
+          }
           return { items: [...state.items, withCode] }
         }),
 
-      inc: (id, selectedUnit) =>
-        set((s) => ({
-          items: s.items.map((x) => (x.id === id && x.selectedUnit === selectedUnit ? { ...x, qty: x.qty + 1 } : x)),
-        })),
-
-      dec: (id, selectedUnit) =>
+      inc: (id, selectedUnit, lineSignature) =>
         set((s) => ({
           items: s.items.map((x) => {
-            if (x.id === id && x.selectedUnit === selectedUnit) {
+            const sig = x.lineSignature ?? prescriptionLineKey({ erx: x.erx, notes: x.notes })
+            const matchSig = (lineSignature ?? "") === (sig || "")
+            if (x.id === id && x.selectedUnit === selectedUnit && matchSig) {
+              return { ...x, qty: x.qty + 1 }
+            }
+            return x
+          }),
+        })),
+
+      dec: (id, selectedUnit, lineSignature) =>
+        set((s) => ({
+          items: s.items.map((x) => {
+            const sig = x.lineSignature ?? prescriptionLineKey({ erx: x.erx, notes: x.notes })
+            const matchSig = (lineSignature ?? "") === (sig || "")
+            if (x.id === id && x.selectedUnit === selectedUnit && matchSig) {
               return { ...x, qty: Math.max(1, x.qty - 1) } // clamp at 1; use remove() to drop
             }
             return x
           }),
         })),
 
-      remove: (id, selectedUnit) =>
+      remove: (id, selectedUnit, lineSignature) =>
         set((s) => ({
-          items: s.items.filter((x) => !(x.id === id && x.selectedUnit === selectedUnit)),
+          items: s.items.filter((x) => {
+            const sig = x.lineSignature ?? prescriptionLineKey({ erx: x.erx, notes: x.notes })
+            const matchSig = (lineSignature ?? "") === (sig || "")
+            return !(x.id === id && x.selectedUnit === selectedUnit && matchSig)
+          }),
         })),
 
       clear: () => set({ items: [], payment: {}, tableInfo: null }),  // ✅ Clear table info too
@@ -299,6 +354,9 @@ export const useCartStore = create<CartState>()(
             const existingIdx = merged.findIndex((m) => {
               const msid = (m.supplierId ?? "").toString().trim()
               if (msid !== sid) return false
+              const mSig = m.lineSignature ?? prescriptionLineKey({ erx: m.erx, notes: m.notes })
+              const itSig = it.lineSignature ?? prescriptionLineKey({ erx: it.erx, notes: it.notes })
+              if (mSig !== itSig) return false
               const mCode = (m.itemCode ?? m.id).toString().trim()
               if (code && mCode === code) return true
               const mName = (m.name ?? "").toString().trim().toLowerCase()
@@ -311,6 +369,9 @@ export const useCartStore = create<CartState>()(
                 ...cur,
                 qty: cur.qty + it.qty,
                 itemCode: (cur.itemCode ?? it.itemCode ?? cur.id ?? it.id).toString().trim() || cur.itemCode,
+                erx: cur.erx ?? it.erx,
+                notes: cur.notes ?? it.notes,
+                lineSignature: cur.lineSignature ?? it.lineSignature,
               }
             } else {
               merged.push({ ...it, itemCode: (it.itemCode ?? it.id).toString().trim() || it.itemCode })

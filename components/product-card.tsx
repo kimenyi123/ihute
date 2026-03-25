@@ -14,6 +14,8 @@ import { cn } from "@/lib/utils"
 import { useToast } from "@/components/ui/use-toast"
 import { PriceWatchButton } from "@/components/price-watch-button"
 import { getProductImageSrc, getProductImageUrl, isValidImageUrl, NO_IMAGE_URL } from "@/lib/image-utils"
+import { ErxPrescriptionDialog } from "@/components/erx-prescription-dialog"
+import { serializeErxForNotes } from "@/lib/erx-prescription"
 import { ProductBadges, ProductTrustSignals } from "@/components/product-badges"
 import type { ProductBadgeType } from "@/components/product-badges"
 
@@ -63,10 +65,13 @@ export function ProductCard({
   product,
   navigateAfterAdd = false,
   compact = false,
+  /** Pharmacy sector (/category_ai/pharmacy): open eRx form before add to cart */
+  pharmacyErx = false,
 }: {
   product: Product
   navigateAfterAdd?: boolean
   compact?: boolean
+  pharmacyErx?: boolean
 }) {
   const router = useRouter()
   const addOrInc = useCartStore((s) => s.addOrInc ?? s.addItem)
@@ -104,6 +109,7 @@ export function ProductCard({
   const checkPriceDrop = usePriceWatchStore((s) => s.checkPriceDrop)
   const [imgError, setImgError] = useState(false)
   const [fallbackSrc, setFallbackSrc] = useState<string | null>(null)
+  const [erxOpen, setErxOpen] = useState(false)
   const placeholder = "/placeholder.svg?height=300&width=300"
 
   // Primary: KAOS-based URL (famille + item_key_words, then flat NIKI code, then backend URL, then KAOS no_image)
@@ -167,7 +173,36 @@ export function ProductCard({
     }
   }, [id, supplierId, price, name, checkPriceDrop, toast])
 
+  const addProductToCart = () => {
+    addOrInc(
+      {
+        id,
+        itemCode: itemCode ?? id,
+        name,
+        price,
+        unit,
+        image,
+        supplierId: (supplierId || "unknown").toString().trim(),
+        supplierName: supplierName || "Supplier",
+        supplierLocation,
+        momo,
+        selectedUnit: unit,
+      },
+      1
+    )
+    if (navigateAfterAdd) {
+      router.push("/cart")
+    } else {
+      toast({
+        title: "Added to cart",
+        description: name,
+        duration: 2000,
+      })
+    }
+  }
+
   return (
+    <>
     <Card className={cn("group h-full overflow-hidden transition-all hover:shadow-lg", compact && "border shadow-sm")}>
       <div className={cn("relative w-full bg-muted", compact ? "aspect-[4/5]" : "aspect-square")}>
         {showPlaceholderIcon ? (
@@ -315,31 +350,11 @@ export function ProductCard({
           onClick={(e) => {
             e.stopPropagation()
             trackClick("product", id, name)
-            addOrInc(
-              {
-                id,
-                itemCode: itemCode ?? id,
-                name,
-                price,
-                unit,
-                image,
-                supplierId: (supplierId || "unknown").toString().trim(),
-                supplierName: supplierName || "Supplier",
-                supplierLocation,
-                momo,
-                selectedUnit: unit,
-              },
-              1
-            )
-            if (navigateAfterAdd) {
-              router.push("/cart")
-            } else {
-              toast({
-                title: "Added to cart",
-                description: name,
-                duration: 2000,
-              })
+            if (pharmacyErx) {
+              setErxOpen(true)
+              return
             }
+            addProductToCart()
           }}
         >
           ⚡ Buy Now
@@ -358,5 +373,43 @@ export function ProductCard({
         </div>
       </CardContent>
     </Card>
+    {pharmacyErx && (
+      <ErxPrescriptionDialog
+        open={erxOpen}
+        onOpenChange={setErxOpen}
+        productName={name}
+        prefillSource={product as Record<string, unknown>}
+        onConfirm={(erx) => {
+          addOrInc(
+            {
+              id,
+              itemCode: itemCode ?? id,
+              name,
+              price,
+              unit,
+              image,
+              supplierId: (supplierId || "unknown").toString().trim(),
+              supplierName: supplierName || "Supplier",
+              supplierLocation,
+              momo,
+              selectedUnit: unit,
+              erx,
+              notes: serializeErxForNotes(erx),
+            },
+            1
+          )
+          if (navigateAfterAdd) {
+            router.push("/cart")
+          } else {
+            toast({
+              title: "Added to cart",
+              description: name,
+              duration: 2000,
+            })
+          }
+        }}
+      />
+    )}
+    </>
   )
 }

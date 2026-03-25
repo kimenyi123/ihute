@@ -53,6 +53,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { type ErxPrescription, serializeErxForNotes } from "@/lib/erx-prescription";
+import { ErxPrescriptionDialog } from "@/components/erx-prescription-dialog";
 import {
   Sheet,
   SheetContent,
@@ -1645,6 +1647,7 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
                                 supplierId={currentSeller.ISHYIGA_ACCOUNT || ""}
                                 isDeliveryShop={isDeliveryShop}
                                 isBarOrRestaurant={isBarOrRestaurant}
+                                isPharmacy={isPharmacy}
                                 hasTableContext={hasTableContext}
                                 customerName={customerName}
                                 customerAddress={customerAddress}
@@ -1895,6 +1898,7 @@ function ProductCard({
   supplierId,
   isDeliveryShop,
   isBarOrRestaurant,
+  isPharmacy,
   hasTableContext,
   customerName,
   customerAddress,
@@ -1907,6 +1911,7 @@ function ProductCard({
   supplierId: string;
   isDeliveryShop: boolean;
   isBarOrRestaurant?: boolean;
+  isPharmacy?: boolean;
   /** When false (only nickname in URL), normal shop: add to cart and checkout without table info. */
   hasTableContext?: boolean;
   customerName: string;
@@ -1936,6 +1941,22 @@ function ProductCard({
     (imageUrl.startsWith("http://") || imageUrl.startsWith("https://") || imageUrl.startsWith("/"));
   const [imgError, setImgError] = useState(false);
   const fav = isFavorite(itemCode);
+  const [erxOpen, setErxOpen] = useState(false);
+
+  const pickField = (...keys: string[]) => {
+    for (const k of keys) {
+      const v = p[k];
+      if (v != null && String(v).trim()) return String(v).trim();
+    }
+    return "";
+  };
+
+  const pharmacyViewFields = {
+    dosage: pickField("dosage", "DOSAGE"),
+    inn: pickField("inn", "INN", "item_name"),
+    form: pickField("form", "FORM", "measurement", "MEASUREMENT"),
+    pack: pickField("package", "PACKAGE", "item_emballage"),
+  };
 
   useEffect(() => {
     setImgError(false);
@@ -1948,7 +1969,7 @@ function ProductCard({
     });
   }, [itemCode, productName, supplierId]);
 
-  const handleAddToCart = () => {
+  const pushToCart = (qty = 1, erx?: ErxPrescription) => {
     // Only require table/customer info when we're in table context (table/customer/address in URL).
     const needsInfo = hasTableContext && (isDeliveryShop || isBarOrRestaurant);
     if (needsInfo && (!customerName || !customerAddress)) {
@@ -1986,8 +2007,10 @@ function ProductCard({
         momo: product.momo,
         selectedUnit: "pcs",
         isBarResto: isBarOrRestaurant,
+        erx,
+        notes: erx ? serializeErxForNotes(erx) : undefined,
       },
-      1
+      Math.max(1, qty)
     );
 
     toast({
@@ -1995,6 +2018,10 @@ function ProductCard({
       description: productName,
       duration: 2000,
     });
+  };
+
+  const openErxDialog = () => {
+    setErxOpen(true);
   };
 
   const handleToggleFavorite = (e: React.MouseEvent) => {
@@ -2065,6 +2092,14 @@ function ProductCard({
       <CardContent className="p-3 flex flex-col gap-2">
         <div className="min-h-[2.5rem]">
           <h3 className="text-sm font-semibold leading-tight line-clamp-2">{displayName}</h3>
+          {isPharmacy && (
+            <div className="mt-1 space-y-0.5 text-[11px] text-muted-foreground">
+              {pharmacyViewFields.dosage && <p>Dosage: {pharmacyViewFields.dosage}</p>}
+              {pharmacyViewFields.inn && <p>INN: {pharmacyViewFields.inn}</p>}
+              {pharmacyViewFields.form && <p>Form: {pharmacyViewFields.form}</p>}
+              {pharmacyViewFields.pack && <p>Package: {pharmacyViewFields.pack}</p>}
+            </div>
+          )}
           {moodMeta.text && moodMetaType !== "discounted" && (
             <p className="text-xs text-muted-foreground mt-0.5" data-mood-subline>{moodMeta.text}</p>
           )}
@@ -2112,7 +2147,11 @@ function ProductCard({
           className="mt-1 w-full bg-[#1e3a5f] hover:bg-[#2c4f7c]"
           onClick={(e) => {
             e.stopPropagation();
-            handleAddToCart();
+            if (isPharmacy) {
+              openErxDialog();
+            } else {
+              pushToCart();
+            }
           }}
         >
           {hasTableContext && (isDeliveryShop || isBarOrRestaurant) && (!customerName || !customerAddress)
@@ -2122,6 +2161,14 @@ function ProductCard({
             : "Buy Now"}
         </Button>
       </CardContent>
+
+      <ErxPrescriptionDialog
+        open={erxOpen}
+        onOpenChange={setErxOpen}
+        productName={productName}
+        prefillSource={p as Record<string, unknown>}
+        onConfirm={(erx) => pushToCart(1, erx)}
+      />
     </Card>
   );
 }

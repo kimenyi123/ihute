@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { useCartStore, CartItem } from "@/lib/cart-store"
+import { parseErxFromNotes, prescriptionLineKey } from "@/lib/erx-prescription"
 import { Minus, Plus, Trash2 } from "lucide-react"
 import { getProductImageSrc, isValidImageUrl, NO_IMAGE_URL } from "@/lib/image-utils"
 
@@ -20,6 +21,9 @@ export function CartItemCard({ item }: { item: CartItem }) {
   // When no image or load error, show KAOS "no image" graphic instead of grey placeholder
   const src = !imgError && hasValidUrl ? resolvedUrl : NO_IMAGE_URL
   const isRemote = /^https?:\/\//i.test(src)
+
+  const erx = item.erx ?? parseErxFromNotes(item.notes ?? undefined)
+  const lineSig = item.lineSignature ?? prescriptionLineKey({ erx: item.erx, notes: item.notes })
 
   useEffect(() => {
     setImgError(false)
@@ -56,6 +60,20 @@ export function CartItemCard({ item }: { item: CartItem }) {
             {item.supplierName}
             {item.supplierLocation ? ` · ${item.supplierLocation}` : ""}
           </div>
+          {erx && (
+            <div className="text-[11px] text-muted-foreground mt-1.5 space-y-0.5 border-l-2 border-primary/30 pl-2">
+              <p className="font-medium text-foreground/80">Prescription</p>
+              <p>Measurement: {erx.measurement}</p>
+              <p>Every: {erx.every}</p>
+              {erx.toBeTakenDays ? <p>Duration (days): {erx.toBeTakenDays}</p> : null}
+              {erx.quantityOnce ? <p>Qty (once): {erx.quantityOnce}</p> : null}
+              <p>Route: {erx.route}</p>
+              <p>Refill: {erx.refill}</p>
+              {erx.instructionNotes ? (
+                <p className="line-clamp-3">Instructions: {erx.instructionNotes}</p>
+              ) : null}
+            </div>
+          )}
           <div className="text-sm mt-1">
             {Number(item.price) > 0
               ? `${Number(item.price).toLocaleString()} ${item.unit ? ` / ${item.unit}` : "RWF"}`
@@ -69,7 +87,7 @@ export function CartItemCard({ item }: { item: CartItem }) {
           <Button
             size="icon"
             variant="outline"
-            onClick={() => dec(item.id, item.selectedUnit)}
+            onClick={() => dec(item.id, item.selectedUnit, lineSig)}
             aria-label="Decrease"
             className="h-8 w-8"
           >
@@ -79,7 +97,7 @@ export function CartItemCard({ item }: { item: CartItem }) {
           <Button
             size="icon"
             variant="outline"
-            onClick={() => inc(item.id, item.selectedUnit)}
+            onClick={() => inc(item.id, item.selectedUnit, lineSig)}
             aria-label="Increase"
             className="h-8 w-8"
           >
@@ -97,7 +115,7 @@ export function CartItemCard({ item }: { item: CartItem }) {
           <Button
             size="icon"
             variant="ghost"
-            onClick={() => remove(item.id, item.selectedUnit)}
+            onClick={() => remove(item.id, item.selectedUnit, lineSig)}
             aria-label="Remove"
             className="h-8 w-8"
           >
