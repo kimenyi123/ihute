@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 
 const RID_HEADER = "x-request-id"
 import { getOrdersUrl } from "@/lib/backend-config"
+import { mapBackendOrderStatusToTrack, type TrackOrderStatus } from "@/lib/order-status-map"
 
 function rid() {
   return Math.random().toString(36).slice(2, 12)
@@ -11,7 +12,7 @@ function log(requestId: string, ...args: any[]) {
   console.log(`[RID ${requestId}]`, ...args)
 }
 
-type OrderStatus = "open" | "pending" | "processing" | "invoice" | "in-transit" | "delivered"
+type OrderStatus = TrackOrderStatus
 
 type StatusHistoryEntry = {
   status: OrderStatus
@@ -20,26 +21,7 @@ type StatusHistoryEntry = {
 }
 
 function mapPaymentToStatus(orderStatus?: string, paymentStatus?: string): OrderStatus {
-  // Priority 1: Check ORDER_STATUS if it exists
-  if (orderStatus) {
-    const s = orderStatus.toLowerCase()
-    if (s.includes("delivered") || s.includes("completed")) return "delivered"
-    if (s.includes("transit") || s.includes("shipped") || s.includes("out")) return "in-transit"
-    if (s.includes("invoice")) return "invoice"
-    if (s.includes("processing") || s.includes("preparing")) return "processing"
-    if (s.includes("open")) return "open"
-  }
-
-  // Priority 2: Check PAYMENT_STATUS
-  if (paymentStatus) {
-    const p = paymentStatus.toLowerCase()
-    if (p === "paid" || p === "success") return "processing"
-    if (p === "pending") return "pending"
-    if (p === "failed") return "open"
-  }
-
-  // Default to open
-  return "open"
+  return mapBackendOrderStatusToTrack(orderStatus, paymentStatus)
 }
 
 /**
@@ -54,7 +36,6 @@ function buildStatusHistory(
   updatedAt?: string
 ): StatusHistoryEntry[] {
   const history: StatusHistoryEntry[] = []
-  const now = new Date().toISOString()
   const createdTime = new Date(createdAt).getTime()
 
   // Always add the "open" status when order was created
@@ -103,15 +84,6 @@ function buildStatusHistory(
       status,
       timestamp,
       note
-    })
-  }
-
-  // If we have explicit ORDER_STATUS that differs from our mapped status, add it
-  if (orderStatus && orderStatus !== currentStatus) {
-    history.push({
-      status: currentStatus,
-      timestamp: updatedAt || now,
-      note: `Status: ${orderStatus}`
     })
   }
 

@@ -26,13 +26,33 @@ export function getBackendBase(): string {
   return raw
 }
 
+/**
+ * OrdersServlet is deployed under the Kaos web path, e.g. .../Trading/Kaos/OrdersServlet.
+ * If JAVA_ORDERS_URL was set to .../Trading/OrdersServlet (missing Kaos), fix it so local .env mistakes still work.
+ */
+function normalizeOrdersServletUrl(url: string): string {
+  const t = url.trim()
+  if (!t || t.includes("/Kaos/OrdersServlet")) return t
+  try {
+    const u = new URL(t)
+    const p = u.pathname
+    if (p.endsWith("/OrdersServlet") && !p.includes("/Kaos/")) {
+      u.pathname = `${p.slice(0, -"OrdersServlet".length)}Kaos/OrdersServlet`
+      return u.toString()
+    }
+  } catch {
+    /* not a full URL */
+  }
+  return t
+}
+
 /** Optional override or derived from base. */
 export function getOrdersUrl(): string {
-  return (
+  const raw =
     process.env.JAVA_ORDERS_URL ||
     process.env.JAVA_SERVLET_URL ||
     `${getBackendBase()}/Kaos/OrdersServlet`
-  )
+  return normalizeOrdersServletUrl(raw)
 }
 
 /** Java post_orders endpoint (XML transaction payload). */

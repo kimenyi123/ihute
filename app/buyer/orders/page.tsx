@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select"
 import { useOrdersStore, type Order } from "@/lib/orders-store"
 import { isInvoiceFinanced, canRequestInvoiceFinancing } from "@/lib/order-financing"
+import { mapBackendOrderStatusToStore } from "@/lib/order-status-map"
 
 type RawTxn = {
   ID_ORDER?: string
@@ -64,13 +65,7 @@ function toIso(v?: number | string) {
 }
 
 function mapOrderStatus(raw?: string): Order["status"] {
-  const s = (raw || "").toLowerCase()
-  if (s === "delivered") return "delivered"
-  if (s === "cancelled" || s === "canceled") return "cancelled"
-  if (s === "open") return "open"
-  if (s === "processing" || s === "in-transit") return s as Order["status"]
-  if (s === "invoice") return "invoice"
-  return "pending"
+  return mapBackendOrderStatusToStore(raw)
 }
 
 function mapPaymentStoreStatus(raw?: string): Order["paymentStatus"] {
