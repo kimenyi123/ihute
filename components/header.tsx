@@ -121,7 +121,7 @@ export function Header() {
             <LanguageSelector />
 
             {/* Notification Bell - Shows for buyers only (suppliers have unified notification) */}
-            {isAuthenticated && user?.role !== "supplier" && <NotificationBell />}
+            {isAuthenticated && (user?.role !== "supplier" || user?.dualPharmacyRetail) && <NotificationBell />}
 
             {isAuthenticated ? (
               <>
@@ -193,7 +193,7 @@ export function Header() {
                 )}
 
                 {/* Customer Orders */}
-                {user?.role !== "supplier" && (
+            {(user?.role !== "supplier" || user?.dualPharmacyRetail) && (
                   <>
                     <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Orders">
                       <Link href="/buyer/orders">

@@ -126,7 +126,7 @@ export default function RegisterPage() {
       if (role === "seller") {
         setShowPendingModal(true)
       } else {
-        const storeRole: UserRole = "customer"
+        const storeRole: UserRole = json?.dualPharmacyRetail ? "supplier" : "customer"
         const newUser = {
           id: json.user.email,
           email: json.user.email,
@@ -135,6 +135,9 @@ export default function RegisterPage() {
           phone: formData.phone,
           location: formData.location,
           ishyigaAccount: json.ishyiga,
+          dbRole: json?.dbRole ?? json?.role,
+          dualPharmacyRetail: !!json?.dualPharmacyRetail,
+          pharmacySector: !!json?.pharmacySector,
         }
         login(newUser)
         router.push("/")

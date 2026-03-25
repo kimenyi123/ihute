@@ -1,12 +1,13 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Menu, X, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { UnifiedNotification } from "@/components/unified-notification";
 import { useAuthStore } from "@/lib/auth-store";
+import { isRestoBarPreferredCategories } from "@/lib/supplier-sector";
 
 export default function SupplierLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -18,19 +19,63 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
   const logout = useAuthStore((state) => state.logout);
   const login = useAuthStore((state) => state.login);
 
-  const menu = [
-    { name: "Dashboard", href: "/supplier/dashboard" },
-    // { name: "My Products", href: "/supplier/products" },
-    { name: "Orders", href: "/supplier/orders" },
-    { name: "Self Ordering", href: "/supplier/self-ordering" },
-    { name: "Tables", href: "/supplier/tables" },
-    { name: "Ratings", href: "/supplier/ratings" },
-    { name: "Rekizisiyo / Kurangura byinshi", href: "/supplier/b2b" },
-    { name: "Expenses", href: "/supplier/expenses" },
-    { name: "Upload Stock", href: "/supplier/products/add" },
-    { name: "Scan Menu", href: "/supplier/scan-menu" },
-    { name: "Settings", href: "/supplier/settings/location" },
-  ];
+  /**
+   * Self Ordering + Tables are restaurant/bar features only (see PREFEREDCATEGORIES).
+   * Opt-in when profile looks like bar/restaurant; never show if auth flagged pharmacySector.
+   */
+  const [showRestoKioskNav, setShowRestoKioskNav] = useState(false);
+
+  useEffect(() => {
+    if (!hasHydrated || !isAuthenticated || !user?.ishyigaAccount || user.role !== "supplier") {
+      setShowRestoKioskNav(false);
+      return;
+    }
+
+    let cancelled = false;
+    fetch(`/api/supplier/profile?account=${encodeURIComponent(user.ishyigaAccount)}`, {
+      cache: "no-store",
+    })
+      .then((res) => res.json())
+      .then((data: { preferredCategories?: string }) => {
+        if (cancelled) return;
+        setShowRestoKioskNav(isRestoBarPreferredCategories(data?.preferredCategories));
+      })
+      .catch(() => {
+        if (!cancelled) setShowRestoKioskNav(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hasHydrated, isAuthenticated, user?.ishyigaAccount, user?.role]);
+
+  const menu = useMemo(() => {
+    const showDualPurchases = !!user?.dualPharmacyRetail;
+    const showRestoSupplierLinks = showRestoKioskNav && user?.pharmacySector !== true;
+
+    const items: { name: string; href: string }[] = [
+      { name: "Dashboard", href: "/supplier/dashboard" },
+      { name: "Orders", href: "/supplier/orders" },
+    ];
+    if (showDualPurchases) {
+      items.push({ name: "My purchases", href: "/buyer/orders" });
+    }
+    if (showRestoSupplierLinks) {
+      items.push(
+        { name: "Self Ordering", href: "/supplier/self-ordering" },
+        { name: "Tables", href: "/supplier/tables" },
+      );
+    }
+    items.push(
+      { name: "Ratings", href: "/supplier/ratings" },
+      { name: "Rekizisiyo / Kurangura byinshi", href: "/supplier/b2b" },
+      { name: "Expenses", href: "/supplier/expenses" },
+      { name: "Upload Stock", href: "/supplier/products/add" },
+      { name: "Scan Menu", href: "/supplier/scan-menu" },
+      { name: "Settings", href: "/supplier/settings/location" },
+    );
+    return items;
+  }, [user?.dualPharmacyRetail, user?.pharmacySector, showRestoKioskNav]);
 
   const closeSidebar = useCallback(() => {
     setSidebarOpen(false);

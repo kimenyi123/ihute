@@ -6,7 +6,15 @@ import { useAuthStore } from "@/lib/auth-store"
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { useOrdersStore, type Order } from "@/lib/orders-store"
+import { isInvoiceFinanced, canRequestInvoiceFinancing } from "@/lib/order-financing"
 
 type RawTxn = {
   ID_ORDER?: string
@@ -15,6 +23,9 @@ type RawTxn = {
   SELLER_ISHYIGA_ACCOUNT?: string
   AMOUNT?: number
   ORDER_STATUS?: string
+  PAYMENT_STATUS?: string
+  PAYMENT_NAME?: string
+  REKISIYO_STATUS?: string
   CREATED_AT?: number
   BUYER_OWNER?: string
   buyerTIN?: string
@@ -23,6 +34,25 @@ type RawTxn = {
   SELLER_TIN?: string
   subtotal?: number
   BUYER_ISHYIGA_ACCOUNT?: string
+  /** Backend may use camelCase or other keys; indexed access in pickRawStr */
+  [key: string]: unknown
+}
+
+/** First non-empty string among known backend key spellings (legacy list payloads vary). */
+function pickRawStr(raw: RawTxn, ...keys: string[]): string {
+  const o = raw as Record<string, unknown>
+  for (const k of keys) {
+    const v = o[k]
+    if (v != null && String(v).trim() !== "") return String(v).trim()
+  }
+  return ""
+}
+
+/** Java list rows use PAYMENT_STATUS; only fall back to alternate keys if it is missing. */
+function paymentStatusFromRaw(raw: RawTxn): string {
+  const direct = raw.PAYMENT_STATUS
+  if (direct != null && String(direct).trim() !== "") return String(direct).trim()
+  return pickRawStr(raw, "payment_status", "paymentStatus", "PaymentStatus")
 }
 
 function toIso(v?: number | string) {
@@ -37,12 +67,71 @@ function mapOrderStatus(raw?: string): Order["status"] {
   const s = (raw || "").toLowerCase()
   if (s === "delivered") return "delivered"
   if (s === "cancelled" || s === "canceled") return "cancelled"
+  if (s === "open") return "open"
   if (s === "processing" || s === "in-transit") return s as Order["status"]
+  if (s === "invoice") return "invoice"
   return "pending"
 }
 
-async function requestLoan(order: Order) {
-  if (order.orderStatus?.toLowerCase() !== "open") {
+function mapPaymentStoreStatus(raw?: string): Order["paymentStatus"] {
+  const p = (raw || "").toLowerCase()
+  if (p === "paid" || p.includes("umusada") || p.includes("financ")) return "paid"
+  if (p === "failed") return "failed"
+  if (p === "unpaid") return "unpaid"
+  return "pending"
+}
+
+/**
+ * Order list (fetchSuggestions) often omits or stale-fills PAYMENT_STATUS. For OPEN rows that
+ * are not already financed per the list, merge PAYMENT_STATUS from /api/orders/track so the
+ * Financing button matches getOrderDetails / buyer order view.
+ */
+async function enrichOpenOrdersPaymentFromTrack(orders: Order[]): Promise<Order[]> {
+  const targets = orders.filter(
+    (o) =>
+      (o.orderStatus ?? "").trim().toUpperCase() === "OPEN" && !isInvoiceFinanced(o.paymentStatusRaw),
+  )
+  if (targets.length === 0) return orders
+
+  const fetched = await Promise.all(
+    targets.map(async (o) => {
+      try {
+        const tr = await fetch("/api/orders/track", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ orderId: o.id }),
+          cache: "no-store",
+        })
+        const data = await tr.json()
+        if (!tr.ok || !data?.ok || !data.order) return null
+        const ps = data.order.PAYMENT_STATUS ?? data.order.paymentStatus
+        if (ps == null || String(ps).trim() === "") return null
+        return { id: o.id, payRaw: String(ps).trim() }
+      } catch {
+        return null
+      }
+    }),
+  )
+
+  const byId = new Map<string, string>()
+  for (const row of fetched) {
+    if (row?.payRaw) byId.set(row.id, row.payRaw)
+  }
+
+  return orders.map((o) => {
+    const payRaw = byId.get(o.id)
+    if (!payRaw) return o
+    return {
+      ...o,
+      paymentStatusRaw: payRaw,
+      paymentStatus: mapPaymentStoreStatus(payRaw),
+    }
+  })
+}
+
+async function requestLoan(order: Order, upsertOrder: (o: Order) => void) {
+  const financed = isInvoiceFinanced(order.paymentStatusRaw)
+  if (!canRequestInvoiceFinancing(order.orderStatus, financed)) {
     alert(`Financing not allowed for orders with status "${order.orderStatus}"`)
     return
   }
@@ -80,6 +169,12 @@ async function requestLoan(order: Order) {
 
     const result = await res.json()
     if (res.ok && result.success) {
+      upsertOrder({
+        ...order,
+        paymentStatusRaw: "UMUSADA",
+        paymentStatus: "paid",
+        paymentName: order.paymentName || "UMUSADA",
+      })
       alert(
         `✅ Loan request submitted\n\n` +
           `Order #: ${order.id}\n` +
@@ -104,8 +199,10 @@ export default function BuyerOrdersPage() {
   const [pageSize, setPageSize] = useState(10)
   const [total, setTotal] = useState<number | null>(null)
   const [search, setSearch] = useState("")
+  const [statusFilter, setStatusFilter] = useState<string>("all")
   const orders = useOrdersStore((s) => s.orders)
   const setOrders = useOrdersStore((s) => s.setOrders)
+  const upsertOrder = useOrdersStore((s) => s.upsertOrder)
 
   useEffect(() => {
     if (!isAuthenticated) router.push("/login")
@@ -137,7 +234,9 @@ export default function BuyerOrdersPage() {
               ? json.orders
               : []
 
-          const finalOrders: Order[] = rawList.map((raw) => ({
+          const finalOrders: Order[] = rawList.map((raw) => {
+            const payRaw = paymentStatusFromRaw(raw)
+            return {
             id: raw.ID_ORDER?.toString() || crypto.randomUUID(),
             buyerName: raw.BUYER_NAME || "Unknown Buyer",
             buyerOwner: raw.BUYER_OWNER || user?.owner || "N/A",
@@ -147,17 +246,20 @@ export default function BuyerOrdersPage() {
             sellerName: raw.SELLER_NAMES || "Unknown Seller",
             seller: raw.SELLER_NAMES || "Unknown Seller",
             amount: raw.AMOUNT ?? 0,
-            orderStatus: raw.ORDER_STATUS || "NA",
+            orderStatus: (raw.ORDER_STATUS ?? "").toString().trim() || "—",
             status: mapOrderStatus(raw.ORDER_STATUS),
-            paymentStatus: "pending",
+            paymentStatus: mapPaymentStoreStatus(payRaw),
+            paymentStatusRaw: payRaw,
             createdAt: toIso(raw.CREATED_AT),
             items: [],
             subtotal: raw.subtotal ?? raw.AMOUNT ?? 0,
             buyerTIN: raw.buyerTIN || raw.BUYER_TIN || "",
             supplierTIN: raw.SUPPLIER_TIN || raw.SELLER_TIN || "",
-          }))
+          }
+          })
 
-          setOrders(finalOrders)
+          const enriched = await enrichOpenOrdersPaymentFromTrack(finalOrders)
+          setOrders(enriched)
           setTotal(json.count ?? null)
         }
       } catch (e: any) {
@@ -170,16 +272,34 @@ export default function BuyerOrdersPage() {
     load()
   }, [user?.email, page, pageSize, setOrders, user?.owner])
 
+  const distinctStatuses = useMemo(() => {
+    const set = new Set<string>()
+    for (const o of orders) {
+      const st = (o.orderStatus ?? "").trim()
+      if (st && st !== "—") set.add(st)
+    }
+    return Array.from(set).sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: "base" }),
+    )
+  }, [orders])
+
   const filteredOrders = useMemo(() => {
-    if (!search) return orders
+    let list = orders
+    if (statusFilter !== "all") {
+      list = list.filter(
+        (o) =>
+          (o.orderStatus ?? "").trim().toUpperCase() === statusFilter.toUpperCase(),
+      )
+    }
+    if (!search.trim()) return list
     const s = search.toLowerCase()
-    return orders.filter(
+    return list.filter(
       (o) =>
         (o.buyerName ?? "").toLowerCase().includes(s) ||
         (o.seller ?? "").toLowerCase().includes(s) ||
-        o.id.includes(s)
+        o.id.includes(s),
     )
-  }, [orders, search])
+  }, [orders, search, statusFilter])
 
   const totalPages = useMemo(() => {
     if (!total || total <= 0) return 1
@@ -209,7 +329,10 @@ export default function BuyerOrdersPage() {
     return "bg-gray-500"
   }
 
-  const canFinance = (status?: string) => status?.toLowerCase() === "open"
+  const rowCanFinance = (o: Order) => {
+    const financed = isInvoiceFinanced(o.paymentStatusRaw)
+    return canRequestInvoiceFinancing(o.orderStatus, financed)
+  }
 
   return (
     <div className="min-h-screen w-full flex flex-col bg-slate-50">
@@ -218,7 +341,7 @@ export default function BuyerOrdersPage() {
       <main className="flex-1 w-full max-w-7xl mx-auto p-6">
         <h1 className="text-2xl font-bold mb-4 text-slate-800">Order Reports</h1>
 
-        <div className="mb-4 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
+        <div className="mb-4 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2">
           <input
             type="text"
             placeholder="Search by buyer, seller, or order ID..."
@@ -226,6 +349,19 @@ export default function BuyerOrdersPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-full sm:w-[200px] border-slate-300">
+              <SelectValue placeholder="Filter by status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All statuses</SelectItem>
+              {distinctStatuses.map((st) => (
+                <SelectItem key={st} value={st}>
+                  {st}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         {loading && <p className="text-slate-600">Loading...</p>}
@@ -256,6 +392,7 @@ export default function BuyerOrdersPage() {
                     <td className="px-4 py-3">
                       <span
                         className={`px-2 py-1 rounded text-white text-sm ${getStatusColor(o.orderStatus)}`}
+                        title="Status from your account orders (backend)"
                       >
                         {o.orderStatus}
                       </span>
@@ -269,12 +406,12 @@ export default function BuyerOrdersPage() {
                       <Button
                         size="sm"
                         className={
-                          !canFinance(o.orderStatus)
+                          !rowCanFinance(o)
                             ? "opacity-50 cursor-not-allowed bg-blue-600 hover:bg-blue-600"
                             : "bg-blue-600 hover:bg-blue-700"
                         }
-                        onClick={() => requestLoan(o)}
-                        disabled={!canFinance(o.orderStatus)}
+                        onClick={() => requestLoan(o, upsertOrder)}
+                        disabled={!rowCanFinance(o)}
                       >
                         Financing
                       </Button>
