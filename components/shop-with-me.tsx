@@ -443,6 +443,39 @@ function getItemCode(product: ShopWithMeProduct): string {
   return String(p.ITEM_CODE ?? p.item_code ?? p.item_key_words ?? "").trim() || "";
 }
 
+type SharedCartItem = {
+  name: string;
+  qty: number;
+  price: number;
+  code?: string;
+};
+
+/** Parse item1/item2... from URL. Accepts: name,qty,price or name;qty;price;code */
+function parseSharedCartItems(searchParams: ReturnType<typeof useSearchParams>): SharedCartItem[] {
+  const out: SharedCartItem[] = [];
+  if (!searchParams) return out;
+  const entries = Array.from(searchParams.entries())
+    .filter(([k]) => /^item\d+$/i.test(k))
+    .sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }));
+  for (const [, raw] of entries) {
+    const decoded = decodeURIComponent(String(raw || "").trim());
+    if (!decoded) continue;
+    const parts = decoded.split(/[;,]/).map((x) => x.trim()).filter(Boolean);
+    if (parts.length < 3) continue;
+    const [name, qtyRaw, priceRaw, codeRaw] = parts;
+    const qty = Math.max(1, parseInt(qtyRaw, 10) || 1);
+    const price = Math.max(0, parseFloat(String(priceRaw).replace(/[^\d.]/g, "")) || 0);
+    if (!name) continue;
+    out.push({
+      name,
+      qty,
+      price,
+      code: codeRaw && codeRaw.length ? codeRaw : undefined,
+    });
+  }
+  return out;
+}
+
 /** API can return products as categories with nested items[]. Flatten to one product per item. item_packet = quantity (available stock). */
 function normalizeSellersProducts(sellers: ShopWithMeSeller[]): ShopWithMeSeller[] {
   return sellers.map((seller) => {
@@ -597,6 +630,7 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
   const [categoryPages, setCategoryPages] = useState<Record<string, number>>({});
 
   const cartItems = useCartStore((s) => s.items);
+  const addItem = useCartStore((s) => s.addItem);
   const cartItemCount = cartItems.reduce((sum, item) => sum + item.qty, 0);
   const setTableInfo = useCartStore((s) => s.setTableInfo);
   const clearTableInfo = useCartStore((s) => s.clearTableInfo);
@@ -604,6 +638,9 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
   const { user, isAuthenticated } = useAuthStore();
 
   const [debouncedProductSearch, setDebouncedProductSearch] = useState("");
+  const sharedItems = useMemo(() => parseSharedCartItems(searchParams), [searchParams]);
+  const sharedAppliedRef = useRef<string>("");
+  const currentSeller = selectedSeller ? sellers.find((s) => s.ISHYIGA_ACCOUNT === selectedSeller) : null;
   useEffect(() => {
     const t = setTimeout(() => setDebouncedProductSearch(productSearchQuery.trim()), 200);
     return () => clearTimeout(t);
@@ -650,6 +687,73 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
       });
     return () => { cancelled = true; };
   }, [nicknameFromUrl, debouncedProductSearch]);
+
+  // Shared-cart deep link: /shop-with-me/{shop}?item1=name;qty;price;code...
+  // Reuses existing NIKI code channel via getItemCode (ITEM_CODE -> item_code -> item_key_words).
+  useEffect(() => {
+    if (!currentSeller || sharedItems.length === 0) return;
+    const signature = `${nicknameFromUrl || ""}|${searchParams?.toString() || ""}`;
+    if (sharedAppliedRef.current === signature) return;
+    sharedAppliedRef.current = signature;
+
+    const preferredLocal = currentSeller?.PREFERRED_CATEGORIES?.toLowerCase() || "";
+    const departmentLocal = currentSeller?.DEPARTMENT?.toLowerCase() || "";
+    const nicknameLowerLocal = (nicknameFromUrl || selectedSeller || "").toString().toLowerCase().trim();
+    const isBurrowsBarLocal = nicknameLowerLocal === "burrows";
+    const isBarOrRestaurantLocal =
+      isBurrowsBarLocal ||
+      preferredLocal.includes("bar") ||
+      preferredLocal.includes("restaurant") ||
+      preferredLocal.includes("resto") ||
+      preferredLocal.includes("pub") ||
+      preferredLocal.includes("cafe") ||
+      departmentLocal.includes("bar") ||
+      departmentLocal.includes("restaurant") ||
+      departmentLocal.includes("resto") ||
+      departmentLocal.includes("pub") ||
+      departmentLocal.includes("cafe");
+
+    const list = currentSeller.products || [];
+    for (const it of sharedItems) {
+      const byCode = it.code
+        ? list.find((p) => getItemCode(p).toLowerCase() === String(it.code).toLowerCase())
+        : null;
+      const byName = byCode
+        ? byCode
+        : list.find((p) => {
+            const n = String((p as any).item_commercial_name ?? (p as any).item_name ?? "").trim().toLowerCase();
+            const target = it.name.trim().toLowerCase();
+            return n === target || n.includes(target) || target.includes(n);
+          });
+      const matched = byName || byCode || null;
+      const itemCode = matched ? getItemCode(matched) : (it.code || it.name);
+      const itemName = matched
+        ? String((matched as any).item_commercial_name ?? (matched as any).item_name ?? it.name)
+        : it.name;
+      const img = matched ? (matched.image_url ?? matched.item_image_url ?? matched.image) : undefined;
+      const unit = matched ? String((matched as any).item_packet ?? "pcs") : "pcs";
+      const price = matched
+        ? (extractNumericPrice((matched as any).selling_price ?? (matched as any).price) || it.price)
+        : it.price;
+      addItem(
+        {
+          id: itemCode,
+          itemCode,
+          name: itemName,
+          price,
+          unit,
+          selectedUnit: unit,
+          image: typeof img === "string" ? img : undefined,
+          supplierId: currentSeller.ISHYIGA_ACCOUNT || "",
+          supplierName: currentSeller.OWNER || currentSeller.SELLER_NAMES || currentSeller.NICKNAME || "Supplier",
+          supplierLocation: currentSeller.LOCATION,
+          momo: (currentSeller as any).momo,
+          isBarResto: isBarOrRestaurantLocal,
+        },
+        it.qty
+      );
+    }
+  }, [currentSeller, sharedItems, addItem, nicknameFromUrl, searchParams, selectedSeller]);
 
   // Pre-fill customer/address only from URL params (never use table name as buyer name)
   useEffect(() => {
@@ -733,8 +837,6 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
 
     router.push(`/shop-with-me/${safeNickname}${params.toString() ? `?${params.toString()}` : ""}`);
   };
-
-  const currentSeller = selectedSeller ? sellers.find((s) => s.ISHYIGA_ACCOUNT === selectedSeller) : null;
 
   const preferred = currentSeller?.PREFERRED_CATEGORIES?.toLowerCase() || "";
   const department = currentSeller?.DEPARTMENT?.toLowerCase() || "";

@@ -60,7 +60,12 @@ function nicknameLookupVariants(raw: string): string[] {
   const spaced = t.replace(/-/g, ' ').replace(/\s+/g, ' ').trim();
   const hyphenated = spaced.replace(/\s+/g, '-');
   const nospace = spaced.replace(/\s+/g, '');
-  return [...new Set([t, spaced, hyphenated, nospace].filter(Boolean))];
+  const variants = [t, spaced, hyphenated, nospace].filter(Boolean);
+  // Alias support: legacy/shared links may use pangolins-burrows while backend nickname is "burrows"
+  if (t.includes("pangolin") || spaced.includes("pangolin") || hyphenated.includes("pangolin")) {
+    variants.push("burrows");
+  }
+  return [...new Set(variants)];
 }
 
 function shopWithMeResponseLooksGood(data: any): boolean {
