@@ -31,8 +31,8 @@ jobs:
       - name: Fix vulnerable dependencies
         run: npm_config_legacy_peer_deps=true npm audit fix || true
 
-      - name: Lint (skipped - next lint not available)
-        run: echo "Skipping lint: Next.js CLI has no 'lint' command in this version."
+      - name: "Lint (skipped: next lint not available)"
+        run: echo "Skipping lint because Next.js CLI has no 'lint' command in this version."
 
       - name: Build app
         run: npm run build
