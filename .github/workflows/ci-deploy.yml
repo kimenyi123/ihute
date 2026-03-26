@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -30,7 +32,7 @@ jobs:
         run: npm_config_legacy_peer_deps=true npm audit fix || true
 
       - name: Run lint
-        run: npm run lint
+        run: npx next lint .
 
       - name: Build app
         run: npm run build
@@ -64,17 +66,17 @@ jobs:
             # Bootstrap repo into the dedicated ai folder (so other domains keep their Bitbucket deploy).
             if [ ! -d "$DEPLOY_PATH/.git" ]; then
               mkdir -p "$(dirname "$DEPLOY_PATH")"
-              git clone --branch "$REPO_BRANCH" --single-branch "$REPO_URL" "$DEPLOY_PATH"
+              git clone --branch "$REPO_BRANCH" --single-branch --no-recurse-submodules "$REPO_URL" "$DEPLOY_PATH"
             fi
 
             cd "$DEPLOY_PATH"
             # Make sure this deploy folder tracks GitHub (it may have Bitbucket as `origin` originally).
             git remote set-url origin "$REPO_URL" >/dev/null 2>&1 || git remote add origin "$REPO_URL"
-            git fetch origin "$REPO_BRANCH" --prune
+            git fetch origin "$REPO_BRANCH" --prune --no-recurse-submodules || git fetch origin "$REPO_BRANCH" --prune
             git checkout -B "$REPO_BRANCH" "origin/$REPO_BRANCH"
             npm ci --legacy-peer-deps
             npm_config_legacy_peer_deps=true npm audit fix || true
-            npm run lint
+            npx next lint .
             npm run build
             APP_NAME="${{ secrets.PM2_APP_NAME }}"
             # Ensure the process starts on the expected port used by Nginx.
