@@ -5,25 +5,44 @@
 // Get base URL and normalize it (remove trailing slashes)
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_SITE_URL || "https://ihute.rw").trim().replace(/\/+$/, "");
 
-// Helper to build URL - ensures we don't double-add /Trading
+/**
+ * Build the URL(s) to try for a given endpoint.
+ *
+ * When running in the browser the Next.js `rewrites()` in next.config.mjs
+ * proxy `/api/payment/*` and `/api/analytics/*` to the Java backend, so we
+ * use a relative URL to avoid CORS entirely.
+ *
+ * When running on the server (SSR) we need the full absolute URL because
+ * there is no Next.js redirect layer – but server-to-server calls are never
+ * blocked by CORS anyway.
+ */
 function buildUrl(endpoint: string): string[] {
-  // Remove leading slash from endpoint if present
   const cleanEndpoint = endpoint.startsWith('/') ? endpoint : '/' + endpoint;
-  
-  // Check if API_BASE_URL already contains /Trading
+
+  // In the browser: use relative URLs for payment/analytics so Next.js
+  // rewrites proxy them (server-side) → no CORS.
+  if (typeof window !== 'undefined') {
+    const isProxiedPath =
+      cleanEndpoint.startsWith('/api/payment') ||
+      cleanEndpoint.startsWith('/api/analytics');
+
+    if (isProxiedPath) {
+      return [cleanEndpoint]; // e.g. /api/payment/reports/transactions?...
+    }
+  }
+
+  // Server-side (SSR) or non-proxied paths: use full absolute URLs.
   const hasTrading = API_BASE_URL.includes('/Trading');
-  
   if (hasTrading) {
-    // If /Trading is already in base URL, just use it directly
     return [`${API_BASE_URL}${cleanEndpoint}`];
   } else {
-    // Try with /Trading first, then without
     return [
       `${API_BASE_URL}/Trading${cleanEndpoint}`,
-      `${API_BASE_URL}${cleanEndpoint}`
+      `${API_BASE_URL}${cleanEndpoint}`,
     ];
   }
 }
+
 
 export interface Transaction {
   transaction_id: string;
