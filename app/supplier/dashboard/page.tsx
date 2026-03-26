@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import AddProductModal, { ProductFormData } from "@/components/supplier/AddProductModal";
+import { isRestoBarPreferredCategories } from "@/lib/supplier-sector";
 
 const QRCode = dynamic(() => import("react-qr-code"), { ssr: false });
 
@@ -89,12 +90,7 @@ function SupplierDashboard() {
     fetch(`/api/supplier/profile?account=${encodeURIComponent(user.ishyigaAccount)}`)
       .then((res) => res.json())
       .then((data) => {
-        const raw = (data?.preferredCategories ?? "").trim().toLowerCase();
-        const isRestoBar =
-          raw === "resto-bar" ||
-          raw.includes("restaurant") ||
-          raw.includes("resto") ||
-          raw.includes("bar");
+        const isRestoBar = isRestoBarPreferredCategories(data?.preferredCategories);
         if (isRestoBar) {
           setShowBarOrRestaurantOption(true);
           setIsBarOrRestaurant(true);
@@ -457,6 +453,14 @@ function SupplierDashboard() {
                 My profile
               </Link>
             </Button>
+            {user?.dualPharmacyRetail && (
+              <Button variant="ghost" asChild className="gap-2">
+                <Link href="/buyer/orders">
+                  <Package className="h-4 w-4" />
+                  My purchases
+                </Link>
+              </Button>
+            )}
             <Button variant="outline" onClick={handleLogout} className="gap-2">
               <LogOut className="h-4 w-4" />
               Logout

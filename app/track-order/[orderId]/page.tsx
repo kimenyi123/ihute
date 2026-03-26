@@ -34,6 +34,8 @@ type OrderDetail = {
   paymentMethod: string
   paymentStatus?: string
   status: OrderStatus
+  /** Raw DB / servlet value (e.g. INVOICE>>LOADED) — shown verbatim when present */
+  ORDER_STATUS?: string
   createdAt: string
   estimatedDeliveryAt?: string
   driverPhone?: string
@@ -90,6 +92,23 @@ function paymentStatusBadge(paymentStatus?: string) {
   }
 
   return <Badge variant="outline" className="capitalize">{paymentStatus}</Badge>
+}
+
+/** Prefer raw ORDER_STATUS from the API; otherwise the friendly badge from mapped `status`. */
+function orderStatusBadge(order: Pick<OrderDetail, "status" | "ORDER_STATUS">) {
+  const raw = order.ORDER_STATUS?.trim()
+  if (raw) {
+    return (
+      <Badge
+        variant="outline"
+        className="font-mono text-xs font-normal normal-case max-w-[min(100%,28rem)] whitespace-normal break-all text-left"
+        title={raw}
+      >
+        {raw}
+      </Badge>
+    )
+  }
+  return statusBadge(order.status)
 }
 
 function buildTracking(status: OrderStatus) {
@@ -481,7 +500,7 @@ export default function TrackOrderPage() {
                   <p className="text-sm text-muted-foreground mb-2">Current Status</p>
                   <div className="flex items-center gap-2">
                     {statusIcon(order.status)}
-                    {statusBadge(order.status)}
+                    {orderStatusBadge(order)}
                   </div>
                 </div>
 

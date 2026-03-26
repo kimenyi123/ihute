@@ -17,6 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Copy, QrCode } from "lucide-react";
 import { SupplierKioskOrdersBoard } from "@/src/modules/self-order/components/SupplierKioskOrdersBoard";
 import type { KioskCategory } from "@/src/modules/self-order/types";
+import { isRestoBarPreferredCategories } from "@/lib/supplier-sector";
 
 const QRCode = dynamic(() => import("react-qr-code"), { ssr: false });
 
@@ -44,12 +45,7 @@ export default function SupplierSelfOrderingPage() {
             .then((data) => {
                 const raw = (data?.preferredCategories ?? "").trim().toLowerCase();
                 setPreferredCategoriesRaw(raw);
-                const isRestoBar =
-                    raw === "resto-bar" ||
-                    raw.includes("restaurant") ||
-                    raw.includes("resto") ||
-                    raw.includes("bar");
-                setIsBarOrRestaurant(isRestoBar);
+                setIsBarOrRestaurant(isRestoBarPreferredCategories(data?.preferredCategories));
 
                 // Suggest a clean nickname from owner name (strip apostrophes, lowercase last word)
                 if (data?.owner && !menuNickname) {

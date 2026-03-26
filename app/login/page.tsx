@@ -29,13 +29,17 @@ type ApiLoginOK = {
   ok: true
   role: "BUYER" | "SELLER" | "ADMIN" | "DRIVER" | "FINANCIER"
   ishyiga: string
+  dbRole?: string
+  dualPharmacyRetail?: boolean
+  pharmacySector?: boolean
   user: { email: string; firstName: string; lastName: string; tel: string; location: string; owner: string }
 }
 
-function toUserRole(r?: string): UserRole {
-  const role = r?.toUpperCase()
-  if (role === "ADMIN") return "admin"
-  if (role === "SELLER") return "supplier"
+function toUserRoleFromAuth(auth: Pick<ApiLoginOK, "role" | "dualPharmacyRetail">): UserRole {
+  const dbRole = auth.role?.toUpperCase()
+  if (dbRole === "ADMIN") return "admin"
+  if (auth.dualPharmacyRetail) return "supplier"
+  if (dbRole === "SELLER") return "supplier"
   return "customer"
 }
 
@@ -52,7 +56,10 @@ function normalizeToStoreUser(payload: ApiLoginOK): User {
       [u.firstName, u.lastName].filter(Boolean).join(" ") ||
       String(u.owner ?? "").trim() ||
       email,
-    role: toUserRole(String((payload as any).role ?? "")),
+    role: toUserRoleFromAuth(payload),
+    dbRole: payload.dbRole,
+    dualPharmacyRetail: !!payload.dualPharmacyRetail,
+    pharmacySector: !!payload.pharmacySector,
     phone: String(u.tel ?? "").trim(),
     location: String(u.location ?? "").trim(),
     ishyigaAccount: payload.ishyiga || undefined,

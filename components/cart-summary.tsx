@@ -536,7 +536,16 @@ function CartSummaryBody() {
         router.refresh()
       } else {
         setPaymentStatus(g.supplierId, "failed")
-        alert(`Failed to create order: ${json?.error || "Unknown error"}`)
+        const errMsg = json?.error || "Unknown error"
+        const hint =
+          typeof json?.hint === "string" && json.hint.trim()
+            ? `\n\n${json.hint.trim()}`
+            : ""
+        const target =
+          typeof json?.ordersUrl === "string" && json.ordersUrl.trim()
+            ? `\n\nBackend URL: ${json.ordersUrl.trim()}`
+            : ""
+        alert(`Failed to create order: ${errMsg}${target}${hint}`)
       }
     } catch (error) {
       console.error("Order creation error:", error)

@@ -1,12 +1,13 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Menu, X, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { UnifiedNotification } from "@/components/unified-notification";
 import { useAuthStore } from "@/lib/auth-store";
+import { isRestoBarPreferredCategories } from "@/lib/supplier-sector";
 
 export default function SupplierLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -18,74 +19,63 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
   const logout = useAuthStore((state) => state.logout);
   const login = useAuthStore((state) => state.login);
 
-  const [preferredCategories, setPreferredCategories] = useState<string>("");
-  const [profileLoaded, setProfileLoaded] = useState(false);
-
-  const menu = [
-    { name: "Dashboard", href: "/supplier/dashboard" },
-    // { name: "My Products", href: "/supplier/products" },
-    { name: "Orders", href: "/supplier/orders" },
-    { name: "Self Ordering", href: "/supplier/self-ordering" },
-    { name: "Tables", href: "/supplier/tables" },
-    { name: "Ratings", href: "/supplier/ratings" },
-    { name: "Rekizisiyo / Kurangura byinshi", href: "/supplier/b2b" },
-    { name: "Expenses", href: "/supplier/expenses" },
-    { name: "Upload Stock", href: "/supplier/products/add" },
-    { name: "Scan Menu", href: "/supplier/scan-menu" },
-    { name: "Settings", href: "/supplier/settings/location" },
-  ];
-
-  // Hide Self Ordering for business categories that are not bar/restro or bar-resto.
-  // We can decide either from `user.businessCategory` OR from the supplier profile preferences
-  // (`/api/supplier/profile` → preferredCategories from account_signup.PREFEREDCATEGORIES).
-  const businessCategory = (user?.businessCategory ?? "").toString().toLowerCase()
-  const allowSelfOrderingByCategories = (categoryString: string) => {
-    const s = (categoryString ?? "").toString().toLowerCase()
-    if (!s) return false
-    // Accept multiple spellings coming from registration and/or admin edits:
-    // "bar/restaurant", "bar-resto", "resto-bar", etc.
-    const hasBar = s.includes("bar")
-    const hasRestaurant = s.includes("restro") || s.includes("restaurant") || s.includes("resto")
-    return hasBar && hasRestaurant
-  }
-
-  const allowSelfOrdering =
-    // If user provides businessCategory, prefer it.
-    businessCategory
-      ? allowSelfOrderingByCategories(businessCategory)
-      : // Otherwise use backend profile preferences if already loaded.
-        profileLoaded
-        ? allowSelfOrderingByCategories(preferredCategories)
-        : false
+  /**
+   * Self Ordering + Tables are restaurant/bar features only (see PREFEREDCATEGORIES).
+   * Opt-in when profile looks like bar/restaurant; never show if auth flagged pharmacySector.
+   */
+  const [showRestoKioskNav, setShowRestoKioskNav] = useState(false);
 
   useEffect(() => {
-    // Best-effort: fetch profile preferences to decide menu visibility.
-    // This avoids relying on `user.businessCategory` being present in the login response.
-    const account = user?.ishyigaAccount
-    if (!account) return
+    if (!hasHydrated || !isAuthenticated || !user?.ishyigaAccount || user.role !== "supplier") {
+      setShowRestoKioskNav(false);
+      return;
+    }
 
-    let cancelled = false
-    ;(async () => {
-      try {
-        const res = await fetch(`/api/supplier/profile?account=${encodeURIComponent(account)}`, {
-          method: "GET",
-          cache: "no-store",
-        })
-        if (!res.ok) return
-        const j: any = await res.json().catch(() => ({}))
-        if (!cancelled) {
-          setPreferredCategories(typeof j?.preferredCategories === "string" ? j.preferredCategories : "")
-          setProfileLoaded(true)
-        }
-      } catch {
-        if (!cancelled) setProfileLoaded(true)
-      }
-    })()
+    let cancelled = false;
+    fetch(`/api/supplier/profile?account=${encodeURIComponent(user.ishyigaAccount)}`, {
+      cache: "no-store",
+    })
+      .then((res) => res.json())
+      .then((data: { preferredCategories?: string }) => {
+        if (cancelled) return;
+        setShowRestoKioskNav(isRestoBarPreferredCategories(data?.preferredCategories));
+      })
+      .catch(() => {
+        if (!cancelled) setShowRestoKioskNav(false);
+      });
 
     return () => {
-      cancelled = true
+      cancelled = true;
+    };
+  }, [hasHydrated, isAuthenticated, user?.ishyigaAccount, user?.role]);
+
+  const menu = useMemo(() => {
+    const showDualPurchases = !!user?.dualPharmacyRetail;
+    const showRestoSupplierLinks = showRestoKioskNav && user?.pharmacySector !== true;
+
+    const items: { name: string; href: string }[] = [
+      { name: "Dashboard", href: "/supplier/dashboard" },
+      { name: "Orders", href: "/supplier/orders" },
+    ];
+    if (showDualPurchases) {
+      items.push({ name: "My purchases", href: "/buyer/orders" });
     }
-  }, [user?.ishyigaAccount])
+    if (showRestoSupplierLinks) {
+      items.push(
+        { name: "Self Ordering", href: "/supplier/self-ordering" },
+        { name: "Tables", href: "/supplier/tables" },
+      );
+    }
+    items.push(
+      { name: "Ratings", href: "/supplier/ratings" },
+      { name: "Rekizisiyo / Kurangura byinshi", href: "/supplier/b2b" },
+      { name: "Expenses", href: "/supplier/expenses" },
+      { name: "Upload Stock", href: "/supplier/products/add" },
+      { name: "Scan Menu", href: "/supplier/scan-menu" },
+      { name: "Settings", href: "/supplier/settings/location" },
+    );
+    return items;
+  }, [user?.dualPharmacyRetail, user?.pharmacySector, showRestoKioskNav]);
 
   const closeSidebar = useCallback(() => {
     setSidebarOpen(false);
@@ -211,7 +201,6 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
               <ul className="space-y-2">
                 {menu.map((item) => (
                   <li key={item.name}>
-                    {item.href === "/supplier/self-ordering" && !allowSelfOrdering ? null : (
                     <Link
                       href={item.href}
                       onClick={closeSidebar}
@@ -224,7 +213,6 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                     >
                       <span>{item.name}</span>
                     </Link>
-                    )}
                   </li>
                 ))}
               </ul>

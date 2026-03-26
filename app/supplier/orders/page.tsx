@@ -250,7 +250,6 @@ export default function SupplierOrdersPage() {
         const bId = Number(b.ID_ORDER ?? b.id_order ?? b.id ?? 0)
         return bId - aId
       })
-
       const mapped: Order[] = sortedRaw.map((t: any) => {
         const kioskCategoryRaw = String(t.KIOSK_CATEGORY ?? t.kiosk_category ?? "").trim()
         const internalDataRaw = String(t.INTERNAL_DATA ?? t.internal_data ?? "").trim()

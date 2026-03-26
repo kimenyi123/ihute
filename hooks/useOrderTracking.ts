@@ -9,6 +9,7 @@
 
 import { useEffect, useState, useCallback } from "react"
 import { orderStatusMonitor } from "@/lib/order-status-monitor"
+import { statusIndicatesDelivered } from "@/lib/order-status-map"
 
 interface UseOrderTrackingOptions {
   orderId: string
@@ -131,7 +132,7 @@ export function useOrderTracking({
     triggerRatingCheck,
     
     // Computed
-    isDelivered: state.currentStatus === 'delivered',
+    isDelivered: statusIndicatesDelivered(state.currentStatus),
     isPending: state.currentStatus === 'pending',
     isProcessing: state.currentStatus === 'processing',
     isInvoiced: state.currentStatus === 'invoice'

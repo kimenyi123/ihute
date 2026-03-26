@@ -8,6 +8,7 @@ import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
 import { useOrdersStore, type Order } from "@/lib/orders-store"
+import { mapBackendOrderStatusToStore } from "@/lib/order-status-map"
 
 type RawTxn = {
   ID_ORDER?: string
@@ -35,11 +36,7 @@ function toIso(v?: number | string) {
 }
 
 function mapOrderStatus(raw?: string): Order["status"] {
-  const s = (raw || "").toLowerCase()
-  if (s === "delivered") return "delivered"
-  if (s === "cancelled" || s === "canceled") return "cancelled"
-  if (s === "processing" || s === "in-transit") return s as Order["status"]
-  return "pending"
+  return mapBackendOrderStatusToStore(raw)
 }
 
 // REQUEST LOAN FUNCTION

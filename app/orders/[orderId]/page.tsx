@@ -20,6 +20,7 @@ import {
 } from "lucide-react"
 import { formatPaymentMethod } from "@/lib/payment-utils"
 import { useAuthStore } from "@/lib/auth-store"
+import { isInvoiceFinanced, canRequestInvoiceFinancing } from "@/lib/order-financing"
 
 interface OrderItem {
   ITEM_CODE: string
@@ -38,6 +39,7 @@ interface OrderDetails {
   SELLER_NAMES: string
   SELLER_PHONE: string
   SELLER_ISHYIGA_ACCOUNT: string
+  BUYER_ISHYIGA_ACCOUNT?: string
   BUYER_OWNER: string
   BUYER_NAME: string
   BUYER_PHONE: string
@@ -70,6 +72,7 @@ export default function OrderDetailsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [financingBusy, setFinancingBusy] = useState(false)
 
   useEffect(() => {
     if (!orderId) return
@@ -221,11 +224,65 @@ ${items}
     )
   }
 
-  const displayOrderStatus = order.ORDER_STATUS ? String(order.ORDER_STATUS).trim() : "Open"
-  const displayPaymentStatus = order.PAYMENT_STATUS ? String(order.PAYMENT_STATUS).trim() : "Pending"
-  const paymentLabel =
-    displayPaymentStatus.toUpperCase() === "UNKNOWN" || !displayPaymentStatus ? "Pending" : displayPaymentStatus
+  const displayOrderStatus = order.ORDER_STATUS != null && String(order.ORDER_STATUS).trim() !== ""
+    ? String(order.ORDER_STATUS).trim()
+    : "—"
+  const displayPaymentStatus = order.PAYMENT_STATUS != null && String(order.PAYMENT_STATUS).trim() !== ""
+    ? String(order.PAYMENT_STATUS).trim()
+    : "—"
+  const paymentLabel = displayPaymentStatus
   const currency = order.CURRENCY || "RWF"
+
+  const financed = isInvoiceFinanced(order.PAYMENT_STATUS)
+  const canFinanceOrder = canRequestInvoiceFinancing(order.ORDER_STATUS, financed)
+
+  const requestFinancing = async () => {
+    if (!order || !canFinanceOrder || financingBusy) return
+    const buyerAccount = (order.BUYER_ISHYIGA_ACCOUNT || user?.ishyigaAccount || "").trim()
+    const sellerAccount = (order.SELLER_ISHYIGA_ACCOUNT || "").trim()
+    const buyerTIN = (order as any).BUYER_TIN || ""
+    const supplierTIN = (order as any).SELLER_TIN || ""
+    if (!buyerAccount || !sellerAccount) {
+      alert("Missing buyer or seller account for financing.")
+      return
+    }
+    if (!confirm("Request financing for this order?")) return
+    setFinancingBusy(true)
+    try {
+      const res = await fetch("/api/request-loan-with-details", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderId: String(order.ID_ORDER),
+          buyerAccount,
+          sellerAccount,
+          buyerTIN,
+          supplierTIN,
+          invoiceAmount: order.AMOUNT || order.total || 0,
+        }),
+      })
+      const result = await res.json()
+      if (res.ok && result.success) {
+        setOrder({
+          ...order,
+          PAYMENT_STATUS: "UMUSADA",
+        })
+        alert(result.message || "Invoice financing submitted.")
+      } else {
+        if (result.code === "DUPLICATE_INVOICE") {
+          setOrder({
+            ...order,
+            PAYMENT_STATUS: order.PAYMENT_STATUS || "UMUSADA",
+          })
+        }
+        alert(result.error || "Financing request failed.")
+      }
+    } catch (e: any) {
+      alert(e?.message || "Financing request failed.")
+    } finally {
+      setFinancingBusy(false)
+    }
+  }
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-4xl">
@@ -279,7 +336,7 @@ ${items}
                 <CreditCard className="h-5 w-5 text-muted-foreground" />
                 <div>
                   <p className="text-sm text-muted-foreground">Payment Status</p>
-                  <Badge className={getPaymentStatusColor(paymentLabel)} variant="outline">
+                  <Badge className={getPaymentStatusColor(paymentLabel === "—" ? "" : paymentLabel)} variant="outline">
                     {paymentLabel}
                   </Badge>
                 </div>
@@ -389,13 +446,14 @@ ${items}
         </CardContent>
       </Card>
 
-      {/* Financing Button */}
+      {/* Financing */}
       <div className="flex justify-end mb-6">
         <Button
           variant="default"
-          disabled={displayOrderStatus.toUpperCase() !== "OPEN"}
+          disabled={!canFinanceOrder || financingBusy}
+          onClick={requestFinancing}
         >
-          Finance Order
+          {financingBusy ? "Submitting…" : financed ? "Financed" : "Finance Order"}
         </Button>
       </div>
 
