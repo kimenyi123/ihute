@@ -1,0 +1,3 @@
+[submodule "kaos"]
+	path = kaos
+	url = https://bitbucket.org/Kimenyi/kaos.git
