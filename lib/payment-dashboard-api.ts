@@ -46,6 +46,8 @@ export interface Transaction {
   subscription_period_months?: number | null;
   /** When this transaction was activated (Activate button); null if not yet activated. */
   activated_at?: string | null;
+  /** Activation validity date set by backend auto/manual activation. */
+  activated_until?: string | null;
 }
 
 export interface SummaryStats {
@@ -132,13 +134,21 @@ class PaymentDashboardApi {
             // If JSON parsing fails, use status text
           }
           
-          // If 404, try next URL
+          // If 404 but backend returned a meaningful JSON message (ex: "No active client found..."),
+          // we should NOT try alternative base URLs; we should surface the real reason.
           if (response.status === 404) {
-            console.warn(`⚠️ 404 at ${url}, trying alternative...`);
+            const msg = (errorMessage || "").toString();
+            const looksLikeEndpointMissing = !msg || msg.toLowerCase().includes("not found");
+            if (!looksLikeEndpointMissing) {
+              throw new Error(msg || `404 ${endpoint}`);
+            }
+
+            // Otherwise it might be wrong base path (/Trading prefix); try alternative URL.
+            console.warn(`⚠️ 404 at ${url} (likely wrong base path), trying alternative...`);
             lastError = new Error(`404: ${endpoint} not found at ${url}`);
-            continue; // Try next URL
+            continue;
           }
-          
+
           // For other errors, throw immediately
           throw new Error(errorMessage || `API error: ${response.status} ${response.statusText}`);
         }
@@ -252,6 +262,22 @@ class PaymentDashboardApi {
     return this.fetch('/api/payment/reconciliation/sync', {
       method: 'POST',
       body: JSON.stringify({ transaction_id: transactionId }),
+    });
+  }
+
+  /**
+   * Bulk-sync stale INITIATED/PENDING transactions against Urubuto.
+   */
+  async syncStaleTransactions(params?: {
+    age_minutes?: number;
+    limit?: number;
+  }): Promise<{ message: string; data: any; status: number }> {
+    return this.fetch('/api/payment/reconciliation/sync-stale', {
+      method: 'POST',
+      body: JSON.stringify({
+        age_minutes: params?.age_minutes ?? 30,
+        limit: params?.limit ?? 100,
+      }),
     });
   }
 

@@ -284,14 +284,29 @@ function SupplierDashboard() {
   }, [isAuthenticated, user?.ishyigaAccount, user?.role, router]);
 
   useEffect(() => {
-    if (!user?.ishyigaAccount) return;
-    fetch(`/api/supplier/analytics?account=${encodeURIComponent(user.ishyigaAccount)}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data?.ok) setAnalytics(data);
-      })
-      .catch(() => {});
-  }, [user?.ishyigaAccount]);
+    if (!user?.ishyigaAccount || user?.role !== "supplier") return;
+
+    let cancelled = false;
+
+    const fetchAnalytics = async () => {
+      try {
+        const res = await fetch(`/api/supplier/analytics?account=${encodeURIComponent(user.ishyigaAccount)}`, {
+          cache: "no-store",
+        })
+        const data = await res.json().catch(() => null)
+        if (cancelled) return
+        if (data?.ok) setAnalytics(data)
+      } catch {}
+    }
+
+    fetchAnalytics()
+    const id = window.setInterval(fetchAnalytics, 10_000)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [user?.ishyigaAccount, user?.role])
 
   const handleLogout = () => {
     logout();
@@ -569,14 +584,18 @@ function SupplierDashboard() {
                 <CardTitle className="text-sm font-medium text-slate-600">Best selling</CardTitle>
               </CardHeader>
               <CardContent>
+                <p className="text-xs text-slate-500 mb-2">{analytics.dailyOrdersCount} orders today</p>
                 {analytics.bestSelling.length === 0 ? (
                   <p className="text-sm text-slate-500">No orders today</p>
                 ) : (
                   <ul className="text-sm space-y-1">
                     {analytics.bestSelling.slice(0, 5).map((item, i) => (
-                      <li key={i} className="flex justify-between">
+                      <li key={i} className="flex justify-between gap-4">
                         <span className="truncate">{item.name}</span>
-                        <span className="font-medium">{item.quantity} sold</span>
+                        <span className="text-right">
+                          <span className="font-medium">{item.quantity} sold</span>
+                          <span className="block text-xs text-slate-500">{Number(item.total ?? 0).toLocaleString()} RWF</span>
+                        </span>
                       </li>
                     ))}
                   </ul>
