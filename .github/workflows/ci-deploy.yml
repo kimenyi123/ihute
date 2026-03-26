@@ -42,7 +42,6 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/GUHUZA'
     steps:
       - name: Deploy over SSH and restart PM2
-        if: ${{ secrets.SSH_HOST != '' && secrets.SSH_USER != '' && secrets.SSH_PRIVATE_KEY != '' && secrets.DEPLOY_PATH != '' && secrets.PM2_APP_NAME != '' }}
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -51,6 +50,10 @@ jobs:
           script_stop: true
           script: |
             set -e
+            if [ -z "${{ secrets.SSH_HOST }}" ] || [ -z "${{ secrets.SSH_USER }}" ] || [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ] || [ -z "${{ secrets.DEPLOY_PATH }}" ] || [ -z "${{ secrets.PM2_APP_NAME }}" ]; then
+              echo "Missing required GitHub Actions secrets. Aborting deploy."
+              exit 1
+            fi
             APP_PORT="${{ secrets.PM2_PORT }}"
             # Default for the dedicated AI app port.
             if [ -z "$APP_PORT" ]; then APP_PORT=3003; fi
@@ -78,9 +81,3 @@ jobs:
             pm2 delete "$APP_NAME" >/dev/null 2>&1 || true
             pm2 start npm --name "$APP_NAME" -- start -- -p "$APP_PORT"
             pm2 save
-
-      - name: Skip deploy (missing secrets)
-        if: ${{ secrets.SSH_HOST == '' || secrets.SSH_USER == '' || secrets.SSH_PRIVATE_KEY == '' || secrets.DEPLOY_PATH == '' || secrets.PM2_APP_NAME == '' }}
-        run: |
-          echo "Deploy skipped. Add these GitHub Actions secrets:"
-          echo "SSH_HOST, SSH_USER, SSH_PRIVATE_KEY, DEPLOY_PATH, PM2_APP_NAME (optional: PM2_PORT)"
