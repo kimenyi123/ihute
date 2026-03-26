@@ -64,6 +64,11 @@ export default function RegisterPage() {
   const [excelFile, setExcelFile] = useState<File | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showPendingModal, setShowPendingModal] = useState(false)
+  const [sellerRegisterMeta, setSellerRegisterMeta] = useState<{
+    temporaryPasswordEmailed?: boolean
+    usedTemporaryPassword?: boolean
+    temporaryPasswordMessage?: string | null
+  } | null>(null)
 
   const totalSteps = role === "seller" ? 3 : 2
 
@@ -79,6 +84,10 @@ export default function RegisterPage() {
     log("REGISTER", `START [RID ${rid}] role=${role}`)
 
     try {
+      if (role === "buyer" && !formData.password.trim()) {
+        throw new Error("Please choose a password")
+      }
+
       const [firstName, ...rest] = formData.name.trim().split(" ")
       const lastName = rest.join(" ")
 
@@ -124,9 +133,14 @@ export default function RegisterPage() {
       }
 
       if (role === "seller") {
+        setSellerRegisterMeta({
+          temporaryPasswordEmailed: json.temporaryPasswordEmailed === true,
+          usedTemporaryPassword: json.usedTemporaryPassword === true,
+          temporaryPasswordMessage: json.temporaryPasswordMessage ?? null,
+        })
         setShowPendingModal(true)
       } else {
-        const storeRole: UserRole = "customer"
+        const storeRole: UserRole = json?.dualPharmacyRetail ? "supplier" : "customer"
         const newUser = {
           id: json.user.email,
           email: json.user.email,
@@ -135,6 +149,9 @@ export default function RegisterPage() {
           phone: formData.phone,
           location: formData.location,
           ishyigaAccount: json.ishyiga,
+          dbRole: json?.dbRole ?? json?.role,
+          dualPharmacyRetail: !!json?.dualPharmacyRetail,
+          pharmacySector: !!json?.pharmacySector,
         }
         login(newUser)
         router.push("/")
@@ -150,8 +167,11 @@ export default function RegisterPage() {
   // ── Step validation ───────────────────────────────────────────────────────
   const handleNext = () => {
     if (currentStep === 1) {
-      if (!formData.name || !formData.email || !formData.phone || !formData.password || !formData.location) {
+      if (!formData.name || !formData.email || !formData.phone || !formData.location) {
         setError("Please fill in all fields"); return
+      }
+      if (role === "buyer" && !formData.password.trim()) {
+        setError("Please choose a password"); return
       }
     }
     if (currentStep === 2 && role === "seller") {
@@ -268,8 +288,20 @@ export default function RegisterPage() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="password">Password</Label>
-                    <Input id="password" type="password" placeholder="Create a password" value={formData.password}
-                      onChange={(e) => set("password", e.target.value)} required />
+                    {role === "seller" && (
+                      <p className="text-xs text-muted-foreground">
+                        Optional for suppliers: leave blank and a temporary password will be emailed to you (after the server is configured for outbound mail).
+                      </p>
+                    )}
+                    <Input
+                      id="password"
+                      type="password"
+                      placeholder={role === "seller" ? "Create a password, or leave blank for email" : "Create a password"}
+                      value={formData.password}
+                      onChange={(e) => set("password", e.target.value)}
+                      required={role === "buyer"}
+                      autoComplete="new-password"
+                    />
                   </div>
                 </>
               )}
@@ -412,9 +444,14 @@ export default function RegisterPage() {
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-2">
                 <p className="text-sm text-blue-900 font-medium">📋 What happens next?</p>
                 <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
+                  {sellerRegisterMeta?.temporaryPasswordMessage && (
+                    <li className={sellerRegisterMeta.temporaryPasswordEmailed ? undefined : "text-amber-800"}>
+                      {sellerRegisterMeta.temporaryPasswordMessage}
+                    </li>
+                  )}
                   <li>Our admin team will review your application</li>
                   <li>We'll verify your business details and TIN</li>
-                  <li>You'll receive an email once approved</li>
+                  <li>You'll receive updates by email when applicable</li>
                   <li>Approval typically takes 24–48 hours</li>
                 </ul>
               </div>

@@ -5,6 +5,8 @@
  * when orders are marked as DELIVERED by suppliers.
  */
 
+import { mapBackendOrderStatusToTrack, statusIndicatesDelivered } from "@/lib/order-status-map"
+
 interface OrderStatusUpdate {
   orderId: string
   oldStatus: string
@@ -41,7 +43,7 @@ class OrderStatusMonitor {
     this.monitoredOrders.add(orderId)
     
     if (currentStatus) {
-      this.lastCheckedStatuses.set(orderId, currentStatus.toLowerCase())
+      this.lastCheckedStatuses.set(orderId, mapBackendOrderStatusToTrack(currentStatus, undefined))
     }
     
     // Limit monitored orders to prevent memory issues
@@ -111,7 +113,8 @@ class OrderStatusMonitor {
       const data = await response.json()
       
       if (data.ok && data.status) {
-        const newStatus = data.status.toLowerCase()
+        const raw = String(data.status).trim()
+        const newStatus = mapBackendOrderStatusToTrack(raw, undefined)
         const oldStatus = this.lastCheckedStatuses.get(orderId)
         
         if (oldStatus && oldStatus !== newStatus) {
@@ -213,7 +216,7 @@ class OrderStatusMonitor {
     })
     
     // Check if this is a delivery status change that should trigger rating
-    if (newStatus === 'delivered' && oldStatus !== 'delivered') {
+    if (statusIndicatesDelivered(newStatus) && !statusIndicatesDelivered(oldStatus)) {
       console.log(`[OrderStatusMonitor] Order ${orderId} delivered - triggering rating check`)
       this.triggerRatingCheck(orderId)
     }

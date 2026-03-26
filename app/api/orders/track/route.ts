@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 
 const RID_HEADER = "x-request-id"
 import { getOrdersUrl } from "@/lib/backend-config"
+import { mapBackendOrderStatusToTrack, type TrackOrderStatus } from "@/lib/order-status-map"
 
 function rid() {
   return Math.random().toString(36).slice(2, 12)
@@ -11,7 +12,7 @@ function log(requestId: string, ...args: any[]) {
   console.log(`[RID ${requestId}]`, ...args)
 }
 
-type OrderStatus = "open" | "pending" | "processing" | "invoice" | "in-transit" | "delivered"
+type OrderStatus = TrackOrderStatus
 
 type StatusHistoryEntry = {
   status: OrderStatus
@@ -20,26 +21,7 @@ type StatusHistoryEntry = {
 }
 
 function mapPaymentToStatus(orderStatus?: string, paymentStatus?: string): OrderStatus {
-  // Priority 1: Check ORDER_STATUS if it exists
-  if (orderStatus) {
-    const s = orderStatus.toLowerCase()
-    if (s.includes("delivered") || s.includes("completed")) return "delivered"
-    if (s.includes("transit") || s.includes("shipped") || s.includes("out")) return "in-transit"
-    if (s.includes("invoice")) return "invoice"
-    if (s.includes("processing") || s.includes("preparing")) return "processing"
-    if (s.includes("open")) return "open"
-  }
-
-  // Priority 2: Check PAYMENT_STATUS
-  if (paymentStatus) {
-    const p = paymentStatus.toLowerCase()
-    if (p === "paid" || p === "success") return "processing"
-    if (p === "pending") return "pending"
-    if (p === "failed") return "open"
-  }
-
-  // Default to open
-  return "open"
+  return mapBackendOrderStatusToTrack(orderStatus, paymentStatus)
 }
 
 /**
@@ -54,7 +36,6 @@ function buildStatusHistory(
   updatedAt?: string
 ): StatusHistoryEntry[] {
   const history: StatusHistoryEntry[] = []
-  const now = new Date().toISOString()
   const createdTime = new Date(createdAt).getTime()
 
   // Always add the "open" status when order was created
@@ -103,15 +84,6 @@ function buildStatusHistory(
       status,
       timestamp,
       note
-    })
-  }
-
-  // If we have explicit ORDER_STATUS that differs from our mapped status, add it
-  if (orderStatus && orderStatus !== currentStatus) {
-    history.push({
-      status: currentStatus,
-      timestamp: updatedAt || now,
-      note: `Status: ${orderStatus}`
     })
   }
 
@@ -210,6 +182,7 @@ export async function POST(req: NextRequest) {
         SELLER_NAMES: orderData.SELLER_NAMES || sellerData.OWNER,
         SELLER_ISHYIGA_ACCOUNT: orderData.SELLER_ISHYIGA_ACCOUNT || sellerData.ISHYIGA_ACCOUNT,
         SELLER_PHONE: sellerData.TEL,
+        BUYER_ISHYIGA_ACCOUNT: orderData.BUYER_ISHYIGA_ACCOUNT || buyerData.ISHYIGA_ACCOUNT,
         BUYER_OWNER: buyerData.OWNER,
         BUYER_PHONE: buyerData.PHONE || orderData.BUYER_PHONE,
         DELIVERY_LOCATION: orderData.DELIVERY_LOCATION,
@@ -217,6 +190,7 @@ export async function POST(req: NextRequest) {
         PAYMENT_NAME: orderData.PAYMENT_NAME,
         PAYMENT_STATUS: orderData.PAYMENT_STATUS,
         ORDER_STATUS: orderData.ORDER_STATUS,
+        REKISIYO_STATUS: orderData.REKISIYO_STATUS,
         CREATED_AT: orderData.CREATED_AT,
         UPDATED_AT: orderData.UPDATED_AT,
         items: itemsData.map((item: any) => ({
@@ -257,9 +231,10 @@ export async function POST(req: NextRequest) {
 
     const rawOrderStatus = (data.ORDER_STATUS || data.order_status || "").toString().trim()
     const rawPaymentStatus = (data.PAYMENT_STATUS || data.payment_status || "").toString().trim()
-    const orderStatusDisplay = rawOrderStatus || (mappedStatus === "delivered" ? "Delivered" : mappedStatus === "in-transit" ? "In transit" : mappedStatus === "processing" ? "Processing" : mappedStatus === "pending" ? "Pending" : "Open")
-    const paymentStatusDisplay = rawPaymentStatus || (rawOrderStatus ? "" : "Pending")
-    const effectivePaymentStatus = paymentStatusDisplay || "Pending"
+    /** Show DB values only — no hardcoded friendly labels on ORDER_STATUS / PAYMENT_STATUS. */
+    const orderStatusDisplay = rawOrderStatus
+    const paymentLegacyDisplay = rawPaymentStatus
+    const effectivePaymentStatus = rawPaymentStatus
 
     const itemsArray = Array.isArray(data.items)
       ? data.items.map((item: any) => ({
@@ -300,6 +275,7 @@ export async function POST(req: NextRequest) {
       SELLER_NAMES: data.SELLER_NAMES || data.SELLER_OWNER || "Unknown Seller",
       SELLER_PHONE: data.SELLER_PHONE || data.SELLER_TEL || undefined,
       SELLER_ISHYIGA_ACCOUNT: data.SELLER_ISHYIGA_ACCOUNT || undefined,
+      BUYER_ISHYIGA_ACCOUNT: data.BUYER_ISHYIGA_ACCOUNT || data.buyer_ishyiga_account || undefined,
       BUYER_OWNER: data.BUYER_OWNER || data.BUYER_NAME,
       BUYER_NAME: data.BUYER_NAME || data.BUYER_OWNER,
       BUYER_PHONE: data.BUYER_PHONE || data.BUYER_TEL,
@@ -307,7 +283,7 @@ export async function POST(req: NextRequest) {
       DELIVERY_LOCATION: data.DELIVERY_LOCATION || data.BUYER_LOCATION,
       BUYER_LOCATION: data.BUYER_LOCATION || data.DELIVERY_LOCATION,
       PAYMENT_NAME: data.PAYMENT_NAME || data.paymentMethod || "Unknown",
-      PAYMENT_STATUS: effectivePaymentStatus,
+      PAYMENT_STATUS: paymentLegacyDisplay,
       ORDER_STATUS: orderStatusDisplay,
       REKISIYO_STATUS: data.REKISIYO_STATUS,
       REFERENCE: data.REFERENCE,
