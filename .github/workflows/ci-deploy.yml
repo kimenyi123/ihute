@@ -24,10 +24,10 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci --legacy-peer-deps
 
       - name: Fix vulnerable dependencies
-        run: npm audit fix || true
+        run: npm_config_legacy_peer_deps=true npm audit fix || true
 
       - name: Run lint
         run: npm run lint
@@ -72,8 +72,8 @@ jobs:
             git remote set-url origin "$REPO_URL" >/dev/null 2>&1 || git remote add origin "$REPO_URL"
             git fetch origin "$REPO_BRANCH" --prune
             git checkout -B "$REPO_BRANCH" "origin/$REPO_BRANCH"
-            npm install
-            npm audit fix || true
+            npm ci --legacy-peer-deps
+            npm_config_legacy_peer_deps=true npm audit fix || true
             npm run lint
             npm run build
             APP_NAME="${{ secrets.PM2_APP_NAME }}"
