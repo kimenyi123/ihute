@@ -108,10 +108,7 @@ export default function LoginPage() {
       log("LOGIN", `Response:`, json)
 
       if (!res.ok || !json?.ok) {
-        const ref = json?.javaRid || json?.rid
-        const code = json?.code ? ` [${json.code}]` : ""
-        const detail = [json?.error, ref ? `(Java ref: ${ref})` : "", code].filter(Boolean).join(" ")
-        throw new Error(detail || `Login failed (${res.status})`)
+        throw new Error("Invalid credentials")
       }
 
       const user: User = normalizeToStoreUser(json as ApiLoginOK)
