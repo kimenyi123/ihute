@@ -62,18 +62,24 @@ jobs:
             REPO_URL="https://github.com/kimenyi123/ihute.git"
             REPO_BRANCH="GUHUZA"
             DEPLOY_PATH="${{ secrets.DEPLOY_PATH }}"
+            REPO_FETCH_URL="$REPO_URL"
+            if [ -n "${{ secrets.GH_REPO_TOKEN }}" ]; then
+              REPO_FETCH_URL="https://x-access-token:${{ secrets.GH_REPO_TOKEN }}@github.com/kimenyi123/ihute.git"
+            fi
 
             # Bootstrap repo into the dedicated ai folder (so other domains keep their Bitbucket deploy).
             if [ ! -d "$DEPLOY_PATH/.git" ]; then
               mkdir -p "$(dirname "$DEPLOY_PATH")"
-              git clone --branch "$REPO_BRANCH" --single-branch --no-recurse-submodules "$REPO_URL" "$DEPLOY_PATH"
+              git clone --branch "$REPO_BRANCH" --single-branch --no-recurse-submodules "$REPO_FETCH_URL" "$DEPLOY_PATH"
+              # Never keep tokenized URL in git config.
+              git -C "$DEPLOY_PATH" remote set-url origin "$REPO_URL"
             fi
 
             cd "$DEPLOY_PATH"
             # Make sure this deploy folder tracks GitHub (it may have Bitbucket as `origin` originally).
             git remote set-url origin "$REPO_URL" >/dev/null 2>&1 || git remote add origin "$REPO_URL"
-            git fetch origin "$REPO_BRANCH" --prune --no-recurse-submodules || git fetch origin "$REPO_BRANCH" --prune
-            git checkout -B "$REPO_BRANCH" "origin/$REPO_BRANCH"
+            git fetch "$REPO_FETCH_URL" "$REPO_BRANCH" --prune --no-recurse-submodules || git fetch "$REPO_FETCH_URL" "$REPO_BRANCH" --prune
+            git checkout -B "$REPO_BRANCH" FETCH_HEAD
             npm ci --legacy-peer-deps
             npm_config_legacy_peer_deps=true npm audit fix || true
             echo "Skipping lint: Next.js CLI has no 'lint' command in this version."
