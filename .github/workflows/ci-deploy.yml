@@ -1,0 +1,85 @@
+name: CI and Deploy
+
+on:
+  push:
+    branches:
+      - GUHUZA
+  pull_request:
+    branches:
+      - GUHUZA
+  workflow_dispatch:
+
+jobs:
+  ci:
+    name: Install, Audit, Lint and Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Fix vulnerable dependencies
+        run: npm audit fix || true
+
+      - name: Run lint
+        run: npm run lint
+
+      - name: Build app
+        run: npm run build
+
+  deploy:
+    name: Deploy to ai.ihute.rw (PM2)
+    runs-on: ubuntu-latest
+    needs: ci
+    if: github.event_name == 'push' && github.ref == 'refs/heads/GUHUZA'
+    steps:
+      - name: Deploy over SSH and restart PM2
+        if: ${{ secrets.SSH_HOST != '' && secrets.SSH_USER != '' && secrets.SSH_PRIVATE_KEY != '' && secrets.DEPLOY_PATH != '' && secrets.PM2_APP_NAME != '' }}
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script_stop: true
+          script: |
+            set -e
+            APP_PORT="${{ secrets.PM2_PORT }}"
+            # Default for the dedicated AI app port.
+            if [ -z "$APP_PORT" ]; then APP_PORT=3003; fi
+            REPO_URL="https://github.com/kimenyi123/ihute.git"
+            REPO_BRANCH="GUHUZA"
+            DEPLOY_PATH="${{ secrets.DEPLOY_PATH }}"
+
+            # Bootstrap repo into the dedicated ai folder (so other domains keep their Bitbucket deploy).
+            if [ ! -d "$DEPLOY_PATH/.git" ]; then
+              mkdir -p "$(dirname "$DEPLOY_PATH")"
+              git clone --branch "$REPO_BRANCH" --single-branch "$REPO_URL" "$DEPLOY_PATH"
+            fi
+
+            cd "$DEPLOY_PATH"
+            # Make sure this deploy folder tracks GitHub (it may have Bitbucket as `origin` originally).
+            git remote set-url origin "$REPO_URL" >/dev/null 2>&1 || git remote add origin "$REPO_URL"
+            git fetch origin "$REPO_BRANCH" --prune
+            git checkout -B "$REPO_BRANCH" "origin/$REPO_BRANCH"
+            npm install
+            npm audit fix || true
+            npm run lint
+            npm run build
+            APP_NAME="${{ secrets.PM2_APP_NAME }}"
+            # Ensure the process starts on the expected port used by Nginx.
+            pm2 delete "$APP_NAME" >/dev/null 2>&1 || true
+            pm2 start npm --name "$APP_NAME" -- start -- -p "$APP_PORT"
+            pm2 save
+
+      - name: Skip deploy (missing secrets)
+        if: ${{ secrets.SSH_HOST == '' || secrets.SSH_USER == '' || secrets.SSH_PRIVATE_KEY == '' || secrets.DEPLOY_PATH == '' || secrets.PM2_APP_NAME == '' }}
+        run: echo "Deploy skipped. Add SSH_HOST, SSH_USER, SSH_PRIVATE_KEY, DEPLOY_PATH, PM2_APP_NAME (optional: SSH_PORT, PM2_PORT) in GitHub Actions secrets."
