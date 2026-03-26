@@ -101,6 +101,7 @@ export function getUmusadaExcelUrl(): string {
   return process.env.JAVA_UMUSADA_EXCEL_URL || `${getBackendBase()}/UmusadaExcelServlet`
 }
 
+/** Seller registration POST JSON. Override JAVA_SUPPLIERS_URL if your WAR maps a different path (e.g. /InsertSupplier vs /Api/InsertSuppliers). */
 export function getSuppliersUrl(): string {
   return process.env.JAVA_SUPPLIERS_URL || `${getBackendBase()}/Api/InsertSuppliers`
 }

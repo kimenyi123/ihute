@@ -67,9 +67,17 @@ export async function POST(req: Request) {
         }, { status: 502 })
       }
 
-      // 201 = created successfully
+      // 201 = created successfully (Java may include temporaryPasswordEmailed when password was generated)
       if (res.status === 201) {
-        return NextResponse.json({ ok: true, message: json.message, rid })
+        return NextResponse.json({
+          ok: true,
+          message: json.message,
+          recipientEmail: json.recipientEmail ?? email,
+          temporaryPasswordMessage: json.temporaryPasswordMessage ?? null,
+          temporaryPasswordEmailed: json.temporaryPasswordEmailed === true,
+          usedTemporaryPassword: json.usedTemporaryPassword === true,
+          rid,
+        })
       }
 
       // 409 = duplicate / conflict
