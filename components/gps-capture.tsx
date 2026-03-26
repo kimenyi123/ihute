@@ -20,16 +20,46 @@ const RWANDA_BOUNDS = {
     lngMax: 30.9
 }
 
+// GPS can be slightly outside Rwanda even when the user is inside
+// (accuracy + border proximity). Allow a small margin to prevent false alerts.
+const RWANDA_BOUNDS_MARGIN = 0.3
+
+// If the browser provides a very inaccurate location (common on desktop/IP-based),
+// we require the user to click the map so we don't store wrong coordinates.
+const MAX_ACCEPTABLE_ACCURACY_M = 300
+
 // Kigali center as default
 const KIGALI_CENTER = { lat: -1.9536, lng: 30.0606 }
+
+async function geocodeDistrictToCoords(district: string): Promise<{ lat: number; lng: number } | null> {
+    if (!district) return null
+    try {
+        // Forward geocode Rwanda district name -> lat/lng (no manual pin needed)
+        const q = `${district}, Rwanda`
+        const res = await fetch(
+            `https://nominatim.openstreetmap.org/search?format=json&countrycodes=rw&q=${encodeURIComponent(q)}&limit=1`
+        )
+        if (!res.ok) return null
+        const data: any[] = await res.json()
+        const first = data?.[0]
+        const lat = parseFloat(first?.lat)
+        const lng = parseFloat(first?.lon)
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+        return { lat, lng }
+    } catch {
+        return null
+    }
+}
 
 interface GPSCaptureProps {
     onLocationSet: (lat: number, lng: number, accuracy: number) => void
     initialLat?: number
     initialLng?: number
+    // Used when browser GPS is wrong/inaccurate so we still set a valid Rwanda location
+    fallbackDistrict?: string
 }
 
-export function GPSCapture({ onLocationSet, initialLat, initialLng }: GPSCaptureProps) {
+export function GPSCapture({ onLocationSet, initialLat, initialLng, fallbackDistrict }: GPSCaptureProps) {
     const { location: gpsLocation, loading: gpsLoading, error: gpsError, denied: gpsDenied } = useGeolocation()
     const [position, setPosition] = useState<{ lat: number, lng: number } | null>(
         initialLat && initialLng ? { lat: initialLat, lng: initialLng } : null
@@ -38,6 +68,7 @@ export function GPSCapture({ onLocationSet, initialLat, initialLng }: GPSCapture
     const [mapReady, setMapReady] = useState(false)
     const [canRenderMap, setCanRenderMap] = useState(false)
     const [capturing, setCapturing] = useState(false)
+    const [usedFallback, setUsedFallback] = useState(false)
 
     useEffect(() => {
         setMapReady(typeof window !== 'undefined')
@@ -54,22 +85,33 @@ export function GPSCapture({ onLocationSet, initialLat, initialLng }: GPSCapture
     useEffect(() => {
         if (gpsLocation && capturing) {
             const newPos = { lat: gpsLocation.lat, lng: gpsLocation.lng }
+            const acc = gpsLocation.accuracy ?? null
+            const accTooPoor = acc == null || acc > MAX_ACCEPTABLE_ACCURACY_M
 
-            // Validate Rwanda bounds
-            if (isInRwanda(newPos.lat, newPos.lng)) {
-                setPosition(newPos)
-                setAccuracy(gpsLocation.accuracy || null)
+            const within = isInRwanda(newPos.lat, newPos.lng)
+
+            // If GPS is reliable, use it. Otherwise, fallback to user's selected district.
+            ;(async () => {
+                if (within && !accTooPoor) {
+                    setPosition(newPos)
+                    setAccuracy(acc)
+                    setUsedFallback(false)
+                    setCapturing(false)
+                    return
+                }
+
+                const coords = fallbackDistrict ? await geocodeDistrictToCoords(fallbackDistrict) : null
+                setPosition(coords ?? KIGALI_CENTER)
+                setAccuracy(null) // we don't trust GPS accuracy here
+                setUsedFallback(true)
                 setCapturing(false)
-            } else {
-                alert('GPS location is outside Rwanda. Please drag the pin to your actual location.')
-                setCapturing(false)
-            }
+            })()
         }
-    }, [gpsLocation, capturing])
+    }, [gpsLocation, capturing, fallbackDistrict])
 
     const isInRwanda = (lat: number, lng: number): boolean => {
-        return lat >= RWANDA_BOUNDS.latMin && lat <= RWANDA_BOUNDS.latMax &&
-            lng >= RWANDA_BOUNDS.lngMin && lng <= RWANDA_BOUNDS.lngMax
+        return lat >= (RWANDA_BOUNDS.latMin - RWANDA_BOUNDS_MARGIN) && lat <= (RWANDA_BOUNDS.latMax + RWANDA_BOUNDS_MARGIN) &&
+            lng >= (RWANDA_BOUNDS.lngMin - RWANDA_BOUNDS_MARGIN) && lng <= (RWANDA_BOUNDS.lngMax + RWANDA_BOUNDS_MARGIN)
     }
 
     const handleCaptureGPS = () => {
@@ -77,13 +119,8 @@ export function GPSCapture({ onLocationSet, initialLat, initialLng }: GPSCapture
     }
 
     const handleConfirm = () => {
-        if (position) {
-            if (!isInRwanda(position.lat, position.lng)) {
-                alert('Please select a location within Rwanda')
-                return
-            }
-            onLocationSet(position.lat, position.lng, accuracy || 5000)
-        }
+        if (!position) return
+        onLocationSet(position.lat, position.lng, accuracy || 5000)
     }
 
     const getAccuracyColor = (acc: number | null): string => {
@@ -100,6 +137,7 @@ export function GPSCapture({ onLocationSet, initialLat, initialLng }: GPSCapture
         return 'Poor'
     }
 
+    const withinRwanda = position ? isInRwanda(position.lat, position.lng) : false
     return (
         <div className="space-y-4">
             {/* GPS Capture Button */}
@@ -130,7 +168,9 @@ export function GPSCapture({ onLocationSet, initialLat, initialLng }: GPSCapture
                         <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
                         <div>
                             <p className="font-medium">Location access denied</p>
-                            <p className="text-xs mt-1">Please drag the pin on the map to your business location manually.</p>
+                            <p className="text-xs mt-1">
+                                We'll use your selected district for now. You can still adjust the pin on the map if you want.
+                            </p>
                         </div>
                     </div>
                 )}
@@ -140,7 +180,9 @@ export function GPSCapture({ onLocationSet, initialLat, initialLng }: GPSCapture
                         <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
                         <div>
                             <p className="font-medium">Could not get location</p>
-                            <p className="text-xs mt-1">You can manually drag the pin to your location on the map below.</p>
+                            <p className="text-xs mt-1">
+                                We'll use your selected district for now. You can still adjust the pin on the map if you want.
+                            </p>
                         </div>
                     </div>
                 )}
@@ -161,6 +203,18 @@ export function GPSCapture({ onLocationSet, initialLat, initialLng }: GPSCapture
                         </div>
                     </div>
                 )}
+
+                {usedFallback && (
+                    <div className="flex items-start gap-2 rounded-lg bg-yellow-50 border border-yellow-200 p-3 text-sm text-yellow-700">
+                        <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                        <div>
+                            <p className="font-medium">GPS is inaccurate</p>
+                            <p className="text-xs mt-1">
+                                We used your selected district to set your pin. If you want a more exact point, click the map to adjust before confirming.
+                            </p>
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Map Preview - only mount map after canRenderMap to avoid double-init in Strict Mode */}
@@ -174,9 +228,12 @@ export function GPSCapture({ onLocationSet, initialLat, initialLng }: GPSCapture
                         {canRenderMap && (
                             <div className="h-full w-full">
                                 <GPSCaptureMapInner
-                                    center={position || KIGALI_CENTER}
-                                    position={position}
-                                    setPosition={(latlng) => setPosition({ lat: latlng.lat, lng: latlng.lng })}
+                                    center={position && withinRwanda ? position : KIGALI_CENTER}
+                                    position={position && withinRwanda ? position : null}
+                                    setPosition={(latlng) => {
+                                        setUsedFallback(false)
+                                        setPosition({ lat: latlng.lat, lng: latlng.lng })
+                                    }}
                                 />
                             </div>
                         )}
