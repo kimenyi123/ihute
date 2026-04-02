@@ -1,6 +1,9 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useRouter } from "next/navigation"
+import { useCartStore } from "@/lib/cart-store"
+import { isBarOrRestaurant } from "@/lib/constants"
 import {
   Sheet,
   SheetContent,
@@ -9,8 +12,11 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { LocationCaptureDialog } from "@/components/location-capture-dialog"
+import { Slider } from "@/components/ui/slider"
 import { useLocationStoreEnhanced, type LocationData } from "@/lib/location-store-enhanced"
+import { getProductImageSrc, NO_IMAGE_URL } from "@/lib/image-utils"
 import { cn } from "@/lib/utils"
+import { SlidersHorizontal } from "lucide-react"
 
 type Category =
   | "Boutique"
@@ -28,8 +34,52 @@ type Product = {
   name: string
   price: number
   emoji: string
+  imageUrl?: string
+  /** Stable key for live-catalog rows (dedupe + React keys) */
+  liveKey?: string
+  /** Live API `in_stock` — only set for injected catalog rows */
+  liveInStock?: boolean
+  /** Menu / famille label from live API (filters) */
+  liveCategory?: string
   qty: number
 }
+
+type BurrowsApiProduct = {
+  item_commercial_name?: string
+  item_name?: string
+  selling_price?: number | string
+  price?: number | string
+  image_url?: string
+  item_image_url?: string
+  image?: string
+  IMAGE_URL?: string
+  item_image?: string
+  photo_url?: string
+  famille?: string
+  FAMILLE?: string
+  item_department?: string
+  ITEM_CODE?: string
+  item_code?: string
+  item_key_words?: string
+  item_state?: string
+  item_packet?: string
+  stock?: number | string
+  in_stock?: boolean
+  category?: string
+  item_state?: string
+}
+
+type BurrowsApiSeller = {
+  ISHYIGA_ACCOUNT?: string
+  OWNER?: string
+  SELLER_NAMES?: string
+  NICKNAME?: string
+  PREFERRED_CATEGORIES?: string
+  DEPARTMENT?: string
+  products?: BurrowsApiProduct[]
+}
+
+type BurrowsApiResponse = { ok: boolean; sellers?: BurrowsApiSeller[] }
 
 type LogisticsId = "human" | "bike" | "moto"
 type LogisticsOption = { id: LogisticsId; icon: string; label: string; baseRwf: number; rwfPerKm: number }
@@ -38,6 +88,8 @@ type PaymentId = "momo" | "airtel" | "bk" | "cash"
 type PaymentMode = { id: PaymentId; label: string; iconSrc: string }
 
 type ShopFilterTab = "favorites" | "reorder" | "trending" | "onsale"
+
+type ItemsSortId = "default" | "name" | "price_asc" | "price_desc"
 
 type ShopEntry = {
   id: string
@@ -61,8 +113,21 @@ type ShopEntry = {
   payoutAccount?: string
 }
 
+type OfferRow = {
+  id: string
+  shopId: string
+  shopName: string
+  shopDistanceKm: number
+  productId: number
+  productName: string
+  productEmoji: string
+  priceRwf: number
+  productMenuCategory: string | null
+}
+
 type GrandmaLang = "en" | "rw" | "fr"
 type AppMode = "buyer" | "seller"
+const PREFERRED_ALL_ID = "__ALL__"
 
 function formatStoredLocation(loc: LocationData | null, fallback: string): string {
   if (!loc) return fallback
@@ -148,7 +213,7 @@ const GRANDMA_LABELS: Record<
     yourLocation: "Your location",
     eta: "Estimated time of arrival",
     etaSub: "From ~{km} km · {mode} delivery",
-    etaSubNoMode: "From ~{km} km · choose delivery mode on Summary for a tighter estimate",
+    etaSubNoMode: "~{km} km from the shop. Choose a delivery option on Summary to see arrival time.",
     paymentModeSection: "Payment Mode",
     sortDistance: " Sorted by distance.",
     shopsIntro:
@@ -163,7 +228,7 @@ const GRANDMA_LABELS: Record<
     logBike: "Bike",
     logMoto: "Moto",
     amountShop: "Amount to shop",
-    ihuteFees: "Ihute fees (0.1%)",
+    ihuteFees: "Ihute fees (1%)",
     taxes: "Taxes",
     amountLogistics: "Amount to logistics",
     totalPay: "Total amount to pay",
@@ -200,7 +265,7 @@ const GRANDMA_LABELS: Record<
     yourLocation: "Aho uherereye",
     eta: "Igihe cyateganyijwe cyo kugera",
     etaSub: "Kuva kuri km ~{km} · {mode}",
-    etaSubNoMode: "Kuva kuri km ~{km} · hitamo uburyo bwo kohereza ku incamake",
+    etaSubNoMode: "Km ~{km} kuva ku iduka. Hitamo uburyo bwo kohereza ku incamake kugira ngo ubone igihe cyo kugera.",
     paymentModeSection: "Uburyo bwo kwishyura",
     sortDistance: " Byagenwe ku ntambwe.",
     shopsIntro: "Hitamo iduka muri {cat}. Ukunda n'ibyakoreshejwe mbere biri ku rutonde rwa mbere.{sort}",
@@ -214,7 +279,7 @@ const GRANDMA_LABELS: Record<
     logBike: "Igare",
     logMoto: "Moto",
     amountShop: "Amafaranga y'iduka",
-    ihuteFees: "Amafaranga ya Ihute (0.1%)",
+    ihuteFees: "Amafaranga ya Ihute (1%)",
     taxes: "Imisoro",
     amountLogistics: "Amafaranga y'uboherezi",
     totalPay: "Amafaranga yose",
@@ -251,7 +316,7 @@ const GRANDMA_LABELS: Record<
     yourLocation: "Votre position",
     eta: "Heure d'arrivée estimée",
     etaSub: "Depuis ~{km} km · livraison {mode}",
-    etaSubNoMode: "Depuis ~{km} km · choisissez le mode sur le récapitulatif",
+    etaSubNoMode: "À ~{km} km du magasin. Choisissez une livraison sur le récapitulatif pour voir l’heure d’arrivée.",
     paymentModeSection: "Mode de paiement",
     sortDistance: " Triés par distance.",
     shopsIntro: "Choisissez un magasin dans {cat}. Favoris et commandes passées en premier.{sort}",
@@ -265,7 +330,7 @@ const GRANDMA_LABELS: Record<
     logBike: "Vélo",
     logMoto: "Moto",
     amountShop: "Montant au magasin",
-    ihuteFees: "Frais Ihute (0,1 %)",
+    ihuteFees: "Frais Ihute (1 %)",
     taxes: "Taxes",
     amountLogistics: "Montant logistique",
     totalPay: "Total à payer",
@@ -319,6 +384,11 @@ const SHOP_LOGO_PATHS = [
   "/img/shops/spar.png",
   "/img/shops/250strores.png",
 ] as const
+
+/** Per-shop logos (override cycling assignment from `SHOP_LOGO_PATHS`) */
+const SHOP_LOGO_OVERRIDE: Record<string, string> = {
+  ph_rite: "/shops/rite-pharmacy-logo.png",
+}
 
 /** Demo shops per category — replace with API + real GPS sort */
 const MOCK_SHOPS: ShopEntry[] = (
@@ -414,6 +484,22 @@ const MOCK_SHOPS: ShopEntry[] = (
     momo: "Airtel: 072***667",
   },
   {
+    id: "ph_rite",
+    name: "Rite Pharmacy",
+    category: "Pharmacy",
+    tagline: "Gisimenti branch · live products",
+    favorite: true,
+    orderedBefore: true,
+    trending: true,
+    onSale: false,
+    distanceKm: 1.6,
+    momo: "MTN MoMo: 079***816",
+    bankName: "Bank of Kigali",
+    payoutAccount: "RITE-00012-204",
+    rating: 4.0,
+    reviewCount: 254,
+  },
+  {
     id: "rs1",
     name: "Rolex House",
     category: "Restaurant",
@@ -424,6 +510,18 @@ const MOCK_SHOPS: ShopEntry[] = (
     onSale: false,
     distanceKm: 0.9,
     momo: "MTN MoMo: 078***889",
+  },
+  {
+    id: "rs_burrows",
+    name: "Burrows",
+    category: "Restaurant",
+    tagline: "Live menu · testing",
+    favorite: true,
+    orderedBefore: true,
+    trending: true,
+    onSale: false,
+    distanceKm: 0.4,
+    momo: "MTN MoMo: 078***000",
   },
   {
     id: "rs2",
@@ -536,7 +634,7 @@ const MOCK_SHOPS: ShopEntry[] = (
   ] satisfies Omit<ShopEntry, "logoSrc">[]
 ).map((s, i) => ({
   ...s,
-  logoSrc: SHOP_LOGO_PATHS[i % SHOP_LOGO_PATHS.length],
+  logoSrc: SHOP_LOGO_OVERRIDE[s.id] ?? SHOP_LOGO_PATHS[i % SHOP_LOGO_PATHS.length],
 }))
 
 const SHOP_FILTER_TABS: { id: ShopFilterTab; label: string }[] = [
@@ -599,9 +697,9 @@ const INITIAL_PRODUCTS: Product[] = [
   { id: 1, category: "Boutique", name: "Inyange Milk", price: 500, emoji: "🥛", qty: 0 },
   { id: 2, category: "Boutique", name: "Sugar", price: 1250, emoji: "🧂", qty: 0 },
   { id: 3, category: "Boutique", name: "Mützig Beer", price: 1000, emoji: "🍺", qty: 0 },
-  { id: 4, category: "Boutique", name: "Heineken Beer", price: 1200, emoji: "🍾", qty: 0 },
+  { id: 4, category: "Boutique", name: "Heineken 300ml", price: 1200, emoji: "🍾", qty: 0 },
   { id: 5, category: "Boutique", name: "Fanta Orange", price: 500, emoji: "🥤", qty: 0 },
-  { id: 6, category: "Boutique", name: "Nyange Water", price: 300, emoji: "💧", qty: 0 },
+  { id: 6, category: "Boutique", name: "Nyange Water 500ml", price: 300, emoji: "💧", qty: 0 },
   { id: 7, category: "Boutique", name: "Bread", price: 700, emoji: "🍞", qty: 0 },
   { id: 8, category: "Supermarket", name: "Rice", price: 1800, emoji: "🍚", qty: 0 },
   { id: 9, category: "Supermarket", name: "Cooking Oil", price: 2500, emoji: "🫗", qty: 0 },
@@ -629,8 +727,8 @@ const PAYMENTS: PaymentMode[] = [
   { id: "cash", label: "Cash on Delivery", iconSrc: "/img/cash.png" },
 ]
 
-/** 0.1% platform fee on items subtotal */
-const IHUTE_FEE_RATE = 0.001
+/** 1% platform fee on items subtotal */
+const IHUTE_FEE_RATE = 0.01
 const TAXES_PLACEHOLDER = 0
 
 function formatRwf(v: number): string {
@@ -640,6 +738,227 @@ function formatRwf(v: number): string {
 function shopIdHash(id: string): number {
   return [...id].reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 7)
 }
+
+function extractNumericPrice(v: unknown): number {
+  if (typeof v === "number" && Number.isFinite(v)) return v
+  const s = String(v ?? "").replace(/[^\d.]/g, "")
+  const n = parseFloat(s)
+  return Number.isFinite(n) ? n : 0
+}
+
+/** Uniquely identify a catalog line (avoids duplicate React keys when API repeats the same SKU). */
+function liveItemDedupeKey(p: BurrowsApiProduct, rowIndex: number): string {
+  const code = String(p.ITEM_CODE ?? p.item_code ?? p.item_key_words ?? "").trim()
+  const state = String(p.item_state ?? "").trim()
+  const packet = String(p.item_packet ?? "").trim()
+  const price = String(p.selling_price ?? p.price ?? "").trim()
+  const name = String(p.item_commercial_name ?? p.item_name ?? "").trim()
+  const core = [code, state, packet, price, name].join("\u241e")
+  return core || `__idx_${rowIndex}`
+}
+
+function emojiForRestaurantItem(name: string): string {
+  const n = name.toLowerCase()
+  if (/salad/.test(n)) return "🥗"
+  if (/pizza/.test(n)) return "🍕"
+  if (/rice/.test(n)) return "🍛"
+  if (/burger/.test(n)) return "🍔"
+  if (/avocado/.test(n)) return "🥑"
+  if (/macaroni|pasta/.test(n)) return "🍝"
+  if (/coffee/.test(n)) return "☕"
+  return "🍽️"
+}
+
+function emojiForPharmacyItem(name: string): string {
+  const n = name.toLowerCase()
+  if (/syrup|sachet|oral/.test(n)) return "🧴"
+  if (/cream|ointment|gel/.test(n)) return "🧪"
+  if (/inject|ampoule|vial/.test(n)) return "💉"
+  if (/tablet|capsule|comp\.|mg|ml/.test(n)) return "💊"
+  return "💊"
+}
+
+function emojiForLiveCategory(category: Category, name: string): string {
+  if (category === "Pharmacy") return emojiForPharmacyItem(name)
+  return emojiForRestaurantItem(name)
+}
+
+const PHARMACY_PLACEHOLDER_IMAGES = [
+  "/pharmacy-medicine-pills-bottles.jpg",
+  "/paracetamol-medicine-pills.jpg",
+  "/aspirin-medicine-pills.jpg",
+  "/ibuprofen-medicine-tablets.jpg",
+  "/cough-syrup-bottle.jpg",
+  "/vitamin-c-supplement-bottle.jpg",
+  "/bandages-medical-pack.jpg",
+  "/digital-thermometer.png",
+  "/hand-sanitizer-bottle.jpg",
+  "/medical-face-masks-box.jpg",
+  "/medicines/amoxicillin.png",
+] as const
+
+const RESTAURANT_PLACEHOLDER_IMAGES = ["/restaurant-food-dining-bar.jpg", "/coffee-shop-cafe-espresso.jpg"] as const
+
+/** Spread placeholder picks so nearby list items rarely share the same stock photo. */
+function placeholderMixIndex(seed: string, modulo: number): number {
+  const a = Math.abs(shopIdHash(seed))
+  const b = Math.abs(shopIdHash([...seed].reverse().join("")))
+  const c = seed.length * 2654435761
+  return Math.abs((a ^ b ^ c) >>> 0) % modulo
+}
+
+function livePlaceholderImageUrl(category: Category, seed: string): string {
+  if (category === "Pharmacy") {
+    const i = placeholderMixIndex(seed, PHARMACY_PLACEHOLDER_IMAGES.length)
+    return PHARMACY_PLACEHOLDER_IMAGES[i]
+  }
+  if (category === "Restaurant") {
+    const i = placeholderMixIndex(seed, RESTAURANT_PLACEHOLDER_IMAGES.length)
+    return RESTAURANT_PLACEHOLDER_IMAGES[i]
+  }
+  return "/placeholder.jpg"
+}
+
+/** Same resolution as `/shop-with-me` (enriched URL → KAOS per NIKI code → none). */
+function liveCatalogThumbUrl(
+  p: BurrowsApiProduct,
+  category: Category,
+  nickname: string,
+  dedupeKey: string,
+  displayName: string
+): string {
+  const resolved = getProductImageSrc(p as Record<string, unknown>)
+  if (resolved !== NO_IMAGE_URL) return resolved
+  return livePlaceholderImageUrl(category, `${nickname}\u241e${dedupeKey}\u241e${displayName}`)
+}
+
+function stableSample<T>(list: T[], take: number, seedKey: (x: T) => string): T[] {
+  if (list.length <= take) return list
+  const scored = list.map((x) => ({ x, s: Math.abs(shopIdHash(seedKey(x))) }))
+  scored.sort((a, b) => a.s - b.s)
+  return scored.slice(0, take).map((r) => r.x)
+}
+
+function offerId(shopId: string, productId: number): string {
+  return `${shopId}::${productId}`
+}
+
+const FILTER_MENU_OTHER = "Other"
+/** Canonical bucket for menu filter state / OfferRow (lowercase). */
+const MENU_FILTER_OTHER_CANON = "other"
+
+/**
+ * Same rules as `components/shop-with-me.tsx` → `categorizeProduct` when famille is missing.
+ */
+function categorizeBurrowsApiProduct(p: BurrowsApiProduct): string {
+  const keywords = String(p.item_key_words || "").toLowerCase()
+  const itemState = String(p.item_state || "").toLowerCase()
+  const name = String(p.item_commercial_name || p.item_name || "").toLowerCase()
+
+  if (keywords.includes("wine") || itemState.includes("wine") || name.includes("wine")) return "Wine"
+  if (
+    keywords.includes("beer") ||
+    itemState.includes("beer") ||
+    name.includes("beer") ||
+    keywords.includes("lager") ||
+    name.includes("lager")
+  ) {
+    return "Beer"
+  }
+  if (
+    keywords.includes("gin") ||
+    keywords.includes("vodka") ||
+    keywords.includes("whisky") ||
+    keywords.includes("rum") ||
+    keywords.includes("tequila") ||
+    itemState.includes("liquor") ||
+    name.includes("gin") ||
+    name.includes("vodka")
+  ) {
+    return "Spirits"
+  }
+  if (keywords.includes("bread") || keywords.includes("cake") || keywords.includes("bakery") || itemState.includes("bakery")) {
+    return "Bakery"
+  }
+  if (keywords.includes("snack") || keywords.includes("chips") || keywords.includes("crisp")) return "Snacks"
+  if (
+    keywords.includes("juice") ||
+    keywords.includes("soda") ||
+    keywords.includes("water") ||
+    keywords.includes("drink") ||
+    itemState.includes("beverage")
+  ) {
+    return "Beverages"
+  }
+  if (keywords.includes("food") || keywords.includes("meal") || itemState.includes("food")) return "Food"
+  return "Other"
+}
+
+/**
+ * Match `shop-with-me` section grouping: famille/FAMILLE first, else API category, else keyword fallback.
+ */
+function resolveLiveMenuSectionCategory(p: BurrowsApiProduct): string {
+  const fam = p.famille ?? p.FAMILLE
+  if (fam != null && String(fam).trim()) return String(fam).trim()
+  const cat = p.category
+  if (cat != null && String(cat).trim()) return String(cat).trim()
+  return categorizeBurrowsApiProduct(p)
+}
+
+function menuCategoryCanon(raw: string | null | undefined): string {
+  const s = String(raw ?? "").trim().replace(/\s+/g, " ")
+  if (!s) return MENU_FILTER_OTHER_CANON
+  return s.toLowerCase()
+}
+
+function menuCategoryTitleFromCanon(canon: string): string {
+  if (canon === MENU_FILTER_OTHER_CANON) return FILTER_MENU_OTHER
+  return canon
+    .split(" ")
+    .map((w) => (w.length ? w.charAt(0).toUpperCase() + w.slice(1) : w))
+    .join(" ")
+}
+
+function priceHistogramCounts(prices: number[], binCount: number): number[] {
+  const bins = Array.from({ length: binCount }, () => 0)
+  if (!prices.length) return bins
+  const lo = Math.min(...prices)
+  const hi = Math.max(...prices)
+  if (hi <= lo) {
+    bins[Math.floor(binCount / 2)] = prices.length
+    return bins
+  }
+  for (const p of prices) {
+    const t = (p - lo) / (hi - lo)
+    const i = Math.min(binCount - 1, Math.floor(t * binCount))
+    bins[i] += 1
+  }
+  return bins
+}
+
+function productMatchesMenuCategory(p: Product, selectedCanon: string | null): boolean {
+  if (selectedCanon == null) return true
+  return menuCategoryCanon(p.liveCategory) === selectedCanon
+}
+
+function offerMatchesMenuCategory(o: OfferRow, selectedCanon: string | null): boolean {
+  if (selectedCanon == null) return true
+  const ok = o.productMenuCategory ?? MENU_FILTER_OTHER_CANON
+  return ok === selectedCanon
+}
+
+function shopProductPriceRwf(shop: ShopEntry, product: Product): number {
+  const h = Math.abs(shopIdHash(`${shop.id}-${product.id}`))
+  // Deterministic per-shop offer points in 25 RWF steps (e.g. 500, 525, 600…)
+  // This is intentional for the "ALL shops" mode so the same item differs by shop.
+  const deltas = [0, 25, 50, 75, 100, 125, 150] as const
+  const delta = deltas[h % deltas.length]
+  // occasional discount for variety
+  const discount = h % 9 === 0 ? 25 : 0
+  return Math.max(25, product.price + delta - discount)
+}
+
+const OFFERS_PER_PRODUCT = 3
 
 /** Stable demo rating per shop until API provides `rating` */
 function shopDisplayRating(s: ShopEntry): number {
@@ -839,6 +1158,7 @@ const SELLER_ORDERS_INIT: SellerOrder[] = [
 ]
 
 export default function GrandmaPage() {
+  const router = useRouter()
   const locationData = useLocationStoreEnhanced((s) => s.location)
   const [page, setPage] = useState<PageId>(1)
   const [category, setCategory] = useState<Category>("Boutique")
@@ -848,6 +1168,12 @@ export default function GrandmaPage() {
   const [useLocationSort, setUseLocationSort] = useState(false)
   const [selectedShopId, setSelectedShopId] = useState<string | null>(null)
   const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS)
+  const [burrowsLiveCount, setBurrowsLiveCount] = useState<number>(0)
+  const [burrowsLiveLoading, setBurrowsLiveLoading] = useState(false)
+  const [burrowsLiveError, setBurrowsLiveError] = useState<string | null>(null)
+  const [imagePreviewOpen, setImagePreviewOpen] = useState(false)
+  const [imagePreviewSrc, setImagePreviewSrc] = useState<string>("")
+  const [imagePreviewTitle, setImagePreviewTitle] = useState<string>("")
   const [selectedLogistics, setSelectedLogistics] = useState<LogisticsId | null>(null)
   const [appMode, setAppMode] = useState<AppMode>("buyer")
   const [language, setLanguage] = useState<GrandmaLang>("rw")
@@ -855,6 +1181,12 @@ export default function GrandmaPage() {
   const [selectedPayment, setSelectedPayment] = useState<PaymentId>("momo")
   const [prefsHydrated, setPrefsHydrated] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false)
+  const [itemsSort, setItemsSort] = useState<ItemsSortId>("default")
+  const [liveInStockOnly, setLiveInStockOnly] = useState(false)
+  const [liveShowAll, setLiveShowAll] = useState(false)
+  const [itemsMenuCategoryKey, setItemsMenuCategoryKey] = useState<string | null>(null)
+  const [priceRangeRwf, setPriceRangeRwf] = useState<[number, number] | null>(null)
   const [locationDialogOpen, setLocationDialogOpen] = useState(false)
   const [orderNotes, setOrderNotes] = useState("")
   const [prescriptionSlots, setPrescriptionSlots] = useState<PrescriptionSlot[]>([])
@@ -874,6 +1206,13 @@ export default function GrandmaPage() {
     () => (selectedShopId ? MOCK_SHOPS.find((s) => s.id === selectedShopId) ?? null : null),
     [selectedShopId]
   )
+
+  const liveMenuNickname = useMemo(() => {
+    if (selectedShopId === "rs_burrows") return "burrows"
+    if (selectedShopId === "ph_rite") return "rite"
+    return null
+  }, [selectedShopId])
+  const isLiveMenuSelected = useMemo(() => Boolean(liveMenuNickname), [liveMenuNickname])
 
   const deliveryKm = selectedShop?.distanceKm ?? 0
 
@@ -919,6 +1258,10 @@ export default function GrandmaPage() {
   }, [courierModalOpen])
 
   useEffect(() => {
+    if (!selectedLogistics) setCourierModalOpen(false)
+  }, [selectedLogistics])
+
+  useEffect(() => {
     const prefs = readGrandmaPrefs()
     setLanguage(prefs.lang)
     setPreferredShopIds(prefs.preferred)
@@ -943,6 +1286,92 @@ export default function GrandmaPage() {
     if (typeof window === "undefined" || !prefsHydrated) return
     localStorage.setItem("grandma:mode", appMode)
   }, [appMode, prefsHydrated])
+
+  useEffect(() => {
+    if (appMode === "seller" || (page !== 2 && page !== 3)) setFilterSheetOpen(false)
+  }, [page, appMode])
+
+  // Live menu (Burrows + Rite) — inject live items into the current shop category list.
+  useEffect(() => {
+    if (!isLiveMenuSelected) {
+      setBurrowsLiveLoading(false)
+      setBurrowsLiveError(null)
+      setBurrowsLiveCount(0)
+      // remove any previously injected live items
+      setProducts((prev) => prev.filter((p) => p.id < 100000))
+      return
+    }
+    let cancelled = false
+    const t = setTimeout(async () => {
+      try {
+        setBurrowsLiveLoading(true)
+        setBurrowsLiveError(null)
+        const nickname = liveMenuNickname || "burrows"
+        const targetCategory = (selectedShop?.category ?? "Restaurant") as Category
+        const params = new URLSearchParams({ nickname })
+        if (search.trim()) params.set("productSearch", search.trim())
+        const res = await fetch(`/api/shop-with-me?${params.toString()}`, { cache: "no-store" })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const data = (await res.json()) as BurrowsApiResponse
+        const sellers = data.sellers ?? []
+        const seller = sellers[0]
+        const list = seller?.products ?? []
+        const uniqueRows: { key: string; p: BurrowsApiProduct }[] = []
+        const seenKeys = new Set<string>()
+        for (let i = 0; i < list.length; i++) {
+          const p = list[i]
+          const key = liveItemDedupeKey(p, i)
+          if (seenKeys.has(key)) continue
+          seenKeys.add(key)
+          uniqueRows.push({ key, p })
+        }
+        const mapped: Product[] = uniqueRows
+          .map(({ key, p }) => {
+            const nameRaw = String(p.item_commercial_name ?? p.item_name ?? "").trim()
+            const name = nameRaw || "Menu item"
+            const id = 100000 + (Math.abs(shopIdHash(`${nickname}:${key}`)) % 899000)
+            const price = extractNumericPrice(p.selling_price ?? p.price)
+            const thumb = liveCatalogThumbUrl(p, targetCategory, nickname, key, name)
+            const sectionLabel = resolveLiveMenuSectionCategory(p)
+            const menuCat = menuCategoryTitleFromCanon(menuCategoryCanon(sectionLabel))
+            return {
+              id,
+              category: targetCategory,
+              name,
+              price: price || 0,
+              emoji: emojiForLiveCategory(targetCategory, name),
+              imageUrl: thumb,
+              liveKey: `${nickname}:${key}`,
+              liveInStock: p.in_stock === true,
+              liveCategory: menuCat,
+              qty: 0,
+            } satisfies Product
+          })
+          .filter((p) => p.name && p.price > 0)
+        if (cancelled) return
+        setBurrowsLiveCount(mapped.length)
+        setProducts((prev) => {
+          const kept = prev.filter((p) => p.id < 100000)
+          // preserve existing qty for same id
+          const qtyById = new Map<number, number>()
+          for (const p of prev) qtyById.set(p.id, p.qty)
+          const merged = mapped.map((p) => ({ ...p, qty: qtyById.get(p.id) ?? 0 }))
+          return [...kept, ...merged]
+        })
+      } catch (e: any) {
+        if (!cancelled) {
+          setBurrowsLiveError(e?.message || "Failed to load menu")
+          setBurrowsLiveCount(0)
+        }
+      } finally {
+        if (!cancelled) setBurrowsLiveLoading(false)
+      }
+    }, 250)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
+  }, [isLiveMenuSelected, liveMenuNickname, selectedShop?.category, search])
 
   /** Pay page (page 5) only — other screens stay English */
   const tPay = GRANDMA_LABELS[language]
@@ -1027,6 +1456,7 @@ export default function GrandmaPage() {
     else if (shopTab === "onsale") list = list.filter((s) => s.onSale)
     else {
       list = [...list].sort((a, b) => {
+        // Preferred shops (Settings) first — e.g. Burrows + Rite when you mark them
         const p = prefBoost(a, b)
         if (p !== 0) return p
         if (a.favorite !== b.favorite) return a.favorite ? -1 : 1
@@ -1039,16 +1469,182 @@ export default function GrandmaPage() {
     list = [...list].sort((a, b) => {
       const p = prefBoost(a, b)
       if (p !== 0) return p
+      if (a.favorite !== b.favorite) return a.favorite ? -1 : 1
+      if (a.orderedBefore !== b.orderedBefore) return a.orderedBefore ? -1 : 1
       if (useLocationSort) return a.distanceKm - b.distanceKm
       return a.name.localeCompare(b.name)
     })
     return list
   }, [shopsInCategory, shopSearch, shopTab, useLocationSort, preferredShopIds])
 
+  const isAllPreferred = useMemo(() => preferredShopIds.includes(PREFERRED_ALL_ID), [preferredShopIds])
+  const multiShopMode = useMemo(() => isAllPreferred && !selectedShopId, [isAllPreferred, selectedShopId])
+
+  const offerShopsForCategory = useMemo(() => {
+    const inCat = MOCK_SHOPS.filter((s) => s.category === category)
+    const prefs = preferredShopIds.filter((x) => x !== PREFERRED_ALL_ID)
+    if (prefs.length) return inCat.filter((s) => prefs.includes(s.id))
+    return inCat
+  }, [category, preferredShopIds])
+
+  /** Full item pool for price histogram / category chips (ignores live “sample 20”). */
+  const itemsFilterStatsSource = useMemo(() => {
+    if (multiShopMode) return [] as Product[]
+    let list = products.filter((p) => p.category === category)
+    const q = search.trim().toLowerCase()
+    if (q) list = list.filter((p) => p.name.toLowerCase().includes(q))
+    if (isLiveMenuSelected) {
+      list = list.filter((p) => p.id >= 100000)
+      if (liveInStockOnly) list = list.filter((p) => p.liveInStock === true)
+    }
+    return list
+  }, [multiShopMode, products, category, search, isLiveMenuSelected, liveInStockOnly])
+
+  const offersBaseList = useMemo((): OfferRow[] => {
+    if (!multiShopMode) return []
+    const q = search.trim().toLowerCase()
+    return products
+      .filter((p) => p.category === category)
+      .filter((p) => !q || p.name.toLowerCase().includes(q))
+      .flatMap((p) => {
+        const offers = offerShopsForCategory
+          .map((shop) => ({
+            shop,
+            priceRwf: shopProductPriceRwf(shop, p),
+          }))
+          .sort((a, b) => a.priceRwf - b.priceRwf || a.shop.distanceKm - b.shop.distanceKm || a.shop.name.localeCompare(b.shop.name))
+          .slice(0, OFFERS_PER_PRODUCT)
+          .map(
+            (x) =>
+              ({
+                id: offerId(x.shop.id, p.id),
+                shopId: x.shop.id,
+                shopName: x.shop.name,
+                shopDistanceKm: x.shop.distanceKm,
+                productId: p.id,
+                productName: p.name,
+                productEmoji: p.emoji,
+                priceRwf: x.priceRwf,
+                productMenuCategory: menuCategoryCanon(p.liveCategory),
+              }) satisfies OfferRow
+          )
+        return offers
+      })
+  }, [multiShopMode, products, category, search, offerShopsForCategory])
+
+  const itemsPriceExtent = useMemo(() => {
+    if (!itemsFilterStatsSource.length) return { min: 0, max: 0 }
+    const prices = itemsFilterStatsSource.map((p) => p.price)
+    return { min: Math.min(...prices), max: Math.max(...prices) }
+  }, [itemsFilterStatsSource])
+
+  const offersPriceExtent = useMemo(() => {
+    if (!offersBaseList.length) return { min: 0, max: 0 }
+    const prices = offersBaseList.map((o) => o.priceRwf)
+    return { min: Math.min(...prices), max: Math.max(...prices) }
+  }, [offersBaseList])
+
+  const filterPriceExtent = useMemo(
+    () => (multiShopMode ? offersPriceExtent : itemsPriceExtent),
+    [multiShopMode, offersPriceExtent, itemsPriceExtent]
+  )
+
+  const filterHistogramPrices = useMemo(() => {
+    if (multiShopMode) return offersBaseList.map((o) => o.priceRwf)
+    return itemsFilterStatsSource.map((p) => p.price)
+  }, [multiShopMode, offersBaseList, itemsFilterStatsSource])
+
+  const filterMenuCategoryKeys = useMemo(() => {
+    const canons = multiShopMode
+      ? offersBaseList.map((o) => o.productMenuCategory ?? MENU_FILTER_OTHER_CANON)
+      : itemsFilterStatsSource.map((p) => menuCategoryCanon(p.liveCategory))
+    return [...new Set(canons)].sort((a, b) => a.localeCompare(b))
+  }, [multiShopMode, offersBaseList, itemsFilterStatsSource])
+
+  const filterHistogramBins = useMemo(
+    () => priceHistogramCounts(filterHistogramPrices, 20),
+    [filterHistogramPrices]
+  )
+
+  useEffect(() => {
+    const { min, max } = filterPriceExtent
+    if (!Number.isFinite(min) || !Number.isFinite(max) || max < min) {
+      setPriceRangeRwf(null)
+      return
+    }
+    setPriceRangeRwf([min, max])
+  }, [filterPriceExtent.min, filterPriceExtent.max, multiShopMode])
+
   const visibleProducts = useMemo(() => {
     const q = search.trim().toLowerCase()
-    return products.filter((p) => p.category === category && (!q || p.name.toLowerCase().includes(q)))
-  }, [products, category, search])
+    let list = products.filter((p) => p.category === category && (!q || p.name.toLowerCase().includes(q)))
+    if (isLiveMenuSelected) {
+      list = list.filter((p) => p.id >= 100000)
+      if (liveInStockOnly) list = list.filter((p) => p.liveInStock === true)
+      const showAll = liveShowAll || Boolean(q)
+      if (!showAll) list = stableSample(list, 20, (p) => `${p.liveKey ?? p.id}-${p.name}`)
+    }
+    if (priceRangeRwf) {
+      const [lo, hi] = priceRangeRwf
+      if (Number.isFinite(lo) && Number.isFinite(hi) && hi >= lo) {
+        list = list.filter((p) => p.price >= lo && p.price <= hi)
+      }
+    }
+    list = list.filter((p) => productMatchesMenuCategory(p, itemsMenuCategoryKey))
+    list = [...list]
+    if (itemsSort === "name") list.sort((a, b) => a.name.localeCompare(b.name))
+    else if (itemsSort === "price_asc") list.sort((a, b) => a.price - b.price || a.name.localeCompare(b.name))
+    else if (itemsSort === "price_desc") list.sort((a, b) => b.price - a.price || a.name.localeCompare(b.name))
+    return list
+  }, [
+    products,
+    category,
+    search,
+    isLiveMenuSelected,
+    liveInStockOnly,
+    liveShowAll,
+    itemsSort,
+    priceRangeRwf,
+    itemsMenuCategoryKey,
+  ])
+
+  const showHeaderFilters = appMode === "buyer" && (page === 2 || page === 3)
+
+  const visibleOffers = useMemo(() => {
+    if (!multiShopMode) return [] as OfferRow[]
+    let list = offersBaseList
+    if (priceRangeRwf) {
+      const [lo, hi] = priceRangeRwf
+      if (Number.isFinite(lo) && Number.isFinite(hi) && hi >= lo) {
+        list = list.filter((o) => o.priceRwf >= lo && o.priceRwf <= hi)
+      }
+    }
+    list = list.filter((o) => offerMatchesMenuCategory(o, itemsMenuCategoryKey))
+    return [...list].sort(
+      (a, b) =>
+        a.productName.localeCompare(b.productName) ||
+        a.priceRwf - b.priceRwf ||
+        a.shopDistanceKm - b.shopDistanceKm
+    )
+  }, [multiShopMode, offersBaseList, priceRangeRwf, itemsMenuCategoryKey])
+
+  const clearGrandmaFilters = useCallback(() => {
+    setShopTab(null)
+    setUseLocationSort(false)
+    setItemsSort("default")
+    setLiveInStockOnly(false)
+    setLiveShowAll(false)
+    setItemsMenuCategoryKey(null)
+    const { min, max } = filterPriceExtent
+    if (Number.isFinite(min) && Number.isFinite(max) && max >= min) setPriceRangeRwf([min, max])
+    else setPriceRangeRwf(null)
+  }, [filterPriceExtent.min, filterPriceExtent.max])
+
+  const priceSliderStep = useMemo(() => {
+    const { min, max } = filterPriceExtent
+    if (max <= min) return 1
+    return Math.max(1, Math.round((max - min) / 80))
+  }, [filterPriceExtent])
 
   const changeQty = (id: number, diff: number) => {
     setProducts((prev) =>
@@ -1063,7 +1659,13 @@ export default function GrandmaPage() {
   }
 
   const togglePreferredShop = (id: string) => {
-    setPreferredShopIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+    setPreferredShopIds((prev) => {
+      if (id === PREFERRED_ALL_ID) {
+        return prev.includes(PREFERRED_ALL_ID) ? prev.filter((x) => x !== PREFERRED_ALL_ID) : [PREFERRED_ALL_ID]
+      }
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev.filter((x) => x !== PREFERRED_ALL_ID), id]
+      return next
+    })
   }
   const updateSellerOrderStatus = (id: number, status: SellerOrderStatus) => {
     setSellerOrders((prev) => prev.map((order) => (order.id === id ? { ...order, status } : order)))
@@ -1093,6 +1695,51 @@ export default function GrandmaPage() {
     return tr.etaSub.replace("{km}", km).replace("{mode}", mode)
   }, [language, deliveryKm, selectedLogistics])
 
+  const proceedToMainCartCheckout = useCallback(() => {
+    if (!selectedShop || selectedProducts.length === 0) {
+      const msg =
+        language === "rw"
+          ? "Shyiramo ibintu mbere yo kohereza komande."
+          : language === "fr"
+            ? "Ajoutez des articles avant de payer."
+            : "Add items before sending your order."
+      window.alert(msg)
+      return
+    }
+    const st = useCartStore.getState()
+    st.clear()
+    st.clearTableInfo()
+    const isBar =
+      selectedShop.category === "Restaurant" || isBarOrRestaurant(selectedShop.name)
+    const notesFirst = orderNotes.trim() || undefined
+    selectedProducts.forEach((p, idx) => {
+      const id = String(p.liveKey ?? p.id)
+      st.addItem(
+        {
+          id,
+          itemCode: (p.liveKey ?? String(p.id)).toString(),
+          name: p.name,
+          price: p.price,
+          image: p.imageUrl,
+          supplierId: selectedShop.id,
+          supplierName: selectedShop.name,
+          momo: selectedShop.momo,
+          isBarResto: isBar,
+          notes: idx === 0 ? notesFirst : undefined,
+        },
+        p.qty
+      )
+    })
+    setProducts((prev) => prev.map((x) => ({ ...x, qty: 0 })))
+    setOrderNotes("")
+    setPrescriptionSlots((prev) => {
+      prev.forEach((s) => URL.revokeObjectURL(s.url))
+      return []
+    })
+    setPage(1)
+    router.push("/cart")
+  }, [language, orderNotes, router, selectedProducts, selectedShop])
+
   const featuredCourierSafe = useMemo(() => {
     const fc = featuredCourier
     return fc ?? COURIER_POOL[0]
@@ -1110,12 +1757,17 @@ export default function GrandmaPage() {
         .app{max-width:430px;margin:0 auto;min-height:100vh;background:linear-gradient(180deg,#f7fbff 0%,#eef4fb 100%);padding-bottom:calc(120px + env(safe-area-inset-bottom));}
         .topbar{background:linear-gradient(90deg,var(--blue),#30acef,var(--blue-dark));color:#fff;padding:14px 16px;position:sticky;top:0;z-index:10;box-shadow:0 8px 20px rgba(0,0,0,.10);}
         .topbar-row{display:flex;align-items:center;gap:10px;}
-        .back-btn,.more-btn{border:none;background:rgba(255,255,255,.14);color:#fff;border-radius:10px;width:36px;height:36px;font-size:18px;cursor:pointer;}
+        .back-btn,.more-btn{border:none;background:rgba(255,255,255,.14);color:#fff;border-radius:10px;width:36px;height:36px;font-size:18px;cursor:pointer;flex-shrink:0;line-height:1;}
+        .filter-trigger-btn{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:10px;background:rgba(255,255,255,.95);color:#17324d;border:1px solid rgba(255,255,255,.55);font-size:12px;font-weight:800;cursor:pointer;flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,.08);}
+        .filter-trigger-btn svg{flex-shrink:0;opacity:.9;}
         .brand{display:flex;align-items:center;gap:10px;flex:1;min-width:0;}
         .logo{width:34px;height:34px;border-radius:10px;background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;border:1px solid rgba(255,255,255,.35);flex-shrink:0;}
         .logo img{width:100%;height:100%;object-fit:contain;display:block;}
         .shop-box .logo{width:48px;height:48px;border-radius:12px;border:1px solid var(--line);}
         .title{font-size:22px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+        .title.title-filter{position:relative;}
+        .title.title-filter:before{content:"⏷";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:34px;opacity:.14;pointer-events:none;}
+        .title-text{position:relative;z-index:1;}
         .page{display:none;padding:14px;}
         .page.active{display:block}
         .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
@@ -1305,9 +1957,30 @@ export default function GrandmaPage() {
             <div className="logo">
               <img src="/img/logo.png" alt="Ishyiga" />
             </div>
-            <div className="title" id="pageTitle">
-              {title}
+            <div
+              className={`title ${
+                appMode !== "seller" &&
+                page !== 1 &&
+                language === "rw" &&
+                (category === "Restaurant" || category === "Pharmacy")
+                  ? "title-filter"
+                  : ""
+              }`}
+              id="pageTitle"
+            >
+              <span className="title-text">{title}</span>
             </div>
+            {showHeaderFilters ? (
+              <button
+                type="button"
+                className="filter-trigger-btn"
+                aria-label="Open filters"
+                onClick={() => setFilterSheetOpen(true)}
+              >
+                <SlidersHorizontal className="h-4 w-4" aria-hidden />
+                <span>Filters</span>
+              </button>
+            ) : null}
           </div>
           <button
             className="more-btn"
@@ -1493,7 +2166,8 @@ export default function GrandmaPage() {
                 setShopSearch("")
                 setShopTab(null)
                 setSelectedShopId(null)
-                goToPage(2)
+                // Business flow: if ALL is selected, go straight to items
+                goToPage(isAllPreferred ? 3 : 2)
               }}
               role="button"
               tabIndex={0}
@@ -1620,6 +2294,20 @@ export default function GrandmaPage() {
         {selectedShop ? (
           <div className="card note" style={{ marginBottom: 12 }}>
             Shopping at <strong>{selectedShop.name}</strong>
+            {isLiveMenuSelected ? (
+              <span style={{ marginLeft: 8, color: "var(--muted)", fontWeight: 700 }}>
+                · {burrowsLiveLoading ? "loading…" : `${burrowsLiveCount} items`}
+              </span>
+            ) : null}
+            {isLiveMenuSelected && burrowsLiveError ? (
+              <div style={{ marginTop: 6, color: "#b42318", fontSize: 12, fontWeight: 700 }}>
+                Live menu error: {burrowsLiveError}
+              </div>
+            ) : null}
+          </div>
+        ) : multiShopMode ? (
+          <div className="card note" style={{ marginBottom: 12 }}>
+            Showing best offers across shops (cheapest, then closest). Tap an item to choose the shop and add to cart.
           </div>
         ) : null}
         <div className="search">
@@ -1636,25 +2324,116 @@ export default function GrandmaPage() {
         </div>
 
         <div className="product-list" id="productList">
-          {visibleProducts.map((p) => (
-            <div className="product-row" key={p.id}>
-              <div className="emoji">{p.emoji}</div>
-              <div>
-                <div className="p-name">{p.name}</div>
-                <div className="p-price">{formatRwf(p.price)}</div>
+          {multiShopMode
+            ? visibleOffers.map((o) => (
+                <div
+                  className="product-row"
+                  key={o.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => {
+                    if (o.shopId) setSelectedShopId(o.shopId)
+                    changeQty(o.productId, 1)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault()
+                      if (o.shopId) setSelectedShopId(o.shopId)
+                      changeQty(o.productId, 1)
+                    }
+                  }}
+                >
+                  <div className="emoji">{o.productEmoji}</div>
+                  <div>
+                    <div className="p-name">{o.productName}</div>
+                    <div className="p-price">
+                      <strong style={{ color: "var(--text)" }}>{formatRwf(o.priceRwf)}</strong> · {o.shopName} ·{" "}
+                      {o.shopDistanceKm.toFixed(1)} km
+                    </div>
+                  </div>
+                  <div className="qty" aria-label="Add to cart">
+                    <button onClick={(e) => { e.stopPropagation(); if (o.shopId) setSelectedShopId(o.shopId); changeQty(o.productId, 1) }} aria-label="Add">
+                      +
+                    </button>
+                    <span> </span>
+                  </div>
+                </div>
+              ))
+            : visibleProducts.map((p) => (
+                <div className="product-row" key={p.liveKey ?? `p-${p.id}`}>
+                  <div className="emoji" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    {p.imageUrl ? (
+                      <img
+                        src={p.imageUrl}
+                        alt={p.name}
+                        style={{ width: 34, height: 34, borderRadius: 10, objectFit: "cover", border: "1px solid var(--line)" }}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setImagePreviewTitle(p.name)
+                          setImagePreviewSrc(p.imageUrl || "")
+                          setImagePreviewOpen(true)
+                        }}
+                      />
+                    ) : (
+                      p.emoji
+                    )}
+                  </div>
+                  <div>
+                    <div className="p-name">{p.name}</div>
+                    <div className="p-price">{formatRwf(p.price)}</div>
+                  </div>
+                  <div className="qty">
+                    <button onClick={() => changeQty(p.id, -1)} aria-label="Decrease">
+                      −
+                    </button>
+                    <span>{p.qty}</span>
+                    <button onClick={() => changeQty(p.id, 1)} aria-label="Increase">
+                      +
+                    </button>
+                  </div>
+                </div>
+              ))}
+        </div>
+
+        {imagePreviewOpen ? (
+          <div
+            className="courier-modal-backdrop"
+            role="presentation"
+            onClick={() => setImagePreviewOpen(false)}
+          >
+            <div
+              className="courier-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Image preview"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="courier-modal-head">
+                <div>
+                  <div className="courier-modal-title">{imagePreviewTitle}</div>
+                  <div className="courier-modal-sub">Tap outside to close</div>
+                </div>
+                <button
+                  type="button"
+                  className="courier-modal-close"
+                  aria-label="Close"
+                  onClick={() => setImagePreviewOpen(false)}
+                >
+                  ×
+                </button>
               </div>
-              <div className="qty">
-                <button onClick={() => changeQty(p.id, -1)} aria-label="Decrease">
-                  −
-                </button>
-                <span>{p.qty}</span>
-                <button onClick={() => changeQty(p.id, 1)} aria-label="Increase">
-                  +
-                </button>
+              <div style={{ padding: 14 }}>
+                {imagePreviewSrc ? (
+                  <img
+                    src={imagePreviewSrc}
+                    alt={imagePreviewTitle}
+                    style={{ width: "100%", height: "auto", borderRadius: 14, border: "1px solid var(--line)" }}
+                  />
+                ) : null}
               </div>
             </div>
-          ))}
-        </div>
+          </div>
+        ) : null}
 
         <div
           className="bottom-bar"
@@ -1765,7 +2544,7 @@ export default function GrandmaPage() {
             <strong id="sumItemsTotal">{formatRwf(itemsTotal)}</strong>
           </div>
           <div className="summary-row">
-            <span>Ihute fees (0.1%)</span>
+            <span>{tPay.ihuteFees}</span>
             <strong id="sumIhuteFees">{formatRwf(ihuteFees)}</strong>
           </div>
           <div className="summary-row">
@@ -1861,7 +2640,13 @@ export default function GrandmaPage() {
           <div className="pay-detail-row">
             <span className="pay-detail-label">{tPay.eta}</span>
             <span className="pay-detail-value">
-              {etaRange.lo}–{etaRange.hi} min
+              {selectedLogistics ? (
+                <>
+                  {etaRange.lo}–{etaRange.hi} min
+                </>
+              ) : (
+                "—"
+              )}
             </span>
           </div>
           <div className="pay-detail-sub" style={{ paddingTop: 2 }}>
@@ -1913,6 +2698,7 @@ export default function GrandmaPage() {
           </div>
         </div>
 
+        {selectedLogistics ? (
         <div
           className="card rider-card"
           onClick={() => setCourierModalOpen(true)}
@@ -1952,8 +2738,9 @@ export default function GrandmaPage() {
           </div>
           <div className="rider-tap-hint">{tPay.tapCouriers}</div>
         </div>
+        ) : null}
 
-        {courierModalOpen ? (
+        {selectedLogistics && courierModalOpen ? (
           <div
             className="courier-modal-backdrop"
             role="presentation"
@@ -2023,7 +2810,7 @@ export default function GrandmaPage() {
           </div>
         ) : null}
 
-        <button className="primary-btn" onClick={() => alert("Order sent successfully")}>
+        <button type="button" className="primary-btn" onClick={proceedToMainCartCheckout}>
           {tPay.sendOrder}
         </button>
       </section>
@@ -2045,6 +2832,235 @@ export default function GrandmaPage() {
           💳<span>Pay</span>
         </button>
       </div>
+
+      <Sheet open={filterSheetOpen} onOpenChange={setFilterSheetOpen}>
+        <SheetContent
+          side="right"
+          className="flex h-[100dvh] w-full max-w-[min(100vw,420px)] flex-col gap-0 overflow-hidden border-l p-0"
+        >
+          <SheetHeader className="shrink-0 border-b border-border px-4 py-4 text-left">
+            <SheetTitle>Filters</SheetTitle>
+            <SheetDescription>
+              {page === 2
+                ? "Refine which shops you see."
+                : page === 3
+                  ? "Price, category, and sort — same for restaurants (Resitora) and pharmacies (Farumasi), and for multi-shop offers."
+                  : "Filters"}
+            </SheetDescription>
+          </SheetHeader>
+
+          <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-4 py-4">
+            {page === 2 ? (
+              <div>
+                <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Shops</div>
+                <p className="mt-1 text-xs text-muted-foreground">Same options as the pills on the list.</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {SHOP_FILTER_TABS.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => setShopTab((prev) => (prev === t.id ? null : t.id))}
+                      className={cn(
+                        "rounded-full border px-3 py-2 text-sm font-bold transition-colors",
+                        shopTab === t.id
+                          ? "border-blue-600 bg-blue-600 text-white"
+                          : "border-border bg-background text-foreground hover:bg-muted/60",
+                      )}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setUseLocationSort((v) => !v)}
+                  className={cn(
+                    "mt-4 w-full rounded-xl border px-3 py-2.5 text-left text-sm font-bold transition-colors",
+                    useLocationSort
+                      ? "border-green-600 bg-green-50 text-green-900"
+                      : "border-border bg-background hover:bg-muted/60",
+                  )}
+                >
+                  {useLocationSort ? "Near me first · on" : "Near me first · off"}
+                </button>
+              </div>
+            ) : null}
+
+            {page === 3 ? (
+              <div className="space-y-6">
+                <div>
+                  <div className="text-sm font-bold text-foreground">Price range (RWF)</div>
+                  {filterHistogramPrices.length > 0 && filterPriceExtent.max >= filterPriceExtent.min ? (
+                    <>
+                      <div className="mt-3 flex h-11 w-full items-end gap-px rounded-md bg-muted/50 px-1 pb-0.5 pt-1">
+                        {(() => {
+                          const maxBin = Math.max(1, ...filterHistogramBins)
+                          return filterHistogramBins.map((c, i) => (
+                            <div
+                              key={i}
+                              className="min-w-0 flex-1 rounded-[2px] bg-slate-400/70"
+                              style={{ height: `${Math.max(10, (c / maxBin) * 100)}%` }}
+                              aria-hidden
+                            />
+                          ))
+                        })()}
+                      </div>
+                      <div className="mt-4 px-1">
+                        <Slider
+                          min={filterPriceExtent.min}
+                          max={filterPriceExtent.max}
+                          step={priceSliderStep}
+                          value={(() => {
+                            const loE = filterPriceExtent.min
+                            const hiE = filterPriceExtent.max
+                            if (hiE <= loE) return [loE, hiE]
+                            const lo = priceRangeRwf?.[0] ?? loE
+                            const hi = priceRangeRwf?.[1] ?? hiE
+                            return [
+                              Math.min(Math.max(lo, loE), hiE),
+                              Math.min(Math.max(hi, loE), hiE),
+                            ] as [number, number]
+                          })()}
+                          onValueChange={(v) => setPriceRangeRwf([v[0], v[1]] as [number, number])}
+                          disabled={filterPriceExtent.max <= filterPriceExtent.min}
+                          className="w-full"
+                        />
+                      </div>
+                      <div className="mt-2 flex justify-between text-xs font-semibold text-muted-foreground">
+                        <span>{formatRwf(priceRangeRwf?.[0] ?? filterPriceExtent.min)}</span>
+                        <span>
+                          {(priceRangeRwf?.[1] ?? filterPriceExtent.max) >= filterPriceExtent.max &&
+                          filterPriceExtent.max > filterPriceExtent.min
+                            ? "No max"
+                            : formatRwf(priceRangeRwf?.[1] ?? filterPriceExtent.max)}
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="mt-2 text-xs text-muted-foreground">No prices to filter yet.</p>
+                  )}
+                </div>
+
+                {filterMenuCategoryKeys.length > 0 ? (
+                  <div>
+                    <div className="text-sm font-bold text-foreground">Category</div>
+                    <div className="mt-3 max-h-52 overflow-y-auto pr-1">
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setItemsMenuCategoryKey(null)}
+                          className={cn(
+                            "rounded-full border px-3 py-2 text-sm font-bold transition-colors",
+                            itemsMenuCategoryKey === null
+                              ? "border-blue-600 bg-blue-600 text-white"
+                              : "border-border bg-background text-foreground hover:bg-muted/60",
+                          )}
+                        >
+                          Any
+                        </button>
+                        {filterMenuCategoryKeys.map((canon) => (
+                          <button
+                            key={canon}
+                            type="button"
+                            onClick={() => setItemsMenuCategoryKey(canon)}
+                            className={cn(
+                              "rounded-full border px-3 py-2 text-sm font-bold transition-colors",
+                              itemsMenuCategoryKey === canon
+                                ? "border-blue-600 bg-blue-600 text-white"
+                                : "border-border bg-background text-foreground hover:bg-muted/60",
+                            )}
+                          >
+                            {menuCategoryTitleFromCanon(canon)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                <div>
+                  <div className="text-sm font-bold text-foreground">Sort</div>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    {(
+                      [
+                        ["default", "Default order"],
+                        ["name", "Name A–Z"],
+                        ["price_asc", "Price · low first"],
+                        ["price_desc", "Price · high first"],
+                      ] as const
+                    ).map(([id, label]) => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => setItemsSort(id)}
+                        className={cn(
+                          "rounded-xl border px-2 py-2.5 text-xs font-bold transition-colors sm:text-sm",
+                          itemsSort === id
+                            ? "border-blue-600 bg-blue-50 text-blue-900"
+                            : "border-border bg-background text-foreground hover:bg-muted/60",
+                        )}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {isLiveMenuSelected ? (
+                  <div className="space-y-4 border-t border-border pt-5">
+                    <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Live menu</div>
+                    <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-background p-3 hover:bg-muted/40">
+                      <input
+                        type="checkbox"
+                        checked={liveInStockOnly}
+                        onChange={(e) => setLiveInStockOnly(e.target.checked)}
+                        className="mt-0.5 h-4 w-4 shrink-0 accent-blue-600"
+                      />
+                      <span>
+                        <span className="block text-sm font-bold">In stock only</span>
+                        <span className="mt-0.5 block text-xs text-muted-foreground">Hide lines the supplier marked out of stock.</span>
+                      </span>
+                    </label>
+                    <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-background p-3 hover:bg-muted/40">
+                      <input
+                        type="checkbox"
+                        checked={liveShowAll}
+                        onChange={(e) => setLiveShowAll(e.target.checked)}
+                        className="mt-0.5 h-4 w-4 shrink-0 accent-blue-600"
+                      />
+                      <span>
+                        <span className="block text-sm font-bold">Show full catalog</span>
+                        <span className="mt-0.5 block text-xs text-muted-foreground">
+                          When off, only a sample shows until you search.
+                        </span>
+                      </span>
+                    </label>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="shrink-0 border-t border-border bg-background px-4 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <button
+                type="button"
+                className="text-sm font-bold text-foreground underline-offset-4 hover:underline"
+                onClick={clearGrandmaFilters}
+              >
+                Clear all
+              </button>
+              <button
+                type="button"
+                className="rounded-xl bg-[#1a4d8c] px-5 py-2.5 text-sm font-bold text-white shadow-sm"
+                onClick={() => setFilterSheetOpen(false)}
+              >
+                {page === 2 ? "Show shops" : "Show products"}
+              </button>
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
 
       <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
         <SheetContent
@@ -2117,6 +3133,18 @@ export default function GrandmaPage() {
               <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{settingsUi.preferredShops}</div>
               <p className="mt-1 text-xs text-muted-foreground">{settingsUi.preferredHint}</p>
               <div className="mt-2 max-h-52 space-y-1 overflow-y-auto rounded-xl border border-border p-2">
+                <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 hover:bg-muted/50">
+                  <input
+                    type="checkbox"
+                    checked={preferredShopIds.includes(PREFERRED_ALL_ID)}
+                    onChange={() => togglePreferredShop(PREFERRED_ALL_ID)}
+                    className="h-4 w-4 shrink-0 accent-blue-600"
+                  />
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-white text-sm font-extrabold">
+                    ALL
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-sm font-semibold">All shops</span>
+                </label>
                 {MOCK_SHOPS.map((shop) => (
                   <label
                     key={shop.id}
