@@ -1310,10 +1310,14 @@ export default function GrandmaPage() {
         const targetCategory = (selectedShop?.category ?? "Restaurant") as Category
         const params = new URLSearchParams({ nickname })
         if (search.trim()) params.set("productSearch", search.trim())
-        const res = await fetch(`/api/shop-with-me?${params.toString()}`, { cache: "no-store" })
+        const apiUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/api/shop-with-me?${params.toString()}`
+        console.log('[DEBUG] Fetching from:', apiUrl)
+        const res = await fetch(apiUrl, { cache: "no-store" })
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const data = (await res.json()) as BurrowsApiResponse
+        console.log('[DEBUG] Grandma API Response:', data)
         const sellers = data.sellers ?? []
+        console.log('[DEBUG] Grandma sellers count:', sellers.length)
         const seller = sellers[0]
         const list = seller?.products ?? []
         const uniqueRows: { key: string; p: BurrowsApiProduct }[] = []

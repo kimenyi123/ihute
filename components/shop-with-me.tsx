@@ -520,7 +520,8 @@ function normalizeSellersProducts(sellers: ShopWithMeSeller[]): ShopWithMeSeller
         });
       }
     }
-    const in_stock_products = flatProducts.filter((pr) => pr.in_stock !== false && (pr.stock ?? 0) > 0).length;
+    const in_stock_products = flatProducts.length; // Temporarily show all products for debugging
+    console.log('[DEBUG] Stock filtering - in_stock_products:', in_stock_products, 'total_products:', flatProducts.length);
     const total_stock = flatProducts.reduce((sum, pr) => sum + (Number(pr.stock) || 0), 0);
     return {
       ...seller,
@@ -691,7 +692,8 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
     setError(null);
     const params = new URLSearchParams({ nickname: normalizedNickname });
     if (debouncedProductSearch) params.set("productSearch", debouncedProductSearch);
-    const url = `/api/shop-with-me?${params.toString()}`;
+    const url = `${typeof window !== 'undefined' ? window.location.origin : ''}/api/shop-with-me?${params.toString()}`;
+    console.log('[DEBUG] Shop-with-me fetching from:', url);
     fetch(url, { cache: "no-store" })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch shop data`);
@@ -699,18 +701,29 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
       })
       .then((data: ShopWithMeResponse) => {
         if (cancelled) return;
+        console.log('[DEBUG] API Response data:', data);
         if (!data.ok) throw new Error("Shop not found");
         if (data.sellers && data.sellers.length > 0) {
+          console.log('[DEBUG] Raw sellers:', data.sellers);
           let next = normalizeSellersProducts(data.sellers);
+          console.log('[DEBUG] Normalized sellers:', next);
           // Burrows: only Restaurant + Pharmacy use live data; pin Restaurant first for testing.
           if (normalizedNickname === "burrows") {
-            next = next.filter((s) => sellerIsRestaurantOrBar(s) || sellerIsPharmacy(s));
+            console.log('[DEBUG] Filtering burrows sellers...');
+            next = next.filter((s) => {
+              const isResto = sellerIsRestaurantOrBar(s);
+              const isPharm = sellerIsPharmacy(s);
+              console.log('[DEBUG] Seller:', s.NICKNAME, 'isResto:', isResto, 'isPharm:', isPharm);
+              return isResto || isPharm;
+            });
+            console.log('[DEBUG] Filtered sellers:', next);
             next = [...next].sort((a, b) => Number(sellerIsRestaurantOrBar(b)) - Number(sellerIsRestaurantOrBar(a)));
           }
           setSellers(next);
           setNickname(normalizedNickname);
           if (data.sellers.length === 1) setSelectedSeller(data.sellers[0].ISHYIGA_ACCOUNT || null);
         } else {
+          console.log('[DEBUG] No sellers found in response');
           setSellers([]);
           setError("No shops found with this nickname");
         }
@@ -816,7 +829,7 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
       const normalizedNickname = searchNickname.trim().toLowerCase();
       // Go through Next.js API route to avoid CORS issues
       const response = await fetch(
-        `/api/shop-with-me?nickname=${encodeURIComponent(normalizedNickname)}`,
+        `${window.location.origin}/api/shop-with-me?nickname=${encodeURIComponent(normalizedNickname)}`,
         { cache: "no-store" }
       );
 
@@ -1016,7 +1029,9 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
 
     setCategories(categorySections);
     setCategoryPages({});
-  }, [currentSeller]);
+  console.log('[DEBUG] Final sellers state:', sellers);
+  console.log('[DEBUG] Current seller:', currentSeller);
+  console.log('[DEBUG] Categories:', categories);
 
   const filtersActive = !!(
     productSearchQuery.trim() ||
