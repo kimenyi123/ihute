@@ -145,7 +145,7 @@ export default function LoginPage() {
             </div>
             <CardTitle className="text-2xl">Welcome Back</CardTitle>
             <CardDescription>
-              Sign in with your account, or continue as a guest (like YouTube) to browse Grandma without signing in.
+              Sign in with your account, or continue as a guest
             </CardDescription>
           </CardHeader>
           <CardContent>
