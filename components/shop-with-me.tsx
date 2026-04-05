@@ -70,7 +70,13 @@ import { useAuthStore } from "@/lib/auth-store";
 import { trackProductView, trackClick } from "@/lib/interaction-tracker";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/use-toast";
-import { getProductImageUrl, getProductImageSrc, normalizeImageUrl } from "@/lib/image-utils";
+import {
+  getProductImageUrl,
+  getProductImageSrc,
+  getProductImageCandidates,
+  normalizeImageUrl,
+  NO_IMAGE_URL,
+} from "@/lib/image-utils";
 import { LocationBadge } from "@/components/location-badge";
 
 /** Optional fields for production: plug in from DB when available. */
@@ -113,7 +119,10 @@ type ShopWithMeProduct = {
   famille?: string;
   item_key_words_french?: string;
   item_key_words_kinyarwanda?: string;
-} & Partial<ShopWithMeProductMeta>;
+} & Partial<ShopWithMeProductMeta> & {
+  ITEM_CODE?: string;
+  item_code?: string;
+};
 
 type ShopWithMeSeller = {
   ISHYIGA_ACCOUNT?: string;
@@ -1975,8 +1984,26 @@ function ProductCard({
   const displayName = `${productName} - ${categoryLabel}`;
   const priceRaw = p.selling_price ?? p.price ?? p.UNITY_PRICE ?? p.SALE_PRICE_INCLUSIVE;
   const price = extractNumericPrice(priceRaw);
-  const imageUrl = getProductImageSrc(product as Record<string, unknown>);
   const moodMeta = moodMetaType ? getMoodMetaText(product, moodMetaType) : { text: null };
+
+  /** Try KAOS famille → flat NIKI → each backend URL → no_image (same order as getProductImageSrc, but advance on 404). */
+  const imageCandidates = useMemo(
+    () => getProductImageCandidates(product as Record<string, unknown>),
+    [
+      itemCode,
+      product.famille,
+      product.item_key_words,
+      product.image,
+      product.image_url,
+      product.item_image_url,
+      p.ITEM_CODE,
+      p.item_code,
+      p.IMAGE_URL,
+    ]
+  );
+  const candidatesSignature = imageCandidates.join("\x1e");
+  const [candidateIdx, setCandidateIdx] = useState(0);
+  const imageUrl = imageCandidates[Math.min(candidateIdx, imageCandidates.length - 1)] ?? NO_IMAGE_URL;
   const validImage =
     !!imageUrl &&
     imageUrl !== "/placeholder.svg?height=300&width=300" &&
@@ -2002,8 +2029,9 @@ function ProductCard({
   };
 
   useEffect(() => {
+    setCandidateIdx(0);
     setImgError(false);
-  }, [imageUrl]);
+  }, [candidatesSignature, itemCode]);
 
   useEffect(() => {
     trackProductView(itemCode, productName, {
@@ -2042,7 +2070,10 @@ function ProductCard({
         name: productName,
         price: price,
         unit: "pcs",
-        image: validImage ? imageUrl : undefined,
+        image:
+          validImage && !imgError && imageUrl !== NO_IMAGE_URL
+            ? imageUrl
+            : getProductImageSrc(product as Record<string, unknown>),
         itemCode,
         supplierId: supplierId,
         supplierName: ownerName || "Supplier",
@@ -2077,7 +2108,10 @@ function ProductCard({
       name: productName,
       price: price,
       unit: "pcs",
-      image: validImage ? imageUrl : undefined,
+      image:
+        validImage && !imgError && imageUrl !== NO_IMAGE_URL
+          ? imageUrl
+          : getProductImageSrc(product as Record<string, unknown>),
       description: undefined,
       supplierId,
       supplierName: ownerName,
@@ -2112,21 +2146,36 @@ function ProductCard({
       >
         {validImage && !imgError && /^https?:\/\//i.test(imageUrl) ? (
           <img
+            key={imageUrl}
             src={imageUrl}
             alt={productName}
             className="absolute inset-0 h-full w-full object-cover"
             loading="lazy"
             decoding="async"
             referrerPolicy="no-referrer"
-            onError={() => setImgError(true)}
+            onError={() => {
+              if (candidateIdx + 1 < imageCandidates.length) {
+                setCandidateIdx((i) => i + 1);
+              } else {
+                setImgError(true);
+              }
+            }}
           />
         ) : validImage && !imgError ? (
           <Image
+            key={imageUrl}
             fill
             src={imageUrl}
             alt={productName}
             className="object-cover"
-            onError={() => setImgError(true)}
+            onError={() => {
+              if (candidateIdx + 1 < imageCandidates.length) {
+                setCandidateIdx((i) => i + 1);
+              } else {
+                setImgError(true);
+              }
+            }}
+            unoptimized={imageUrl === NO_IMAGE_URL}
           />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">

@@ -29,26 +29,41 @@ type ApiLoginOK = {
   ok: true
   role: "BUYER" | "SELLER" | "ADMIN" | "DRIVER" | "FINANCIER"
   ishyiga: string
+  dbRole?: string
+  dualPharmacyRetail?: boolean
+  pharmacySector?: boolean
   user: { email: string; firstName: string; lastName: string; tel: string; location: string; owner: string }
 }
 
-function toUserRole(r?: string): UserRole {
-  const role = r?.toUpperCase()
-  if (role === "ADMIN") return "admin"
-  if (role === "SELLER") return "supplier"
+function toUserRoleFromAuth(auth: Pick<ApiLoginOK, "role" | "dualPharmacyRetail">): UserRole {
+  const dbRole = auth.role?.toUpperCase()
+  if (dbRole === "ADMIN") return "admin"
+  if (auth.dualPharmacyRetail) return "supplier"
+  if (dbRole === "SELLER") return "supplier"
   return "customer"
 }
 
 function normalizeToStoreUser(payload: ApiLoginOK): User {
+  const u = (payload as any).user ?? {}
+  const email = String(u.email ?? (payload as any).email ?? "").trim()
+  if (!email) {
+    throw new Error("Login succeeded but profile data is incomplete. Check Java user-auth JSON (user.email).")
+  }
   return {
-    id: payload.user.email,
-    email: payload.user.email,
-    name: [payload.user.firstName, payload.user.lastName].filter(Boolean).join(" ") || payload.user.owner || payload.user.email,
-    role: toUserRole(payload.role),
-    phone: payload.user.tel || "",
-    location: payload.user.location || "",
+    id: email,
+    email,
+    name:
+      [u.firstName, u.lastName].filter(Boolean).join(" ") ||
+      String(u.owner ?? "").trim() ||
+      email,
+    role: toUserRoleFromAuth(payload),
+    dbRole: payload.dbRole,
+    dualPharmacyRetail: !!payload.dualPharmacyRetail,
+    pharmacySector: !!payload.pharmacySector,
+    phone: String(u.tel ?? "").trim(),
+    location: String(u.location ?? "").trim(),
     ishyigaAccount: payload.ishyiga || undefined,
-    businessName: payload.user.owner || undefined,
+    businessName: u.owner ? String(u.owner).trim() : undefined,
   }
 }
 
@@ -75,10 +90,11 @@ export default function LoginPage() {
     try {
       log("LOGIN", `Sending to /api/auth/login`)
 
+      const emailTrimmed = email.trim()
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email: emailTrimmed, password }),
       })
 
       log("LOGIN", `HTTP Status: ${res.status}`)
@@ -92,7 +108,7 @@ export default function LoginPage() {
       log("LOGIN", `Response:`, json)
 
       if (!res.ok || !json?.ok) {
-        throw new Error(json?.error || `Login failed (${res.status})`)
+        throw new Error("Invalid credentials")
       }
 
       const user: User = normalizeToStoreUser(json as ApiLoginOK)

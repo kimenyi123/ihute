@@ -18,6 +18,7 @@ import { useGeolocation } from "@/hooks/use-geolocation"
 import { searchNearbyProducts, NearbyProduct } from "@/lib/location-search-api"
 import { DistanceBadge } from "@/components/distance-badge"
 import { Badge } from "@/components/ui/badge"
+import { getProductImageSrc } from "@/lib/image-utils"
 
 export interface GlobalResult {
   type?: "product" | "supplier"
@@ -283,7 +284,7 @@ export function GlobalSearch({
       supplierId,
       supplierName: p.supplier_name || p.supplier_account || "Supplier",
       supplierLocation: p.supplier_location,
-      image: p.image ?? p.image_url ?? p.item_image_url ?? p.IMAGE_URL ?? "/placeholder.svg?height=300&width=300",
+      image: getProductImageSrc(p as Record<string, unknown>, "/placeholder.svg?height=300&width=300"),
       momo: p.momo,
     })
 

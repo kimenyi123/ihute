@@ -99,6 +99,43 @@ const formatUTCTimestamp = (timestamp: string | null | undefined): string => {
   }
 };
 
+const isValidTransactionId = (id: string | null | undefined): boolean => {
+  if (!id) return false;
+  const v = id.trim();
+  return v.length > 0 && v.toLowerCase() !== 'null';
+};
+
+const toComparableEpoch = (value: string | null | undefined): number | null => {
+  if (!value) return null;
+  const s = value.trim();
+  if (!s) return null;
+
+  const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})$/);
+  if (m) {
+    const [, dd, mm, yyyy, hh, mi, ss] = m;
+    const dt = new Date(
+      parseInt(yyyy, 10),
+      parseInt(mm, 10) - 1,
+      parseInt(dd, 10),
+      parseInt(hh, 10),
+      parseInt(mi, 10),
+      parseInt(ss, 10)
+    );
+    return isNaN(dt.getTime()) ? null : dt.getTime();
+  }
+
+  const isoLike = s.replace(' ', 'T');
+  const dt = new Date(isoLike);
+  return isNaN(dt.getTime()) ? null : dt.getTime();
+};
+
+const isSameDateTime = (a: string | null | undefined, b: string | null | undefined): boolean => {
+  const ea = toComparableEpoch(a);
+  const eb = toComparableEpoch(b);
+  if (ea === null || eb === null) return (a || '').trim() === (b || '').trim();
+  return Math.abs(ea - eb) <= 1000;
+};
+
 export default function PaymentDashboard({ initialFilters }: PaymentDashboardProps) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [summary, setSummary] = useState<SummaryStats | null>(null);
@@ -129,6 +166,8 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
   const [checkingGhost, setCheckingGhost] = useState(false);
   const [deletingGhost, setDeletingGhost] = useState(false);
   const [ghostResults, setGhostResults] = useState<any>(null);
+  const [syncingStale, setSyncingStale] = useState(false);
+  const [syncPreview, setSyncPreview] = useState<any>(null);
 
   // Bulk delete
   const [selectedTransactions, setSelectedTransactions] = useState<Set<string>>(new Set());
@@ -142,10 +181,13 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
   const [activatingTransactionId, setActivatingTransactionId] = useState<string | null>(null);
   const [activateDialogTx, setActivateDialogTx] = useState<Transaction | null>(null);
   const [activateValidUntil, setActivateValidUntil] = useState<string>('');
+  const [activateGracePeriodDays, setActivateGracePeriodDays] = useState<string>('0');
 
   // Alert details modal
   const [showAlertModal, setShowAlertModal] = useState(false);
-  const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
+  const [selectedAlert, setSelectedAlert] = useState<AlertItem | null>(null);
+  const [alertPendingTransactions, setAlertPendingTransactions] = useState<Transaction[]>([]);
+  const [loadingAlertPendingTransactions, setLoadingAlertPendingTransactions] = useState(false);
 
   // Analytics charts
   const [analyticsData, setAnalyticsData] = useState<any>(null);
@@ -203,9 +245,12 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
       });
       console.log('📊 Transactions response:', data);
       if (data?.data?.transactions) {
-        console.log(`✅ Loaded ${data.data.transactions.length} transactions`);
-        setTransactions(data.data.transactions);
-        setTotalTransactions(data.data.total || 0);
+        const validTransactions = data.data.transactions.filter((tx: Transaction) =>
+          isValidTransactionId(tx.transaction_id)
+        );
+        console.log(`✅ Loaded ${validTransactions.length} transactions`);
+        setTransactions(validTransactions);
+        setTotalTransactions(data.data.total || validTransactions.length);
         setHasMore(data.data.has_more || false);
       } else {
         console.warn('⚠️ No transactions in response:', data);
@@ -251,8 +296,11 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
           offset: offset,
         });
         if (data?.data?.transactions) {
-          setTransactions(data.data.transactions);
-          setTotalTransactions(data.data.total || 0);
+          const validTransactions = data.data.transactions.filter((tx: Transaction) =>
+            isValidTransactionId(tx.transaction_id)
+          );
+          setTransactions(validTransactions);
+          setTotalTransactions(data.data.total || validTransactions.length);
           setHasMore(data.data.has_more || false);
         } else {
           setTransactions([]);
@@ -347,7 +395,7 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
     setCheckingGhost(true);
     setGhostResults(null);
     try {
-      const transactionIds = transactions.map(tx => tx.transaction_id);
+      const transactionIds = transactions.map(tx => tx.transaction_id).filter(isValidTransactionId);
       const result = await paymentDashboardApi.checkGhostTransactions(transactionIds);
       setGhostResults(result.data);
       console.log('Ghost check results:', result.data);
@@ -383,6 +431,47 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
       alert('Failed to delete ghost transactions');
     } finally {
       setDeletingGhost(false);
+    }
+  };
+
+  const handleSyncStale = async () => {
+    setSyncingStale(true);
+    try {
+      const result = await paymentDashboardApi.syncStaleTransactions({
+        age_minutes: 30,
+        limit: 200,
+      });
+      const data = result?.data || {};
+      setSyncPreview(data);
+      alert(
+        `Sync complete.\nPending total: ${data.pending_total ?? 0}\nPending with valid ID: ${data.pending_with_valid_id ?? 0}\nPending with invalid ID (skipped): ${data.pending_with_invalid_id ?? 0}\nCandidates: ${data.candidates ?? 0}\nChecked: ${data.checked ?? 0}\nUpdated: ${data.updated ?? 0}\nFailed: ${data.failed ?? 0}`
+      );
+      await loadDashboardData();
+    } catch (error) {
+      console.error('Error syncing stale transactions:', error);
+      alert('Failed to sync stale transactions');
+    } finally {
+      setSyncingStale(false);
+    }
+  };
+
+  const loadAlertPendingTransactions = async () => {
+    setLoadingAlertPendingTransactions(true);
+    try {
+      const data = await paymentDashboardApi.getTransactions({
+        status: 'PENDING',
+        limit: 200,
+        offset: 0,
+      });
+      const validTransactions = (data?.data?.transactions || []).filter((tx: Transaction) =>
+        isValidTransactionId(tx.transaction_id)
+      );
+      setAlertPendingTransactions(validTransactions);
+    } catch (error) {
+      console.error('Error loading pending transactions for alert modal:', error);
+      setAlertPendingTransactions([]);
+    } finally {
+      setLoadingAlertPendingTransactions(false);
     }
   };
 
@@ -499,6 +588,7 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
   const openActivateDialog = (tx: Transaction) => {
     setActivateDialogTx(tx);
     setActivateValidUntil(defaultValidUntilDate(tx.payment_date_time));
+    setActivateGracePeriodDays('0');
   };
 
   const handleActivateConfirm = async () => {
@@ -508,6 +598,7 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
     try {
       const result = await paymentDashboardApi.activateTransaction(transactionId, {
         valid_payment_time: activateValidUntil || undefined,
+        grace_period_days: Math.max(0, Number(activateGracePeriodDays || '0')),
       }) as {
         status: number;
         message?: string;
@@ -656,10 +747,7 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
               </Card>
 
               {alerts.length > 0 && (
-                <Card className="cursor-pointer hover:shadow-lg transition-shadow" onClick={() => {
-                  setSelectedAlert(alerts[0])
-                  setShowAlertModal(true)
-                }}>
+                <Card className="hover:shadow-lg transition-shadow">
                   <CardHeader>
                     <CardTitle className="text-lg flex items-center gap-2">
                       <AlertCircle className="h-5 w-5 text-orange-500" />
@@ -669,14 +757,25 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
                   <CardContent>
                     <div className="space-y-2">
                       {alerts.slice(0, 3).map((alert, idx) => (
-                        <Alert key={idx} variant={getSeverityColor(alert.severity) as any}>
+                        <Alert
+                          key={idx}
+                          variant={getSeverityColor(alert.severity) as any}
+                          className="cursor-pointer"
+                          onClick={() => {
+                            setSelectedAlert(alert);
+                            if (alert.type === 'OLD_PENDING_TRANSACTIONS') {
+                              loadAlertPendingTransactions();
+                            }
+                            setShowAlertModal(true);
+                          }}
+                        >
                           <AlertCircle className="h-4 w-4" />
                           <AlertTitle>{alert.type}</AlertTitle>
                           <AlertDescription>{alert.message}</AlertDescription>
                         </Alert>
                       ))}
                     </div>
-                    <p className="text-sm text-gray-500 mt-3">Click to see details →</p>
+                    <p className="text-sm text-gray-500 mt-3">Click an alert to see details →</p>
                   </CardContent>
                 </Card>
               )}
@@ -971,6 +1070,15 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
                     <Activity className={`h-4 w-4 mr-2 ${checkingGhost ? 'animate-spin' : ''}`} />
                     {checkingGhost ? 'Checking...' : 'Check Ghost'}
                   </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleSyncStale}
+                    disabled={syncingStale}
+                  >
+                    <RefreshCw className={`h-4 w-4 mr-2 ${syncingStale ? 'animate-spin' : ''}`} />
+                    {syncingStale ? 'Syncing...' : 'KURURA TXN'}
+                  </Button>
                   {ghostResults && ghostResults.ghost && ghostResults.ghost.length > 0 && (
                     <Button
                       variant="destructive"
@@ -1238,6 +1346,28 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
                 </Alert>
               )}
 
+              {/* Sync preview/results */}
+              {syncPreview && (
+                <Alert className="mb-4 border-blue-500 bg-blue-50">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertTitle>Sync Preview (Last Run)</AlertTitle>
+                  <AlertDescription>
+                    <details className="mt-2">
+                      <summary className="cursor-pointer font-medium text-sm text-blue-800 hover:text-blue-900">
+                        Show/Hide sync details
+                      </summary>
+                      <div className="mt-2 text-sm space-y-1">
+                        <p>Pending total: <strong>{syncPreview.pending_total ?? 0}</strong></p>
+                        <p>Pending with valid ID: <strong>{syncPreview.pending_with_valid_id ?? 0}</strong></p>
+                        <p>Pending with invalid ID (skipped): <strong>{syncPreview.pending_with_invalid_id ?? 0}</strong></p>
+                        <p>Candidates selected (age + limit): <strong>{syncPreview.candidates ?? 0}</strong></p>
+                        <p>Checked: <strong>{syncPreview.checked ?? 0}</strong> | Updated: <strong>{syncPreview.updated ?? 0}</strong> | Failed: <strong>{syncPreview.failed ?? 0}</strong></p>
+                      </div>
+                    </details>
+                  </AlertDescription>
+                </Alert>
+              )}
+
               {/* Transactions Table */}
               <div className="border rounded-lg">
                 <Table>
@@ -1256,6 +1386,7 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
                       <TableHead>Amount</TableHead>
                       <TableHead>Channel</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead>Activated Until</TableHead>
                       <TableHead>Date</TableHead>
                       <TableHead className="w-20">Actions</TableHead>
                     </TableRow>
@@ -1263,7 +1394,7 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
                   <TableBody>
                     {transactions.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={8} className="text-center py-8 text-gray-500">
+                        <TableCell colSpan={9} className="text-center py-8 text-gray-500">
                           No transactions found
                         </TableCell>
                       </TableRow>
@@ -1300,6 +1431,13 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
                           </TableCell>
                           <TableCell>{tx.payment_channel_name || tx.payment_channel}</TableCell>
                           <TableCell>{getStatusBadge(tx.status)}</TableCell>
+                          <TableCell className="text-xs">
+                            {tx.activated_until
+                              ? formatUTCTimestamp(tx.activated_until)
+                              : tx.activated_at
+                                ? 'Activated'
+                                : '-'}
+                          </TableCell>
                           <TableCell className="text-xs" title={tx.payment_date_time || tx.created_at || ''}>
                             {tx.payment_date_time
                               ? formatUTCTimestamp(tx.payment_date_time)
@@ -1471,9 +1609,9 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
                     </div>
                     <div>
                       <Label className="text-xs text-gray-500">DateTime (From UrubutoPay Callback)</Label>
-                      <div className={selectedTransactionDetails.raw_callback_datetime !== selectedTransactionDetails.payment_date_time ? 'text-red-600' : ''}>
+                      <div className={!isSameDateTime(selectedTransactionDetails.raw_callback_datetime, selectedTransactionDetails.payment_date_time) ? 'text-red-600' : ''}>
                         {selectedTransactionDetails.raw_callback_datetime || 'N/A'}
-                        {selectedTransactionDetails.raw_callback_datetime !== selectedTransactionDetails.payment_date_time && (
+                        {!isSameDateTime(selectedTransactionDetails.raw_callback_datetime, selectedTransactionDetails.payment_date_time) && (
                           <span className="text-xs ml-2">⚠️ MISMATCH!</span>
                         )}
                       </div>
@@ -1583,6 +1721,19 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
                   className="w-full"
                 />
               </div>
+              <div className="grid gap-2">
+                <Label htmlFor="activate-grace-period">GRACE PERIOD DAYS</Label>
+                <Input
+                  id="activate-grace-period"
+                  type="number"
+                  min={0}
+                  max={365}
+                  step={1}
+                  value={activateGracePeriodDays}
+                  onChange={(e) => setActivateGracePeriodDays(e.target.value)}
+                  className="w-full"
+                />
+              </div>
               <div className="flex justify-end gap-2 pt-2">
                 <Button variant="outline" onClick={() => setActivateDialogTx(null)}>
                   Cancel
@@ -1632,9 +1783,7 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {transactions
-                          .filter(tx => tx.status === 'PENDING')
-                          .map((tx) => (
+                        {(loadingAlertPendingTransactions ? [] : alertPendingTransactions).map((tx) => (
                             <TableRow key={tx.transaction_id}>
                               <TableCell className="font-mono text-xs">
                                 {tx.transaction_id || 'null'}
@@ -1675,7 +1824,10 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
                     </Table>
                   </div>
 
-                  {transactions.filter(tx => tx.status === 'PENDING').length === 0 && (
+                  {loadingAlertPendingTransactions && (
+                    <p className="text-center text-gray-500 py-4">Loading pending transactions...</p>
+                  )}
+                  {!loadingAlertPendingTransactions && alertPendingTransactions.length === 0 && (
                     <p className="text-center text-gray-500 py-4">No pending transactions found</p>
                   )}
                 </div>
@@ -1684,7 +1836,13 @@ export default function PaymentDashboard({ initialFilters }: PaymentDashboardPro
               {/* For other alert types, show generic info */}
               {selectedAlert.type !== 'OLD_PENDING_TRANSACTIONS' && (
                 <div className="p-4 bg-orange-50 rounded-lg">
-                  <p className="text-sm text-gray-700">{selectedAlert.details || 'No additional details available'}</p>
+                  <div className="space-y-1 text-sm text-gray-700">
+                    <p><strong>Message:</strong> {selectedAlert.message}</p>
+                    <p><strong>Severity:</strong> {selectedAlert.severity}</p>
+                    <p><strong>Current value:</strong> {selectedAlert.value}</p>
+                    <p><strong>Threshold:</strong> {selectedAlert.threshold}</p>
+                    <p><strong>Reported at:</strong> {selectedAlert.timestamp}</p>
+                  </div>
                 </div>
               )}
             </div>

@@ -10,6 +10,18 @@ export interface User {
   email: string
   name: string
   role: UserRole
+  /** Raw account_signup TYPE from backend (BUYER | SELLER | ...). */
+  dbRole?: string
+  /**
+   * True when PREFEREDCATEGORIES/DEPARTMENT indicates pharmacy or retail,
+   * so the user should be able to view both buyer and seller order views.
+   */
+  dualPharmacyRetail?: boolean
+  /**
+   * True when account sector is pharmacy (PREFEREDCATEGORIES/DEPARTMENT contains "pharmacy").
+   * Used to hide restaurant-only supplier features (e.g. self-ordering, tables).
+   */
+  pharmacySector?: boolean
   phone: string
   location: string
   businessName?: string
@@ -67,6 +79,7 @@ export const useAuthStore = create<AuthState>()(
         if (typeof window !== "undefined") {
           localStorage.removeItem("auth-storage")
           localStorage.removeItem("cart-storage")
+          sessionStorage.removeItem("cart-storage")
           localStorage.removeItem("favorites-storage")
           localStorage.removeItem("orders-storage")
           localStorage.removeItem("prefs-storage")

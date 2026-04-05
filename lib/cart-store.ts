@@ -6,6 +6,7 @@ import { trackClick } from "./interaction-tracker"
 import { getPublicApiUrl } from "./backend-config"
 import type { ErxPrescription } from "./erx-prescription"
 import { prescriptionLineKey } from "./erx-prescription"
+import { isConcreteProductImageUrl } from "./image-utils"
 
 export type CartItem = {
   id: string
@@ -19,9 +20,16 @@ export type CartItem = {
   erx?: ErxPrescription
   /** Distinguishes lines with same product code but different prescriptions */
   lineSignature?: string
+  /** Backend product image fields — kept so cart can resolve images after merge / refresh */
+  image_url?: string
+  item_image_url?: string
+  IMAGE_URL?: string
 
   /** Item code / NIKI code (e.g. item_key_words) — sent in order transaction */
   itemCode?: string
+  /** Optional: used only for image URL resolution in cart (KAOS paths) */
+  item_key_words?: string
+  famille?: string
 
   // seller info
   supplierId: string
@@ -56,6 +64,9 @@ export type TableInfo = {
   /** Optional shop metadata */
   shopName?: string
   shopId?: string
+
+  /** Kiosk self-order: dine-in or takeaway — set by KioskHome and read by KioskCheckoutPage */
+  orderType?: "dine-in" | "takeaway"
 }
 
 export type SellerGroup = {
@@ -106,6 +117,19 @@ type CartState = {
   // Payments
   getPaymentStatus: (supplierId: string) => PayState
   setPaymentStatus: (supplierId: string, status: PayState) => void
+}
+
+/** Prefer a real product image URL when merging duplicate cart lines. */
+function pickBestCartImage(...candidates: (string | undefined)[]): string | undefined {
+  for (const c of candidates) {
+    const s = typeof c === "string" ? c.trim() : ""
+    if (isConcreteProductImageUrl(s)) return s
+  }
+  for (const c of candidates) {
+    const s = typeof c === "string" ? c.trim() : ""
+    if (s) return s
+  }
+  return undefined
 }
 
 export const useCartStore = create<CartState>()(
@@ -170,6 +194,30 @@ export const useCartStore = create<CartState>()(
               notes: first.notes ?? item.notes,
               erx: first.erx ?? item.erx,
               lineSignature: first.lineSignature ?? incomingSig,
+              image: pickBestCartImage(
+                first.image,
+                item.image,
+                ...matching.map((m) => m.image)
+              ),
+              image_url: pickBestCartImage(
+                first.image_url,
+                item.image_url,
+                ...matching.map((m) => m.image_url)
+              ),
+              item_image_url: pickBestCartImage(
+                first.item_image_url,
+                item.item_image_url,
+                ...matching.map((m) => m.item_image_url)
+              ),
+              IMAGE_URL: pickBestCartImage(
+                first.IMAGE_URL,
+                item.IMAGE_URL,
+                ...matching.map((m) => m.IMAGE_URL)
+              ),
+              item_key_words: first.item_key_words ?? item.item_key_words,
+              famille: first.famille ?? item.famille,
+              momo: first.momo ?? item.momo,
+              sellerPhone: first.sellerPhone ?? item.sellerPhone,
             }
             return {
               items: state.items.filter((x) => !keyMatch(x)).concat([mergedLine]),
@@ -278,6 +326,30 @@ export const useCartStore = create<CartState>()(
               notes: first.notes ?? item.notes,
               erx: first.erx ?? item.erx,
               lineSignature: first.lineSignature ?? incomingSig,
+              image: pickBestCartImage(
+                first.image,
+                item.image,
+                ...matching.map((m) => m.image)
+              ),
+              image_url: pickBestCartImage(
+                first.image_url,
+                item.image_url,
+                ...matching.map((m) => m.image_url)
+              ),
+              item_image_url: pickBestCartImage(
+                first.item_image_url,
+                item.item_image_url,
+                ...matching.map((m) => m.item_image_url)
+              ),
+              IMAGE_URL: pickBestCartImage(
+                first.IMAGE_URL,
+                item.IMAGE_URL,
+                ...matching.map((m) => m.IMAGE_URL)
+              ),
+              item_key_words: first.item_key_words ?? item.item_key_words,
+              famille: first.famille ?? item.famille,
+              momo: first.momo ?? item.momo,
+              sellerPhone: first.sellerPhone ?? item.sellerPhone,
             }
             return {
               items: state.items.filter((x) => !keyMatch(x)).concat([mergedLine]),
@@ -372,6 +444,12 @@ export const useCartStore = create<CartState>()(
                 erx: cur.erx ?? it.erx,
                 notes: cur.notes ?? it.notes,
                 lineSignature: cur.lineSignature ?? it.lineSignature,
+                image: pickBestCartImage(cur.image, it.image),
+                image_url: pickBestCartImage(cur.image_url, it.image_url),
+                item_image_url: pickBestCartImage(cur.item_image_url, it.item_image_url),
+                IMAGE_URL: pickBestCartImage(cur.IMAGE_URL, it.IMAGE_URL),
+                item_key_words: cur.item_key_words ?? it.item_key_words,
+                famille: cur.famille ?? it.famille,
               }
             } else {
               merged.push({ ...it, itemCode: (it.itemCode ?? it.id).toString().trim() || it.itemCode })
@@ -433,7 +511,9 @@ export const useCartStore = create<CartState>()(
     }),
     {
       name: "cart-storage",
-      storage: createJSONStorage(() => localStorage),
+      // Use sessionStorage so multiple self-order screens opened on the same
+      // POS device (different tabs/windows) don't overwrite each other's cart.
+      storage: createJSONStorage(() => sessionStorage),
     }
   )
 )

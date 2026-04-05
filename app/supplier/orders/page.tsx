@@ -46,6 +46,41 @@ function formatOrderDate(value: unknown): string {
   return `${y}-${m}-${day} ${h}:${min}:${sec}`
 }
 
+/**
+ * Calendar date for date-range filters.
+ * - MySQL DATETIME from `order_transaction.heure` (e.g. `2026-03-19 08:43:34`): use the **stored** YYYY-MM-DD
+ *   so it matches what you see in the DB (no `Date()` parse quirks / UTC shift).
+ * - ISO strings with Z: use local calendar day.
+ */
+function toLocalDateKey(value: unknown): string {
+  if (value == null || value === "") return ""
+  const s = String(value).trim()
+  if (!s) return ""
+  // MySQL DATETIME or "YYYY-MM-DD HH:mm:ss" / "YYYY-MM-DDTHH:mm:ss"
+  const mysqlLike = /^(\d{4}-\d{2}-\d{2})[\sT]\d/.exec(s)
+  if (mysqlLike) return mysqlLike[1]
+  const d = new Date(s)
+  if (Number.isNaN(d.getTime())) {
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10)
+    return ""
+  }
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, "0")
+  const day = String(d.getDate()).padStart(2, "0")
+  return `${y}-${m}-${day}`
+}
+
+function localTodayKey(): string {
+  return toLocalDateKey(new Date())
+}
+
+function localDateKeysLastNDays(n: number): { from: string; to: string } {
+  const end = new Date()
+  const start = new Date()
+  start.setDate(start.getDate() - (n - 1))
+  return { from: toLocalDateKey(start), to: toLocalDateKey(end) }
+}
+
 // ===========================================
 // Inline Status Picker Component
 // ===========================================
@@ -118,6 +153,7 @@ export default function SupplierOrdersPage() {
   const [dateTo, setDateTo] = useState("")
   const [paymentFilter, setPaymentFilter] = useState<"all" | "paid" | "unpaid">("all")
   const [statusFilter, setStatusFilter] = useState<string>("all")
+  const [sourceFilter, setSourceFilter] = useState<"all" | "kiosk">("all")
 
   // Wait for persisted auth (localStorage) so link-with-account can "auto" show orders when already logged in on this device
   useEffect(() => {
@@ -166,45 +202,120 @@ export default function SupplierOrdersPage() {
     setLoading(true)
     setErr(null)
 
-    const payload = { sellerAccount, page: 1, pageSize: loadPageSize }
-    console.log("[Supplier Orders] 📤 Fetching orders — sellerAccount:", sellerAccount, "pageSize:", loadPageSize)
+    const pageSizeCap = Math.min(500, Math.max(1, loadPageSize))
+    console.log("[Supplier Orders] 📤 Fetching orders — sellerAccount:", sellerAccount, "pageSize:", pageSizeCap)
     try {
-      const res = await fetch("/api/seller-orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        cache: "no-store"
-      })
-      const json = await res.json()
-      console.log("[Supplier Orders] 📥 Response — ok:", res.ok, "status:", res.status, "orders count:", (json.orders ?? json.data ?? []).length, "error:", json?.error ?? null)
-      if (!res.ok) throw new Error(json?.error || "Failed to load orders")
+      const allRaw: any[] = []
+      let reportedTotal = 0
+      let pageNum = 1
+      const maxPages = 40
 
-      const rawOrders = json.orders ?? json.data ?? []
+      while (pageNum <= maxPages) {
+        const res = await fetch("/api/seller-orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sellerAccount, page: pageNum, pageSize: pageSizeCap }),
+          cache: "no-store",
+        })
+        const json = await res.json()
+        if (!res.ok) throw new Error(json?.error || "Failed to load orders")
+
+        const batch = json.orders ?? json.data ?? []
+        // Helpful when debugging date issues: see exactly what the API sends.
+        if (pageNum === 1 && Array.isArray(batch) && batch.length > 0) {
+          console.log(
+            "[Supplier Orders] 🔍 Sample raw order from API (page 1):",
+            batch[0]
+          )
+        }
+        reportedTotal = Number(json.total ?? 0)
+        allRaw.push(...(Array.isArray(batch) ? batch : []))
+
+        const got = batch.length
+        if (got < pageSizeCap) break
+        if (reportedTotal > 0 && allRaw.length >= reportedTotal) break
+        pageNum += 1
+      }
+
+      console.log(
+        "[Supplier Orders] 📥 Loaded pages — orders count:",
+        allRaw.length,
+        "reportedTotal:",
+        reportedTotal || "n/a"
+      )
+
+      const rawOrders = allRaw
       const sortedRaw: any[] = (Array.isArray(rawOrders) ? [...rawOrders] : []).sort((a, b) => {
         const aId = Number(a.ID_ORDER ?? a.id_order ?? a.id ?? 0)
         const bId = Number(b.ID_ORDER ?? b.id_order ?? b.id ?? 0)
         return bId - aId
       })
-      const mapped: Order[] = sortedRaw.map((t: any) => ({
-        id: String(t.ID_ORDER ?? t.id_order ?? t.id ?? ""),
-        sellerId: String(t.SELLER_ISHYIGA_ACCOUNT ?? t.seller_ishyiga_account ?? ""),
-        sellerName: t.SELLER_NAMES ?? t.SELLER_OWNER ?? t.seller_names ?? "Supplier",
-        items: [],
-        itemsCount: undefined,
-        subtotal: Number(t.AMOUNT ?? t.amount ?? 0),
-        status: (t.ORDER_STATUS ?? t.order_status ?? "open")?.toLowerCase() || "open",
-        supplierStatus: (t.ORDER_STATUS ?? t.order_status ?? "open")?.toLowerCase() || "open",
-        createdAt: t.CREATED_AT ?? t.created_at ?? t.heure ?? new Date().toISOString(),
-        buyerTIN: t.BUYER_TIN ?? t.buyer_tin ?? "",
-        SUPPLIER_TIN: t.SELLER_TIN ?? t.seller_tin ?? "",
-        buyerName: (() => {
-          const raw = (t.BUYER_NAME ?? t.BUYER_OWNER_NAME ?? t.BUYER_OWNER ?? t.BUYER_ISHYIGA_ACCOUNT ?? t.buyer_name ?? "").toString().trim() || "Guest Buyer"
-          const seller = (t.SELLER_NAMES ?? t.SELLER_OWNER ?? "").toString().trim()
-          if (seller && raw && seller.toLowerCase() === raw.toLowerCase()) return (t.TABLE_NAME ? `Table: ${t.TABLE_NAME}` : "Guest Buyer")
-          return raw
-        })(),
-        paymentStatus: /(pay[_\s-]*on[_\s-]*delivery|cod)/i.test(String(t.PAYMENT_NAME ?? t.payment_name ?? "")) ? "unpaid" : "paid"
-      }))
+      const mapped: Order[] = sortedRaw.map((t: any) => {
+        const kioskCategoryRaw = String(t.KIOSK_CATEGORY ?? t.kiosk_category ?? "").trim()
+        const internalDataRaw = String(t.INTERNAL_DATA ?? t.internal_data ?? "").trim()
+        const orderNumberRaw = String(t.ORDER_NUMBER ?? t.order_number ?? "").trim()
+        const orderTypeRaw = String(t.ORDER_TYPE ?? t.order_type ?? "").trim().toLowerCase()
+        const internalUpper = internalDataRaw.toUpperCase()
+        const orderNumberUpper = orderNumberRaw.toUpperCase()
+
+        // Heuristic: kiosk orders usually carry KIOSK_* fields/tokens in INTERNAL_DATA.
+        // This lets staff distinguish kiosk self-ordering from regular supplier orders.
+        const isKioskOrder = !!(
+          Boolean(kioskCategoryRaw) ||
+          internalUpper.includes("KIOSK_LANES:") ||
+          internalUpper.includes("KIOSK_PICKUP_DONE") ||
+          internalUpper.includes("KIOSK_SPEAK_SEQ:") ||
+          orderNumberUpper.startsWith("KIOSK") ||
+          (Boolean(orderTypeRaw) &&
+            (orderTypeRaw === "takeaway" || orderTypeRaw === "dine-in") &&
+            internalUpper.includes("KIOSK"))
+        )
+
+        return {
+          id: String(t.ID_ORDER ?? t.id_order ?? t.id ?? ""),
+          sellerId: String(t.SELLER_ISHYIGA_ACCOUNT ?? t.seller_ishyiga_account ?? ""),
+          sellerName: t.SELLER_NAMES ?? t.SELLER_OWNER ?? t.seller_names ?? "Supplier",
+          items: [],
+          itemsCount: undefined,
+          subtotal: Number(t.AMOUNT ?? t.amount ?? 0),
+          status: (t.ORDER_STATUS ?? t.order_status ?? "open")?.toLowerCase() || "open",
+          supplierStatus: (t.ORDER_STATUS ?? t.order_status ?? "open")?.toLowerCase() || "open",
+          // DB: chaos_beta.order_transaction.heure — list API may send heure / HEURE / CREATED_AT
+          createdAt: (() => {
+            const raw =
+              t.heure ??
+              t.HEURE ??
+              t.CREATED_AT ??
+              t.created_at ??
+              t.ORDER_DATE ??
+              t.order_date
+            const str = raw != null ? String(raw).trim() : ""
+            return str || new Date().toISOString()
+          })(),
+          buyerTIN: t.BUYER_TIN ?? t.buyer_tin ?? "",
+          SUPPLIER_TIN: t.SELLER_TIN ?? t.seller_tin ?? "",
+          buyerName: (() => {
+            if (isKioskOrder) {
+              const kioskCustomerName = String(t.BUYER_NAMES ?? t.BUYER_NAME ?? t.CUSTOMER_NAME ?? t.customer_name ?? "").toString().trim()
+              const kioskTable = String(t.TABLE_NUMBER ?? t.table_number ?? "").toString().trim()
+              // For self-order, show the guest name they typed (fallback to table if present).
+              if (kioskCustomerName) return kioskCustomerName
+              if (kioskTable) return `Table: ${kioskTable}`
+            }
+
+            const raw =
+              (t.BUYER_NAMES ?? t.BUYER_NAME ?? t.BUYER_OWNER_NAME ?? t.BUYER_OWNER ?? t.BUYER_ISHYIGA_ACCOUNT ?? t.buyer_name ?? "")
+                .toString()
+                .trim() || "Guest Buyer"
+            const seller = (t.SELLER_NAMES ?? t.SELLER_OWNER ?? "").toString().trim()
+            if (seller && raw && seller.toLowerCase() === raw.toLowerCase())
+              return t.TABLE_NAME ? `Table: ${t.TABLE_NAME}` : "Guest Buyer"
+            return raw
+          })(),
+          isKioskOrder,
+          paymentStatus: /(pay[_\s-]*on[_\s-]*delivery|cod)/i.test(String(t.PAYMENT_NAME ?? t.payment_name ?? "")) ? "unpaid" : "paid",
+        }
+      })
 
       setOrders(mapped)
       setLastRefresh(new Date())
@@ -238,7 +349,7 @@ export default function SupplierOrdersPage() {
 
   useEffect(() => {
     setPage(1)
-  }, [searchQuery, dateFrom, dateTo, paymentFilter, statusFilter])
+  }, [searchQuery, dateFrom, dateTo, paymentFilter, statusFilter, sourceFilter])
 
   const filteredOrders = useMemo(() => {
     let list = orders
@@ -257,14 +368,16 @@ export default function SupplierOrdersPage() {
     if (dateFrom) {
       const from = dateFrom.slice(0, 10)
       list = list.filter((o) => {
-        const d = o.createdAt ? String(o.createdAt).slice(0, 10) : ""
+        const d = toLocalDateKey(o.createdAt)
+        if (d === "") return false
         return d >= from
       })
     }
     if (dateTo) {
       const to = dateTo.slice(0, 10)
       list = list.filter((o) => {
-        const d = o.createdAt ? String(o.createdAt).slice(0, 10) : ""
+        const d = toLocalDateKey(o.createdAt)
+        if (d === "") return false
         return d <= to
       })
     }
@@ -274,8 +387,11 @@ export default function SupplierOrdersPage() {
     if (statusFilter !== "all") {
       list = list.filter((o) => (o.status || o.supplierStatus || "").toLowerCase() === statusFilter.toLowerCase())
     }
+    if (sourceFilter === "kiosk") {
+      list = list.filter((o) => !!o.isKioskOrder)
+    }
     return list
-  }, [orders, searchQuery, dateFrom, dateTo, paymentFilter, statusFilter])
+  }, [orders, searchQuery, dateFrom, dateTo, paymentFilter, statusFilter, sourceFilter])
 
   const displayPageSize = pageSize === -1 ? filteredOrders.length : Math.max(1, pageSize)
   const totalPages = useMemo(
@@ -340,7 +456,7 @@ export default function SupplierOrdersPage() {
                 className="pl-9"
               />
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
               <span className="text-sm text-muted-foreground whitespace-nowrap">Search by dates</span>
               <Input
@@ -358,6 +474,44 @@ export default function SupplierOrdersPage() {
                 onChange={(e) => setDateTo(e.target.value)}
                 className="w-[140px]"
               />
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="h-9"
+                onClick={() => {
+                  const t = localTodayKey()
+                  setDateFrom(t)
+                  setDateTo(t)
+                }}
+              >
+                Today
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9"
+                onClick={() => {
+                  const { from, to } = localDateKeysLastNDays(7)
+                  setDateFrom(from)
+                  setDateTo(to)
+                }}
+              >
+                Last 7 days
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-9"
+                onClick={() => {
+                  setDateFrom("")
+                  setDateTo("")
+                }}
+              >
+                Clear dates
+              </Button>
             </div>
             <Select value={paymentFilter} onValueChange={(v) => setPaymentFilter(v as "all" | "paid" | "unpaid")}>
               <SelectTrigger className="w-[130px]">
@@ -380,6 +534,15 @@ export default function SupplierOrdersPage() {
                     {opt.label}
                   </SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+            <Select value={sourceFilter} onValueChange={(v) => setSourceFilter(v as "all" | "kiosk")}>
+              <SelectTrigger className="w-[170px]">
+                <SelectValue placeholder="Order source" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All orders</SelectItem>
+                <SelectItem value="kiosk">Self Order (kiosk)</SelectItem>
               </SelectContent>
             </Select>
             <Select
@@ -454,7 +617,16 @@ export default function SupplierOrdersPage() {
                 pagedOrders.map(order => (
                   <TableRow key={order.id}>
                     <TableCell>{order.id}</TableCell>
-                    <TableCell>{order.buyerName}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <span>{order.buyerName}</span>
+                        {order.isKioskOrder && (
+                          <span className="text-xs font-semibold rounded-full bg-emerald-600/10 text-emerald-700 px-2 py-0.5">
+                            Self Order (kiosk)
+                          </span>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell>{formatOrderDate(order.createdAt)}</TableCell>
                     <TableCell>{order.subtotal.toLocaleString()} RWF</TableCell>
                     <TableCell>{order.paymentStatus}</TableCell>

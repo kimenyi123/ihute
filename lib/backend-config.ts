@@ -12,21 +12,49 @@ function noTrailingSlash(s: string): string {
 
 /** Java backend base URL (no trailing slash). Uses BACKEND_URL, JAVA_BACKEND_BASE, or NEXT_PUBLIC_API_URL from env. */
 export function getBackendBase(): string {
-  return noTrailingSlash(
+  const raw = noTrailingSlash(
     process.env.BACKEND_URL ||
       process.env.JAVA_BACKEND_BASE ||
       process.env.NEXT_PUBLIC_API_URL ||
       "https://ihute.rw/Trading"
   )
+
+  // Some local/dev env values point only to the Tomcat host (e.g. http://localhost:8080)
+  // while the Java servlets live under the `/Trading` context path.
+  // If the base is missing `/Trading`, append it so `/api/kiosk/*` routes resolve.
+  if (!raw.toLowerCase().includes("/trading")) {
+    return `${raw}/Trading`
+  }
+  return raw
+}
+
+/**
+ * OrdersServlet is deployed under the Kaos web path, e.g. .../Trading/Kaos/OrdersServlet.
+ * If JAVA_ORDERS_URL was set to .../Trading/OrdersServlet (missing Kaos), fix it so local .env mistakes still work.
+ */
+function normalizeOrdersServletUrl(url: string): string {
+  const t = url.trim()
+  if (!t || t.includes("/Kaos/OrdersServlet")) return t
+  try {
+    const u = new URL(t)
+    const p = u.pathname
+    if (p.endsWith("/OrdersServlet") && !p.includes("/Kaos/")) {
+      u.pathname = `${p.slice(0, -"OrdersServlet".length)}Kaos/OrdersServlet`
+      return u.toString()
+    }
+  } catch {
+    /* not a full URL */
+  }
+  return t
 }
 
 /** Optional override or derived from base. */
 export function getOrdersUrl(): string {
-  return (
+  const raw =
     process.env.JAVA_ORDERS_URL ||
     process.env.JAVA_SERVLET_URL ||
     `${getBackendBase()}/Kaos/OrdersServlet`
-  )
+  return normalizeOrdersServletUrl(raw)
 }
 
 /** Java post_orders endpoint (XML transaction payload). */
@@ -75,6 +103,7 @@ export function getUmusadaExcelUrl(): string {
   return process.env.JAVA_UMUSADA_EXCEL_URL || `${getBackendBase()}/UmusadaExcelServlet`
 }
 
+/** Seller registration POST JSON. Override JAVA_SUPPLIERS_URL if your WAR maps a different path (e.g. /InsertSupplier vs /Api/InsertSuppliers). */
 export function getSuppliersUrl(): string {
   return process.env.JAVA_SUPPLIERS_URL || `${getBackendBase()}/Api/InsertSuppliers`
 }
