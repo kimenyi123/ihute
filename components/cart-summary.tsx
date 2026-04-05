@@ -3,7 +3,7 @@
 
 import dynamic from "next/dynamic"
 import { useMemo, useState, useEffect, useRef } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, usePathname } from "next/navigation"
 import { useAuthStore } from "@/lib/auth-store"
 import { useCartStore, type CartItem } from "@/lib/cart-store"
 import { trackClick } from "@/lib/interaction-tracker"
@@ -195,6 +195,9 @@ function slugifyShopName(v: string): string {
     .replace(/^-+|-+$/g, "") || "shop";
 }
 
+/** Saved locally for repeat guest buyers (YouTube-style: same device, no account). */
+const GUEST_CHECKOUT_STORAGE_KEY = "ihute_guest_checkout_v1"
+
 function encodeSharedItem(args: { name: string; qty: number; price: number; itemCode?: string }): string {
   const cleanedName = String(args.name || "").replace(/[;,]/g, " ").replace(/\s+/g, " ").trim();
   const qty = Math.max(1, Number(args.qty || 1));
@@ -211,6 +214,7 @@ export function CartSummary() {
 
 function CartSummaryBody() {
   const router = useRouter()
+  const pathname = usePathname()
   const { isAuthenticated, user } = useAuthStore()
   const getGroupsBySeller = useCartStore((s) => s.getGroupsBySeller)
   const getGrandTotal    = useCartStore((s) => s.getGrandTotal)
@@ -229,10 +233,10 @@ function CartSummaryBody() {
   const [selectedSeller, setSelectedSeller] = useState<string | null>(null)
   const [paymentMethod, setPaymentMethod] = useState<"momo" | "airtel" | "cod">("momo")
 
-  // Anonymous checkout mode
-  const [checkoutMode, setCheckoutMode] = useState<"login" | "anonymous">(isAuthenticated ? "login" : "anonymous")
+  /** Guest orders: contact only (no account). Logged-in users use profile. */
   const [anonymousPhone, setAnonymousPhone] = useState("")
   const [anonymousName, setAnonymousName] = useState("")
+  const [rememberGuestContact, setRememberGuestContact] = useState(true)
 
   // Table command mode
   const { isInTableCommand, activeSession, lockTableCommand, canCloseTable, closeTableCommand, createTableCommand, updateTableShareData } = useTableCommandStore()
@@ -242,15 +246,29 @@ function CartSummaryBody() {
 
   // Pre-fill from tableInfo only when NOT a table order (e.g. delivery from shop-with-me)
   useEffect(() => {
-    if (checkoutMode === "anonymous" && tableInfo && !isInTableCommand()) {
-      if (tableInfo.customerName && !anonymousName) {
-        setAnonymousName(tableInfo.customerName)
+    if (!isAuthenticated && tableInfo && !isInTableCommand()) {
+      if (tableInfo.customerName) {
+        setAnonymousName((n) => n || String(tableInfo.customerName || "").trim())
       }
-      if (tableInfo.customerAddress && !deliveryLocation) {
-        setDeliveryLocation(tableInfo.customerAddress)
+      if (tableInfo.customerAddress) {
+        setDeliveryLocation((d) => d || String(tableInfo.customerAddress || "").trim())
       }
     }
-  }, [checkoutMode, tableInfo, isInTableCommand])
+  }, [isAuthenticated, tableInfo, isInTableCommand])
+
+  // Restore last guest contact on this device (optional; user can clear via checkbox)
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    try {
+      const raw = localStorage.getItem(GUEST_CHECKOUT_STORAGE_KEY)
+      if (!raw) return
+      const j = JSON.parse(raw) as { name?: string; phone?: string }
+      setAnonymousName((prev) => prev || (typeof j.name === "string" ? j.name : ""))
+      setAnonymousPhone((prev) => prev || (typeof j.phone === "string" ? j.phone : ""))
+    } catch {
+      /* ignore */
+    }
+  }, [])
 
   const [tableCommandDialogOpen, setTableCommandDialogOpen] = useState(false)
   const [tableCommandSeller, setTableCommandSeller] = useState<{ id: string; name: string } | null>(null)
@@ -314,7 +332,7 @@ function CartSummaryBody() {
   const discountPercent = appliedPromo?.percent ?? 0
   const discountAmount = Math.round((grandTotal * discountPercent) / 100)
   const totalAfterDiscount = grandTotal - discountAmount
-  const myPhone = checkoutMode === "anonymous" ? anonymousPhone : (user?.phone || "")
+  const myPhone = !isAuthenticated ? anonymousPhone : (user?.phone || "")
 
   const applyPromo = async () => {
     const code = promoCode.trim().toUpperCase()
@@ -343,13 +361,6 @@ function CartSummaryBody() {
   useEffect(() => {
     if (codOpen) setSavedAddresses(getSavedAddresses())
   }, [codOpen])
-
-  const requireLogin = () => {
-    // If anonymous mode, don't require login
-    if (checkoutMode === "anonymous") return true
-    if (!isAuthenticated) { router.push("/login"); return false }
-    return true
-  }
 
   // MoMo payment auto-poll
   async function pollPayment(orderId: string, supplierId: string) {
@@ -441,7 +452,6 @@ function CartSummaryBody() {
 
   // Open payment method selection
   const openPaymentMethod = (supplierId: string) => {
-    if (!requireLogin()) return
     const g = groups.find(x => x.supplierId === supplierId)
     if (!g) return
 
@@ -469,25 +479,35 @@ function CartSummaryBody() {
   const proceedWithPayment = async () => {
     if (!selectedSeller) return
 
-    // If user selected "login" mode, redirect to login
-    if (checkoutMode === "login" && !isAuthenticated) {
-      router.push("/login")
-      return
-    }
-
-    // Validate anonymous user info
-    if (checkoutMode === "anonymous") {
+    // Guest checkout: only need contact for the seller (not a full "account")
+    if (!isAuthenticated) {
       if (!anonymousName.trim() || !anonymousPhone.trim()) {
-        alert("Please fill in your name and phone number")
+        alert("Add your name and mobile number so the shop can reach you about this order.")
         return
+      }
+      if (rememberGuestContact) {
+        try {
+          localStorage.setItem(
+            GUEST_CHECKOUT_STORAGE_KEY,
+            JSON.stringify({ name: anonymousName.trim(), phone: anonymousPhone.trim() })
+          )
+        } catch {
+          /* ignore quota */
+        }
+      } else {
+        try {
+          localStorage.removeItem(GUEST_CHECKOUT_STORAGE_KEY)
+        } catch {
+          /* ignore */
+        }
       }
     }
 
     if (paymentMethod === "cod") {
       setPaymentMethodOpen(false)
       setCodForSeller(selectedSeller)
-      setDeliveryLocation(checkoutMode === "anonymous" ? (tableInfo?.customerAddress || "") : user?.location || "")
-      setContactPhone(checkoutMode === "anonymous" ? anonymousPhone : user?.phone || "")
+      setDeliveryLocation(!isAuthenticated ? (tableInfo?.customerAddress || "") : user?.location || "")
+      setContactPhone(!isAuthenticated ? anonymousPhone : user?.phone || "")
       setCodOpen(true)
       setSelectedSeller(null)
     } else {
@@ -510,7 +530,6 @@ function CartSummaryBody() {
       paymentId?: string;
     }
   ) => {
-    if (!requireLogin()) return
     try {
       setBusy(g.supplierId)
       setPaymentStatus(g.supplierId, "pending")
@@ -537,9 +556,9 @@ function CartSummaryBody() {
       // Buyer name: for table orders use user-entered name only (so "Ordered By" shows person, not table name)
       const isOrderingFromOwnShop = Boolean(user?.ishyigaAccount && g.supplierId && user.ishyigaAccount === g.supplierId);
       const resolvedBuyerName = isInTableCommand()
-        ? (checkoutMode === "anonymous" ? (anonymousName?.trim() || "Guest") : (user?.name || "Guest"))
+        ? (!isAuthenticated ? (anonymousName?.trim() || "Guest") : (user?.name || "Guest"))
         : (tableInfo?.customerName && String(tableInfo.customerName).trim()) ||
-          (checkoutMode === "anonymous" ? anonymousName : null) ||
+          (!isAuthenticated ? anonymousName : null) ||
           (isOrderingFromOwnShop ? (tableInfo?.customerName || anonymousName || "Guest") : user?.name) ||
           anonymousName ||
           user?.name ||
@@ -549,9 +568,9 @@ function CartSummaryBody() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          buyerEmail: checkoutMode === "anonymous" ? `guest_${Date.now()}@ihute.rw` : user?.email,
-          buyerPhone: opts.buyerPhone || (checkoutMode === "anonymous" ? anonymousPhone : user?.phone || ""),
-          buyerLocation: opts.buyerLocation || (checkoutMode === "anonymous" ? deliveryLocation : user?.location || "NA"),
+          buyerEmail: !isAuthenticated ? `guest_${Date.now()}@ihute.rw` : user?.email,
+          buyerPhone: opts.buyerPhone || (!isAuthenticated ? anonymousPhone : user?.phone || ""),
+          buyerLocation: opts.buyerLocation || (!isAuthenticated ? deliveryLocation : user?.location || "NA"),
           buyerName: String(resolvedBuyerName || "").trim() || "Guest",
           sellerAccount: g.supplierId,
           sellerName: g.supplierName,
@@ -598,8 +617,8 @@ function CartSummaryBody() {
               json.tableCommand.tableName,
               g.supplierId,
               json.tableCommand.tableLocation,
-              checkoutMode === "anonymous" ? anonymousName : user?.name || "Guest",
-              checkoutMode === "anonymous" ? `guest_${Date.now()}@ihute.rw` : user?.email || "",
+              !isAuthenticated ? anonymousName : user?.name || "Guest",
+              !isAuthenticated ? `guest_${Date.now()}@ihute.rw` : user?.email || "",
               {
                 shareableLink: json.tableCommand.shareableLink,
                 shareableToken: json.tableCommand.shareableToken,
@@ -648,12 +667,12 @@ function CartSummaryBody() {
             orderId,
             sellerName: g.supplierName,
             sellerPhone: sellerTel || "",
-            buyerPhone: checkoutMode === "anonymous" ? anonymousPhone : (user?.phone || ""),
+            buyerPhone: !isAuthenticated ? anonymousPhone : (user?.phone || ""),
             total: String(g.subtotal),
             paymentMethod: opts.paymentName
           })
           router.push(`/order-success?${params.toString()}`)
-        } else if (checkoutMode === "login" || isAuthenticated) {
+        } else if (isAuthenticated) {
           router.push("/orders")
         } else {
           router.push("/")
@@ -661,7 +680,25 @@ function CartSummaryBody() {
         router.refresh()
       } else {
         setPaymentStatus(g.supplierId, "failed")
-        alert(`Failed to create order: ${json?.error || "Unknown error"}`)
+        const baseMsg = json?.error || "Unknown error"
+        const extra: string[] = []
+        if (json?.hint && typeof json.hint === "string") extra.push(json.hint)
+        if (json?.last?.raw) {
+          const raw = String(json.last.raw).trim()
+          if (raw) extra.push(raw.length > 320 ? `${raw.slice(0, 320)}…` : raw)
+        }
+        if (json?.details && typeof json.details === "object") {
+          const d = json.details as Record<string, unknown>
+          const inner =
+            (typeof d.error === "string" && d.error) ||
+            (typeof d.message === "string" && d.message) ||
+            ""
+          if (inner && inner !== baseMsg) extra.push(inner)
+        }
+        if (process.env.NODE_ENV === "development" && json?.ordersUrl) {
+          extra.push(`(dev) ordersUrl: ${json.ordersUrl}`)
+        }
+        alert(extra.length ? `${baseMsg}\n\n${extra.join("\n\n")}` : `Failed to create order: ${baseMsg}`)
       }
     } catch (error) {
       console.error("Order creation error:", error)
@@ -927,8 +964,12 @@ function CartSummaryBody() {
       <Dialog open={paymentMethodOpen} onOpenChange={setPaymentMethodOpen}>
         <DialogContent className="max-w-lg max-h-[90vh] flex flex-col overflow-hidden p-0 gap-0">
           <DialogHeader className="flex-shrink-0 px-6 pt-6 pb-2">
-            <DialogTitle>Choose Payment Method</DialogTitle>
-            <DialogDescription>Select how you'd like to pay for this order</DialogDescription>
+            <DialogTitle>{!isAuthenticated ? "Pay as guest" : "Choose payment method"}</DialogTitle>
+            <DialogDescription>
+              {!isAuthenticated
+                ? "No account needed. Add how the shop can reach you, then pick how you pay."
+                : "Select how you'd like to pay for this order."}
+            </DialogDescription>
           </DialogHeader>
 
           <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-4">
@@ -974,61 +1015,83 @@ function CartSummaryBody() {
             </div>
           )}
 
-          {/* Checkout Mode Selection */}
+          {/* Guest contact — framed as “reach you for this order”, not “create username” */}
           {!isAuthenticated && (
-            <div className="space-y-3 pb-4 border-b">
-              <Label className="text-sm font-medium">Checkout as:</Label>
-              <RadioGroup value={checkoutMode} onValueChange={(v) => setCheckoutMode(v as "login" | "anonymous")}>
-                <div className="flex items-center space-x-3 border rounded-lg p-3 cursor-pointer hover:bg-accent" onClick={() => setCheckoutMode("login")}>
-                  <RadioGroupItem value="login" id="checkout-login" />
-                  <Label htmlFor="checkout-login" className="cursor-pointer flex-1">
-                    <div className="font-medium">Sign in to checkout</div>
-                    <div className="text-xs text-muted-foreground">Track your orders easily</div>
-                  </Label>
+            <div className="space-y-3 rounded-xl border border-border bg-muted/35 p-4 pb-4">
+              <div className="flex items-start gap-3">
+                <div
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border bg-background text-base font-bold text-primary shadow-sm"
+                  aria-hidden
+                >
+                  G
                 </div>
-                <div className="flex items-center space-x-3 border rounded-lg p-3 cursor-pointer hover:bg-accent" onClick={() => setCheckoutMode("anonymous")}>
-                  <RadioGroupItem value="anonymous" id="checkout-anonymous" />
-                  <Label htmlFor="checkout-anonymous" className="cursor-pointer flex-1">
-                    <div className="font-medium">Continue as guest</div>
-                    <div className="text-xs text-muted-foreground">No account needed</div>
-                  </Label>
+                <div className="min-w-0 flex-1 space-y-1">
+                  <p className="text-sm font-semibold leading-tight">Guest checkout</p>
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    You are not signing in. The seller only needs a name and mobile number for this order (updates
+                    on WhatsApp or phone). This is not a username or password.
+                  </p>
                 </div>
-              </RadioGroup>
-            </div>
-          )}
-
-          {/* Anonymous user info: for table orders do NOT pre-fill name — user enters their name so "Ordered By" shows person, not table */}
-          {checkoutMode === "anonymous" && (
-            <div className="space-y-3 pb-4 border-b">
-              <div className="space-y-1">
-                <Label className="text-sm font-medium">Your Name *</Label>
-                <Input
-                  value={anonymousName}
-                  onChange={(e) => setAnonymousName(e.target.value)}
-                  placeholder={isInTableCommand() ? "e.g., John, Alice" : "Enter your full name"}
-                  className={!isInTableCommand() && tableInfo?.customerName ? "bg-muted" : ""}
-                />
-                {isInTableCommand() ? (
-                  <p className="text-xs text-muted-foreground">
-                    Enter your name so the supplier knows who ordered (table is already shown above).
-                  </p>
-                ) : tableInfo?.customerName ? (
-                  <p className="text-xs text-muted-foreground">
-                    Pre-filled from shop information
-                  </p>
-                ) : null}
               </div>
-              <div className="space-y-1">
-                <Label className="text-sm font-medium">Phone Number *</Label>
-                <Input
-                  value={anonymousPhone}
-                  onChange={(e) => setAnonymousPhone(e.target.value)}
-                  placeholder="+250..."
-                />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="guest-order-name" className="text-xs font-medium text-muted-foreground">
+                    Name on the order
+                  </Label>
+                  <Input
+                    id="guest-order-name"
+                    autoComplete="name"
+                    value={anonymousName}
+                    onChange={(e) => setAnonymousName(e.target.value)}
+                    placeholder={isInTableCommand() ? "Who is ordering (e.g. John)" : "Shown to the shop"}
+                    className={!isInTableCommand() && tableInfo?.customerName ? "bg-muted/80" : ""}
+                  />
+                  {isInTableCommand() ? (
+                    <p className="text-[11px] leading-snug text-muted-foreground">
+                      So the kitchen sees who ordered; the table name is already included above.
+                    </p>
+                  ) : tableInfo?.customerName ? (
+                    <p className="text-[11px] text-muted-foreground">Pre-filled from the shop link where possible.</p>
+                  ) : null}
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="guest-order-phone" className="text-xs font-medium text-muted-foreground">
+                    WhatsApp / mobile
+                  </Label>
+                  <Input
+                    id="guest-order-phone"
+                    type="tel"
+                    inputMode="tel"
+                    autoComplete="tel"
+                    value={anonymousPhone}
+                    onChange={(e) => setAnonymousPhone(e.target.value)}
+                    placeholder="+250 7XX XXX XXX"
+                  />
+                  <p className="text-[11px] leading-snug text-muted-foreground">
+                    For this delivery only — not a login.
+                  </p>
+                </div>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Your order details and tracking link will be sent via WhatsApp
-              </p>
+              <label className="flex cursor-pointer items-start gap-2.5 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={rememberGuestContact}
+                  onChange={(e) => setRememberGuestContact(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 shrink-0 rounded border-input accent-primary"
+                />
+                <span>Remember name and number on this device for next time (stored only in your browser).</span>
+              </label>
+              <button
+                type="button"
+                className="text-xs font-medium text-primary underline-offset-4 hover:underline"
+                onClick={() => {
+                  setPaymentMethodOpen(false)
+                  const next = pathname && pathname.startsWith("/") ? pathname : "/cart"
+                  router.push(`/login?redirect=${encodeURIComponent(next)}`)
+                }}
+              >
+                Use my Ihute account instead
+              </button>
             </div>
           )}
 
@@ -1127,15 +1190,15 @@ function CartSummaryBody() {
           <div className="space-y-4">
             {/* Customer Information */}
             <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-3">
-              <h4 className="font-medium text-sm text-muted-foreground">CUSTOMER INFORMATION</h4>
-              {checkoutMode === "anonymous" && (
+              <h4 className="font-medium text-sm text-muted-foreground">CONTACT FOR THIS ORDER</h4>
+              {!isAuthenticated && (
                 <>
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Name:</span>
+                    <span className="text-muted-foreground">Name on order:</span>
                     <span className="font-medium">{anonymousName}</span>
                   </div>
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Phone:</span>
+                    <span className="text-muted-foreground">WhatsApp / mobile:</span>
                     <span className="font-medium">{anonymousPhone}</span>
                   </div>
                 </>
@@ -1265,7 +1328,7 @@ function CartSummaryBody() {
                         </p>
                       )}
                     </div>
-                    {checkoutMode !== "anonymous" && (
+                    {isAuthenticated && (
                       <div className="space-y-1">
                         <label className="text-sm font-medium">Contact phone</label>
                         <Input

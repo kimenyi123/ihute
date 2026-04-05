@@ -1,23 +1,68 @@
 /**
  * Central backend API configuration from .env / .env.local.
- * One base is enough: set BACKEND_URL, JAVA_BACKEND_BASE, or NEXT_PUBLIC_API_URL
- * (e.g. http://64.225.66.239:8080/trading_ai or https://ihute.rw/Trading).
- * All servlet URLs (fetchSuggestions, shop_with_me, orders, etc.) are derived from this base.
- * Optional overrides: JAVA_ORDERS_URL, JAVA_FETCH_SUGGESTIONS_URL, JAVA_SHOP_WITH_ME_URL, etc.
+ * Base URL resolution: BACKEND_URL → JAVA_BACKEND_BASE → NEXT_PUBLIC_API_URL →
+ * NEXT_PUBLIC_BACKEND_URL → JAVA_BASE_URL → NEXT_PUBLIC_API_BASE → default https://ihute.rw/Trading
+ * Optional full-URL overrides (ignore BACKEND_URL if set): JAVA_FETCH_SUGGESTIONS_URL, JAVA_SHOP_WITH_ME_URL, …
  */
 
 function noTrailingSlash(s: string): string {
   return (s || "").replace(/\/+$/, "")
 }
 
-/** Java backend base URL (no trailing slash). Uses BACKEND_URL, JAVA_BACKEND_BASE, or NEXT_PUBLIC_API_URL from env. */
+/** First non-empty wins (order matters). Add common names people put in .env.local by mistake. */
+const BACKEND_BASE_ENV_KEYS = [
+  "BACKEND_URL",
+  "JAVA_BACKEND_BASE",
+  "NEXT_PUBLIC_API_URL",
+  "NEXT_PUBLIC_BACKEND_URL",
+  "JAVA_BASE_URL",
+  "NEXT_PUBLIC_API_BASE",
+] as const
+
+let backendBaseDevLogged = false
+let servletOverridesDevLogged = false
+
+function logServletOverridesOnce() {
+  if (process.env.NODE_ENV !== "development" || servletOverridesDevLogged) return
+  servletOverridesDevLogged = true
+  if (process.env.JAVA_FETCH_SUGGESTIONS_URL?.trim()) {
+    console.warn(
+      "[backend-config] JAVA_FETCH_SUGGESTIONS_URL is set — /api/fetchSuggestions uses this full URL, not BACKEND_URL:",
+      process.env.JAVA_FETCH_SUGGESTIONS_URL.trim()
+    )
+  }
+  if (process.env.JAVA_SHOP_WITH_ME_URL?.trim()) {
+    console.warn(
+      "[backend-config] JAVA_SHOP_WITH_ME_URL is set — /api/shop-with-me uses this, not BACKEND_URL:",
+      process.env.JAVA_SHOP_WITH_ME_URL.trim()
+    )
+  }
+}
+
+function resolveBackendBase(): { base: string; source: string } {
+  for (const key of BACKEND_BASE_ENV_KEYS) {
+    const raw = process.env[key]
+    if (raw != null && String(raw).trim() !== "") {
+      return { base: noTrailingSlash(String(raw).trim()), source: key }
+    }
+  }
+  return { base: noTrailingSlash("https://ihute.rw/Trading"), source: "(default ihute.rw — set BACKEND_URL in .env.local)" }
+}
+
+/**
+ * Java backend base URL (no trailing slash).
+ * Reads BACKEND_URL, JAVA_BACKEND_BASE, NEXT_PUBLIC_API_URL, NEXT_PUBLIC_BACKEND_URL, JAVA_BASE_URL, NEXT_PUBLIC_API_BASE.
+ * In development, logs once which key was used (restart `next dev` after editing .env.local).
+ */
 export function getBackendBase(): string {
-  return noTrailingSlash(
-    process.env.BACKEND_URL ||
-      process.env.JAVA_BACKEND_BASE ||
-      process.env.NEXT_PUBLIC_API_URL ||
-      "https://ihute.rw/Trading"
-  )
+  const { base, source } = resolveBackendBase()
+  if (process.env.NODE_ENV === "development" && !backendBaseDevLogged) {
+    backendBaseDevLogged = true
+    console.log(`[backend-config] Java API base: ${base}`)
+    console.log(`[backend-config] Source env: ${source}`)
+    logServletOverridesOnce()
+  }
+  return base
 }
 
 /** Optional override or derived from base. */
@@ -55,11 +100,15 @@ export function getDeliveryUrl(): string {
 }
 
 export function getFetchSuggestionsUrl(): string {
-  return process.env.JAVA_FETCH_SUGGESTIONS_URL || `${getBackendBase()}/Kaos/fetchSuggestions`
+  const base = getBackendBase()
+  const override = process.env.JAVA_FETCH_SUGGESTIONS_URL?.trim()
+  return override || `${base}/Kaos/fetchSuggestions`
 }
 
 export function getShopWithMeUrl(): string {
-  return process.env.JAVA_SHOP_WITH_ME_URL || `${getBackendBase()}/shop_with_me`
+  const base = getBackendBase()
+  const override = process.env.JAVA_SHOP_WITH_ME_URL?.trim()
+  return override || `${base}/shop_with_me`
 }
 
 export function getAuthUrl(): string {

@@ -6,8 +6,6 @@ export const revalidate = 0
 
 import { getBackendBase } from "@/lib/backend-config"
 
-const BACKEND_URL = getBackendBase()
-
 export async function POST(req: Request) {
   try {
     // Parse request body - use req.json() for Next.js API routes
@@ -86,7 +84,8 @@ export async function POST(req: Request) {
       }
     })
 
-    const url = `${BACKEND_URL}/AdminServlet`
+    const backendUrl = getBackendBase()
+    const url = `${backendUrl}/AdminServlet`
     console.log("[admin/route] Calling backend:", url)
     console.log("[admin/route] Action:", action)
     
@@ -135,7 +134,7 @@ export async function POST(req: Request) {
   } catch (e: any) {
     console.error("[admin/route] POST - Error:", e?.message)
     console.error("[admin/route] POST - Stack:", e?.stack)
-    console.error("[admin/route] POST - Backend URL:", BACKEND_URL)
+    console.error("[admin/route] POST - Backend URL:", getBackendBase())
     
     if (e?.name === 'AbortError') {
       return NextResponse.json(
@@ -150,7 +149,7 @@ export async function POST(req: Request) {
         error: e?.message || "Internal server error",
         details: process.env.NODE_ENV === 'development' ? {
           stack: e?.stack,
-          backendUrl: BACKEND_URL,
+          backendUrl: getBackendBase(),
           type: e?.name
         } : undefined
       },
@@ -181,7 +180,8 @@ export async function GET(req: Request) {
       }
     })
 
-    const url = `${BACKEND_URL}/AdminServlet?${params.toString()}`
+    const backendUrl = getBackendBase()
+    const url = `${backendUrl}/AdminServlet?${params.toString()}`
     console.log("[admin/route] GET - Calling backend:", url)
     console.log("[admin/route] GET - Action:", action)
     
@@ -228,7 +228,7 @@ export async function GET(req: Request) {
   } catch (e: any) {
     console.error("[admin/route] GET - Error:", e?.message)
     console.error("[admin/route] GET - Stack:", e?.stack)
-    console.error("[admin/route] GET - Backend URL:", BACKEND_URL)
+    console.error("[admin/route] GET - Backend URL:", getBackendBase())
     
     if (e?.name === 'AbortError') {
       return NextResponse.json(
@@ -243,7 +243,7 @@ export async function GET(req: Request) {
         error: e?.message || "Internal server error",
         details: process.env.NODE_ENV === 'development' ? {
           stack: e?.stack,
-          backendUrl: BACKEND_URL,
+          backendUrl: getBackendBase(),
           type: e?.name
         } : undefined
       },

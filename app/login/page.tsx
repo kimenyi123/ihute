@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Separator } from "@/components/ui/separator"
 import { ArrowLeft } from "lucide-react"
 import { useAuthStore } from "@/lib/auth-store"
 import type { User, UserRole } from "@/lib/auth-store"
@@ -143,7 +144,9 @@ export default function LoginPage() {
               <Image src="/images/ishyiga-logo.png" alt="Ishyiga Software" width={200} height={60} className="h-12 w-auto" />
             </div>
             <CardTitle className="text-2xl">Welcome Back</CardTitle>
-            <CardDescription>Sign in to your account to continue</CardDescription>
+            <CardDescription>
+              Sign in with your account, or continue as a guest (like YouTube) to browse Grandma without signing in.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleLogin} className="space-y-4">
@@ -172,6 +175,29 @@ export default function LoginPage() {
                 {loading ? "Signing in..." : "Sign In"}
               </Button>
             </form>
+            <div className="mt-5 flex items-center gap-3">
+              <Separator className="flex-1" />
+              <span className="shrink-0 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Or guest
+              </span>
+              <Separator className="flex-1" />
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              className="mt-4 w-full"
+              disabled={loading}
+              onClick={() => {
+                const decoded = redirectTo ? decodeURIComponent(redirectTo) : ""
+                const safe = decoded.startsWith("/") && !decoded.startsWith("//")
+                router.push(safe && decoded.length > 0 ? decoded : "/grandma")
+              }}
+            >
+              Continue as Guest
+            </Button>
+            <p className="mt-2 text-center text-xs text-muted-foreground">
+              Guest mode: shop on Grandma and use guest checkout in the cart — no password.
+            </p>
             <div className="mt-6 text-center space-y-2">
               <p className="text-sm text-muted-foreground">
                 Don&apos;t have an account? <Link href="/register" className="text-primary hover:underline font-medium">Register here</Link>

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
+import { useAuthStore } from "@/lib/auth-store"
 import { useCartStore } from "@/lib/cart-store"
 import { isBarOrRestaurant } from "@/lib/constants"
 import {
@@ -11,11 +12,17 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { LocationCaptureDialog } from "@/components/location-capture-dialog"
 import { Slider } from "@/components/ui/slider"
 import { useLocationStoreEnhanced, type LocationData } from "@/lib/location-store-enhanced"
 import { getProductImageSrc, NO_IMAGE_URL } from "@/lib/image-utils"
 import { cn } from "@/lib/utils"
+import {
+  catalogItemCodeFromApi,
+  fallbackLiveItemCode,
+  sanitizeItemCodeForOrderDb,
+} from "@/lib/catalog-item-code"
 import { SlidersHorizontal } from "lucide-react"
 
 type Category =
@@ -37,6 +44,8 @@ type Product = {
   imageUrl?: string
   /** Stable key for live-catalog rows (dedupe + React keys) */
   liveKey?: string
+  /** ITEM_CODE / item_code / item_key_words — safe for Java NIKI_CODE (never use liveKey here). */
+  liveOrderItemCode?: string
   /** Live API `in_stock` — only set for injected catalog rows */
   liveInStock?: boolean
   /** Menu / famille label from live API (filters) */
@@ -187,6 +196,15 @@ const GRANDMA_LABELS: Record<
     tapCouriers: string
     closestToShop: string
     top5Available: string
+    yourAccount: string
+    browsingAsGuest: string
+    guestModeHint: string
+    signIn: string
+    signOut: string
+    guestUser: string
+    guestSubtitle: string
+    openAllSettings: string
+    accountMenuAria: string
   }
 > = {
   en: {
@@ -240,6 +258,16 @@ const GRANDMA_LABELS: Record<
     tapCouriers: "Tap to see top 5 couriers closest to the shop",
     closestToShop: "Closest to shop",
     top5Available: "top 5 available",
+    yourAccount: "Your account",
+    browsingAsGuest: "Browsing as guest",
+    guestModeHint:
+      "Shop and check out without signing in. Use guest checkout on the cart page. Sign in anytime to sync orders and saved details.",
+    signIn: "Sign in",
+    signOut: "Sign out",
+    guestUser: "Guest",
+    guestSubtitle: "Not signed in — browse and check out on this device.",
+    openAllSettings: "All settings",
+    accountMenuAria: "Account and guest menu",
   },
   rw: {
     demoLocation: "Kacyiru, Gasabo — inyigo (shyiraho aderesi mu buryo)",
@@ -291,6 +319,16 @@ const GRANDMA_LABELS: Record<
     tapCouriers: "Kanda urebe aboherezi 5 ba mbere buri hafi y'iduka",
     closestToShop: "Bari hafi y'iduka",
     top5Available: "5 ba mbere bahari",
+    yourAccount: "Konti yawe",
+    browsingAsGuest: "Utariye konti",
+    guestModeHint:
+      "Gura utariye konti. Kuri cart hitamo guest checkout. Injira igihe icyo ari cyo kugira ngo uhagarike amaduka n'amabwiriza.",
+    signIn: "Injira",
+    signOut: "Sohoka",
+    guestUser: "Guest",
+    guestSubtitle: "Ntariye konti — shakisha ukoresheje iki gikoresho.",
+    openAllSettings: "Igenamiterere ryose",
+    accountMenuAria: "Konti cyangwa guest",
   },
   fr: {
     demoLocation: "Kacyiru, Gasabo — démo (définissez l'adresse dans les réglages)",
@@ -342,6 +380,16 @@ const GRANDMA_LABELS: Record<
     tapCouriers: "Appuyez pour voir les 5 livreurs les plus proches",
     closestToShop: "Les plus proches du magasin",
     top5Available: "top 5 disponibles",
+    yourAccount: "Votre compte",
+    browsingAsGuest: "Navigation en mode invité",
+    guestModeHint:
+      "Parcourez et payez sans compte (checkout invité sur le panier). Connectez-vous quand vous voulez pour synchroniser commandes et adresses.",
+    signIn: "Se connecter",
+    signOut: "Se déconnecter",
+    guestUser: "Invité",
+    guestSubtitle: "Non connecté — navigation et commande sur cet appareil.",
+    openAllSettings: "Tous les réglages",
+    accountMenuAria: "Compte et mode invité",
   },
 }
 
@@ -753,7 +801,8 @@ function liveItemDedupeKey(p: BurrowsApiProduct, rowIndex: number): string {
   const packet = String(p.item_packet ?? "").trim()
   const price = String(p.selling_price ?? p.price ?? "").trim()
   const name = String(p.item_commercial_name ?? p.item_name ?? "").trim()
-  const core = [code, state, packet, price, name].join("\u241e")
+  // ASCII "|" avoids U+241E in keys (that byte sequence breaks MySQL latin1 NIKI_CODE if mistaken for itemCode) yatumaga command itagenda
+  const core = [code, state, packet, price, name].join("|")
   return core || `__idx_${rowIndex}`
 }
 
@@ -829,7 +878,7 @@ function liveCatalogThumbUrl(
 ): string {
   const resolved = getProductImageSrc(p as Record<string, unknown>)
   if (resolved !== NO_IMAGE_URL) return resolved
-  return livePlaceholderImageUrl(category, `${nickname}\u241e${dedupeKey}\u241e${displayName}`)
+  return livePlaceholderImageUrl(category, `${nickname}|${dedupeKey}|${displayName}`)
 }
 
 function stableSample<T>(list: T[], take: number, seedKey: (x: T) => string): T[] {
@@ -1181,6 +1230,7 @@ export default function GrandmaPage() {
   const [selectedPayment, setSelectedPayment] = useState<PaymentId>("momo")
   const [prefsHydrated, setPrefsHydrated] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const [filterSheetOpen, setFilterSheetOpen] = useState(false)
   const [itemsSort, setItemsSort] = useState<ItemsSortId>("default")
   const [liveInStockOnly, setLiveInStockOnly] = useState(false)
@@ -1329,6 +1379,7 @@ export default function GrandmaPage() {
           seenKeys.add(key)
           uniqueRows.push({ key, p })
         }
+        const sellerAccount = String(seller?.ISHYIGA_ACCOUNT ?? nickname ?? "live").trim() || "live"
         const mapped: Product[] = uniqueRows
           .map(({ key, p }) => {
             const nameRaw = String(p.item_commercial_name ?? p.item_name ?? "").trim()
@@ -1338,6 +1389,8 @@ export default function GrandmaPage() {
             const thumb = liveCatalogThumbUrl(p, targetCategory, nickname, key, name)
             const sectionLabel = resolveLiveMenuSectionCategory(p)
             const menuCat = menuCategoryTitleFromCanon(menuCategoryCanon(sectionLabel))
+            const fromApi = sanitizeItemCodeForOrderDb(catalogItemCodeFromApi(p))
+            const orderItemCode = fromApi || fallbackLiveItemCode(sellerAccount.replace(/[^\w.-]/g, "_") || "live", id)
             return {
               id,
               category: targetCategory,
@@ -1346,6 +1399,7 @@ export default function GrandmaPage() {
               emoji: emojiForLiveCategory(targetCategory, name),
               imageUrl: thumb,
               liveKey: `${nickname}:${key}`,
+              liveOrderItemCode: orderItemCode,
               liveInStock: p.in_stock === true,
               liveCategory: menuCat,
               qty: 0,
@@ -1386,13 +1440,18 @@ export default function GrandmaPage() {
     [locationData, language]
   )
 
-  /** Settings sheet — always English */
-  const displayUserLocationEn = useMemo(
-    () => formatStoredLocation(locationData, GRANDMA_LABELS.en.demoLocation),
-    [locationData]
-  )
+  const settingsUi = GRANDMA_LABELS[language]
 
-  const settingsUi = GRANDMA_LABELS.en
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+  const authUser = useAuthStore((s) => s.user)
+  const logout = useAuthStore((s) => s.logout)
+  const authHydrated = useAuthStore((s) => s.hasHydrated)
+
+  const profileLetter = useMemo(() => {
+    if (!authHydrated) return null
+    if (!isAuthenticated || !authUser?.name?.trim()) return "G"
+    return authUser.name.trim().charAt(0).toUpperCase()
+  }, [authHydrated, isAuthenticated, authUser?.name])
 
   const ihuteFees = useMemo(() => Math.round(itemsTotal * IHUTE_FEE_RATE), [itemsTotal])
   const grandTotal = useMemo(
@@ -1717,11 +1776,16 @@ export default function GrandmaPage() {
       selectedShop.category === "Restaurant" || isBarOrRestaurant(selectedShop.name)
     const notesFirst = orderNotes.trim() || undefined
     selectedProducts.forEach((p, idx) => {
-      const id = String(p.liveKey ?? p.id)
+      const rowKey = String(p.liveKey ?? p.id)
+      const itemCode = p.liveOrderItemCode
+        ? p.liveOrderItemCode
+        : p.liveKey
+          ? fallbackLiveItemCode(selectedShop.id.replace(/[^\w.-]/g, "_") || "shop", p.id)
+          : String(p.id)
       st.addItem(
         {
-          id,
-          itemCode: (p.liveKey ?? String(p.id)).toString(),
+          id: rowKey,
+          itemCode,
           name: p.name,
           price: p.price,
           image: p.imageUrl,
@@ -1762,6 +1826,8 @@ export default function GrandmaPage() {
         .topbar{background:linear-gradient(90deg,var(--blue),#30acef,var(--blue-dark));color:#fff;padding:14px 16px;position:sticky;top:0;z-index:10;box-shadow:0 8px 20px rgba(0,0,0,.10);}
         .topbar-row{display:flex;align-items:center;gap:10px;}
         .back-btn,.more-btn{border:none;background:rgba(255,255,255,.14);color:#fff;border-radius:10px;width:36px;height:36px;font-size:18px;cursor:pointer;flex-shrink:0;line-height:1;}
+        .profile-avatar-btn{border:none;background:rgba(255,255,255,.95);color:var(--blue-dark);border-radius:50%;width:36px;height:36px;font-size:15px;font-weight:800;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.1);border:1px solid rgba(255,255,255,.6);}
+        .profile-avatar-btn:active{transform:scale(.96);}
         .filter-trigger-btn{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:10px;background:rgba(255,255,255,.95);color:#17324d;border:1px solid rgba(255,255,255,.55);font-size:12px;font-weight:800;cursor:pointer;flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,.08);}
         .filter-trigger-btn svg{flex-shrink:0;opacity:.9;}
         .brand{display:flex;align-items:center;gap:10px;flex:1;min-width:0;}
@@ -1994,6 +2060,76 @@ export default function GrandmaPage() {
           >
             ⚙
           </button>
+          <Popover open={accountMenuOpen} onOpenChange={setAccountMenuOpen}>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className="profile-avatar-btn"
+                aria-label={settingsUi.accountMenuAria}
+                aria-haspopup="dialog"
+              >
+                <span className="leading-none">{profileLetter ?? "·"}</span>
+              </button>
+            </PopoverTrigger>
+            <PopoverContent
+              align="end"
+              side="bottom"
+              sideOffset={8}
+              className="w-[min(100vw-24px,300px)] border-border p-0 shadow-lg"
+            >
+              <div className="border-b border-border px-4 py-3">
+                <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                  {isAuthenticated && authUser ? settingsUi.yourAccount : settingsUi.guestUser}
+                </p>
+                {isAuthenticated && authUser ? (
+                  <>
+                    <p className="mt-1 truncate text-base font-bold text-foreground">{authUser.name}</p>
+                    <p className="mt-0.5 truncate text-xs text-muted-foreground">{authUser.email}</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="mt-1 text-base font-bold text-foreground">{settingsUi.browsingAsGuest}</p>
+                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{settingsUi.guestSubtitle}</p>
+                  </>
+                )}
+              </div>
+              <div className="flex flex-col gap-1 p-2">
+                {isAuthenticated && authUser ? (
+                  <button
+                    type="button"
+                    className="rounded-lg px-3 py-2.5 text-left text-sm font-bold text-foreground hover:bg-muted"
+                    onClick={() => {
+                      logout()
+                      setAccountMenuOpen(false)
+                    }}
+                  >
+                    {settingsUi.signOut}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="rounded-lg px-3 py-2.5 text-left text-sm font-bold text-foreground hover:bg-muted"
+                    onClick={() => {
+                      setAccountMenuOpen(false)
+                      router.push(`/login?redirect=${encodeURIComponent("/grandma")}`)
+                    }}
+                  >
+                    {settingsUi.signIn}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="rounded-lg px-3 py-2.5 text-left text-sm font-bold text-foreground hover:bg-muted"
+                  onClick={() => {
+                    setAccountMenuOpen(false)
+                    setSettingsOpen(true)
+                  }}
+                >
+                  {settingsUi.openAllSettings}
+                </button>
+              </div>
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
 
@@ -3077,6 +3213,43 @@ export default function GrandmaPage() {
           </SheetHeader>
           <div className="space-y-6 px-4 py-4">
             <div>
+              <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                {settingsUi.yourAccount}
+              </div>
+              {isAuthenticated && authUser ? (
+                <div className="mt-2 space-y-2">
+                  <p className="text-sm font-semibold text-foreground">{authUser.name}</p>
+                  <p className="break-all text-xs text-muted-foreground">{authUser.email}</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      logout()
+                      setSettingsOpen(false)
+                    }}
+                    className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-left text-sm font-bold text-foreground hover:bg-muted/60"
+                  >
+                    {settingsUi.signOut}
+                  </button>
+                </div>
+              ) : (
+                <div className="mt-2 space-y-2">
+                  <p className="text-sm font-bold text-foreground">{settingsUi.browsingAsGuest}</p>
+                  <p className="text-xs leading-relaxed text-muted-foreground">{settingsUi.guestModeHint}</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      router.push(`/login?redirect=${encodeURIComponent("/grandma")}`)
+                      setSettingsOpen(false)
+                    }}
+                    className="w-full rounded-xl border border-blue-600 bg-blue-50 px-3 py-2.5 text-sm font-bold text-blue-950 hover:bg-blue-100"
+                  >
+                    {settingsUi.signIn}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div>
               <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Mode</div>
               <div className="mt-2 grid grid-cols-2 gap-2">
                 {(["buyer", "seller"] as const).map((mode) => (
@@ -3122,7 +3295,7 @@ export default function GrandmaPage() {
               <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{settingsUi.setLocation}</div>
               <p className="mt-1 text-sm text-muted-foreground">
                 <span className="font-semibold text-foreground">{settingsUi.locationCurrent}:</span>{" "}
-                {locationData ? displayUserLocationEn : settingsUi.noLocationYet}
+                {locationData ? displayUserLocation : settingsUi.noLocationYet}
               </p>
               <button
                 type="button"

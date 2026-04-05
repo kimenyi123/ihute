@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getShopWithMeUrl, getFetchSuggestionsUrl } from '@/lib/backend-config';
+import { getShopWithMeUrl, getFetchSuggestionsUrl, getBackendBase, getProxyTimeoutMs } from '@/lib/backend-config';
 import { buildCacheKey, getCached, setCached, DATA_TTL_SEC } from '@/lib/redis-cache';
 
 /** Ensure each product in the response has brand and category for the client. */
@@ -176,6 +176,8 @@ export async function GET(request: NextRequest) {
     let lastStatus = 502;
     let winningVariant = originalNickname;
 
+    const proxyTimeoutMs = getProxyTimeoutMs();
+
     for (const variant of variants) {
       let backendUrl = `${base}?nickname=${encodeURIComponent(variant)}`;
       if (productSearch.trim()) {
@@ -183,10 +185,18 @@ export async function GET(request: NextRequest) {
       }
       console.log('[API shop-with-me] Redis miss, trying backend nickname variant:', variant);
 
-      const response = await fetch(backendUrl, {
-        cache: 'no-store',
-        headers: { ...headersBase },
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), proxyTimeoutMs);
+      let response: Response;
+      try {
+        response = await fetch(backendUrl, {
+          cache: 'no-store',
+          headers: { ...headersBase },
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       console.log('[API shop-with-me] Backend response status:', response.status, 'variant:', variant);
 
@@ -236,9 +246,22 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(data);
   } catch (error: any) {
     console.error('[API shop-with-me] Fetch error:', error);
+    const baseUsed = getBackendBase();
+    const isTimeout =
+      error?.name === 'AbortError' ||
+      error?.code === 'UND_ERR_CONNECT_TIMEOUT' ||
+      /timeout|aborted/i.test(String(error?.message || error?.cause?.message || ''));
+    const hint =
+      process.env.NODE_ENV === 'development'
+        ? ` Check .env.local: set BACKEND_URL or NEXT_PUBLIC_API_URL (or JAVA_BASE_URL / NEXT_PUBLIC_API_BASE) to your Java base, e.g. http://localhost:8081/Trading. Restart next dev after changes. Currently using: ${baseUsed}`
+        : ' Backend unreachable. Configure BACKEND_URL or NEXT_PUBLIC_API_URL on the server.';
     return NextResponse.json(
-      { ok: false, error: error.message || 'Failed to fetch shop data' },
-      { status: 500 }
+      {
+        ok: false,
+        error: (error?.message || 'Failed to fetch shop data') + hint,
+        ...(process.env.NODE_ENV === 'development' ? { _debugBackendBase: baseUsed } : {}),
+      },
+      { status: isTimeout ? 504 : 502 }
     );
   }
 }
