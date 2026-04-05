@@ -23,6 +23,7 @@ import {
   fallbackLiveItemCode,
   sanitizeItemCodeForOrderDb,
 } from "@/lib/catalog-item-code"
+import { formatSellerMomoAccountLine, cartMomoFieldsFromShopWithMeSellerMomo } from "@/lib/momo-ussd"
 import { SlidersHorizontal } from "lucide-react"
 
 type Category =
@@ -75,7 +76,6 @@ type BurrowsApiProduct = {
   stock?: number | string
   in_stock?: boolean
   category?: string
-  item_state?: string
 }
 
 type BurrowsApiSeller = {
@@ -85,6 +85,8 @@ type BurrowsApiSeller = {
   NICKNAME?: string
   PREFERRED_CATEGORIES?: string
   DEPARTMENT?: string
+  /** Often MoMo Pay merchant code (e.g. "999998") from Java shop-with-me */
+  momo?: string
   products?: BurrowsApiProduct[]
 }
 
@@ -112,6 +114,10 @@ type ShopEntry = {
   /** km — used when “location sort” is on */
   distanceKm: number
   momo: string
+  /** MTN MoMo Pay merchant code when known (shown in Konti / summary when set) */
+  momoCode?: string
+  /** Backend account for GET /api/account/profile?account= (MoMo + momoCode) */
+  profileAccount?: string
   /** optional — from API; otherwise derived deterministically from id */
   rating?: number
   reviewCount?: number
@@ -418,11 +424,22 @@ function readGrandmaPrefs(): { lang: GrandmaLang; payment: PaymentId; preferred:
   return { lang, payment, preferred, mode }
 }
 
-function shopPayReceivingAccount(shop: ShopEntry | null): { bankName: string; account: string } {
+function shopPayReceivingAccount(
+  shop: ShopEntry | null,
+  liveProfile: { momo?: string; momoCode?: string } | null
+): { bankName: string; account: string } {
   if (!shop) return { bankName: "—", account: "—" }
+  const momoRaw =
+    liveProfile?.momo && liveProfile.momo.trim() ? liveProfile.momo : shop.momo
+  const code =
+    liveProfile?.momoCode && liveProfile.momoCode.trim()
+      ? liveProfile.momoCode
+      : shop.momoCode
   return {
     bankName: shop.bankName ?? "Bank of Kigali",
-    account: shop.payoutAccount ?? shop.momo,
+    account:
+      shop.payoutAccount ??
+      formatSellerMomoAccountLine(momoRaw, code ?? null),
   }
 }
 
@@ -570,6 +587,7 @@ const MOCK_SHOPS: ShopEntry[] = (
     onSale: false,
     distanceKm: 0.4,
     momo: "MTN MoMo: 078***000",
+    profileAccount: "burrows",
   },
   {
     id: "rs2",
@@ -1257,6 +1275,68 @@ export default function GrandmaPage() {
     [selectedShopId]
   )
 
+  const [shopPayoutProfile, setShopPayoutProfile] = useState<{
+    momo?: string
+    momoCode?: string
+  } | null>(null)
+
+  /** Seller `momo` from last shop-with-me response (live menu) — carried to cart as `momoCode` when numeric code */
+  const [liveMenuSellerMomo, setLiveMenuSellerMomo] = useState("")
+
+  useEffect(() => {
+    const acc = selectedShop?.profileAccount?.trim()
+    if (!acc) {
+      setShopPayoutProfile(null)
+      return
+    }
+    let cancelled = false
+    fetch(`/api/account/profile?account=${encodeURIComponent(acc)}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled || !data?.ok || !data.profile) return
+        setShopPayoutProfile({
+          momo: String(data.profile.momo ?? "").trim(),
+          momoCode: String(data.profile.momoCode ?? "").trim(),
+        })
+      })
+      .catch(() => {
+        if (!cancelled) setShopPayoutProfile(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [selectedShop?.profileAccount])
+
+  /** Shop list: MoMo / MoMo Pay code from API when `ShopEntry.profileAccount` is set (not hardcoded-only). */
+  const [shopListProfileByAccount, setShopListProfileByAccount] = useState<
+    Record<string, { momo?: string; momoCode?: string }>
+  >({})
+  const shopListProfileReqRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    const accounts = new Set<string>()
+    for (const s of MOCK_SHOPS) {
+      const a = s.profileAccount?.trim()
+      if (a) accounts.add(a)
+    }
+    accounts.forEach((acc) => {
+      if (shopListProfileReqRef.current.has(acc)) return
+      shopListProfileReqRef.current.add(acc)
+      fetch(`/api/account/profile?account=${encodeURIComponent(acc)}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (!data?.ok || !data?.profile) return
+          setShopListProfileByAccount((prev) => ({
+            ...prev,
+            [acc]: {
+              momo: String(data.profile.momo ?? "").trim(),
+              momoCode: String(data.profile.momoCode ?? "").trim(),
+            },
+          }))
+        })
+        .catch(() => {})
+    })
+  }, [])
+
   const liveMenuNickname = useMemo(() => {
     if (selectedShopId === "rs_burrows") return "burrows"
     if (selectedShopId === "ph_rite") return "rite"
@@ -1347,6 +1427,7 @@ export default function GrandmaPage() {
       setBurrowsLiveLoading(false)
       setBurrowsLiveError(null)
       setBurrowsLiveCount(0)
+      setLiveMenuSellerMomo("")
       // remove any previously injected live items
       setProducts((prev) => prev.filter((p) => p.id < 100000))
       return
@@ -1407,6 +1488,7 @@ export default function GrandmaPage() {
           })
           .filter((p) => p.name && p.price > 0)
         if (cancelled) return
+        setLiveMenuSellerMomo(String(seller?.momo ?? "").trim())
         setBurrowsLiveCount(mapped.length)
         setProducts((prev) => {
           const kept = prev.filter((p) => p.id < 100000)
@@ -1420,6 +1502,7 @@ export default function GrandmaPage() {
         if (!cancelled) {
           setBurrowsLiveError(e?.message || "Failed to load menu")
           setBurrowsLiveCount(0)
+          setLiveMenuSellerMomo("")
         }
       } finally {
         if (!cancelled) setBurrowsLiveLoading(false)
@@ -1775,6 +1858,11 @@ export default function GrandmaPage() {
     const isBar =
       selectedShop.category === "Restaurant" || isBarOrRestaurant(selectedShop.name)
     const notesFirst = orderNotes.trim() || undefined
+    const liveSwm = isLiveMenuSelected
+      ? cartMomoFieldsFromShopWithMeSellerMomo(liveMenuSellerMomo)
+      : {}
+    const hasLiveSellerMomo = Boolean(isLiveMenuSelected && liveMenuSellerMomo.trim())
+
     selectedProducts.forEach((p, idx) => {
       const rowKey = String(p.liveKey ?? p.id)
       const itemCode = p.liveOrderItemCode
@@ -1791,7 +1879,11 @@ export default function GrandmaPage() {
           image: p.imageUrl,
           supplierId: selectedShop.id,
           supplierName: selectedShop.name,
-          momo: selectedShop.momo,
+          momo: hasLiveSellerMomo
+            ? liveSwm.momo ?? (liveSwm.momoCode ? "" : selectedShop.momo)
+            : selectedShop.momo,
+          momoCode: hasLiveSellerMomo ? liveSwm.momoCode ?? selectedShop.momoCode : selectedShop.momoCode,
+          supplierProfileAccount: selectedShop.profileAccount,
           isBarResto: isBar,
           notes: idx === 0 ? notesFirst : undefined,
         },
@@ -1806,7 +1898,15 @@ export default function GrandmaPage() {
     })
     setPage(1)
     router.push("/cart")
-  }, [language, orderNotes, router, selectedProducts, selectedShop])
+  }, [
+    language,
+    orderNotes,
+    router,
+    selectedProducts,
+    selectedShop,
+    isLiveMenuSelected,
+    liveMenuSellerMomo,
+  ])
 
   const featuredCourierSafe = useMemo(() => {
     const fc = featuredCourier
@@ -1861,6 +1961,7 @@ export default function GrandmaPage() {
         .shop-avatar img{width:100%;height:100%;object-fit:contain;display:block;background:#fff;}
         .shop-row-meta{flex:1;min-width:0;}
         .shop-row-name{font-size:16px;font-weight:700;}
+        .shop-row-momo{font-size:13px;font-weight:700;color:var(--blue-dark);margin-top:3px;line-height:1.25;word-break:break-word;}
         .shop-row-tag{color:var(--muted);font-size:13px;margin-top:4px;line-height:1.3;}
         .shop-row-badges{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
         .shop-badge{font-size:11px;font-weight:700;padding:4px 8px;border-radius:8px;background:#f1f8ff;color:var(--blue-dark);}
@@ -2404,6 +2505,20 @@ export default function GrandmaPage() {
                 </div>
                 <div className="shop-row-meta">
                   <div className="shop-row-name">{s.name}</div>
+                  {(() => {
+                    const acc = s.profileAccount?.trim()
+                    const live = acc ? shopListProfileByAccount[acc] : undefined
+                    const line = formatSellerMomoAccountLine(
+                      live?.momo?.trim() || s.momo,
+                      live?.momoCode?.trim() || s.momoCode || null
+                    )
+                    if (line === "—") return null
+                    return (
+                      <div className="shop-row-momo" title="MoMo / MoMo Pay (from shop or live profile)">
+                        {line}
+                      </div>
+                    )
+                  })()}
                   <div className="shop-row-tag">{s.tagline}</div>
                   <div className="shop-row-rating">
                     <span className="shop-stars" aria-hidden>
@@ -2644,7 +2759,20 @@ export default function GrandmaPage() {
           </div>
           <div className="shop-main">
             <div className="shop-name">{selectedShop?.name ?? "Select a shop"}</div>
-            <div className="shop-code">{selectedShop?.momo ?? "—"}</div>
+            <div className="shop-code">
+              {selectedShop
+                ? (() => {
+                    const swm =
+                      isLiveMenuSelected && liveMenuSellerMomo.trim()
+                        ? cartMomoFieldsFromShopWithMeSellerMomo(liveMenuSellerMomo)
+                        : {}
+                    return formatSellerMomoAccountLine(
+                      shopPayoutProfile?.momo?.trim() || swm.momo || selectedShop.momo,
+                      shopPayoutProfile?.momoCode?.trim() || selectedShop.momoCode || swm.momoCode || null
+                    )
+                  })()
+                : "—"}
+            </div>
             {selectedShop ? (
               <div className="shop-inline-rating">
                 ★ {shopDisplayRating(selectedShop).toFixed(1)} · {shopDisplayReviews(selectedShop)} reviews
@@ -2767,11 +2895,11 @@ export default function GrandmaPage() {
           </div>
           <div className="pay-detail-row">
             <span className="pay-detail-label">{tPay.bankName}</span>
-            <span className="pay-detail-value">{shopPayReceivingAccount(selectedShop).bankName}</span>
+            <span className="pay-detail-value">{shopPayReceivingAccount(selectedShop, shopPayoutProfile).bankName}</span>
           </div>
           <div className="pay-detail-row">
             <span className="pay-detail-label">{tPay.account}</span>
-            <span className="pay-detail-value">{shopPayReceivingAccount(selectedShop).account}</span>
+            <span className="pay-detail-value">{shopPayReceivingAccount(selectedShop, shopPayoutProfile).account}</span>
           </div>
           <div className="pay-detail-row">
             <span className="pay-detail-label">{tPay.yourLocation}</span>

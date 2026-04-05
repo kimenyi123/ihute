@@ -11,6 +11,8 @@ interface BackendProfile {
   tel?: string
   hqLocation?: string
   momo?: string
+  /** MTN MoMo Pay merchant code (if backend exposes it) */
+  momoCode?: string
   currency?: string
   preferred_currency?: string
   description?: string
@@ -35,6 +37,7 @@ function normalizeProfile(p: BackendProfile) {
     phone: (p.tel ?? "").trim(),
     location: (p.hqLocation ?? "").trim(),
     momo: (p.momo ?? "").trim(),
+    momoCode: String(p.momoCode ?? p.MOMO_CODE ?? "").trim(),
     currency: (p.currency ?? p.preferred_currency ?? "").trim(),
     description: (p.description ?? "").trim(),
     nickname: (p.nickname ?? "").trim(),

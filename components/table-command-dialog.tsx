@@ -55,6 +55,7 @@ export function TableCommandDialog({
   // Autofill Table Name and Your Name when opened from Shop With Me QR (bar/resto)
   useEffect(() => {
     if (open) {
+      setError("")
       if (initialTableName?.trim()) setTableName(initialTableName.trim())
       if (initialUserName?.trim()) setUserName(initialUserName.trim())
     }
@@ -72,6 +73,11 @@ export function TableCommandDialog({
       fetchActiveTables()
     }
   }, [open, mode, locationId])
+
+  /** Create/join validation errors must not stay visible after switching to individual order */
+  useEffect(() => {
+    setError("")
+  }, [mode])
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -141,6 +147,7 @@ export function TableCommandDialog({
     if (submitting) return
     
     if (mode === "individual") {
+      setError("")
       onOpenChange(false)
       if (onIndividualOrder) {
         onIndividualOrder()

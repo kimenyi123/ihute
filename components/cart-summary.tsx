@@ -5,7 +5,7 @@ import dynamic from "next/dynamic"
 import { useMemo, useState, useEffect, useRef } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import { useAuthStore } from "@/lib/auth-store"
-import { useCartStore, type CartItem } from "@/lib/cart-store"
+import { useCartStore, type CartItem, type SellerGroup } from "@/lib/cart-store"
 import { trackClick } from "@/lib/interaction-tracker"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -45,7 +45,7 @@ import {
 
 const QRCode = dynamic(() => import("react-qr-code"), { ssr: false })
 const CUR = "RWF"
-import { buildMoMoUssd } from "@/lib/momo-ussd"
+import { resolveMtnMoMoUssd, formatSellerMomoAccountLine } from "@/lib/momo-ussd"
 import { parseErxFromNotes } from "@/lib/erx-prescription"
 
 // ---------- helpers ----------
@@ -288,6 +288,7 @@ function CartSummaryBody() {
   const [momoPaymentProvider, setMomoPaymentProvider] = useState<"mtn" | "airtel">("mtn")
   // Fallback: fetch supplier MoMo from profile when cart items don't have it (e.g. Burrows has momo in account_signup)
   const [supplierMomoFallback, setSupplierMomoFallback] = useState<Record<string, string>>({})
+  const [supplierMomoCodeFallback, setSupplierMomoCodeFallback] = useState<Record<string, string>>({})
 
   // Cart suggestions popup (before checkout). Skip popup for rest of session once user chose "No thanks" or "Continue to checkout"
   const [suggestionsPopupOpen, setSuggestionsPopupOpen] = useState(false)
@@ -308,23 +309,60 @@ function CartSummaryBody() {
   const groups = getGroupsBySeller()
   const grandTotal = Math.round(getGrandTotal())
 
-  // Resolve MoMo for a group: from cart items first, then fallback from profile API
-  const getMomoForGroup = (g: { supplierId: string; momo?: string | null }) =>
-    (g.momo ?? "").trim() || (supplierMomoFallback[g.supplierId] ?? "").trim()
+  /**
+   * Backend `/api/account/profile?account=` expects Ishyiga account (e.g. `burrows`).
+   * Cart lines often carry a display name ("Burrows") or slug instead — map known shops so we still load momo + momoCode.
+   */
+  const supplierProfileLookupAccount = (g: SellerGroup): string => {
+    const explicit = (g.supplierProfileAccount ?? "").trim()
+    if (explicit) return explicit
+    const sid = (g.supplierId ?? "").trim()
+    const sidLower = sid.toLowerCase()
+    const name = (g.supplierName ?? "").toLowerCase()
+    const looksLikeBurrows =
+      name.includes("pangolin") ||
+      name.includes("burrows") ||
+      sidLower === "burrows" ||
+      sidLower === "rs_burrows"
+    if (looksLikeBurrows) return "burrows"
+    return sid
+  }
 
-  // Fetch supplier profile (momo) when group has no momo so QR code can still show (e.g. PANGOLIN'S BURROWS)
+  // Resolve MoMo for a group: cart line first, but prefer API when cart is masked and profile has a full number
+  const getMomoForGroup = (g: SellerGroup) => {
+    const fromCart = (g.momo ?? "").trim()
+    const fromApi = (supplierMomoFallback[supplierProfileLookupAccount(g)] ?? "").trim()
+    if (fromApi && fromCart.includes("*") && !fromApi.includes("*")) return fromApi
+    return fromCart || fromApi
+  }
+
+  const getMomoCodeForGroup = (g: SellerGroup) =>
+    (g.momoCode ?? "").trim() || (supplierMomoCodeFallback[supplierProfileLookupAccount(g)] ?? "").trim()
+
+  const groupHasDialableMtnUssd = (g: SellerGroup) =>
+    Boolean(
+      resolveMtnMoMoUssd(getMomoForGroup(g), Math.max(1, g.subtotal), getMomoCodeForGroup(g) || null)?.ussd
+    )
+
+  const groupHasMoMoPayInfo = (g: SellerGroup) =>
+    Boolean(getMomoForGroup(g) || getMomoCodeForGroup(g))
+
+  // Fetch supplier profile once per account (momo + optional MoMo Pay merchant code)
   const requestedMomoRef = useRef<Set<string>>(new Set())
   useEffect(() => {
     groups.forEach((g) => {
-      const account = (g.supplierId ?? "").trim()
-      if (!account || (g.momo ?? "").trim()) return
+      const account = supplierProfileLookupAccount(g)
+      if (!account) return
       if (requestedMomoRef.current.has(account)) return
       requestedMomoRef.current.add(account)
       fetch(`/api/account/profile?account=${encodeURIComponent(account)}`)
         .then((res) => res.json())
         .then((data) => {
-          const momo = (data?.ok && data?.profile?.momo) ? String(data.profile.momo).trim() : ""
+          if (!data?.ok || !data?.profile) return
+          const momo = data.profile.momo ? String(data.profile.momo).trim() : ""
+          const momoCode = data.profile.momoCode ? String(data.profile.momoCode).trim() : ""
           if (momo) setSupplierMomoFallback((prev) => ({ ...prev, [account]: momo }))
+          if (momoCode) setSupplierMomoCodeFallback((prev) => ({ ...prev, [account]: momoCode }))
         })
         .catch(() => {})
     })
@@ -393,7 +431,7 @@ function CartSummaryBody() {
         return [name, qty, amount]
       })
       const orderId = orderIds[g.supplierId]
-      const hasUssdTarget = Boolean(getMomoForGroup(g))
+      const hasMoMoInfo = groupHasMoMoPayInfo(g)
       const isPaid = getPaymentStatus(g.supplierId) === "paid"
       const message = buildWhatsAppMessageStyled({
         shop: g.supplierName,
@@ -403,7 +441,7 @@ function CartSummaryBody() {
         total: g.subtotal,
         discount: 0,
         paid: isPaid ? g.subtotal : 0,
-        paidAt: isPaid ? "MTN MoMo" : (hasUssdTarget ? "Pending (MoMo)" : "Pay on delivery"),
+        paidAt: isPaid ? "MTN MoMo" : (hasMoMoInfo ? "Pending (MoMo)" : "Pay on delivery"),
         reference: orderId ? `ORDER ${orderId}` : undefined,
         myPhone,
         link: orderId ? `${(process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw").replace(/\/Trading\/?$/, "")}/orders/${orderId}` : undefined,
@@ -411,7 +449,7 @@ function CartSummaryBody() {
       const href = phone ? waHrefFor(phone, message) : ""
       return { supplierId: g.supplierId, phone, message, href }
     })
-  }, [groups, orderIds, orderPhones, myPhone, getPaymentStatus])
+  }, [groups, orderIds, orderPhones, myPhone, getPaymentStatus, supplierMomoFallback, supplierMomoCodeFallback])
 
   const buildGroupShareLink = (g: ReturnType<typeof getGroupsBySeller>[number]) => {
     const shopSlug = slugifyShopName(g.supplierName || g.supplierId || "shop");
@@ -468,10 +506,10 @@ function CartSummaryBody() {
     }
 
     // Otherwise proceed with regular checkout
-    const hasUssdTarget = Boolean(getMomoForGroup(g))
+    const hasDialableMomo = groupHasDialableMtnUssd(g)
     setSelectedSeller(supplierId)
-    // Default to momo if available, otherwise cod
-    setPaymentMethod(hasUssdTarget ? "momo" : "cod")
+    // Default to momo only when we can build a valid USSD string
+    setPaymentMethod(hasDialableMomo ? "momo" : "cod")
     setPaymentMethodOpen(true)
   }
 
@@ -759,19 +797,26 @@ function CartSummaryBody() {
           const status = getPaymentStatus(g.supplierId)
           const wa = sellerWhatsData.find(x => x.supplierId === g.supplierId)
 
-          const momoTarget = getMomoForGroup(g)
-          const hasUssdTarget = momoTarget.length > 0
+          const momoPayLine = formatSellerMomoAccountLine(
+            getMomoForGroup(g),
+            getMomoCodeForGroup(g) || null
+          )
           const unmark = () => setPaymentStatus(g.supplierId, "unpaid")
 
           return (
             <Card key={g.supplierId} className="border-2">
               <CardHeader className="pb-2 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-                <CardTitle className="text-base flex-1">
-                  {g.supplierName}
-                  {g.supplierLocation ? (
-                    <span className="text-muted-foreground font-normal block sm:inline"> — {g.supplierLocation}</span>
+                <div className="flex-1 min-w-0">
+                  <CardTitle className="text-base">
+                    {g.supplierName}
+                    {g.supplierLocation ? (
+                      <span className="text-muted-foreground font-normal block sm:inline"> — {g.supplierLocation}</span>
+                    ) : null}
+                  </CardTitle>
+                  {momoPayLine !== "—" ? (
+                    <p className="text-sm text-muted-foreground mt-1">{momoPayLine}</p>
                   ) : null}
-                </CardTitle>
+                </div>
                 {status === "paid" && (
                   <Badge variant="secondary" className="gap-1 text-green-700 border-green-200">
                     <CheckCircle2 className="h-4 w-4" /> Paid
@@ -1100,37 +1145,53 @@ function CartSummaryBody() {
             <div className="space-y-3">
               {selectedSeller && (() => {
                 const g = groups.find(x => x.supplierId === selectedSeller)
-                const hasUssdTarget = g ? Boolean(getMomoForGroup(g)) : false
+                const hasDialableMomo = g ? groupHasDialableMtnUssd(g) : false
 
                 return (
                   <>
                     <div
-                      className={`flex items-center space-x-3 border rounded-lg p-4 cursor-pointer hover:bg-accent ${!hasUssdTarget ? 'opacity-50' : ''}`}
-                      onClick={() => hasUssdTarget && setPaymentMethod("momo")}
+                      className={`flex items-center space-x-3 border rounded-lg p-4 cursor-pointer hover:bg-accent ${!hasDialableMomo ? 'opacity-50' : ''}`}
+                      onClick={() => hasDialableMomo && setPaymentMethod("momo")}
                     >
-                      <RadioGroupItem value="momo" id="momo" disabled={!hasUssdTarget} />
-                      <Label htmlFor="momo" className={`flex items-center gap-2 flex-1 ${hasUssdTarget ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                      <RadioGroupItem value="momo" id="momo" disabled={!hasDialableMomo} />
+                      <Label htmlFor="momo" className={`flex items-center gap-2 flex-1 ${hasDialableMomo ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
                         <Wallet className="h-5 w-5 text-yellow-600" />
-                        <div>
+                        <div className="min-w-0">
                           <div className="font-medium">MTN Mobile Money</div>
                           <div className="text-sm text-muted-foreground">
-                            {hasUssdTarget ? 'Pay instantly with MTN MoMo' : 'Not available for this seller'}
+                            {hasDialableMomo ? "Pay instantly with MTN MoMo" : "USSD dial not available — use cash on delivery or contact the shop"}
                           </div>
+                          {g && groupHasMoMoPayInfo(g) ? (
+                            <div className="text-xs font-medium text-primary mt-1.5 break-all">
+                              {formatSellerMomoAccountLine(
+                                getMomoForGroup(g),
+                                getMomoCodeForGroup(g) || null
+                              )}
+                            </div>
+                          ) : null}
+                          {g &&
+                          groupHasMoMoPayInfo(g) &&
+                          !getMomoCodeForGroup(g) &&
+                          (getMomoForGroup(g).includes("*") || /\d\s*[•·.]+\s*\d/.test(getMomoForGroup(g))) ? (
+                            <p className="text-[11px] text-amber-900/90 dark:text-amber-100/90 mt-1.5 leading-snug">
+                              The shop profile did not return a MoMo Pay merchant code (<span className="font-mono">momoCode</span>) — only a masked number. The UI cannot invent one; it has to come from your Java/API. Use cash on delivery or pay the shop directly until that field is set.
+                            </p>
+                          ) : null}
                         </div>
                       </Label>
                     </div>
 
                     <div
-                      className={`flex items-center space-x-3 border rounded-lg p-4 cursor-pointer hover:bg-accent ${!hasUssdTarget ? 'opacity-50' : ''}`}
-                      onClick={() => hasUssdTarget && setPaymentMethod("airtel")}
+                      className={`flex items-center space-x-3 border rounded-lg p-4 cursor-pointer hover:bg-accent ${!hasDialableMomo ? 'opacity-50' : ''}`}
+                      onClick={() => hasDialableMomo && setPaymentMethod("airtel")}
                     >
-                      <RadioGroupItem value="airtel" id="airtel" disabled={!hasUssdTarget} />
-                      <Label htmlFor="airtel" className={`flex items-center gap-2 flex-1 ${hasUssdTarget ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                      <RadioGroupItem value="airtel" id="airtel" disabled={!hasDialableMomo} />
+                      <Label htmlFor="airtel" className={`flex items-center gap-2 flex-1 ${hasDialableMomo ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
                         <Wallet className="h-5 w-5 text-red-600" />
-                        <div>
+                        <div className="min-w-0">
                           <div className="font-medium">Airtel Money</div>
                           <div className="text-sm text-muted-foreground">
-                            {hasUssdTarget ? 'Pay with Airtel Money' : 'Not available for this seller'}
+                            {hasDialableMomo ? "Pay with Airtel Money" : "Same as MTN — needs a dialable number or code"}
                           </div>
                         </div>
                       </Label>
@@ -1390,9 +1451,12 @@ function CartSummaryBody() {
             if (!g) return null
 
             const momoTarget = getMomoForGroup(g)
-            const hasUssdTarget = momoTarget.length > 0
-            const payload = buildMoMoUssd(momoTarget, g.subtotal)
-            const telHref = `tel:${encodeURIComponent(payload)}`
+            const momoCode = getMomoCodeForGroup(g) || null
+            const resolved = resolveMtnMoMoUssd(momoTarget, g.subtotal, momoCode)
+            const payload = resolved?.ussd ?? ""
+            const hasUssdTarget = Boolean(payload)
+            const telHref = hasUssdTarget ? `tel:${encodeURIComponent(payload)}` : ""
+            const copyTarget = resolved?.copyLabel ?? formatSellerMomoAccountLine(momoTarget, momoCode)
 
             return (
               <div className="space-y-4">
@@ -1418,6 +1482,9 @@ function CartSummaryBody() {
                       <p className="font-mono text-sm bg-white border rounded px-2 py-1 break-all select-all" title="Copy or dial">
                         {payload}
                       </p>
+                      <p className="text-xs text-muted-foreground">
+                        {resolved?.kind === "merchant" ? "Merchant MoMo Pay (*182*8*1*…)" : "Send to number (*182*1*1*…)"}
+                      </p>
                       <p className="text-xs text-muted-foreground">Or tap &quot;Dial now&quot; below to open your dialer with this code.</p>
                     </div>
 
@@ -1427,8 +1494,8 @@ function CartSummaryBody() {
                         className="flex-1"
                         onClick={async () => {
                           try {
-                            await navigator.clipboard.writeText(momoTarget)
-                            alert(`Copied: ${momoTarget}`)
+                            await navigator.clipboard.writeText(copyTarget)
+                            alert(`Copied: ${copyTarget}`)
                           } catch {}
                         }}
                       >
@@ -1450,10 +1517,13 @@ function CartSummaryBody() {
                 )}
 
                 {!hasUssdTarget && (
-                  <div className="text-center p-6 bg-muted rounded-lg">
+                  <div className="text-center p-6 bg-muted rounded-lg space-y-2">
                     <p className="text-sm text-muted-foreground">
-                      No MoMo code available for this seller. Please contact them directly.
+                      We could not build a dialable USSD string (e.g. masked number only). Use another payment method or pay the shop directly.
                     </p>
+                    {copyTarget && copyTarget !== "—" ? (
+                      <p className="text-xs font-mono break-all">{copyTarget}</p>
+                    ) : null}
                   </div>
                 )}
 
@@ -1492,9 +1562,9 @@ function CartSummaryBody() {
             if (!open && isInTableCommand() && tableCommandSeller) {
               const g = groups.find(x => x.supplierId === tableCommandSeller.id)
               if (g) {
-                const hasUssdTarget = Boolean(getMomoForGroup(g))
+                const hasDialableMomo = groupHasDialableMtnUssd(g)
                 setSelectedSeller(tableCommandSeller.id)
-                setPaymentMethod(hasUssdTarget ? "momo" : "cod")
+                setPaymentMethod(hasDialableMomo ? "momo" : "cod")
                 setPaymentMethodOpen(true)
               }
             }
@@ -1504,9 +1574,9 @@ function CartSummaryBody() {
             if (tableCommandSeller) {
               const g = groups.find(x => x.supplierId === tableCommandSeller.id)
               if (g) {
-                const hasUssdTarget = Boolean(getMomoForGroup(g))
+                const hasDialableMomo = groupHasDialableMtnUssd(g)
                 setSelectedSeller(tableCommandSeller.id)
-                setPaymentMethod(hasUssdTarget ? "momo" : "cod")
+                setPaymentMethod(hasDialableMomo ? "momo" : "cod")
                 setPaymentMethodOpen(true)
               }
             }

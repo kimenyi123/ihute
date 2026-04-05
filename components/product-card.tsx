@@ -17,6 +17,7 @@ import { getProductImageSrc, getProductImageUrl, isValidImageUrl, NO_IMAGE_URL }
 import { ErxPrescriptionDialog } from "@/components/erx-prescription-dialog"
 import { serializeErxForNotes } from "@/lib/erx-prescription"
 import { ProductBadges, ProductTrustSignals } from "@/components/product-badges"
+import { cartMomoFieldsFromShopWithMeSellerMomo } from "@/lib/momo-ussd"
 import type { ProductBadgeType } from "@/components/product-badges"
 
 type Product = {
@@ -174,6 +175,7 @@ export function ProductCard({
   }, [id, supplierId, price, name, checkPriceDrop, toast])
 
   const addProductToCart = () => {
+    const mf = cartMomoFieldsFromShopWithMeSellerMomo(momo)
     addOrInc(
       {
         id,
@@ -185,7 +187,8 @@ export function ProductCard({
         supplierId: (supplierId || "unknown").toString().trim(),
         supplierName: supplierName || "Supplier",
         supplierLocation,
-        momo,
+        momo: mf.momo,
+        momoCode: mf.momoCode,
         selectedUnit: unit,
       },
       1

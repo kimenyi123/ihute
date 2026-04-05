@@ -69,6 +69,7 @@ import { useTableCommandStore, getOrCreateGuestEmail } from "@/lib/table-command
 import { useAuthStore } from "@/lib/auth-store";
 import { trackProductView, trackClick } from "@/lib/interaction-tracker";
 import { cn } from "@/lib/utils";
+import { cartMomoFieldsFromShopWithMeSellerMomo } from "@/lib/momo-ussd";
 import { useToast } from "@/components/ui/use-toast";
 import { getProductImageUrl, getProductImageSrc, normalizeImageUrl } from "@/lib/image-utils";
 import { LocationBadge } from "@/components/location-badge";
@@ -787,6 +788,7 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
       const price = matched
         ? (extractNumericPrice((matched as any).selling_price ?? (matched as any).price) || it.price)
         : it.price;
+      const swmMomo = cartMomoFieldsFromShopWithMeSellerMomo(String((currentSeller as any).momo ?? ""));
       addItem(
         {
           id: itemCode,
@@ -799,7 +801,8 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
           supplierId: currentSeller.ISHYIGA_ACCOUNT || "",
           supplierName: currentSeller.OWNER || currentSeller.SELLER_NAMES || currentSeller.NICKNAME || "Supplier",
           supplierLocation: currentSeller.LOCATION,
-          momo: (currentSeller as any).momo,
+          momo: swmMomo.momo,
+          momoCode: swmMomo.momoCode,
           isBarResto: isBarOrRestaurantLocal,
         },
         it.qty
@@ -1701,6 +1704,7 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
                                 product={product}
                                 moodMetaType={currentMoodConfig?.metaType}
                                 ownerName={currentSeller.OWNER || currentSeller.SELLER_NAMES || currentSeller.NICKNAME}
+                                sellerMomo={String((currentSeller as any).momo ?? "").trim() || undefined}
                                 supplierId={currentSeller.ISHYIGA_ACCOUNT || ""}
                                 isDeliveryShop={isDeliveryShop}
                                 isBarOrRestaurant={isBarOrRestaurant}
@@ -1952,6 +1956,7 @@ function ProductCard({
   product,
   moodMetaType,
   ownerName,
+  sellerMomo,
   supplierId,
   isDeliveryShop,
   isBarOrRestaurant,
@@ -1965,6 +1970,8 @@ function ProductCard({
   /** When set, show contextual subtitle under product name (from MOOD_CONFIG.metaType). */
   moodMetaType?: MoodMetaType | null;
   ownerName?: string;
+  /** Seller-level `momo` from shop-with-me (often MoMo Pay code) */
+  sellerMomo?: string;
   supplierId: string;
   isDeliveryShop: boolean;
   isBarOrRestaurant?: boolean;
@@ -2051,6 +2058,10 @@ function ProductCard({
       supplierId,
     });
 
+    const rawSellerMomo =
+      (sellerMomo && String(sellerMomo).trim()) || (product.momo && String(product.momo).trim()) || "";
+    const swmFields = cartMomoFieldsFromShopWithMeSellerMomo(rawSellerMomo);
+
     addItem(
       {
         id: itemCode,
@@ -2062,7 +2073,8 @@ function ProductCard({
         supplierId: supplierId,
         supplierName: ownerName || "Supplier",
         supplierLocation: undefined,
-        momo: product.momo,
+        momo: swmFields.momo,
+        momoCode: swmFields.momoCode,
         selectedUnit: "pcs",
         isBarResto: isBarOrRestaurant,
         erx,

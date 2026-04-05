@@ -196,7 +196,7 @@ export default function LoginPage() {
               Continue as Guest
             </Button>
             <p className="mt-2 text-center text-xs text-muted-foreground">
-              Guest mode: shop on Grandma and use guest checkout in the cart — no password.
+              Guest mode: shop and use guest checkout in the cart — no password.
             </p>
             <div className="mt-6 text-center space-y-2">
               <p className="text-sm text-muted-foreground">

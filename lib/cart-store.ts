@@ -28,6 +28,10 @@ export type CartItem = {
   supplierName: string
   supplierLocation?: string
   momo?: string              // seller MoMo (for USSD)
+  /** MTN MoMo Pay merchant code when known (e.g. from API or shop config) */
+  momoCode?: string
+  /** Backend account for /api/account/profile when it differs from supplierId */
+  supplierProfileAccount?: string
   sellerPhone?: string       // WhatsApp phone from account_signup.TEL
 
   // variant key
@@ -63,6 +67,9 @@ export type SellerGroup = {
   supplierName: string
   supplierLocation?: string
   momo?: string
+  momoCode?: string
+  /** Prefer this for profile API when set */
+  supplierProfileAccount?: string
   phone?: string
   items: CartItem[]
   subtotal: number
@@ -167,6 +174,8 @@ export const useCartStore = create<CartState>()(
               qty: totalQty,
               price: bestPrice,
               itemCode: (first.itemCode ?? item.itemCode ?? first.id ?? item.id).toString().trim() || first.itemCode,
+              momoCode: first.momoCode ?? item.momoCode,
+              supplierProfileAccount: first.supplierProfileAccount ?? item.supplierProfileAccount,
               notes: first.notes ?? item.notes,
               erx: first.erx ?? item.erx,
               lineSignature: first.lineSignature ?? incomingSig,
@@ -409,6 +418,8 @@ export const useCartStore = create<CartState>()(
               supplierName: it.supplierName,
               supplierLocation: it.supplierLocation,
               momo: it.momo,
+              momoCode: it.momoCode,
+              supplierProfileAccount: it.supplierProfileAccount,
               phone: it.sellerPhone,
               items: [],
               subtotal: 0,
@@ -417,6 +428,8 @@ export const useCartStore = create<CartState>()(
           g.items.push(it)
           g.subtotal += it.price * it.qty
           if (it.momo && it.momo.trim()) g.momo = it.momo
+          if (it.momoCode && it.momoCode.trim()) g.momoCode = it.momoCode.trim()
+          if (it.supplierProfileAccount?.trim()) g.supplierProfileAccount = it.supplierProfileAccount.trim()
           if (it.sellerPhone && it.sellerPhone.trim()) g.phone = it.sellerPhone
           if (it.isBarResto) g.isBarResto = true
           groups.set(sid, g)

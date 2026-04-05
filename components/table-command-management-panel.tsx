@@ -15,7 +15,7 @@ import { useState, useEffect } from "react"
 import { Users, Send, XCircle, CheckCircle, AlertCircle, Clock, PhoneCall, Copy } from "lucide-react"
 import dynamic from "next/dynamic"
 import { SendTableButton } from "./table-command-send-button"
-import { buildMoMoUssd } from "@/lib/momo-ussd"
+import { resolveMtnMoMoUssd } from "@/lib/momo-ussd"
 
 interface TableInfo {
   tableName: string
@@ -270,9 +270,11 @@ const QRCode = dynamic(() => import("react-qr-code"), { ssr: false })
 
 function MomoQRDialog({ data, onClose }: { data: { tableName: string; amount: number; momo: string }; onClose: () => void }) {
   const momoTarget = (data.momo || "").trim()
-  const hasTarget = momoTarget.length > 0
-  const payload = hasTarget ? buildMoMoUssd(momoTarget, data.amount) : ""
+  const resolved = momoTarget ? resolveMtnMoMoUssd(momoTarget, data.amount, null) : null
+  const payload = resolved?.ussd ?? ""
+  const hasTarget = Boolean(payload)
   const telHref = hasTarget ? `tel:${encodeURIComponent(payload)}` : ""
+  const copyLabel = resolved?.copyLabel ?? momoTarget
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -297,8 +299,8 @@ function MomoQRDialog({ data, onClose }: { data: { tableName: string; amount: nu
                 className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 border rounded-md text-sm"
                 onClick={async () => {
                   try {
-                    await navigator.clipboard.writeText(momoTarget)
-                    alert(`Copied MoMo number: ${momoTarget}`)
+                    await navigator.clipboard.writeText(copyLabel)
+                    alert(`Copied MoMo number: ${copyLabel}`)
                   } catch {
                     // ignore
                   }
