@@ -684,7 +684,7 @@ export async function finalizeNegotiation(negotiationId: number): Promise<{
   return data;
 }
 
-export default {
+const b2bApi = {
   searchB2B,
   downloadTemplate,
   importExcel,
@@ -709,3 +709,5 @@ export default {
   rejectNegotiation,
   finalizeNegotiation,
 };
+
+export default b2bApi;

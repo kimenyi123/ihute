@@ -41,8 +41,8 @@ export function CheckoutForm() {
   const [showMap, setShowMap] = useState(false)
 
   // Check if this is a table order
-  const hasTableNumber = tableInfo?.tableNumber && tableInfo.tableNumber.trim() !== ""
-  const isTableOrder = hasTableNumber
+  const hasTableNumber = Boolean(tableInfo?.tableNumber && tableInfo.tableNumber.trim() !== "")
+  const isTableOrder: boolean = hasTableNumber
 
   const {
     register,
@@ -146,7 +146,7 @@ export function CheckoutForm() {
 
           items: items.map((it) => ({
             name: it.name,
-            qty: it.quantity, // ✅ Fixed: use quantity instead of qty
+            qty: it.qty,
             unitPrice: it.price,
             unit: it.unit || "pcs",
           })),
@@ -218,9 +218,8 @@ export function CheckoutForm() {
                   <Input
                     id="fullName"
                     placeholder={isTableOrder ? "Table 5" : "John Doe"}
-                    {...register("fullName")}
-                    disabled={showReview || isTableOrder}
-                    className={isTableOrder ? "bg-muted" : ""}
+                    {...register("fullName", { disabled: showReview || isTableOrder })}
+                    className={isTableOrder ? "bg-muted" : undefined}
                   />
                   {isTableOrder && (
                     <p className="text-xs text-muted-foreground">
@@ -265,8 +264,7 @@ export function CheckoutForm() {
                   <Input
                     id="address"
                     placeholder={isTableOrder ? "Table 5" : "Street address, building, apartment"}
-                    {...register("address")}
-                    disabled={showReview || isTableOrder}
+                    {...register("address", { disabled: showReview || isTableOrder })}
                     className={`flex-1 ${isTableOrder ? "bg-muted" : ""}`}
                   />
                   {!isTableOrder && (

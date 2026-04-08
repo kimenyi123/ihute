@@ -80,12 +80,31 @@ export async function POST(req: Request) {
         })
       }
 
-      // 409 = duplicate / conflict
+      // 409 = duplicate / conflict (e.g. buyer email, or insertSeller duplicate)
       if (res.status === 409) {
         return NextResponse.json({ ok: false, error: json.message || json.error || "Conflict", rid }, { status: 409 })
       }
 
-      return NextResponse.json({ ok: false, error: json.error || "Supplier registration failed", rid }, { status: 400 })
+      // InsertSuppliers returns 200 when email is already SELLER ("Seller exists with user type SELLER.")
+      if (res.status === 200) {
+        const msg =
+          json.message ||
+          json.error ||
+          "This email is already registered as a seller. Sign in or use Forgot password if needed."
+        return NextResponse.json({ ok: false, error: msg, rid }, { status: 409 })
+      }
+
+      if (res.status >= 500) {
+        return NextResponse.json(
+          { ok: false, error: json.error || json.message || "Supplier server error", rid },
+          { status: 502 },
+        )
+      }
+
+      return NextResponse.json(
+        { ok: false, error: json.error || json.message || "Supplier registration failed", rid },
+        { status: 400 },
+      )
     }
 
     // ─── BUYER → existing general auth servlet ───────────────────────────────

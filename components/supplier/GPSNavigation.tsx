@@ -1,6 +1,6 @@
 "use client"
 
-import { MapPin, Route, Radio, Map, Settings, History, Activity } from "lucide-react"
+import { Radio, Map, Settings, History, Activity } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"

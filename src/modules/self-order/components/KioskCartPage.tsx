@@ -88,7 +88,7 @@ export function KioskCartPage() {
             {/* Product image */}
             <div className="h-16 w-16 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0">
               {line.image ? (
-                // eslint-disable-next-line @next/next/no-img-element
+                 
                 <img
                   src={line.image}
                   alt={line.name}

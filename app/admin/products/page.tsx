@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { Package, CheckCircle, XCircle, Flag, Ban } from 'lucide-react'
+import { CheckCircle, XCircle } from 'lucide-react'
 
 interface Product {
   id: number

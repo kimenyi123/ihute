@@ -6,7 +6,6 @@ import { Card } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { useAuthStore } from "@/lib/auth-store"
-import { getSessionId } from "@/lib/interaction-tracker"
 import { getSmartRecommendations } from "@/lib/recommendation-service"
 
 type RecommendedProduct = {

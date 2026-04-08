@@ -163,7 +163,7 @@ export function filterProductsByRelevance<T extends {
 
   const scoredProducts = products.map(product => {
     // Start with backend score if available
-    let baseScore = (product.match_score || product.relevance_score || 0)
+    const baseScore = (product.match_score || product.relevance_score || 0)
 
     // Calculate frontend scores using multilingual matching
     const nameScore = calculateRelevanceScore(

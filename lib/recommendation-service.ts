@@ -1,7 +1,7 @@
 // lib/recommendation-service.ts
 "use client"
 
-import { getSessionId, getRecentInteractions, type Interaction } from "./interaction-tracker"
+import { getSessionId, getRecentInteractions } from "./interaction-tracker"
 import { useAuthStore } from "./auth-store"
 import { getCacheDuration } from "./recommendation-config"
 

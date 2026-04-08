@@ -42,6 +42,34 @@ import Link from "next/link";
 import AddProductModal, { ProductFormData } from "@/components/supplier/AddProductModal";
 import { isRestoBarPreferredCategories } from "@/lib/supplier-sector";
 
+/** Redis / API may send last_sync_time, LAST_SYNC_TIME, or lastSyncTime */
+function parseSupplierProductLastSyncMs(p: Record<string, unknown>): number | null {
+  const raw =
+    p.last_sync_time ??
+    p.LAST_SYNC_TIME ??
+    p.lastSyncTime ??
+    p.last_sync;
+  if (raw == null || String(raw).trim() === "") return null;
+  const s = String(raw).trim();
+  const normalized = s.includes("T") ? s : s.replace(/^(\d{4}-\d{2}-\d{2}) (\d)/, "$1T$2");
+  const d = new Date(normalized);
+  return Number.isNaN(d.getTime()) ? null : d.getTime();
+}
+
+function formatSupplierProductLastSync(p: Record<string, unknown>): string {
+  const ms = parseSupplierProductLastSyncMs(p);
+  if (ms != null) {
+    return new Date(ms).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
+  }
+  const raw =
+    p.last_sync_time ??
+    p.LAST_SYNC_TIME ??
+    p.lastSyncTime ??
+    p.last_sync;
+  if (raw == null || String(raw).trim() === "") return "—";
+  return String(raw).trim();
+}
+
 const QRCode = dynamic(() => import("react-qr-code"), { ssr: false });
 
 function SupplierDashboard() {
@@ -184,6 +212,17 @@ function SupplierDashboard() {
           return 0;
         };
 
+        const parseNumeric = (value: any): number => {
+          if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+          if (typeof value === "string") {
+            const cleaned = value.replace(/,/g, "").replace(/[^\d.\-]/g, "").trim();
+            if (!cleaned) return 0;
+            const parsed = parseFloat(cleaned);
+            return Number.isNaN(parsed) ? 0 : parsed;
+          }
+          return 0;
+        };
+
         // Map products - handle Redis format (your format)
         const mappedProducts = products.map((p: any, index: number) => {
           console.log(`Product ${index}:`, p);
@@ -195,7 +234,9 @@ function SupplierDashboard() {
 
           if (isRedisFormat) {
             // Handle Redis format: price only from selling_price; item_emballage passed through as-is (empty remains empty)
-            const stock = parseIntSafe(p.item_packet);
+            const packetQty = parseNumeric(p.item_packet);
+            const emballageQty = parseNumeric(p.item_emballage);
+            const stock = emballageQty > 0 ? packetQty / emballageQty : packetQty;
             const price = p.selling_price != null ? parsePrice(String(p.selling_price)) : 0;
 
             mapped = {
@@ -217,24 +258,23 @@ function SupplierDashboard() {
               DESCRIPTION: p.item_description || p.item_state || "",
               UNIT: p.item_unit || "PCS",
               currency: p.currency ?? "RWF",
-              imageUrl: p.item_image_url || p.IMAGE_URL || p.image_url || ""
+              imageUrl: p.item_image_url || p.IMAGE_URL || p.image_url || "",
+              last_sync_time:
+                p.last_sync_time ?? p.LAST_SYNC_TIME ?? p.lastSyncTime ?? p.last_sync ?? "",
             };
           } else {
             // Handle database format (fallback)
             const price = parsePrice(
               p.selling_price ?? (p.price || p.UNITY_PRICE || p.SALE_PRICE_INCLUSIVE || 0)
             );
+            const packetQty = parseNumeric(p.item_packet ?? p.stock ?? p.STOCK ?? p.QUANTITY ?? 0);
+            const emballageQty = parseNumeric(p.item_emballage);
+            const stock = emballageQty > 0 ? packetQty / emballageQty : packetQty;
 
             mapped = {
               ...p, // Keep all original fields
               // Normalize field names - handle database, Redis, and API variations
-              stock: Number(
-                p.stock ||
-                p.STOCK ||
-                p.item_packet ||
-                p.QUANTITY ||
-                0
-              ),
+              stock: stock,
               price: price,
               costPrice: Number(
                 p.cost_price ??
@@ -257,6 +297,8 @@ function SupplierDashboard() {
               sales: 0,
               currency: p.currency ?? "RWF",
               imageUrl: p.IMAGE_URL || p.image_url || p.item_image_url || "",
+              last_sync_time:
+                p.last_sync_time ?? p.LAST_SYNC_TIME ?? p.lastSyncTime ?? p.last_sync ?? "",
             };
           }
 
@@ -286,7 +328,7 @@ function SupplierDashboard() {
 
     const fetchAnalytics = async () => {
       try {
-        const res = await fetch(`/api/supplier/analytics?account=${encodeURIComponent(user.ishyigaAccount)}`, {
+        const res = await fetch(`/api/supplier/analytics?account=${encodeURIComponent(user.ishyigaAccount ?? "")}`, {
           cache: "no-store",
         })
         const data = await res.json().catch(() => null)
@@ -340,9 +382,22 @@ function SupplierDashboard() {
   const lowStock = supplierProducts.filter((p) => p.stock <= 10 && p.stock > 0).length;
   const outOfStock = supplierProducts.filter((p) => p.stock === 0).length;
   const totalValue = supplierProducts.reduce(
-    (sum, p) => sum + p.price * p.stock,
+    (sum, p) => sum + Number(p.costPrice ?? 0) * Number(p.stock ?? 0),
     0
   );
+
+  const latestInventorySyncLabel = (() => {
+    let best: number | null = null;
+    for (const p of supplierProducts) {
+      const t = parseSupplierProductLastSyncMs(p as Record<string, unknown>);
+      if (t != null && (best == null || t > best)) best = t;
+    }
+    if (best == null) return null;
+    return new Date(best).toLocaleString(undefined, {
+      dateStyle: "short",
+      timeStyle: "short",
+    });
+  })();
 
   const handleDelete = async (product: any) => {
     const itemName = product.ITEM_NAME || product.itemName || "this product";
@@ -488,6 +543,11 @@ function SupplierDashboard() {
                 {totalProducts}
               </div>
               <p className="text-xs text-slate-500 mt-1">All products</p>
+              {latestInventorySyncLabel != null && (
+                <p className="text-xs text-slate-500 mt-1.5 pt-1 border-t border-slate-100">
+                  Last sync  {latestInventorySyncLabel}
+                </p>
+              )}
             </CardContent>
           </Card>
 
@@ -556,11 +616,23 @@ function SupplierDashboard() {
                 </Button>
               </CardHeader>
               <CardContent>
-                <ul className="text-sm space-y-1">
+                <ul className="text-sm space-y-0 divide-y divide-slate-100">
                   {lowStockList.map((p) => (
-                    <li key={p.itemCode || p.ITEM_CODE} className="flex justify-between">
-                      <span className="truncate">{p.itemName || p.ITEM_NAME}</span>
-                      <span className="text-yellow-700 font-medium">{p.stock ?? p.STOCK} left</span>
+                    <li
+                      key={p.itemCode || p.ITEM_CODE}
+                      className="flex justify-between gap-3 items-start py-2 first:pt-0"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <span className="truncate block text-slate-900">
+                          {p.itemName || p.ITEM_NAME}
+                        </span>
+                        <span className="text-xs text-slate-500 mt-0.5 block">
+                          Last sync: {formatSupplierProductLastSync(p as Record<string, unknown>)}
+                        </span>
+                      </div>
+                      <span className="text-yellow-700 font-medium shrink-0">
+                        {p.stock ?? p.STOCK} left
+                      </span>
                     </li>
                   ))}
                 </ul>
@@ -845,8 +917,14 @@ function SupplierDashboard() {
                         <th className="text-left px-4 py-3 text-sm font-semibold text-slate-700">
                           Price
                         </th>
+                        <th className="text-left px-4 py-3 text-sm font-semibold text-slate-700">
+                          Cost Price
+                        </th>
                         <th className="text-center px-4 py-3 text-sm font-semibold text-slate-700">
                           Stock
+                        </th>
+                        <th className="text-left px-4 py-3 text-sm font-semibold text-slate-700 whitespace-nowrap">
+                          Last sync
                         </th>
                         <th className="text-center px-4 py-3 text-sm font-semibold text-slate-700">
                           Status
@@ -865,7 +943,7 @@ function SupplierDashboard() {
 
                     <tbody className="divide-y divide-slate-200">
                       {paginatedProducts.map((p, rowIndex) => {
-                        const revenue = p.price * p.stock;
+                        const revenue = Number(p.costPrice ?? 0) * Number(p.stock ?? 0);
                         const displayName = p.ITEM_NAME || p.itemName || "Unknown";
                         const displayCode = p.ITEM_CODE || p.itemCode || "";
                         const uniqueKey = `${displayCode}-${startIndex + rowIndex}`;
@@ -899,6 +977,17 @@ function SupplierDashboard() {
                                 </span>
                               )}
                             </td>
+                            <td className="px-4 py-4">
+                              {Number(p.costPrice ?? 0) > 0 ? (
+                                <span className="font-medium text-slate-900">
+                                  {Number(p.costPrice ?? 0).toLocaleString()} {p.currency ?? "RWF"}
+                                </span>
+                              ) : (
+                                <span className="text-slate-400 text-sm italic">
+                                  No cost
+                                </span>
+                              )}
+                            </td>
                             <td className="px-4 py-4 text-center">
                               <span
                                 className={`font-semibold ${
@@ -911,6 +1000,9 @@ function SupplierDashboard() {
                               >
                                 {p.stock}
                               </span>
+                            </td>
+                            <td className="px-4 py-4 text-sm text-slate-600 whitespace-nowrap tabular-nums">
+                              {formatSupplierProductLastSync(p as Record<string, unknown>)}
                             </td>
                             <td className="px-4 py-4 text-center">
                               <span

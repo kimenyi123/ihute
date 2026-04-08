@@ -84,7 +84,6 @@ export function KioskHome() {
     if (nicknameFromUrl && !shopNick) {
       setShopNick(nicknameFromUrl)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nicknameFromUrl])
 
   const handleStart = (category: KioskCategory) => {

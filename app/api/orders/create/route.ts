@@ -103,7 +103,7 @@ export async function POST(req: Request) {
     }
 
     /* -------- payment validation -------- */
-    let paymentName = String(bodyIn.paymentName ?? "PAY_ON_DELIVERY").toUpperCase()
+    const paymentName = String(bodyIn.paymentName ?? "PAY_ON_DELIVERY").toUpperCase()
     const validPaymentMethods = [
       "PAY_ON_DELIVERY",
       "PAID_MTN_MOMO",
@@ -324,7 +324,7 @@ export async function POST(req: Request) {
         last: lastErr,
         ordersUrl: url,
         hint:
-          lastErr && lastErr.status > 0
+          lastErr != null && (lastErr.status ?? 0) > 0
             ? "HTTP 500 means Tomcat reached OrdersServlet but Java threw an error — inspect catalina.out / IDE console. Connection issues are different (ECONNREFUSED / timeout)."
             : "Check Java/Tomcat is running. In .env.local set JAVA_BACKEND_BASE to your context root (e.g. http://localhost:8080/Trading). Port must match Tomcat (8080 vs 8081).",
       },

@@ -260,6 +260,11 @@ export default function SupplierOrderDetailPage() {
   
   const canViewInvoice = isB2B && (order?.status === "B2B_ACCEPTED" || order?.status === "B2B_CONFIRMED" || order?.status === "B2B_COMPLETED");
 
+  const canMakeDecision =
+    isB2B &&
+    !isLocked &&
+    (canAcceptDirectly || canProposeChanges || canFinalize);
+
   const getStatusBadge = (status: string) => {
     const statusMap: Record<string, { label: string; className: string }> = {
       B2B_DRAFT: { label: "Draft", className: "bg-slate-100 text-slate-700" },

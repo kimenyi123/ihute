@@ -5,19 +5,17 @@ import Image from "next/image"
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Star } from "lucide-react"
-import { RotateCcw, ScrollText, RefreshCcw } from "lucide-react"
+import { ScrollText } from "lucide-react"
 import {
   ShoppingCart,
   User,
   Heart,
   Eye,
-  Truck,
   PackageSearch,
   PackageCheck,
   Users,
   BarChart3,
   LogOut,
-  Barcode,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"

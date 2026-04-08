@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react"
 import { ProductCard } from "@/components/product-card"
-import { TrendingUp, Sparkles, Clock, Store, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react"
+import { Sparkles, Clock, Store, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react"
 import { useAuthStore } from "@/lib/auth-store"
-import { getSessionId, getRecentProductIds } from "@/lib/interaction-tracker"
+import { getRecentProductIds } from "@/lib/interaction-tracker"
 import { getSmartRecommendations } from "@/lib/recommendation-service"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"

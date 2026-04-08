@@ -2,7 +2,7 @@
 
 import { useTableCommandStore } from "@/lib/table-command-store"
 import { Button } from "@/components/ui/button"
-import { Beer, X, Lock, CheckCircle, Send, Share2 } from "lucide-react"
+import { Beer, X, Lock, CheckCircle, Send } from "lucide-react"
 import { useState } from "react"
 import { TableCommandShareModal } from "@/components/table-command-share-modal"
 import {

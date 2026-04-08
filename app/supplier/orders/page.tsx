@@ -81,6 +81,24 @@ function localDateKeysLastNDays(n: number): { from: string; to: string } {
   return { from: toLocalDateKey(start), to: toLocalDateKey(end) }
 }
 
+function pickAnyStr(row: Record<string, unknown>, ...keys: string[]): string {
+  for (const k of keys) {
+    const v = row[k]
+    if (v != null && String(v).trim() !== "") return String(v).trim()
+  }
+  return ""
+}
+
+function pickAnyNum(row: Record<string, unknown>, ...keys: string[]): number | null {
+  for (const k of keys) {
+    const v = row[k]
+    if (v == null || String(v).trim() === "") continue
+    const n = Number(v)
+    if (!Number.isNaN(n)) return n
+  }
+  return null
+}
+
 // ===========================================
 // Inline Status Picker Component
 // ===========================================
@@ -211,10 +229,20 @@ export default function SupplierOrdersPage() {
       const maxPages = 40
 
       while (pageNum <= maxPages) {
+        const criteria = statusFilter !== "all" ? statusFilter.toUpperCase() : undefined
         const res = await fetch("/api/seller-orders", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sellerAccount, page: pageNum, pageSize: pageSizeCap }),
+          body: JSON.stringify({
+            sellerAccount,
+            buyerAccount: searchQuery.trim() || undefined,
+            CLIENT: searchQuery.trim() || undefined,
+            START: dateFrom ? `${dateFrom} 00:00:00` : undefined,
+            END: dateTo ? `${dateTo} 23:59:59` : undefined,
+            criteria,
+            page: pageNum,
+            pageSize: pageSizeCap,
+          }),
           cache: "no-store",
         })
         const json = await res.json()
@@ -272,6 +300,7 @@ export default function SupplierOrdersPage() {
         )
 
         return {
+          rawRow: t,
           id: String(t.ID_ORDER ?? t.id_order ?? t.id ?? ""),
           sellerId: String(t.SELLER_ISHYIGA_ACCOUNT ?? t.seller_ishyiga_account ?? ""),
           sellerName: t.SELLER_NAMES ?? t.SELLER_OWNER ?? t.seller_names ?? "Supplier",
@@ -294,6 +323,8 @@ export default function SupplierOrdersPage() {
           })(),
           buyerTIN: t.BUYER_TIN ?? t.buyer_tin ?? "",
           SUPPLIER_TIN: t.SELLER_TIN ?? t.seller_tin ?? "",
+          // Prefer account_signup OWNER-style fields over generic BUYER_OWNER labels.
+          buyerOwner: t.OWNER ?? t.owner ?? t.BUYER_OWNER_NAME ?? t.BUYER_OWNER ?? t.buyer_owner_name ?? "",
           buyerName: (() => {
             if (isKioskOrder) {
               const kioskCustomerName = String(t.BUYER_NAMES ?? t.BUYER_NAME ?? t.CUSTOMER_NAME ?? t.customer_name ?? "").toString().trim()
@@ -314,6 +345,12 @@ export default function SupplierOrdersPage() {
           })(),
           isKioskOrder,
           paymentStatus: /(pay[_\s-]*on[_\s-]*delivery|cod)/i.test(String(t.PAYMENT_NAME ?? t.payment_name ?? "")) ? "unpaid" : "paid",
+          servedAmount:
+            pickAnyNum(t, "SERVED_AMOUNT", "servedAmount", "AMOUNT_SERVED", "SERVED_TOTAL") ?? 0,
+          servedQty:
+            pickAnyNum(t, "CONFIRMED_RECEIVED_QTY", "SERVED_QTY", "servedQty", "SERVED_QUANTITY", "received_quantity") ?? 0,
+          orderNote:
+            pickAnyStr(t, "CONDITIONS", "ORDER_NOTE", "orderNote", "NOTE") || "",
         }
       })
 
@@ -324,7 +361,7 @@ export default function SupplierOrdersPage() {
     } finally {
       setLoading(false)
     }
-  }, [user?.ishyigaAccount, setOrders, loadPageSize])
+  }, [user?.ishyigaAccount, setOrders, loadPageSize, searchQuery, dateFrom, dateTo, statusFilter])
 
   useEffect(() => {
     if (!isAuthenticated || !user) return
@@ -403,6 +440,37 @@ export default function SupplierOrdersPage() {
     [filteredOrders, page, pageSize]
   )
   const supplierOrderLink = (orderId: number | string) => `/supplier/orders/${orderId}`
+  const exportOrderRowCsv = (order: any) => {
+    const fields = [
+      "Order ID",
+      "Buyer",
+      "Company",
+      "Amount",
+      "Served Amount",
+      "Status",
+      "Date",
+      "Order Note",
+    ]
+    const values = [
+      String(order.id ?? ""),
+      String(order.buyerName ?? ""),
+      String(order.buyerOwner ?? ""),
+      String(order.subtotal ?? 0),
+      String(Number(order.servedAmount ?? 0)),
+      String(order.status ?? ""),
+      String(order.createdAt ?? ""),
+      String(order.orderNote ?? ""),
+    ]
+    const esc = (v: string) => `"${v.replace(/"/g, '""')}"`
+    const csv = `${fields.map(esc).join(",")}\n${values.map(esc).join(",")}\n`
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `order-${order.id}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 
   // Wait for auth to hydrate from localStorage so existing session counts as "logged in"
   if (!hydrated) {
@@ -597,6 +665,9 @@ export default function SupplierOrdersPage() {
               <TableRow>
                 <TableHead>Order #</TableHead>
                 <TableHead>Customer</TableHead>
+                <TableHead>Company</TableHead>
+                <TableHead>Served Amount</TableHead>
+                <TableHead>Order Note</TableHead>
                 <TableHead>Date</TableHead>
                 <TableHead>Total</TableHead>
                 <TableHead>Payment</TableHead>
@@ -607,7 +678,7 @@ export default function SupplierOrdersPage() {
             <TableBody>
               {!loading && !err && pagedOrders.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
                     {orders.length === 0
                       ? "No orders yet. Orders from customers will appear here."
                       : "No orders match your search or filters. Try different criteria."}
@@ -627,6 +698,11 @@ export default function SupplierOrdersPage() {
                         )}
                       </div>
                     </TableCell>
+                    <TableCell>{(order as any).buyerOwner || "—"}</TableCell>
+                    <TableCell>{Number((order as any).servedAmount ?? 0).toLocaleString()} RWF</TableCell>
+                    <TableCell className="max-w-[240px] truncate" title={(order as any).orderNote || ""}>
+                      {(order as any).orderNote || "—"}
+                    </TableCell>
                     <TableCell>{formatOrderDate(order.createdAt)}</TableCell>
                     <TableCell>{order.subtotal.toLocaleString()} RWF</TableCell>
                     <TableCell>{order.paymentStatus}</TableCell>
@@ -636,6 +712,9 @@ export default function SupplierOrdersPage() {
                     <TableCell className="text-center flex gap-2 justify-center">
                       <Button variant="outline" size="sm" onClick={() => router.push(supplierOrderLink(order.id))}>
                         View
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => exportOrderRowCsv(order)}>
+                        Export
                       </Button>
                     </TableCell>
                   </TableRow>

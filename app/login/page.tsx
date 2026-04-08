@@ -9,9 +9,18 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { ArrowLeft } from "lucide-react"
 import { useAuthStore } from "@/lib/auth-store"
 import type { User, UserRole } from "@/lib/auth-store"
+import { getStrongPasswordError } from "@/lib/password-policy"
 
 // --- LOGGING UTILITY (fully disabled to avoid leaking sensitive info) ---
 const isLoginDebugEnabled = false
@@ -32,7 +41,23 @@ type ApiLoginOK = {
   dbRole?: string
   dualPharmacyRetail?: boolean
   pharmacySector?: boolean
+  /** Java: force_password_change after temporary password */
+  mustChangePassword?: boolean
   user: { email: string; firstName: string; lastName: string; tel: string; location: string; owner: string }
+}
+
+/** Java/org.json may send boolean, 1/0, or snake_case; treat all as "must show change-password". */
+function parseMustChangePassword(json: Record<string, unknown> | null | undefined): boolean {
+  if (!json || typeof json !== "object") return false
+  const v =
+    json.mustChangePassword ?? json.must_change_password ?? (json as { force_password_change?: unknown }).force_password_change
+  if (v === true || v === 1) return true
+  if (v === false || v === 0 || v == null) return false
+  if (typeof v === "string") {
+    const s = v.trim().toLowerCase()
+    return s === "1" || s === "true" || s === "yes"
+  }
+  return false
 }
 
 function toUserRoleFromAuth(auth: Pick<ApiLoginOK, "role" | "dualPharmacyRetail">): UserRole {
@@ -76,6 +101,12 @@ export default function LoginPage() {
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [pendingLoginPayload, setPendingLoginPayload] = useState<ApiLoginOK | null>(null)
+  const [existingPassword, setExistingPassword] = useState("")
+  const [newPassword, setNewPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
+  const [pwChangeLoading, setPwChangeLoading] = useState(false)
+  const [pwChangeError, setPwChangeError] = useState<string | null>(null)
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -95,6 +126,7 @@ export default function LoginPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: emailTrimmed, password }),
+        credentials: "include",
       })
 
       log("LOGIN", `HTTP Status: ${res.status}`)
@@ -111,12 +143,24 @@ export default function LoginPage() {
         throw new Error("Invalid credentials")
       }
 
-      const user: User = normalizeToStoreUser(json as ApiLoginOK)
+      const payload = json as ApiLoginOK
+      const mustChange = parseMustChangePassword(json as Record<string, unknown>)
+
+      if (mustChange) {
+        setPendingLoginPayload(payload)
+        setExistingPassword(password)
+        setNewPassword("")
+        setConfirmPassword("")
+        setPwChangeError(null)
+        log("LOGIN", "mustChangePassword — show set-password dialog")
+        return
+      }
+
+      const user: User = normalizeToStoreUser(payload)
       log("LOGIN", `User normalized:`, user)
 
       login(user)
 
-      // If they came from a link (e.g. "View my orders" QR), send them back after login
       const decoded = redirectTo ? decodeURIComponent(redirectTo) : ""
       const safeRedirect = decoded.startsWith("/") && !decoded.startsWith("//")
       if (safeRedirect && decoded.length > 0) {
@@ -124,7 +168,6 @@ export default function LoginPage() {
         return
       }
 
-      // Otherwise redirect based on role
       if (user.role === "admin") {
         router.push("/admin/dashboard")
       } else if (user.role === "supplier") {
@@ -139,6 +182,71 @@ export default function LoginPage() {
     } finally {
       setLoading(false)
       log("LOGIN", `END`)
+    }
+  }
+
+  const finishLoginAndRedirect = (payload: ApiLoginOK) => {
+    const user: User = normalizeToStoreUser(payload)
+    login(user)
+    setPendingLoginPayload(null)
+    setExistingPassword("")
+    setNewPassword("")
+    setConfirmPassword("")
+    const decoded = redirectTo ? decodeURIComponent(redirectTo) : ""
+    const safeRedirect = decoded.startsWith("/") && !decoded.startsWith("//")
+    if (safeRedirect && decoded.length > 0) {
+      router.push(decoded)
+      return
+    }
+    if (user.role === "admin") {
+      router.push("/admin/dashboard")
+    } else if (user.role === "supplier") {
+      router.push("/supplier/dashboard")
+    } else {
+      router.push("/")
+    }
+  }
+
+  const handlePasswordChangeAfterLogin = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setPwChangeError(null)
+    const current = existingPassword.trim()
+    if (!current) {
+      setPwChangeError("Enter the password you used to sign in (temporary password)")
+      return
+    }
+    const strongErr = getStrongPasswordError(newPassword)
+    if (strongErr) {
+      setPwChangeError(strongErr)
+      return
+    }
+    if (newPassword.trim() === current) {
+      setPwChangeError("New password must be different from your current password")
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setPwChangeError("Passwords do not match")
+      return
+    }
+    if (!pendingLoginPayload) return
+    setPwChangeLoading(true)
+    try {
+      const res = await fetch("/api/auth/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ currentPassword: current, newPassword }),
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok || !j?.ok) {
+        setPwChangeError(j?.error || "Could not update password")
+        return
+      }
+      finishLoginAndRedirect(pendingLoginPayload)
+    } catch {
+      setPwChangeError("Network error")
+    } finally {
+      setPwChangeLoading(false)
     }
   }
 
@@ -188,13 +296,77 @@ export default function LoginPage() {
                 {loading ? "Signing in..." : "Sign In"}
               </Button>
             </form>
-            <div className="mt-6 text-center space-y-2">
+            <div className="mt-6 text-center space-y-3">
+              <p className="text-sm">
+                <Link href="/forgot-password" className="text-primary hover:underline font-medium">
+                  Forgot password?
+                </Link>
+              </p>
               <p className="text-sm text-muted-foreground">
                 Don&apos;t have an account? <Link href="/register" className="text-primary hover:underline font-medium">Register here</Link>
               </p>
             </div>
           </CardContent>
         </Card>
+
+        <Dialog open={!!pendingLoginPayload} onOpenChange={() => {}}>
+          <DialogContent className="sm:max-w-md" onPointerDownOutside={(ev) => ev.preventDefault()} onEscapeKeyDown={(ev) => ev.preventDefault()}>
+            <DialogHeader>
+              <DialogTitle>Set a new password</DialogTitle>
+              <DialogDescription>
+                Confirm the temporary password you used to sign in, then choose a strong new password (10+ characters with
+                uppercase, lowercase, number, and symbol).
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handlePasswordChangeAfterLogin} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="existing-pw">Current password</Label>
+                <Input
+                  id="existing-pw"
+                  type="password"
+                  value={existingPassword}
+                  onChange={(e) => setExistingPassword(e.target.value)}
+                  required
+                  autoComplete="current-password"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="new-pw">New password</Label>
+                <Input
+                  id="new-pw"
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  required
+                  minLength={10}
+                  autoComplete="new-password"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Use at least 10 characters with uppercase, lowercase, a number, and a symbol. It must not match your
+                  current password.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="confirm-pw">Confirm new password</Label>
+                <Input
+                  id="confirm-pw"
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  required
+                  minLength={10}
+                  autoComplete="new-password"
+                />
+              </div>
+              {pwChangeError && <p className="text-sm text-destructive">{pwChangeError}</p>}
+              <DialogFooter>
+                <Button type="submit" className="w-full sm:w-auto" disabled={pwChangeLoading}>
+                  {pwChangeLoading ? "Saving…" : "Save and continue"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   )

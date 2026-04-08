@@ -28,6 +28,8 @@ interface OrderItem {
   name: string
   QUANTITY: number
   qty: number
+  SERVED_QTY?: number
+  servedQty?: number
   UNIT_PRICE: number
   unitPrice: number
   UNIT: string
@@ -52,7 +54,10 @@ interface OrderDetails {
   REKISIYO_STATUS: string
   REFERENCE: string
   AMOUNT: number | null
+  SERVED_AMOUNT?: number | null
   total: number | null
+  CONDITIONS?: string
+  ORDER_NOTE?: string
   CURRENCY: string
   CREATED_AT: number
   createdAt: string
@@ -60,6 +65,16 @@ interface OrderDetails {
   TABLE_NAME?: string
   TABLE_LOCATION?: string
   items: OrderItem[]
+}
+
+function pickAnyNum(row: Record<string, unknown>, ...keys: string[]): number | null {
+  for (const k of keys) {
+    const v = row[k]
+    if (v == null || String(v).trim() === "") continue
+    const n = Number(v)
+    if (!Number.isNaN(n)) return n
+  }
+  return null
 }
 
 export default function OrderDetailsPage() {
@@ -85,7 +100,7 @@ export default function OrderDetailsPage() {
         const response = await fetch("/api/orders/track", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ orderId }),
+          body: JSON.stringify({ orderId, buyerAccount: user?.ishyigaAccount || "" }),
         })
 
         const data = await response.json()
@@ -104,7 +119,7 @@ export default function OrderDetailsPage() {
     }
 
     fetchOrderDetails()
-  }, [orderId])
+  }, [orderId, user?.ishyigaAccount])
 
   // If the viewer is the seller for this order, send them to the supplier order page (not buyer view with "Contact Seller")
   useEffect(() => {
@@ -232,6 +247,16 @@ ${items}
     : "—"
   const paymentLabel = displayPaymentStatus
   const currency = order.CURRENCY || "RWF"
+  const servedOrderAmount =
+    pickAnyNum(order as unknown as Record<string, unknown>, "SERVED_AMOUNT", "servedAmount", "AMOUNT_SERVED") ??
+    0
+  const orderNote =
+    String(
+      (order as unknown as Record<string, unknown>).CONDITIONS ??
+      (order as unknown as Record<string, unknown>).ORDER_NOTE ??
+      (order as unknown as Record<string, unknown>).orderNote ??
+      ""
+    ).trim()
 
   const financed = isInvoiceFinanced(order.PAYMENT_STATUS)
   const canFinanceOrder = canRequestInvoiceFinancing(order.ORDER_STATUS, financed)
@@ -418,30 +443,75 @@ ${items}
               <tr>
                 <th className="px-4 py-2 border">Item</th>
                 <th className="px-4 py-2 border">Quantity</th>
-                <th className="px-4 py-2 border">Unit Price</th>
-                <th className="px-4 py-2 border">Total</th>
+                <th className="px-4 py-2 border">Served Qty</th>
+                <th className="px-4 py-2 border">Requested Price</th>
+                <th className="px-4 py-2 border">Served Price</th>
+                <th className="px-4 py-2 border">Total Requested</th>
+                <th className="px-4 py-2 border">Total Served</th>
               </tr>
             </thead>
             <tbody>
               {order.items.map((item, idx) => {
                 const name = item.ITEM_NAME || item.name
+                const orderedBy = String((item as any).ORDERED_BY ?? "").trim() || "—"
                 const qty = item.QUANTITY || item.qty || 0
-                const price = item.UNIT_PRICE || item.unitPrice || 0
-                const total = qty * price
+                const servedQty =
+                  pickAnyNum(item as unknown as Record<string, unknown>, "CONFIRMED_RECEIVED_QTY", "SERVED_QTY", "servedQty", "CONFIRMED_QTY") ??
+                  qty
+                const requestedPrice =
+                  pickAnyNum(item as unknown as Record<string, unknown>, "REQUEST_PRICE", "requestPrice", "UNIT_PRICE", "unitPrice") ?? 0
+                const servedPrice =
+                  pickAnyNum(item as unknown as Record<string, unknown>, "UNITY_PRICE", "servedAmount", "SERVED_AMOUNT", "servedPrice", "UNIT_PRICE", "unitPrice") ?? 0
+                const totalRequested = qty * requestedPrice
+                const totalServed = servedQty * servedPrice
                 return (
                   <tr key={idx}>
                     <td className="px-4 py-2 border">{name}</td>
                     <td className="px-4 py-2 border">{qty}</td>
-                    <td className="px-4 py-2 border">{price.toLocaleString()} {currency}</td>
-                    <td className="px-4 py-2 border font-semibold">{total.toLocaleString()} {currency}</td>
+                    <td className="px-4 py-2 border">{servedQty}</td>
+                    <td className="px-4 py-2 border">{requestedPrice.toLocaleString()} {currency}</td>
+                    <td className="px-4 py-2 border">{servedPrice.toLocaleString()} {currency}</td>
+                    <td className="px-4 py-2 border font-semibold">{totalRequested.toLocaleString()} {currency}</td>
+                    <td className="px-4 py-2 border font-semibold">{totalServed.toLocaleString()} {currency}</td>
                   </tr>
                 )
               })}
             </tbody>
           </table>
 
-          <div className="flex justify-end mt-4 text-lg font-bold">
-            Total: {(order.AMOUNT || order.total || 0).toLocaleString()} {currency}
+          {(() => {
+            const totals = order.items.reduce(
+              (acc, item) => {
+                const qty = Number(item.QUANTITY || item.qty || 0)
+                const servedQty =
+                  pickAnyNum(item as unknown as Record<string, unknown>, "CONFIRMED_RECEIVED_QTY", "SERVED_QTY", "servedQty", "CONFIRMED_QTY") ??
+                  qty
+                const requestedPrice =
+                  pickAnyNum(item as unknown as Record<string, unknown>, "REQUEST_PRICE", "requestPrice", "UNIT_PRICE", "unitPrice") ?? 0
+                const servedPrice =
+                  pickAnyNum(item as unknown as Record<string, unknown>, "UNITY_PRICE", "servedAmount", "SERVED_AMOUNT", "servedPrice", "UNIT_PRICE", "unitPrice") ?? 0
+                acc.requested += qty * requestedPrice
+                acc.served += servedQty * servedPrice
+                return acc
+              },
+              { requested: 0, served: 0 }
+            )
+            return (
+              <div className="mt-4 space-y-1 text-right">
+                <div className="text-sm text-slate-600">
+                  Total Requested Price: {totals.requested.toLocaleString()} {currency}
+                </div>
+                <div className="text-sm text-slate-600">
+                  Total Served Price: {totals.served.toLocaleString()} {currency}
+                </div>
+              </div>
+            )
+          })()}
+          <div className="mt-4 space-y-1 text-right">
+            <div className="text-lg font-bold">
+              Total: {(order.AMOUNT || order.total || 0).toLocaleString()} {currency}
+            </div>
+            {orderNote && <div className="text-sm text-slate-600">Order Note: {orderNote}</div>}
           </div>
         </CardContent>
       </Card>

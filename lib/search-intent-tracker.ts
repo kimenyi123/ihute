@@ -54,7 +54,7 @@ function getUserIdentifiers(): { userId: string | null; sessionId: string } {
   }
   
   // Get or create session ID
-  let sessionId = getSessionId();
+  const sessionId = getSessionId();
   
   return { userId, sessionId };
 }

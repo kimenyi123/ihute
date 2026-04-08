@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 
 const RID_HEADER = "x-request-id"
-import { getOrdersUrl } from "@/lib/backend-config"
+import { getOrdersUrl, getSellerOrdersUrl } from "@/lib/backend-config"
 import { mapBackendOrderStatusToTrack, type TrackOrderStatus } from "@/lib/order-status-map"
 
 function rid() {
@@ -96,7 +96,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json()
-    const { orderId } = body
+    const { orderId, buyerAccount } = body
 
     if (!orderId) {
       return NextResponse.json(
@@ -107,11 +107,49 @@ export async function POST(req: NextRequest) {
 
     log(requestId, `Fetching order details for orderId=${orderId}`)
 
-    // Try getOrderDetails first (if servlet is updated), fallback to buyerOrderDetails
+    // Prefer SellerOrdersServlet buyer details when buyerAccount is provided
     let data: any = null
     let usingFallback = false
 
-    try {
+    if (buyerAccount) {
+      try {
+        const form = new URLSearchParams({
+          action: "listBuyerOrderItems",
+          buyerAccount: String(buyerAccount),
+          orderId: String(orderId),
+        }).toString()
+        const buyerRes = await fetch(getSellerOrdersUrl(), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Accept: "application/json",
+          },
+          body: form,
+          cache: "no-store",
+        })
+        if (buyerRes.ok) {
+          const result = await buyerRes.json()
+          if (result?.ok && result?.order) {
+            const orderData = result.order || {}
+            const itemsData = result.items || []
+            const buyerData = result.buyer || {}
+            data = {
+              ...orderData,
+              BUYER_ISHYIGA_ACCOUNT: orderData.BUYER_ISHYIGA_ACCOUNT || buyerData.ISHYIGA_ACCOUNT,
+              BUYER_OWNER: buyerData.OWNER || orderData.BUYER_OWNER,
+              BUYER_PHONE: buyerData.PHONE || orderData.BUYER_PHONE,
+              items: itemsData,
+            }
+            log(requestId, "✅ Using listBuyerOrderItems via SellerOrdersServlet")
+          }
+        }
+      } catch (err) {
+        log(requestId, "listBuyerOrderItems failed, continue fallback chain")
+      }
+    }
+
+    // Fallback chain: OrdersServlet getOrderDetails, then buyerOrderDetails
+    if (!data) try {
       // Try new endpoint first
       const url = new URL(getOrdersUrl())
       url.searchParams.set("action", "getOrderDetails")
@@ -243,10 +281,16 @@ export async function POST(req: NextRequest) {
           name: item.ITEM_NAME || item.name || "Product",
           QUANTITY: Number(item.QUANTITY ?? item.qty ?? item.QTY ?? 1),
           qty: Number(item.QUANTITY ?? item.qty ?? item.QTY ?? 1),
+          SERVED_QTY: Number(item.CONFIRMED_RECEIVED_QTY ?? item.SERVED_QTY ?? item.served_qty ?? item.servedQty ?? item.received_quantity ?? 0),
+          servedQty: Number(item.CONFIRMED_RECEIVED_QTY ?? item.SERVED_QTY ?? item.served_qty ?? item.servedQty ?? item.received_quantity ?? 0),
+          REQUEST_PRICE: Number(item.REQUEST_PRICE ?? item.request_price ?? item.REQUESTED_PRICE ?? item.UNIT_PRICE ?? item.unitPrice ?? 0),
+          UNITY_PRICE: Number(item.UNITY_PRICE ?? item.unity_price ?? item.SERVED_PRICE ?? item.served_price ?? item.UNIT_PRICE ?? item.unitPrice ?? 0),
+          servedAmount: Number(item.SERVED_AMOUNT ?? item.servedAmount ?? item.served_amount ?? item.UNITY_PRICE ?? item.unity_price ?? 0),
           UNIT_PRICE: Number(item.UNIT_PRICE ?? item.unitPrice ?? 0),
           unitPrice: Number(item.UNIT_PRICE ?? item.unitPrice ?? 0),
           UNIT: item.UNIT || item.unit,
           unit: item.UNIT || item.unit,
+          ORDERED_BY: item.ORDERED_BY ?? item.ordered_by ?? "",
         }))
       : []
     const totalAmount = Number(data.AMOUNT ?? data.total ?? 0)
@@ -288,6 +332,8 @@ export async function POST(req: NextRequest) {
       REKISIYO_STATUS: data.REKISIYO_STATUS,
       REFERENCE: data.REFERENCE,
       AMOUNT: totalAmount,
+      SERVED_AMOUNT: Number(data.SERVED_AMOUNT ?? data.servedAmount ?? data.AMOUNT_SERVED ?? 0),
+      CONDITIONS: data.CONDITIONS ?? data.ORDER_NOTE ?? data.orderNote ?? "",
       CURRENCY: currency,
       CREATED_AT: createdAt,
       IS_TABLE_COMMAND: Boolean(data.IS_TABLE_COMMAND ?? data.table_command),

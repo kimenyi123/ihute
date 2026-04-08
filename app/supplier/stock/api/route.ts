@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
     const contentType = request.headers.get('content-type') || '';
 
     let body: any;
-    let headers: HeadersInit = {
+    const headers: HeadersInit = {
       'Cookie': request.headers.get('cookie') || '',
     };
 

@@ -121,7 +121,31 @@ async function forward(req: NextRequest) {
       const otherCount = total - redisCount - dbCount
       const dataSource = redisCount > 0 && dbCount === 0 ? "redis" : dbCount > 0 && redisCount === 0 ? "database" : redisCount > 0 && dbCount > 0 ? "mixed" : "unknown"
       const supplierParam = incoming.searchParams.get("supplier") || ""
+      
+      // Debug: Check first few products for item_key_words and famille
       console.log("[fetchSuggestions] Data source:", dataSource, "| Products:", total, "| redis:", redisCount, "db:", dbCount, "other:", otherCount, supplierParam ? "| supplier=" + supplierParam : "")
+      
+      if (parsed.products.length > 0) {
+        const sampleProduct = parsed.products[0]
+        console.log("[fetchSuggestions] Sample product fields:", {
+          item_key_words: sampleProduct.item_key_words,
+          famille: sampleProduct.famille,
+          FAMILLE: sampleProduct.FAMILLE,
+          image_url: sampleProduct.image_url,
+          item_image_url: sampleProduct.item_image_url,
+          IMAGE_URL: sampleProduct.IMAGE_URL,
+          image: sampleProduct.image,
+          source: sampleProduct.source
+        })
+        
+        // Check if critical fields are null/undefined
+        if (sampleProduct.item_key_words == null) {
+          console.warn("[fetchSuggestions] WARNING: item_key_words is null/undefined in first product!")
+        }
+        if (sampleProduct.famille == null && sampleProduct.FAMILLE == null) {
+          console.warn("[fetchSuggestions] WARNING: Both famille and FAMILLE are null/undefined in first product!")
+        }
+      }
     } else if (parsed) {
       const supplierParam = incoming.searchParams.get("supplier") || ""
       console.log("[fetchSuggestions] Data source: unknown (no products array) | supplier=" + (supplierParam || "n/a"))

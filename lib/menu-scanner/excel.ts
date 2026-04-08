@@ -1,6 +1,10 @@
 import * as XLSX from "xlsx";
 import type { MenuItem, EnrichedMenuItem } from "@/types/menu-scanner";
 
+/** SheetJS worksheet (types not resolved via package exports in this project) */
+type XlsxSheet = Record<string, unknown>;
+type XlsxBook = { SheetNames: string[]; Sheets: Record<string, XlsxSheet> };
+
 /** Required DB/Redis column names for bulk upload (CODE = product code, auto-generated on upload if blank) */
 export const REQUIRED_DB_COLUMNS = {
   NAME: "NAME",
@@ -75,13 +79,13 @@ export function validateForBulkUpload(items: MenuItem[]): {
 }
 
 function addExcelFormatting(
-  ws: XLSX.WorkSheet,
+  ws: XlsxSheet,
   _rowCount: number
 ): void {
   ws["!freeze"] = { xSplit: 0, ySplit: 1 };
 }
 
-function addInstructionsSheet(wb: XLSX.WorkBook): void {
+function addInstructionsSheet(wb: XlsxBook): void {
   const instructions = [
     ["BULK UPLOAD INSTRUCTIONS"],
     [""],
@@ -106,7 +110,9 @@ function addInstructionsSheet(wb: XLSX.WorkBook): void {
     ["DIETARY_TAGS - Vegetarian, Vegan, etc."],
     ["IMAGE - Image URL (optional)"],
   ];
-  const wsInstructions = XLSX.utils.aoa_to_sheet(instructions);
+  const aoa = XLSX.utils.aoa_to_sheet;
+  if (!aoa) throw new Error("xlsx: aoa_to_sheet unavailable");
+  const wsInstructions = aoa(instructions) as XlsxSheet;
   wsInstructions["!cols"] = [{ wch: 80 }];
   XLSX.utils.book_append_sheet(wb, wsInstructions, "Instructions");
 }
@@ -147,10 +153,8 @@ export function exportToExcelForBulkUpload(menuItems: MenuItem[]): void {
     return row;
   });
 
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(worksheetData, {
-    header: [...BULK_UPLOAD_HEADERS],
-  });
+  const wb = XLSX.utils.book_new() as XlsxBook;
+  const ws = XLSX.utils.json_to_sheet(worksheetData) as XlsxSheet;
 
   ws["!cols"] = [
     { wch: 30 },
@@ -192,8 +196,8 @@ export function downloadMenuExcel(menuData: MenuItem[]): void {
     "Image URL": item.image_url || "",
   }));
 
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new() as XlsxBook;
+  const ws = XLSX.utils.json_to_sheet(rows) as XlsxSheet;
 
   ws["!cols"] = [
     { wch: 22 },
@@ -214,7 +218,7 @@ export function downloadMenuExcel(menuData: MenuItem[]): void {
       Value: Math.max(...menuData.map((i) => i.page_number), 0) || 1,
     },
   ];
-  const wsMeta = XLSX.utils.json_to_sheet(metadata);
+  const wsMeta = XLSX.utils.json_to_sheet(metadata) as XlsxSheet;
   XLSX.utils.book_append_sheet(wb, wsMeta, "Metadata");
 
   const timestamp = new Date()

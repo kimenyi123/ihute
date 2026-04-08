@@ -118,6 +118,16 @@ function collectBackendImageUrls(source: ProductImageSource | null | undefined):
     seen.add(n)
     out.push(n)
   }
+  
+  // Debug: Log what backend image fields contain
+  console.log("[ImageUtils] Backend image fields:", {
+    image_url: source.image_url,
+    item_image_url: source.item_image_url,
+    IMAGE_URL: (source as any).IMAGE_URL,
+    image: source.image,
+    foundValidUrls: out
+  })
+  
   return out
 }
 
@@ -137,19 +147,41 @@ export function getProductImageCandidates(source: ProductImageSource | null | un
     out.push(n)
   }
 
+  // Debug: Log the entire source object
+  if (typeof window !== "undefined") {
+    console.log("[ImageUtils] Full product data for image resolution:", source)
+  }
+
   if (source && typeof source === "object") {
     const rawFamille = (source as any).famille ?? (source as any).FAMILLE
     const nikiCode = getNikiCodeFromSource(source)
     const famille = typeof rawFamille === "string" ? rawFamille.trim() : String(rawFamille ?? "").trim()
     const nikiPath = nikiCode ? sanitizeKaosSegment(nikiCode) : ""
 
+    // Debug: Log critical fields
+    if (typeof window !== "undefined") {
+      console.log("[ImageUtils] Critical image fields:", {
+        nikiCode,
+        famille,
+        FAMILLE: (source as any).FAMILLE,
+        rawFamille,
+        nikiPath,
+        hasNikiCode: !!nikiCode,
+        hasFamille: !!famille
+      })
+    }
+
     if (nikiPath) {
       if (famille) {
-        add(`${KAOS_BASE}${sanitizeKaosSegment(famille)}/${nikiPath}.jpg`)
+        const famillePath = `${KAOS_BASE}${sanitizeKaosSegment(famille)}/${nikiPath}.jpg`
+        add(famillePath)
+        console.log("[ImageUtils] KAOS famille URL:", famillePath)
       }
-      add(`${KAOS_BASE}${nikiPath}.jpg`)
+      const nikiPathUrl = `${KAOS_BASE}${nikiPath}.jpg`
+      add(nikiPathUrl)
+      console.log("[ImageUtils] KAOS niki URL:", nikiPathUrl)
       try {
-        console.debug("[ImageSrc] KAOS candidates", {
+        console.log("[ImageSrc] KAOS candidates", {
           id: getNikiCodeFromSource(source) || String((source as any).id ?? ""),
           famille,
           nikiCode,
@@ -158,7 +190,11 @@ export function getProductImageCandidates(source: ProductImageSource | null | un
       } catch {
         /* ignore */
       }
+    } else {
+      console.warn("[ImageUtils] No nikiPath generated - nikiCode is empty or invalid")
     }
+  } else {
+    console.warn("[ImageUtils] Invalid source object for image resolution")
   }
 
   for (const u of collectBackendImageUrls(source)) {
@@ -166,6 +202,11 @@ export function getProductImageCandidates(source: ProductImageSource | null | un
   }
 
   add(NO_IMAGE_URL)
+
+  // Debug: Log final candidates
+  if (typeof window !== "undefined") {
+    console.log("[ImageUtils] Final image candidates:", out)
+  }
 
   return out.length > 0 ? out : [NO_IMAGE_URL]
 }

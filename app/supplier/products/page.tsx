@@ -9,7 +9,6 @@ import { Badge } from "@/components/ui/badge"
 import {
   Package,
   Edit,
-  Trash2,
   Plus,
   Search,
   Filter,
@@ -28,6 +27,7 @@ type Product = {
   name: string
   category: string
   price: number
+  currency?: string
   stock: number
   status: ProductStatus
   sales: number
@@ -45,7 +45,7 @@ export default function MyProductsPage() {
 
   // Filters
   const [searchQuery, setSearchQuery] = useState("")
-  // const [categoryFilter, setCategoryFilter] = useState("all")
+  const categoryFilter = "all" as const
   const [statusFilter, setStatusFilter] = useState<ProductStatus | "all">("all")
   const [fromCache, setFromCache] = useState(false)
 

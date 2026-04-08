@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { User } from '@/lib/types/user';
 
 // TODO: Replace this mock function with your actual database connection
 async function queryDB(sql: string): Promise<any[]> {

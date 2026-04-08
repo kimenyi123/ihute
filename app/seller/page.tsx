@@ -14,7 +14,12 @@ type SellerOrder = {
   BUYER_PHONE: string
   DELIVERY_LOCATION: string
   AMOUNT: number
+  // All possible status fields from database
   STATUS: string
+  ORDER_STATUS: string
+  INVOICE: string
+  FACTURE: string
+  INVOICE_LOADED: string
   CURRENCY: string
 }
 
@@ -97,6 +102,16 @@ export default function SellerOrdersPage() {
               <p><strong>Buyer:</strong> {o.BUYER_OWNER || "Guest"}</p>
               <p><strong>Phone:</strong> {o.BUYER_PHONE || "N/A"}</p>
               <p><strong>Location:</strong> {o.DELIVERY_LOCATION || "N/A"}</p>
+              
+              {/* Display all status fields */}
+              <div className="space-y-1">
+                <p><strong>Status:</strong> {o.STATUS || "PENDING"}</p>
+                {o.ORDER_STATUS && <p><strong>Order Status:</strong> <span className="font-mono">{o.ORDER_STATUS}</span></p>}
+                {o.INVOICE && <p><strong>Invoice:</strong> <span className="font-mono">{o.INVOICE}</span></p>}
+                {o.FACTURE && <p><strong>Facture:</strong> <span className="font-mono">{o.FACTURE}</span></p>}
+                {o.INVOICE_LOADED && <p><strong>Invoice Loaded:</strong> <span className="font-mono">{o.INVOICE_LOADED}</span></p>}
+              </div>
+
               <p>
                 <strong>Total:</strong> {Number(o.AMOUNT || 0).toLocaleString()}{" "}
                 {o.CURRENCY || "RWF"}

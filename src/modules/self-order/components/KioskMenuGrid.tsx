@@ -380,7 +380,7 @@ function ItemExpandPanel({
       {/* Header row */}
       <div className="flex items-start gap-4 p-4 pb-3">
         {item.image_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
+           
           <img
             src={item.image_url}
             alt={item.item_commercial_name}
@@ -511,7 +511,7 @@ function ItemCard({
       {/* Image */}
       <div className="relative h-20 w-20 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0">
         {item.image_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
+           
           <img
             src={item.image_url}
             alt={item.item_commercial_name}
@@ -593,7 +593,7 @@ function CartSidebar({
           {items.map((ci) => (
             <div key={`${ci.id}-${ci.selectedUnit}`} className="flex items-start gap-3">
               {ci.image ? (
-                // eslint-disable-next-line @next/next/no-img-element
+                 
                 <img src={ci.image} alt={ci.name} className="h-14 w-14 rounded-xl object-cover flex-shrink-0" />
               ) : (
                 <div className="h-14 w-14 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0 text-xl">🍽️</div>
@@ -971,7 +971,6 @@ export function KioskMenuGrid({
       } finally { setLoading(false) }
     }, 350)
     return () => { if (timerRef.current) clearTimeout(timerRef.current) }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, category, shopNickname])
 
   function handleAdd(item: KioskMenuItem, qty: number, _selected: Record<string, KioskModifierOption> = {}) {
@@ -1010,7 +1009,7 @@ export function KioskMenuGrid({
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0 text-lg">
               {venueLogoUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
+                 
                 <img src={venueLogoUrl} alt="" className="w-8 h-8 rounded-full object-cover" />
               ) : useUnifiedShopTabs ? (
                 <span className="text-sm leading-none">🍽🍺</span>

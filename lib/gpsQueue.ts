@@ -57,9 +57,7 @@ export async function queueGPSUpdate(payload: Omit<QueuedGPSUpdate, 'id' | 'sync
 export async function getPendingUpdates(): Promise<QueuedGPSUpdate[]> {
     try {
         return await db.gpsQueue
-            .where('synced')
-            .equals(false)
-            .and((item) => item.retries < 5) // Max 5 retries
+            .filter((item) => !item.synced && item.retries < 5)
             .sortBy('timestamp')
     } catch (error) {
         console.error('[GPS-Queue] Failed to get pending:', error)
@@ -162,7 +160,7 @@ export async function cleanupOldRecords() {
         const deleted = await db.gpsQueue
             .where('timestamp')
             .below(weekAgo)
-            .and((item) => item.synced)
+            .and((item: QueuedGPSUpdate) => item.synced)
             .delete()
 
         if (deleted > 0) {
@@ -179,8 +177,8 @@ export async function cleanupOldRecords() {
 export async function getQueueStats() {
     try {
         const total = await db.gpsQueue.count()
-        const pending = await db.gpsQueue.where('synced').equals(false).count()
-        const synced = await db.gpsQueue.where('synced').equals(true).count()
+        const pending = await db.gpsQueue.filter((r) => !r.synced).count()
+        const synced = await db.gpsQueue.filter((r) => r.synced).count()
 
         return { total, pending, synced }
     } catch (error) {

@@ -91,8 +91,9 @@ export async function POST(req: Request) {
       )
     }
 
+    const mcp = json?.mustChangePassword ?? json?.must_change_password
     console.log(
-      `[api/auth/login][proxyRid=${rid}] SUCCESS role=${json?.role} ishyiga=${json?.ishyiga ?? "n/a"} javaRid=${javaMeta.javaRid ?? "n/a"}`
+      `[api/auth/login][proxyRid=${rid}] SUCCESS role=${json?.role} ishyiga=${json?.ishyiga ?? "n/a"} javaRid=${javaMeta.javaRid ?? "n/a"} mustChangePassword=${String(mcp)} (type=${typeof mcp})`
     )
 
     // Forward Set-Cookie headers from Java backend to client

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { Bell, Send, Mail, MessageSquare, Clock } from 'lucide-react'
+import { Send, Clock } from 'lucide-react'
 
 interface NotificationHistory {
   id: number

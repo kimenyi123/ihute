@@ -22,7 +22,7 @@ export function KioskItemCard({ item, onSelect }: Props) {
     >
       <div className="relative h-32 w-full bg-slate-800 overflow-hidden">
         {item.image_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
+           
           <img
             src={item.image_url}
             alt={item.item_commercial_name || ""}
