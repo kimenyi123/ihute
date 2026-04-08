@@ -5,7 +5,6 @@ import { useEffect, useState, useRef } from "react"
 import { ProductCard } from "./product-card"
 import { TrendingUp, ArrowRight, Store } from "lucide-react"
 import { useAuthStore } from "@/lib/auth-store"
-import { getSessionId } from "@/lib/interaction-tracker"
 import { getSmartRecommendations, shuffle } from "@/lib/recommendation-service"
 import Link from "next/link"
 

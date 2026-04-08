@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { ArrowLeft, User, Save } from "lucide-react"
+import { ArrowLeft, User as UserIcon, Save } from "lucide-react"
 import { useAuthStore, type User } from "@/lib/auth-store"
 
 export default function AccountPage() {
@@ -66,7 +66,7 @@ export default function AccountPage() {
         .then((data) => {
           if (data?.ok && data.profile) {
             const p = data.profile
-            setForm((prev) => ({
+            setForm((prev: Partial<User>) => ({
               ...prev,
               name: p.name ?? prev.name,
               email: p.email ?? prev.email,
@@ -155,7 +155,7 @@ export default function AccountPage() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
           <div className="flex items-center gap-2">
-            <User className="h-5 w-5" />
+            <UserIcon className="h-5 w-5" />
             <CardTitle>My profile</CardTitle>
           </div>
           {!editing ? (
@@ -193,7 +193,7 @@ export default function AccountPage() {
               <Input
                 id="name"
                 value={form.name ?? ""}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                onChange={(e) => setForm((f: Partial<User>) => ({ ...f, name: e.target.value }))}
                 readOnly={!editing}
                 className={!editing ? "bg-muted" : ""}
               />
@@ -217,7 +217,7 @@ export default function AccountPage() {
               <Input
                 id="phone"
                 value={form.phone ?? ""}
-                onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+                onChange={(e) => setForm((f: Partial<User>) => ({ ...f, phone: e.target.value }))}
                 readOnly={!editing}
                 className={!editing ? "bg-muted" : ""}
                 placeholder="e.g. 0781234567"
@@ -228,7 +228,7 @@ export default function AccountPage() {
               <Input
                 id="location"
                 value={form.location ?? ""}
-                onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
+                onChange={(e) => setForm((f: Partial<User>) => ({ ...f, location: e.target.value }))}
                 readOnly={!editing}
                 className={!editing ? "bg-muted" : ""}
                 placeholder="e.g. Kigali"
@@ -242,7 +242,7 @@ export default function AccountPage() {
               <Input
                 id="momo"
                 value={form.momo ?? ""}
-                onChange={(e) => setForm((f) => ({ ...f, momo: e.target.value }))}
+                onChange={(e) => setForm((f: Partial<User>) => ({ ...f, momo: e.target.value }))}
                 readOnly={!editing}
                 className={!editing ? "bg-muted" : ""}
                 placeholder="e.g. 0781234567"
@@ -253,7 +253,7 @@ export default function AccountPage() {
               <Input
                 id="currency"
                 value={form.currency ?? ""}
-                onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}
+                onChange={(e) => setForm((f: Partial<User>) => ({ ...f, currency: e.target.value }))}
                 readOnly={!editing}
                 className={!editing ? "bg-muted" : ""}
                 placeholder="e.g. RWF, USD"
@@ -266,7 +266,7 @@ export default function AccountPage() {
             <Input
               id="nickname"
               value={form.nickname ?? ""}
-              onChange={(e) => setForm((f) => ({ ...f, nickname: e.target.value }))}
+              onChange={(e) => setForm((f: Partial<User>) => ({ ...f, nickname: e.target.value }))}
               readOnly={!editing}
               className={!editing ? "bg-muted" : ""}
               placeholder="e.g. for Shop with Me URL"
@@ -279,7 +279,7 @@ export default function AccountPage() {
               id="description"
               rows={3}
               value={form.description ?? ""}
-              onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+              onChange={(e) => setForm((f: Partial<User>) => ({ ...f, description: e.target.value }))}
               readOnly={!editing}
               className={`flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${!editing ? "bg-muted" : ""}`}
               placeholder="Profile or business description"
@@ -292,7 +292,7 @@ export default function AccountPage() {
               <Input
                 id="ishyigaAccount"
                 value={form.ishyigaAccount ?? ""}
-                onChange={(e) => setForm((f) => ({ ...f, ishyigaAccount: e.target.value }))}
+                onChange={(e) => setForm((f: Partial<User>) => ({ ...f, ishyigaAccount: e.target.value }))}
                 readOnly={!editing}
                 className={!editing ? "bg-muted" : ""}
                 placeholder="e.g. ALG00001234"
@@ -303,7 +303,7 @@ export default function AccountPage() {
               <Input
                 id="owner"
                 value={form.owner ?? ""}
-                onChange={(e) => setForm((f) => ({ ...f, owner: e.target.value }))}
+                onChange={(e) => setForm((f: Partial<User>) => ({ ...f, owner: e.target.value }))}
                 readOnly={!editing}
                 className={!editing ? "bg-muted" : ""}
               />
@@ -316,7 +316,7 @@ export default function AccountPage() {
               <Input
                 id="businessName"
                 value={form.businessName ?? ""}
-                onChange={(e) => setForm((f) => ({ ...f, businessName: e.target.value }))}
+                onChange={(e) => setForm((f: Partial<User>) => ({ ...f, businessName: e.target.value }))}
                 readOnly={!editing}
                 className={!editing ? "bg-muted" : ""}
               />
@@ -326,7 +326,7 @@ export default function AccountPage() {
               <Input
                 id="businessCategory"
                 value={form.businessCategory ?? ""}
-                onChange={(e) => setForm((f) => ({ ...f, businessCategory: e.target.value }))}
+                onChange={(e) => setForm((f: Partial<User>) => ({ ...f, businessCategory: e.target.value }))}
                 readOnly={!editing}
                 className={!editing ? "bg-muted" : ""}
               />

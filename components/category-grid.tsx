@@ -1,11 +1,16 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import Link from "next/link"
 import Image from "next/image"
 import { Card, CardContent } from "@/components/ui/card"
 import { useTranslation } from "@/hooks/use-translation"
 import type { TranslationKey } from "@/lib/translations"
+import { 
+  normalizeImageUrl, 
+  isValidImageUrl, 
+  NO_IMAGE_URL 
+} from "@/lib/image-utils"
 
 interface Category {
   id?: number
@@ -77,6 +82,89 @@ const defaultCategories: Category[] = [
     colorClass: "bg-slate-500/10",
   },
 ]
+
+// Category image component with robust fallback system
+function CategoryImage({ category, alt }: { category: Category; alt: string }) {
+  // Create image candidates using the same system as products
+  const imageCandidates = useMemo(() => {
+    const candidates: string[] = []
+    
+    // Try the category's imageUrl first
+    if (category.imageUrl) {
+      const normalized = normalizeImageUrl(category.imageUrl)
+      if (normalized && isValidImageUrl(normalized)) {
+        candidates.push(normalized)
+      }
+    }
+    
+    // Try KAOS URLs based on categoryId
+    const KAOS_BASE = "https://ishyiga.rw/images_kaos_beta/"
+    const sanitizedCategory = category.categoryId.replace(/[^a-zA-Z0-9]/g, "_")
+    
+    // Try category-specific image
+    candidates.push(`${KAOS_BASE}${sanitizedCategory}.jpg`)
+    candidates.push(`${KAOS_BASE}category_${sanitizedCategory}.jpg`)
+    
+    // Add fallback to static images
+    const staticImages = [
+      `/${category.categoryId}.jpg`,
+      `/${category.categoryId}.png`,
+      `/category-${category.categoryId}.jpg`,
+      `/category-${category.categoryId}.png`,
+    ]
+    
+    staticImages.forEach(img => {
+      if (isValidImageUrl(img)) {
+        candidates.push(img)
+      }
+    })
+    
+    // Final fallback
+    candidates.push(NO_IMAGE_URL)
+    
+    // Remove duplicates and filter valid URLs
+    const seen = new Set<string>()
+    return candidates.filter(url => {
+      if (!isValidImageUrl(url) || seen.has(url)) return false
+      seen.add(url)
+      return true
+    })
+  }, [category.imageUrl, category.categoryId])
+
+  const [candidateIdx, setCandidateIdx] = useState(0)
+  const [imgError, setImgError] = useState(false)
+  
+  const currentUrl = imageCandidates[Math.min(candidateIdx, imageCandidates.length - 1)] || NO_IMAGE_URL
+  const isRemote = /^https?:\/\//i.test(currentUrl)
+  
+  // Reset when image candidates change
+  useEffect(() => {
+    setImgError(false)
+    setCandidateIdx(0)
+  }, [imageCandidates.join("\x1e")])
+
+  const handleError = () => {
+    if (candidateIdx + 1 < imageCandidates.length) {
+      setCandidateIdx(prev => prev + 1)
+    } else {
+      setImgError(true)
+    }
+  }
+
+  const displayUrl = imgError ? NO_IMAGE_URL : currentUrl
+
+  return (
+    <Image
+      src={displayUrl}
+      alt={alt}
+      fill
+      className="object-cover"
+      onError={handleError}
+      loading="lazy"
+      decoding="async"
+    />
+  )
+}
 
 export function CategoryGrid() {
   const { t } = useTranslation()
@@ -169,11 +257,9 @@ export function CategoryGrid() {
                   <Card className="group h-full transition-all hover:shadow-lg hover:scale-105 overflow-hidden">
                     <CardContent className="flex flex-col items-center justify-center p-3 md:p-4 text-center">
                       <div className={`mb-2 rounded-xl overflow-hidden ${category.colorClass || "bg-gray-500/10"} w-full aspect-square relative`}>
-                        <Image
-                          src={category.imageUrl || "/placeholder.svg"}
+                        <CategoryImage 
+                          category={category}
                           alt={t(category.nameKey as TranslationKey)}
-                          fill
-                          className="object-cover"
                         />
                       </div>
                       <h3 className="text-xs md:text-sm font-semibold text-foreground group-hover:text-primary line-clamp-2">

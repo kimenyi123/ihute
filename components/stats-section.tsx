@@ -1,6 +1,6 @@
 "use client"
 
-import { Store, Users, CreditCard, Truck } from "lucide-react"
+import { Store, Users, Truck } from "lucide-react"
 import { useEffect, useState } from "react"
 
 type Stats = {

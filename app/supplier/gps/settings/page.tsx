@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { useAuthStore } from "@/lib/auth-store"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, Shield, Clock, MapPin, Bell, Save, Zap } from "lucide-react"
+import { ArrowLeft, Shield, Clock, Bell, Save, Zap } from "lucide-react"
 import Link from "next/link"
 
 export default function GPSSettingsPage() {

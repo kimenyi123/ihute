@@ -58,7 +58,7 @@ function extractDietaryTags(text: string): string[] {
 }
 
 function parsePriceValue(str: string): number | null {
-  let cleaned = str
+  const cleaned = str
     .replace(/[^\d.,\s]/g, "")
     .replace(/\s/g, "")
     .replace(/^[.,]+/, "")

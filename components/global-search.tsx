@@ -215,7 +215,7 @@ export function GlobalSearch({
               product_count: 0,
             }
           })
-          .sort((a, b) => a.distance_km - b.distance_km)
+          .sort((a: GlobalResult, b: GlobalResult) => (a.distance_km ?? 0) - (b.distance_km ?? 0))
           .slice(0, 10) // Top 10 nearest
 
         setNearbySuppliers(suppliersWithDistance)

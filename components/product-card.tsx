@@ -15,7 +15,6 @@ import { useToast } from "@/components/ui/use-toast"
 import { PriceWatchButton } from "@/components/price-watch-button"
 import {
   getProductImageSrc,
-  getProductImageUrl,
   getProductImageCandidates,
   getNikiCodeFromSource,
   isValidImageUrl,
@@ -139,25 +138,25 @@ export function ProductCard({
     setImgError(false)
     setCandidateIdx(0)
 
-    // Debug log to inspect image resolution for this product
-    try {
-      // Only log in browser
-      if (typeof window !== "undefined") {
-        // @ts-expect-error debug
-        const famille = (product as any).famille ?? (product as any).FAMILLE
-        const niki = getNikiCodeFromSource(product)
-        // eslint-disable-next-line no-console
-        console.log("[ProductCard][image-debug]", {
-          id,
-          name,
-          famille,
-          niki /* NIKI code === item_key_words when from API */,
-          firstCandidate: imageCandidates[0],
-          backendUrl: getProductImageUrl(product as any) || null,
-        })
-      }
-    } catch {
-      // ignore logging failures
+    // Debug logging for image resolution
+    if (typeof window !== "undefined") {
+      console.log("[ProductCard] Image resolution for:", {
+        name: name,
+        id: id,
+        itemCode: itemCode,
+        famille: (product as any).famille ?? (product as any).FAMILLE,
+        nikiCode: getNikiCodeFromSource(product),
+        imageCandidates: imageCandidates.slice(0, 5), // First 5 candidates
+        totalCandidates: imageCandidates.length,
+        resolvedUrl,
+        hasValidUrl,
+        backendImageFields: {
+          image_url: product.image_url,
+          item_image_url: product.item_image_url,
+          IMAGE_URL: (product as any).IMAGE_URL,
+          image: product.image
+        }
+      })
     }
   }, [candidatesSignature, id])
 
@@ -200,11 +199,21 @@ export function ProductCard({
             decoding="async"
             referrerPolicy="no-referrer"
             onError={() => {
+              console.log("[ProductCard] Remote image failed to load:", {
+                name: name,
+                id: id,
+                failedUrl: src,
+                candidateIdx,
+                totalCandidates: imageCandidates.length,
+                tryingNext: candidateIdx + 1 < imageCandidates.length
+              })
+              
               if (candidateIdx + 1 < imageCandidates.length) {
                 setCandidateIdx((i) => i + 1)
                 setImgError(false)
               } else {
                 setImgError(true)
+                console.log("[ProductCard] All image candidates failed, showing NO_IMAGE_URL for:", name)
               }
             }}
           />
@@ -216,11 +225,21 @@ export function ProductCard({
             alt={name}
             className="object-cover"
             onError={() => {
+              console.log("[ProductCard] Next.js Image failed to load:", {
+                name: name,
+                id: id,
+                failedUrl: src,
+                candidateIdx,
+                totalCandidates: imageCandidates.length,
+                tryingNext: candidateIdx + 1 < imageCandidates.length
+              })
+              
               if (candidateIdx + 1 < imageCandidates.length) {
                 setCandidateIdx((i) => i + 1)
                 setImgError(false)
               } else {
                 setImgError(true)
+                console.log("[ProductCard] All image candidates failed, showing NO_IMAGE_URL for:", name)
               }
             }}
             unoptimized={src === NO_IMAGE_URL || src === placeholder}

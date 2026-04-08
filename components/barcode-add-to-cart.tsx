@@ -57,17 +57,19 @@ export function BarcodeAddToCart({ open, onOpenChange }: Props) {
       const itemCode = String(first.item_code ?? first.item_key_words ?? first.ITEM_CODE ?? trimmed)
       const supplierId = String(first.supplier_account ?? first.supplierAccount ?? "").trim()
       const supplierName = String(first.supplier_name ?? first.supplierName ?? "Supplier")
-      addItem({
-        id: itemCode,
-        itemCode,
-        name,
-        price,
-        unit: String(first.item_packet ?? first.item_packet ?? ""),
-        supplierId: supplierId || "unknown",
-        supplierName,
-        qty: 1,
-        image: typeof first.image_url === "string" ? first.image_url : typeof first.image === "string" ? first.image : undefined,
-      })
+      addItem(
+        {
+          id: itemCode,
+          itemCode,
+          name,
+          price,
+          unit: String(first.item_packet ?? first.item_packet ?? ""),
+          supplierId: supplierId || "unknown",
+          supplierName,
+          image: typeof first.image_url === "string" ? first.image_url : typeof first.image === "string" ? first.image : undefined,
+        },
+        1
+      )
       setMessage({ type: "success", text: `Added "${name}" to cart` })
       setCode("")
       setTimeout(() => onOpenChange(false), 800)

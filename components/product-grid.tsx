@@ -20,7 +20,16 @@ type ServerProduct = {
   item_seller_account?: string;
   supplier_name?: string;
   supplier_location?: string;
+  // Preserve all image fields for KAOS URL construction
   image?: string;
+  image_url?: string;
+  item_image_url?: string;
+  IMAGE_URL?: string;
+  IMAGE_URL_2?: string;
+  IMAGE_URL_3?: string;
+  // Also preserve famille for KAOS paths
+  famille?: string;
+  FAMILLE?: string;
   // ✅ we’ll keep category info if backend provides it (type/sector/category)
   type?: string;
   sector?: string;
@@ -72,19 +81,38 @@ function normalizeProduct(
     item_key_words: p.item_key_words ?? p.DESCRIPTION_KEYWORD ?? "",
     item_seller_account:
       p.item_seller_account ??
+      p.supplier_account ??
       p.seller_account ??
       p.SELLER_ISHYIGA_ACCOUNT ??
       fallbacks?.account ??
       "",
     supplier_name: p.supplier_name ?? p.SELLER_NAMES ?? fallbacks?.sellerName ?? "",
     supplier_location: p.supplier_location ?? p.LOCATION ?? fallbacks?.sellerLoc ?? "",
-    image: p.image ?? p.image_url ?? p.item_image_url ?? p.IMAGE_URL ?? undefined,
+    // Preserve all original image fields for KAOS URL construction
+    image: p.image,
+    image_url: p.image_url,
+    item_image_url: p.item_image_url,
+    IMAGE_URL: p.IMAGE_URL,
+    // Also preserve famille for KAOS paths
+    famille: p.famille,
+    FAMILLE: p.FAMILLE,
     momo: p.momo,
     // keep any server-provided category hint
     type: p.type ?? p.TYPE ?? undefined,
     sector: p.sector ?? p.SECTOR ?? undefined,
     category: p.category ?? p.CATEGORY ?? undefined,
   };
+}
+
+function extractSuppliersWithProducts(payload: any): any[] {
+  if (Array.isArray(payload)) return payload;
+  if (payload && typeof payload === "object") {
+    if (Array.isArray(payload.sellers)) return payload.sellers;
+    if (Array.isArray(payload.suppliers)) return payload.suppliers;
+    if (Array.isArray(payload.data)) return payload.data;
+    if (Array.isArray(payload.results)) return payload.results;
+  }
+  return [];
 }
 
 export function ProductGrid({
@@ -133,9 +161,13 @@ export function ProductGrid({
         const params = new URLSearchParams({
           globalSearch: searchQuery.trim(),
           sector: categoryId, // Filter to current category only
-          limit: "100",
+          limit: "10000",
           Currency: "RWF",
         });
+        // When a supplier is selected, force Redis-first supplier cache search in backend.
+        if (selectedSupplier && selectedSupplier !== "all") {
+          params.set("supplier", selectedSupplier);
+        }
 
         const res = await fetch(`/api/fetchSuggestions?${params}`, {
           cache: "no-store"
@@ -193,8 +225,8 @@ export function ProductGrid({
         // For each supplier, fetch their products in this category
         const allProducts: any[] = [];
 
-        // Add direct product matches (already category-filtered)
-        const filteredProducts = filterProductsByRelevance(categoryFilteredProducts, searchQuery.trim(), 10);
+        // Backend already matched/ranked; client minScore was dropping valid rows (e.g. keyword codes vs display name).
+        const filteredProducts = filterProductsByRelevance(categoryFilteredProducts, searchQuery.trim(), 0);
         allProducts.push(...filteredProducts);
 
         // Fetch products from matching suppliers
@@ -204,7 +236,7 @@ export function ProductGrid({
 
           try {
             const supplierRes = await fetch(
-              `/api/fetchSuggestions?supplierProducts=${encodeURIComponent(supplierAccount)}&limit=20&Currency=RWF`,
+              `/api/fetchSuggestions?supplierProducts=${encodeURIComponent(supplierAccount)}&limit=10000&Currency=RWF`,
               { cache: "no-store" }
             );
 
@@ -248,7 +280,7 @@ export function ProductGrid({
     }, 300); // 300ms debounce
 
     return () => clearTimeout(timeoutId);
-  }, [searchQuery, categoryId]);
+  }, [searchQuery, categoryId, selectedSupplier]);
 
   useEffect(() => {
     let isMounted = true;
@@ -262,14 +294,15 @@ export function ProductGrid({
         if (selectedSupplier === "all") {
           // show random products from sellers in this category
           const res = await fetch(
-            `${base}/api/fetchSuggestions?listSuppliersWithProducts=${encodeURIComponent(categoryId)}&Currency=RWF`,
+            `${base}/api/fetchSuggestions?listSuppliersWithProducts=${encodeURIComponent(categoryId)}&limit=10000&Currency=RWF`,
             { cache: "no-store" }
           );
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const sellers = (await res.json()) as Array<any>;
+          const raw = await res.json();
+          const sellers = extractSuppliersWithProducts(raw);
 
           const products: ServerProduct[] = [];
-          for (const s of sellers || []) {
+          for (const s of sellers) {
             const sellerAccount =
               s.seller_account ?? s.SELLER_ISHYIGA_ACCOUNT ?? s.seller_ishyiga_account ?? "";
             const sellerName = s.seller_name ?? s.SELLER_NAMES ?? "";
@@ -285,7 +318,7 @@ export function ProductGrid({
         } else {
           // ONLY the selected supplier's items
           const res = await fetch(
-            `${base}/api/fetchSuggestions?supplierProducts=${encodeURIComponent(selectedSupplier)}&limit=50&Currency=RWF`,
+            `${base}/api/fetchSuggestions?supplierProducts=${encodeURIComponent(selectedSupplier)}&limit=10000&Currency=RWF`,
             { cache: "no-store" }
           );
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -314,10 +347,24 @@ export function ProductGrid({
   const allProducts = useMemo(() => {
     // Use global search results if searching, otherwise use server products
     const sourceProducts = searchQuery.trim() ? globalSearchResults : serverProducts;
+    
+    console.log("[ProductGrid] allProducts update:", {
+      searchQuery: searchQuery,
+      usingGlobalResults: !!searchQuery.trim(),
+      sourceProductsCount: sourceProducts.length,
+      globalResultsCount: globalSearchResults.length,
+      serverProductsCount: serverProducts.length
+    });
 
     return (sourceProducts || []).map((p, idx) => {
+      // Backend often sets type: "product" (entity kind), not a sector — do not treat as route category.
+      const typeRaw = p.type != null ? String(p.type).trim() : "";
+      const fromType =
+        typeRaw && typeRaw.toLowerCase() !== "product"
+          ? toRouteCategoryId(p.type)
+          : undefined;
       const firstCategoryHint =
-        toRouteCategoryId(p.type) ||
+        fromType ||
         toRouteCategoryId(p.sector) ||
         toRouteCategoryId(p.category);
 
@@ -330,15 +377,27 @@ export function ProductGrid({
         unit: p.item_packet,
         inStock: true,
         rating: 4,
-        supplierId: p.item_seller_account,
+        supplierId:
+          p.item_seller_account ||
+          (selectedSupplier !== "all" ? selectedSupplier : "") ||
+          "",
         supplierName: p.supplier_name || p.item_seller_account || "Supplier",
         supplierLocation: p.supplier_location,
-        image: p.image || "/placeholder.svg?height=300&width=300",
+        // Preserve all image fields for KAOS URL construction
+        image: p.image,
+        image_url: p.image_url,
+        item_image_url: p.item_image_url,
+        IMAGE_URL: p.IMAGE_URL,
+        // Also preserve famille for KAOS paths
+        famille: p.famille,
+        FAMILLE: p.FAMILLE,
+        item_key_words: p.item_key_words,
+        item_code: p.item_key_words,
         momo: p.momo,
         _routeCategory: firstCategoryHint,
       };
     });
-  }, [serverProducts, globalSearchResults, searchQuery, categoryId]);
+  }, [serverProducts, globalSearchResults, searchQuery, categoryId, selectedSupplier]);
 
   const suppliers = useMemo(() => {
     const uniq = new Map<string, { id: string; name: string; location?: string }>();
@@ -357,17 +416,12 @@ export function ProductGrid({
   const filteredProducts = useMemo(() => {
     let items = allProducts;
 
-    // filter by supplier if chosen
+    // Supplier chip: only match account id. Category/sector is enforced by the API
+    // (sector on globalSearch, listSuppliersWithProducts by categoryId, etc.) — never
+    // re-filter here using client-side _routeCategory heuristics (breaks with type: "product", mixed fields, Redis shapes).
     if (selectedSupplier !== "all") {
       items = items.filter((p) => p.supplierId === selectedSupplier);
-
-      // If supplierProducts includes category hints, keep only items in the current category
-      if (items.some((p) => !!p._routeCategory)) {
-        items = items.filter((p) => p._routeCategory === categoryId);
-      }
     }
-
-    // No need for local text filtering - global search handles it with multilingual support
 
     // sort
     switch (sortBy) {
@@ -385,7 +439,7 @@ export function ProductGrid({
     }
 
     return items;
-  }, [allProducts, selectedSupplier, sortBy, categoryId]);
+  }, [allProducts, selectedSupplier, sortBy]);
 
   const displayedProducts = filteredProducts.slice(0, displayCount);
 
@@ -407,7 +461,10 @@ export function ProductGrid({
               type="search"
               placeholder={`Search ${categoryName} products or suppliers…`}
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => {
+                console.log("[ProductGrid] Search input changed:", e.target.value);
+                setSearchQuery(e.target.value);
+              }}
               className="pl-10 pr-10"
             />
             {searching && (

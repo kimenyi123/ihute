@@ -98,7 +98,7 @@ export async function POST(req: NextRequest) {
     const contentType = req.headers.get('content-type') || ''
 
     let body: any
-    let headers: HeadersInit = {}
+    const headers: HeadersInit = {}
 
     // Handle multipart/form-data (Excel upload)
     if (contentType.includes('multipart/form-data')) {

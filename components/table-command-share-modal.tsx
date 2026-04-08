@@ -3,7 +3,7 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Copy, CheckCircle2, Download, MessageCircle, X } from "lucide-react"
+import { Copy, CheckCircle2, Download, MessageCircle } from "lucide-react"
 import { useState } from "react"
 import dynamic from "next/dynamic"
 

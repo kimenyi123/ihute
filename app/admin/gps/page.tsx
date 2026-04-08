@@ -1,8 +1,8 @@
 "use client"
 
-import { useState, useEffect, useMemo, useRef } from "react"
+import { useState, useEffect, useMemo } from "react"
 import dynamic from 'next/dynamic'
-import { MapPin, AlertCircle, CheckCircle, RefreshCw, Download, Upload, Search, ExternalLink, Copy, Map } from "lucide-react"
+import { MapPin, AlertCircle, CheckCircle, RefreshCw, Download, Upload, Search, Copy, Map } from "lucide-react"
 
 // Dynamically import map components to avoid SSR issues
 const MapContainer = dynamic(() => import('react-leaflet').then(mod => mod.MapContainer), { ssr: false })
@@ -48,6 +48,9 @@ interface GPSIssue {
     gps_accuracy: number | null
     status: string
     days_since_update: number | null
+    loc_province?: string | null
+    loc_district?: string | null
+    loc_cell?: string | null
 }
 
 interface GPSStats {
@@ -133,7 +136,7 @@ export default function GPSManagementPage() {
     }
 
     const filteredIssues = useMemo(() => {
-        let filtered = getFilteredIssues()
+        const filtered = getFilteredIssues()
 
         // Add distance calculation to each issue
         const withDistance = filtered.map(issue => ({

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { useAuthStore } from "@/lib/auth-store"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, MapPin, Clock, TrendingUp, Zap } from "lucide-react"
+import { ArrowLeft, MapPin, Clock, Zap } from "lucide-react"
 import Link from "next/link"
 
 type ActivityZone = {

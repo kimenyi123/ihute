@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { filterSuppliersByRelevance } from "@/lib/search-utils"
 import { getTranslations } from "@/lib/keyword-mapping"
-import { MapPin, Store, ChevronLeft, ChevronRight } from "lucide-react"
+import { MapPin, Store } from "lucide-react"
 import { useTableCommandStore } from "@/lib/table-command-store"
 import { useLocationStoreEnhanced } from "@/lib/location-store-enhanced"
 import { LocationBadge } from "@/components/location-badge"
@@ -33,6 +33,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import Image from "next/image"
 
 type Shop = {
   supplier_account: string
@@ -64,6 +65,9 @@ type Product = {
   image?: string
   image_url?: string
   item_image_url?: string
+  IMAGE_URL?: string
+  famille?: string
+  FAMILLE?: string
   relevance_score?: number
 }
 
@@ -85,6 +89,18 @@ type SectorSeller = {
   seller_location?: string
   seller_momo?: string
   products: Product[]
+}
+
+// Category image mapping
+const CATEGORY_IMAGES: Record<string, string> = {
+  pharmacy: "/pharmacy-medicine-pills-bottles.jpg",
+  "liquor-store": "/wine-bottles-liquor-store.jpg", 
+  boutique: "/fashion-clothing-boutique-store.jpg",
+  "bar-resto": "/restaurant-food-dining-bar.jpg",
+  supermarket: "/supermarket-groceries-shopping-cart.jpg",
+  "coffee-shop": "/coffee-shop-cafe-espresso.jpg",
+  beauty: "/beauty-cosmetics-makeup-products.jpg",
+  general: "/general-store-retail-products.jpg",
 }
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || process.env.NEXT_PUBLIC_API_URL || ""
@@ -235,8 +251,6 @@ function normalizeSupplierProductsResponse(
       const items = (p as any).items
       if (Array.isArray(items) && items.length > 0) {
         for (const item of items) {
-          const rawImg = getProductImageUrl(item)
-          const img = rawImg ? (normalizeImageUrl(rawImg) ?? rawImg) : undefined
           flat.push({
             item_code: item.item_key_words ?? item.item_code ?? "",
             item_commercial_name: item.item_commercial_name ?? item.item_name ?? "Product",
@@ -253,11 +267,15 @@ function normalizeSupplierProductsResponse(
             supplier_name,
             supplier_location: (p as any).supplier_location ?? undefined,
             type: (p as any).type ?? "product",
-            image: img ?? undefined,
-            image_url: img ?? undefined,
-            item_image_url: img ?? undefined,
+            // Preserve original backend image fields for KAOS URL construction
+            image: item.image,
+            image_url: item.image_url,
+            item_image_url: item.item_image_url,
+            IMAGE_URL: item.IMAGE_URL,
+            // Also preserve famille for KAOS paths
+            famille: item.famille,
+            FAMILLE: item.FAMILLE,
             momo: item.momo ?? (p as any).momo,
-            famille: (item as any).famille ?? (p as any).famille ?? (item as any).FAMILLE ?? (p as any).FAMILLE,
           })
         }
       } else {
@@ -277,14 +295,18 @@ function normalizeSupplierProductsResponse(
           supplier_name: q.supplier_name ?? supplier_name,
           supplier_location: q.supplier_location,
           type: q.type ?? "product",
-          image: img ?? undefined,
-          image_url: img ?? undefined,
-          item_image_url: img ?? undefined,
+          // Preserve original backend image fields for KAOS URL construction
+          image: q.image,
+          image_url: q.image_url,
+          item_image_url: q.item_image_url,
+          IMAGE_URL: q.IMAGE_URL,
+          // Also preserve famille for KAOS paths
+          famille: q.famille,
+          FAMILLE: q.FAMILLE,
           selling_price: q.selling_price ?? q.SALE_PRICE_INCLUSIVE ?? q.price,
           cost_price: q.cost_price,
           currency: q.currency,
           momo: q.momo,
-          famille: (q as any).famille ?? (q as any).FAMILLE,
         })
       }
     }
@@ -509,7 +531,7 @@ export default function SearchPage() {
 
   // ====== MAIN FIX: Trust backend translation results ======
   useEffect(() => {
-    let cancelled = false
+    const cancelled = false
     async function run() {
       if (!debouncedQ || debouncedQ.length < 2) {
         setSearchResult(null)
@@ -548,7 +570,11 @@ export default function SearchPage() {
 
         if (!cancelled) {
           // Log data source (Redis vs DB) for debugging
-          const dataSource = getDataSourceLabel(data)
+          const dataSource = getDataSourceLabel({
+            source: data.source,
+            fromNiki: data.fromNiki,
+            products: data.products?.map((p: any) => ({ source: p.source })) || []
+          })
           const productSources = (data.products ?? []).map((p: Product & { source?: string }) => p?.source ?? "?")
           console.log("[Search] Data source:", dataSource, "| Query:", debouncedQ, "| Products:", data.products?.length ?? 0, "| source:", data.source, "fromNiki:", data.fromNiki, "| Product sources:", productSources.slice(0, 5))
           if (dataSource === "unknown") {
@@ -611,7 +637,7 @@ export default function SearchPage() {
       }
     }
     run()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [debouncedQ, selectedShop?.supplier_account, locationParam, sectorParam])
 
   // Seller catalogue (RIGHT)
@@ -626,7 +652,7 @@ export default function SearchPage() {
       try {
         const url = `/api/fetchSuggestions?supplierProducts=${encodeURIComponent(
           selectedShop.supplier_account,
-        )}&limit=500&Currency=RWF`
+        )}&limit=10000&Currency=RWF`
         const res = await fetch(url, { cache: "no-store" })
         const raw = res.ok ? await res.json() : null
         const data = normalizeSupplierProductsResponse(
@@ -1121,9 +1147,21 @@ export default function SearchPage() {
             {sectorParam && (
               <section className="bg-white rounded-xl border p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <h2 className="font-semibold text-lg">
-                    Sector spotlight — <span className="text-blue-700">{sectorParam}</span>
-                  </h2>
+                  <div className="flex items-center gap-3">
+                    {CATEGORY_IMAGES[sectorParam] && (
+                      <div className="relative w-12 h-12 rounded-lg overflow-hidden flex-shrink-0">
+                        <Image
+                          src={CATEGORY_IMAGES[sectorParam]}
+                          alt={sectorParam.replace("-", " ")}
+                          fill
+                          className="object-cover"
+                        />
+                      </div>
+                    )}
+                    <h2 className="font-semibold text-lg">
+                      Sector spotlight — <span className="text-blue-700">{sectorParam.replace("-", " ")}</span>
+                    </h2>
+                  </div>
                   <div className="flex items-center gap-2">
                     {loadingSector && <span className="text-sm opacity-60 animate-pulse">Loading…</span>}
                     <Button size="sm" variant="outline" onClick={clearSector} title="Clear sector filter">
@@ -1218,127 +1256,42 @@ export default function SearchPage() {
                   <div className="py-8 text-center text-gray-500 text-sm">Searching…</div>
                 ) : displayedSupplierProducts.length > 0 ? (
                   <>
-                    {(() => {
-                      const total = displayedSupplierProducts.length
-                      const totalPages = Math.max(1, Math.ceil(total / supplierProductsPerPage))
-                      const page = Math.min(Math.max(1, supplierProductPage), totalPages)
-                      const startIndex = (page - 1) * supplierProductsPerPage
-                      const endIndex = Math.min(startIndex + supplierProductsPerPage, total)
-                      const paginatedProducts = displayedSupplierProducts.slice(startIndex, endIndex)
-                      return (
-                        <>
-                          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                            <p className="text-sm text-gray-500">
-                              {total} product{total !== 1 ? "s" : ""}
-                              {debouncedSupplierSearch.trim() ? ` matching "${debouncedSupplierSearch.trim()}"` : ""}
-                            </p>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <Select value={supplierProductSort} onValueChange={(v: "relevance" | "price-asc" | "price-desc") => setSupplierProductSort(v)}>
-                                <SelectTrigger className="w-[140px] h-9">
-                                  <SelectValue placeholder="Sort by" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="relevance">Relevance</SelectItem>
-                                  <SelectItem value="price-asc">Price: Low to High</SelectItem>
-                                  <SelectItem value="price-desc">Price: High to Low</SelectItem>
-                                </SelectContent>
-                              </Select>
-                              <span className="text-sm text-gray-500">
-                                Showing {startIndex + 1}–{endIndex} of {total}
-                              </span>
-                            </div>
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                      <p className="text-sm text-gray-500">
+                        {displayedSupplierProducts.length} product{displayedSupplierProducts.length !== 1 ? "s" : ""}
+                        {debouncedSupplierSearch.trim() ? ` matching "${debouncedSupplierSearch.trim()}"` : ""}
+                      </p>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Select value={supplierProductSort} onValueChange={(v: "relevance" | "price-asc" | "price-desc") => setSupplierProductSort(v)}>
+                          <SelectTrigger className="w-[140px] h-9">
+                            <SelectValue placeholder="Sort by" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="relevance">Relevance</SelectItem>
+                            <SelectItem value="price-asc">Price: Low to High</SelectItem>
+                            <SelectItem value="price-desc">Price: High to Low</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                      {displayedSupplierProducts.map((p, index) => (
+                        <div key={`${p.item_code}-${p.supplier_account || ""}-${index}`} className="relative">
+                          <div role="button" tabIndex={0} onClick={() => addProductToCart(p)} onKeyDown={(e) => onTileKey(e, p)} title="Click to add to cart">
+                            <ProductCard product={toCardProduct(p)} />
                           </div>
-                          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-                            {paginatedProducts.map((p, index) => (
-                              <div key={`${p.item_code}-${p.supplier_account || ""}-${startIndex + index}`} className="relative">
-                                <div role="button" tabIndex={0} onClick={() => addProductToCart(p)} onKeyDown={(e) => onTileKey(e, p)} title="Click to add to cart">
-                                  <ProductCard product={toCardProduct(p)} />
-                                </div>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="absolute bottom-2 right-2 text-xs z-10"
-                                  onClick={(e) => { e.stopPropagation(); setQuickViewProduct(p); setQuickViewOpen(true); }}
-                                >
-                                  Quick view
-                                </Button>
-                              </div>
-                            ))}
-                          </div>
-                          {totalPages > 1 && (
-                            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-4 pt-4 border-t border-gray-200">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm text-gray-500">Show</span>
-                                <Select
-                                  value={String(supplierProductsPerPage)}
-                                  onValueChange={(v) => {
-                                    setSupplierProductsPerPage(Number(v))
-                                    setSupplierProductPage(1)
-                                  }}
-                                >
-                                  <SelectTrigger className="w-[72px] h-8">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="10">10</SelectItem>
-                                    <SelectItem value="15">15</SelectItem>
-                                    <SelectItem value="24">24</SelectItem>
-                                    <SelectItem value="48">48</SelectItem>
-                                    <SelectItem value="96">96</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                                <span className="text-sm text-gray-500">per page</span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm text-gray-500">
-                                  Page {page} of {totalPages}
-                                </span>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-8 gap-1"
-                                  onClick={() => setSupplierProductPage((p) => Math.max(1, p - 1))}
-                                  disabled={page <= 1}
-                                >
-                                  <ChevronLeft className="h-4 w-4" />
-                                  Previous
-                                </Button>
-                                <div className="flex items-center gap-1">
-                                  {Array.from({ length: totalPages }, (_, i) => i + 1)
-                                    .filter((pNum) => pNum === 1 || pNum === totalPages || Math.abs(pNum - page) <= 1)
-                                    .map((pNum, i, arr) => (
-                                      <div key={pNum} className="flex items-center gap-1">
-                                        {i > 0 && arr[i - 1] !== pNum - 1 && (
-                                          <span className="text-gray-400 px-1">…</span>
-                                        )}
-                                        <Button
-                                          variant={page === pNum ? "default" : "outline"}
-                                          size="sm"
-                                          className="h-8 w-8 p-0 min-w-8"
-                                          onClick={() => setSupplierProductPage(pNum)}
-                                        >
-                                          {pNum}
-                                        </Button>
-                                      </div>
-                                    ))}
-                                </div>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-8 gap-1"
-                                  onClick={() => setSupplierProductPage((p) => Math.min(totalPages, p + 1))}
-                                  disabled={page >= totalPages}
-                                >
-                                  Next
-                                  <ChevronRight className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </div>
-                          )}
-                        </>
-                      )
-                    })()}
-                  </>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="absolute bottom-2 right-2 text-xs z-10"
+                            onClick={(e) => { e.stopPropagation(); setQuickViewProduct(p); setQuickViewOpen(true); }}
+                          >
+                            Quick view
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </> 
                 ) : (
                   <div className="text-center py-6 text-gray-500">
                     {debouncedSupplierSearch.trim()
@@ -1389,44 +1342,24 @@ export default function SearchPage() {
                       </h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         {products.map((product, index) => (
-                          <div
-                            key={`${product.item_code}-${product.supplier_account || ""}-${index}`}
-                            className="rounded-lg border p-3 hover:border-blue-300 transition-colors group"
-                          >
-                            <div className="flex gap-3">
-                              <ProductThumb
-                                product={product}
-                                alt={String(product.item_commercial_name ?? product.item_code ?? "Product")}
-                              />
-                              <div className="min-w-0 flex-1">
-                                <div className="font-medium text-gray-900 group-hover:text-blue-700 line-clamp-2">
-                                  {product.item_commercial_name}
-                                </div>
-                                <div className="text-sm text-gray-600 mt-1 line-clamp-1">
-                                  {product.item_packet || "No description"}
-                                </div>
-                              </div>
-                            </div>
-                            <div className="mt-2 text-base font-semibold text-green-600">
-                              {product.selling_price != null ? `${Number(product.selling_price).toLocaleString()} ${product.currency || "RWF"}` : "Price not available"}
-                            </div>
-                            <div className="mt-3 flex gap-2">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="text-xs"
-                                onClick={(e) => { e.stopPropagation(); setQuickViewProduct(product); setQuickViewOpen(true); }}
-                              >
-                                Quick view
-                              </Button>
-                              <Button
-                                size="sm"
-                                className="text-xs"
-                                onClick={(e) => { e.stopPropagation(); addProductToCart(product); }}
-                              >
-                                Add to cart
-                              </Button>
-                            </div>
+                          <div key={`${product.item_code}-${product.supplier_account || ""}-${index}`} className="space-y-3">
+                            {/* Debug: Log product data for search results */}
+                            {(() => {
+                              console.log("[Search] Product data for search results:", {
+                                name: product.item_commercial_name,
+                                item_key_words: product.item_key_words,
+                                famille: (product as any).famille,
+                                FAMILLE: (product as any).FAMILLE,
+                                image_url: product.image_url,
+                                item_image_url: product.item_image_url,
+                                IMAGE_URL: (product as any).IMAGE_URL,
+                                supplier: product.supplier_account
+                              })
+                              return null
+                            })()}
+                            <ProductCard
+                              product={toCardProduct(product)}
+                            />
                           </div>
                         ))}
                       </div>
@@ -1451,11 +1384,7 @@ export default function SearchPage() {
                   {allSuppliers.map((supplier) => (
                     <div
                       key={supplier.supplier_account}
-                      className={`p-3 rounded-lg border cursor-pointer transition-all ${
-                        selectedShop?.supplier_account === supplier.supplier_account
-                          ? "border-blue-500 bg-blue-50"
-                          : "border-gray-200 hover:border-blue-300 hover:bg-gray-50"
-                      }`}
+                      className="p-3 rounded-lg border cursor-pointer transition-all border-gray-200 hover:border-blue-300 hover:bg-gray-50"
                       onClick={() => handleSelectShop(supplier)}
                       title="Click to preview this supplier's products"
                     >

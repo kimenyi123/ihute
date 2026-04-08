@@ -54,7 +54,6 @@ export default function SellerDetailPage() {
     if (sellerAccount) {
       loadSellerDetails()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sellerAccount, productPage])
 
   const loadSellerDetails = async () => {

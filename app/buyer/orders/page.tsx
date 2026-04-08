@@ -6,6 +6,7 @@ import { useAuthStore } from "@/lib/auth-store"
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
@@ -20,15 +21,23 @@ import { mapBackendOrderStatusToStore } from "@/lib/order-status-map"
 type RawTxn = {
   ID_ORDER?: string
   BUYER_NAME?: string
+  BUYER_NAMES?: string
   SELLER_NAMES?: string
   SELLER_ISHYIGA_ACCOUNT?: string
   AMOUNT?: number
+  SERVED_AMOUNT?: number | string
+  SERVED_QTY?: number | string
+  servedAmount?: number | string
+  servedQty?: number | string
+  CONDITIONS?: string
+  ORDER_NOTE?: string
   ORDER_STATUS?: string
   PAYMENT_STATUS?: string
   PAYMENT_NAME?: string
   REKISIYO_STATUS?: string
   CREATED_AT?: number
   BUYER_OWNER?: string
+  BUYER_OWNER_NAME?: string
   buyerTIN?: string
   BUYER_TIN?: string
   SUPPLIER_TIN?: string
@@ -37,6 +46,17 @@ type RawTxn = {
   BUYER_ISHYIGA_ACCOUNT?: string
   /** Backend may use camelCase or other keys; indexed access in pickRawStr */
   [key: string]: unknown
+}
+
+function pickRawNum(raw: RawTxn, ...keys: string[]): number | null {
+  const o = raw as Record<string, unknown>
+  for (const k of keys) {
+    const v = o[k]
+    if (v == null || String(v).trim() === "") continue
+    const n = Number(v)
+    if (!Number.isNaN(n)) return n
+  }
+  return null
 }
 
 /** First non-empty string among known backend key spellings (legacy list payloads vary). */
@@ -94,7 +114,7 @@ async function enrichOpenOrdersPaymentFromTrack(orders: Order[]): Promise<Order[
         const tr = await fetch("/api/orders/track", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ orderId: o.id }),
+          body: JSON.stringify({ orderId: o.id, buyerAccount: (o as any).buyerAccount }),
           cache: "no-store",
         })
         const data = await tr.json()
@@ -194,6 +214,9 @@ export default function BuyerOrdersPage() {
   const [pageSize, setPageSize] = useState(10)
   const [total, setTotal] = useState<number | null>(null)
   const [search, setSearch] = useState("")
+  const [dateFrom, setDateFrom] = useState("")
+  const [dateTo, setDateTo] = useState("")
+  const [criteria, setCriteria] = useState<string>("all")
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const orders = useOrdersStore((s) => s.orders)
   const setOrders = useOrdersStore((s) => s.setOrders)
@@ -214,7 +237,16 @@ export default function BuyerOrdersPage() {
         const res = await fetch("/api/orders", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: user.email, page, pageSize }),
+          body: JSON.stringify({
+            email: user.email,
+            buyerAccount: user.ishyigaAccount,
+            CLIENT: search.trim() || undefined,
+            START: dateFrom ? `${dateFrom} 00:00:00` : undefined,
+            END: dateTo ? `${dateTo} 23:59:59` : undefined,
+            criteria: criteria !== "all" ? criteria : undefined,
+            page,
+            pageSize,
+          }),
           cache: "no-store",
         })
 
@@ -231,10 +263,17 @@ export default function BuyerOrdersPage() {
 
           const finalOrders: Order[] = rawList.map((raw) => {
             const payRaw = paymentStatusFromRaw(raw)
+            const resolvedBuyerName =
+              pickRawStr(raw, "OWNER", "owner", "BUYER_OWNER_NAME", "BUYER_OWNER", "BUYER_NAME", "BUYER_NAMES") ||
+              user?.owner ||
+              "Unknown Buyer"
             return {
             id: raw.ID_ORDER?.toString() || crypto.randomUUID(),
-            buyerName: raw.BUYER_NAME || "Unknown Buyer",
-            buyerOwner: raw.BUYER_OWNER || user?.owner || "N/A",
+            buyerName: resolvedBuyerName,
+            buyerOwner:
+              pickRawStr(raw, "OWNER", "owner", "BUYER_OWNER_NAME", "BUYER_OWNER") ||
+              user?.owner ||
+              "N/A",
             buyerAccount: raw.BUYER_ISHYIGA_ACCOUNT || "",
             sellerAccount: raw.SELLER_ISHYIGA_ACCOUNT || "",
             sellerId: raw.SELLER_ISHYIGA_ACCOUNT || "",
@@ -250,6 +289,9 @@ export default function BuyerOrdersPage() {
             subtotal: raw.subtotal ?? raw.AMOUNT ?? 0,
             buyerTIN: raw.buyerTIN || raw.BUYER_TIN || "",
             supplierTIN: raw.SUPPLIER_TIN || raw.SELLER_TIN || "",
+            servedAmount: pickRawNum(raw, "SERVED_AMOUNT", "servedAmount", "AMOUNT_SERVED"),
+            servedQty: pickRawNum(raw, "CONFIRMED_RECEIVED_QTY", "SERVED_QTY", "servedQty", "SERVED_QUANTITY", "received_quantity"),
+            orderNote: pickRawStr(raw, "CONDITIONS", "ORDER_NOTE", "orderNote", "NOTE"),
           }
           })
 
@@ -265,7 +307,7 @@ export default function BuyerOrdersPage() {
     }
 
     load()
-  }, [user?.email, page, pageSize, setOrders, user?.owner])
+  }, [user?.email, user?.ishyigaAccount, search, dateFrom, dateTo, criteria, page, pageSize, setOrders, user?.owner])
 
   const distinctStatuses = useMemo(() => {
     const set = new Set<string>()
@@ -286,15 +328,25 @@ export default function BuyerOrdersPage() {
           (o.orderStatus ?? "").trim().toUpperCase() === statusFilter.toUpperCase(),
       )
     }
+    if (criteria !== "all") {
+      const c = criteria.toUpperCase()
+      list = list.filter((o) => {
+        const payRaw = (o.paymentStatusRaw ?? "").toUpperCase()
+        const st = (o.orderStatus ?? "").toUpperCase()
+        if (c === "CREDIT") return payRaw.includes("CREDIT")
+        return st === c
+      })
+    }
     if (!search.trim()) return list
     const s = search.toLowerCase()
     return list.filter(
       (o) =>
         (o.buyerName ?? "").toLowerCase().includes(s) ||
+        ((o as any).buyerOwner ?? "").toLowerCase().includes(s) ||
         (o.seller ?? "").toLowerCase().includes(s) ||
         o.id.includes(s),
     )
-  }, [orders, search, statusFilter])
+  }, [orders, search, statusFilter, criteria])
 
   const totalPages = useMemo(() => {
     if (!total || total <= 0) return 1
@@ -329,6 +381,43 @@ export default function BuyerOrdersPage() {
     return canRequestInvoiceFinancing(o.orderStatus, financed)
   }
 
+  const exportOrderRowCsv = (o: Order) => {
+    const servedAmount = Number((o as any).servedAmount ?? 0)
+    const fields = [
+      "Order ID",
+      "Buyer",
+      "Company",
+      "Seller",
+      "Amount",
+      "Served Amount",
+      "Served Qty",
+      "Status",
+      "Date",
+      "Order Note",
+    ]
+    const values = [
+      String(o.id),
+      String(o.buyerName ?? ""),
+      String((o as any).buyerOwner ?? ""),
+      String(o.seller ?? ""),
+      String((o.amount ?? o.subtotal ?? 0)),
+      String(Number.isFinite(servedAmount) ? servedAmount : ""),
+      String(Number((o as any).servedQty ?? 0) || 0),
+      String(o.orderStatus ?? ""),
+      new Date(o.createdAt).toISOString(),
+      String((o as any).orderNote ?? ""),
+    ]
+    const esc = (v: string) => `"${v.replace(/"/g, '""')}"`
+    const csv = `${fields.map(esc).join(",")}\n${values.map(esc).join(",")}\n`
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `order-${o.id}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="min-h-screen w-full flex flex-col bg-slate-50">
       <Header />
@@ -339,11 +428,28 @@ export default function BuyerOrdersPage() {
         <div className="mb-4 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2">
           <input
             type="text"
-            placeholder="Search by buyer, seller, or order ID..."
+            placeholder="Search by buyer, company, seller, or order ID..."
             className="border border-slate-300 px-3 py-2 rounded-lg w-full sm:max-w-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
+          <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-full sm:w-[170px]" />
+          <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-full sm:w-[170px]" />
+          <Select value={criteria} onValueChange={setCriteria}>
+            <SelectTrigger className="w-full sm:w-[180px] border-slate-300">
+              <SelectValue placeholder="JSP criteria" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All criteria</SelectItem>
+              <SelectItem value="OPEN">OPEN</SelectItem>
+              <SelectItem value="ORDER">ORDER</SelectItem>
+              <SelectItem value="SLEEPED">SLEEPED</SelectItem>
+              <SelectItem value="FACTURE">FACTURE</SelectItem>
+              <SelectItem value="INVOICE">INVOICE</SelectItem>
+              <SelectItem value="DELIVERED">DELIVERED</SelectItem>
+              <SelectItem value="CREDIT">CREDIT</SelectItem>
+            </SelectContent>
+          </Select>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger className="w-full sm:w-[200px] border-slate-300">
               <SelectValue placeholder="Filter by status" />
@@ -368,8 +474,10 @@ export default function BuyerOrdersPage() {
               <thead className="bg-slate-100 text-slate-700">
                 <tr>
                   <th className="px-4 py-3 text-left text-sm font-semibold">Order ID</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold">Company</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold">Seller</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold">Amount</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold">Order Note</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold">Status</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold">Date</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold">Action</th>
@@ -380,9 +488,13 @@ export default function BuyerOrdersPage() {
                 {filteredOrders.map((o) => (
                   <tr key={o.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 font-semibold">{o.id}</td>
+                    <td className="px-4 py-3">{o.buyerName || (o as any).buyerOwner || "—"}</td>
                     <td className="px-4 py-3">{o.seller}</td>
                     <td className="px-4 py-3 font-medium">
                       {(o.amount ?? o.subtotal ?? 0).toLocaleString()} RWF
+                    </td>
+                    <td className="px-4 py-3 max-w-[220px] truncate" title={(o as any).orderNote || ""}>
+                      {(o as any).orderNote || "—"}
                     </td>
                     <td className="px-4 py-3">
                       <span
@@ -396,6 +508,9 @@ export default function BuyerOrdersPage() {
                     <td className="px-4 py-3 flex gap-2">
                       <Button size="sm" variant="default" onClick={() => router.push(`/orders/${o.id}`)}>
                         View
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => exportOrderRowCsv(o)}>
+                        Export
                       </Button>
 
                       <Button

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { DollarSign, TrendingUp, Settings, Package } from 'lucide-react'
+import { DollarSign, TrendingUp, Settings } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
 interface CommissionSettings {

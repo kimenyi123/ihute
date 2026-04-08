@@ -18,7 +18,7 @@ import { formatPaymentMethod } from "@/lib/payment-utils"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog"
-import { Copy, PhoneCall, CheckCircle2, RotateCcw, MessageCircle, Truck, CreditCard, Wallet, Beer, Users, Lock, Tag, MapPin } from "lucide-react"
+import { Copy, PhoneCall, CheckCircle2, RotateCcw, MessageCircle, Truck, CreditCard, Wallet, Users, Lock, MapPin } from "lucide-react"
 import { isBarOrRestaurant } from "@/lib/constants"
 import { useTableCommandStore } from "@/lib/table-command-store"
 import { getSavedAddresses, saveAddress, type SavedAddress } from "@/lib/saved-addresses"
@@ -50,7 +50,7 @@ import { buildMoMoUssd } from "@/lib/momo-ussd"
 
 // ---------- helpers ----------
 function normalizePhone(raw?: string | null): string {
-  let v = (raw || "").replace(/\s|-/g, "")
+  const v = (raw || "").replace(/\s|-/g, "")
   if (!v) return ""
   if (v.startsWith("+250") || v.startsWith("+258")) return v
   if (v.startsWith("250")) return "+" + v

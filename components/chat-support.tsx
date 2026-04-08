@@ -9,7 +9,6 @@ import {
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
 import { motion, AnimatePresence } from "framer-motion"
 import Link from "next/link"
 import { 

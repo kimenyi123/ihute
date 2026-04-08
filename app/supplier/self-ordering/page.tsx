@@ -62,7 +62,6 @@ export default function SupplierSelfOrderingPage() {
             .catch(() => {
                 setProfileChecked(true);
             });
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [user?.ishyigaAccount, user?.role]);
 
     useEffect(() => {

@@ -176,7 +176,7 @@ function buildTracking(status: OrderStatus) {
 }
 
 function normalizePhone(raw?: string | null): string {
-  let v = (raw || "").replace(/\s|-/g, "")
+  const v = (raw || "").replace(/\s|-/g, "")
   if (!v) return ""
   if (v.startsWith("+250") || v.startsWith("+258")) return v
   if (v.startsWith("250")) return "+" + v

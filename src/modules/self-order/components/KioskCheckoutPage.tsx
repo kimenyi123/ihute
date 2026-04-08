@@ -1,10 +1,10 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import dynamic from "next/dynamic"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useCartStore } from "@/lib/cart-store"
-import { ChevronLeft, CreditCard, Banknote, Smartphone, Copy, CheckCircle2, X } from "lucide-react"
+import { ChevronLeft, CreditCard, Banknote, Smartphone, Copy, CheckCircle2 } from "lucide-react"
 import type { KioskCategory, KioskOrderLine, KioskOrderPayload } from "@/src/modules/self-order/types"
 
 const QRCode = dynamic(() => import("react-qr-code"), { ssr: false })
@@ -272,7 +272,7 @@ export function KioskCheckoutPage() {
               {/* Image */}
               <div className="h-14 w-14 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0">
                 {line.image ? (
-                  // eslint-disable-next-line @next/next/no-img-element
+                   
                   <img src={line.image} alt={line.name} className="h-full w-full object-cover" />
                 ) : (
                   <div className="h-full w-full flex items-center justify-center text-xl text-gray-300">

@@ -2,9 +2,46 @@
 
 import { useEffect, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
-import { ChevronLeft, ChevronRight } from "lucide-react"
+import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react"
 
 type Supplier = { id: string; name: string; location?: string }
+
+type RawSupplierRow = Record<string, unknown>
+
+function extractSuppliersArray(payload: unknown): unknown[] {
+  if (Array.isArray(payload)) return payload
+  if (payload && typeof payload === "object") {
+    const o = payload as Record<string, unknown>
+    if (Array.isArray(o.sellers)) return o.sellers
+    if (Array.isArray(o.suppliers)) return o.suppliers
+    if (Array.isArray(o.data)) return o.data
+    if (Array.isArray(o.results)) return o.results
+  }
+  return []
+}
+
+function mapRowsToSuppliers(rows: unknown[], categoryId: string): Supplier[] {
+  return rows.map((row, index) => {
+    const d = row as RawSupplierRow
+    const rawId = d.id ?? d.SELLER_ISHYIGA_ACCOUNT
+    const id =
+      rawId != null && String(rawId).trim() !== ""
+        ? String(rawId)
+        : `__row_${categoryId}_${index}`
+    return {
+      id,
+      name: String(d.name ?? d.SELLER_NAMES ?? "Supplier"),
+      location:
+        typeof d.location === "string"
+          ? d.location
+          : typeof d.LOCATION === "string"
+            ? d.LOCATION
+            : undefined,
+    }
+  })
+}
+
+const SKELETON_CHIPS = 6
 
 export function BusinessList({
   categoryId,
@@ -18,13 +55,11 @@ export function BusinessList({
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [reloadNonce, setReloadNonce] = useState(0)
 
   const trackRef = useRef<HTMLDivElement | null>(null)
-
-  function getApiBase() {
-    // Always use empty string to make relative calls to Next.js API routes
-    return ""
-  }
+  const headingId = "business-list-heading"
+  const statusId = "business-list-status"
 
   useEffect(() => {
     let isMounted = true
@@ -32,20 +67,17 @@ export function BusinessList({
       setLoading(true)
       setError(null)
       try {
-        const base = getApiBase()
-        const url = `${base}/api/fetchSuggestions?listSuppliersBySector=${encodeURIComponent(categoryId)}`
+        const url = `/api/fetchSuggestions?listSuppliersBySector=${encodeURIComponent(categoryId)}`
         const res = await fetch(url, { cache: "no-store" })
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const data = (await res.json()) as Array<any>
+        if (!res.ok) throw new Error(`Request failed (${res.status})`)
+        const raw: unknown = await res.json()
+        const data = extractSuppliersArray(raw)
         if (!isMounted) return
-        const mapped: Supplier[] = (data || []).map((d) => ({
-          id: String(d.id ?? d.SELLER_ISHYIGA_ACCOUNT ?? ""),
-          name: String(d.name ?? d.SELLER_NAMES ?? "Supplier"),
-          location: d.location ?? d.LOCATION ?? undefined,
-        }))
-        setSuppliers(mapped)
-      } catch (e: any) {
-        if (isMounted) setError(e?.message || "Failed to load suppliers")
+        setSuppliers(mapRowsToSuppliers(data, categoryId))
+      } catch (e: unknown) {
+        const message =
+          e instanceof Error ? e.message : "Failed to load suppliers"
+        if (isMounted) setError(message)
       } finally {
         if (isMounted) setLoading(false)
       }
@@ -54,51 +86,93 @@ export function BusinessList({
     return () => {
       isMounted = false
     }
-  }, [categoryId])
+  }, [categoryId, reloadNonce])
 
   const scrollByAmount = (dir: "left" | "right") => {
     const el = trackRef.current
     if (!el) return
-    const amount = Math.max(280, el.clientWidth * 0.75) // responsive feel
+    const amount = Math.max(280, el.clientWidth * 0.75)
     el.scrollBy({ left: dir === "left" ? -amount : amount, behavior: "smooth" })
   }
 
+  const scrollToEdge = (edge: "start" | "end") => {
+    const el = trackRef.current
+    if (!el) return
+    el.scrollTo({
+      left: edge === "start" ? 0 : el.scrollWidth,
+      behavior: "smooth",
+    })
+  }
+
+  const retry = () => setReloadNonce((n) => n + 1)
+
+  const showEmpty = !loading && !error && suppliers.length === 0
+
   return (
-    <div>
+    <section aria-labelledby={headingId}>
       <div className="mb-4">
-        <h2 className="text-xl font-semibold">Businesses in this category</h2>
-        <p className="text-sm text-muted-foreground">
+        <h2 id={headingId} className="text-xl font-semibold">
+          Businesses in this category
+        </h2>
+        <p id={`${headingId}-desc`} className="text-sm text-muted-foreground">
           Pick a business to see their products — or view all.
         </p>
       </div>
 
+      <p id={statusId} className="sr-only" aria-live="polite" aria-atomic="true">
+        {loading
+          ? "Loading businesses."
+          : error
+            ? `Failed to load businesses: ${error}`
+            : showEmpty
+              ? "No businesses listed in this category."
+              : ""}
+      </p>
+
       <div className="relative">
-        {/* left arrow */}
         <button
+          type="button"
           aria-label="Scroll suppliers left"
           onClick={() => scrollByAmount("left")}
           className="absolute left-0 top-1/2 -translate-y-1/2 z-10 h-9 w-9 rounded-full border bg-background/90 backdrop-blur hover:bg-accent shadow-sm hidden md:inline-flex items-center justify-center"
         >
-          <ChevronLeft className="h-5 w-5" />
+          <ChevronLeft className="h-5 w-5" aria-hidden />
         </button>
 
-        {/* scroll track */}
         <div
           ref={trackRef}
+          role="group"
+          aria-label="Filter products by supplier"
+          aria-busy={loading}
+          aria-describedby={`${headingId}-desc`}
           className={cn(
-            // horizontal scroller; hide scrollbar; no wrap
-            "flex items-center gap-2 overflow-x-auto whitespace-nowrap scroll-smooth px-10 md:px-12",
+            "flex items-center gap-2 overflow-x-auto whitespace-nowrap scroll-smooth px-10 md:px-12 min-h-[2.75rem]",
             "no-scrollbar"
           )}
-          // keyboard support
           tabIndex={0}
           onKeyDown={(e) => {
-            if (e.key === "ArrowLeft") scrollByAmount("left")
-            if (e.key === "ArrowRight") scrollByAmount("right")
+            if (e.key === "ArrowLeft") {
+              scrollByAmount("left")
+              e.preventDefault()
+            }
+            if (e.key === "ArrowRight") {
+              scrollByAmount("right")
+              e.preventDefault()
+            }
+            if (e.key === "Home") {
+              scrollToEdge("start")
+              e.preventDefault()
+            }
+            if (e.key === "End") {
+              scrollToEdge("end")
+              e.preventDefault()
+            }
           }}
         >
           <button
+            type="button"
             onClick={() => onSelect("all", "All Suppliers")}
+            aria-pressed={selectedSupplier === "all"}
             className={cn(
               "px-3 py-1.5 rounded-full border text-sm flex-shrink-0",
               selectedSupplier === "all"
@@ -109,42 +183,76 @@ export function BusinessList({
             All Suppliers
           </button>
 
-          {loading && <span className="text-sm text-muted-foreground px-3">Loading…</span>}
-          {error && <span className="text-sm text-destructive px-3">Failed: {error}</span>}
+          {loading &&
+            Array.from({ length: SKELETON_CHIPS }, (_, i) => (
+              <div
+                key={`sk-${i}`}
+                className="h-9 w-28 flex-shrink-0 rounded-full bg-muted animate-pulse"
+                aria-hidden
+              />
+            ))}
+
+          {error && (
+            <div
+              className="flex items-center gap-2 px-2 py-1 flex-wrap"
+              role="alert"
+            >
+              <span className="text-sm text-destructive">{error}</span>
+              <button
+                type="button"
+                onClick={retry}
+                className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2.5 py-1 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+                Retry
+              </button>
+            </div>
+          )}
 
           {!loading &&
             !error &&
-            suppliers.map((s) => (
+            suppliers.map((s, i) => (
               <button
-                key={s.id}
+                key={`${s.id}-${i}`}
+                type="button"
                 onClick={() => onSelect(s.id, s.name)}
+                aria-pressed={selectedSupplier === s.id}
                 className={cn(
-                  "px-3 py-1.5 rounded-full border text-sm flex-shrink-0",
+                  "px-3 py-1.5 rounded-full border text-sm flex-shrink-0 max-w-[min(100vw-4rem,20rem)] truncate",
                   selectedSupplier === s.id
                     ? "bg-primary text-primary-foreground border-primary"
                     : "bg-background hover:bg-accent"
                 )}
                 title={s.location ? `${s.name} – ${s.location}` : s.name}
               >
-                {s.name}
-                {s.location ? ` – ${s.location}` : ""}
+                <span className="truncate">
+                  {s.name}
+                  {s.location ? ` – ${s.location}` : ""}
+                </span>
               </button>
             ))}
+
+          {showEmpty && (
+            <p className="text-sm text-muted-foreground px-2 py-1 max-w-md">
+              No businesses are listed in this category yet. Use{" "}
+              <span className="font-medium text-foreground">All Suppliers</span>{" "}
+              to browse products from every seller.
+            </p>
+          )}
         </div>
 
-        {/* right arrow */}
         <button
+          type="button"
           aria-label="Scroll suppliers right"
           onClick={() => scrollByAmount("right")}
           className="absolute right-0 top-1/2 -translate-y-1/2 z-10 h-9 w-9 rounded-full border bg-background/90 backdrop-blur hover:bg-accent shadow-sm hidden md:inline-flex items-center justify-center"
         >
-          <ChevronRight className="h-5 w-5" />
+          <ChevronRight className="h-5 w-5" aria-hidden />
         </button>
 
-        {/* subtle gradient edges to hint scrollability */}
         <div className="pointer-events-none absolute left-0 top-0 h-full w-8 bg-gradient-to-r from-background to-transparent" />
         <div className="pointer-events-none absolute right-0 top-0 h-full w-8 bg-gradient-to-l from-background to-transparent" />
       </div>
-    </div>
+    </section>
   )
 }

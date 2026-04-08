@@ -19,7 +19,9 @@ function normalizeOrders(input: any): any[] {
     // ✅ Explicitly ensure TIN fields are included and mapped correctly
     SELLER_TIN: order.SELLER_TIN ?? order.sellerTin ?? "",
     BUYER_TIN: order.BUYER_TIN ?? order.buyerTin ?? "",
-    BUYER_OWNER_NAME: order.BUYER_OWNER_NAME ?? order.buyerOwnerName ?? "",
+    // Prefer joined account owner name; avoid generic placeholders like BUYER_OWNER="Customer".
+    BUYER_OWNER: order.BUYER_OWNER_NAME ?? order.buyerOwnerName ?? order.OWNER ?? order.owner ?? order.BUYER_OWNER ?? order.buyerOwner ?? "",
+    BUYER_OWNER_NAME: order.BUYER_OWNER_NAME ?? order.buyerOwnerName ?? order.OWNER ?? order.owner ?? order.BUYER_OWNER ?? order.buyerOwner ?? "",
 
     items: (Array.isArray(order?.items) ? order.items : []).map((item: any) => {
       const qty = Number(item.QUANTITY ?? item.qty ?? item.quantity ?? 0)
@@ -43,6 +45,11 @@ export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({} as any))
     const sellerAccount = String(body?.sellerAccount ?? "").trim()
+    const buyerAccount = String(body?.buyerAccount ?? "").trim()
+    const client = String(body?.CLIENT ?? "").trim()
+    const start = String(body?.START ?? "").trim()
+    const end = String(body?.END ?? "").trim()
+    const criteria = String(body?.criteria ?? "").trim()
     const page = Math.max(1, Number(body?.page ?? 1))
     const pageSize = Math.min(500, Math.max(1, Number(body?.pageSize ?? 100)))
 
@@ -53,12 +60,18 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "sellerAccount required" }, { status: 400 })
     }
 
-    const form = new URLSearchParams({
+    const formParams = new URLSearchParams({
       action: "listSellerOrders",
       sellerAccount,
       page: String(page),
       pageSize: String(pageSize),
-    }).toString()
+    })
+    if (buyerAccount) formParams.set("buyerAccount", buyerAccount)
+    if (client) formParams.set("CLIENT", client)
+    if (start) formParams.set("START", start)
+    if (end) formParams.set("END", end)
+    if (criteria) formParams.set("criteria", criteria)
+    const form = formParams.toString()
 
     const backendUrl = getSellerOrdersUrl()
     console.log(`[${reqId}] Calling backend: ${backendUrl}`)

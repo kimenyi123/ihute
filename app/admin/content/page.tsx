@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { Image, Star, Zap, FolderTree } from 'lucide-react'
+import { Image as ImageIcon, Star, Zap, FolderTree } from 'lucide-react'
 
 export default function ContentPage() {
   const [banners, setBanners] = useState<any[]>([])
@@ -66,7 +66,7 @@ export default function ContentPage() {
       {/* Homepage Banners */}
       <div className="bg-white rounded-lg shadow p-6">
         <div className="flex items-center gap-3 mb-4">
-          <Image className="text-blue-600" size={24} />
+          <ImageIcon className="text-blue-600" size={24} aria-hidden />
           <h2 className="text-xl font-semibold text-gray-900">Homepage Banners</h2>
         </div>
         {loading ? (

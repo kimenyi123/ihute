@@ -11,7 +11,7 @@ import { formatPaymentMethod } from "@/lib/payment-utils" // ✅ IMPORTED
 import { RatingModal } from "@/components/RatingModal"
 
 function normalizePhone(raw?: string | null): string {
-  let v = (raw || "").replace(/\s|-/g, "")
+  const v = (raw || "").replace(/\s|-/g, "")
   if (!v) return ""
   if (v.startsWith("+250") || v.startsWith("+258")) return v
   if (v.startsWith("250")) return "+" + v

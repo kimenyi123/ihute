@@ -55,7 +55,7 @@ export function KioskItemDrawer({ item, open, onOpenChange }: KioskItemDrawerPro
         <div className="flex flex-col md:flex-row gap-6 p-4">
           {item.image_url && (
             <div className="w-full md:w-64 h-40 md:h-48 rounded-2xl overflow-hidden bg-slate-900">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
+              { }
               <img
                 src={item.image_url}
                 alt={item.item_commercial_name || ""}
