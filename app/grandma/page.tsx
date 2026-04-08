@@ -17,8 +17,9 @@ import { useLocationStoreEnhanced, type LocationData } from "@/lib/location-stor
 import { getProductImageSrc, NO_IMAGE_URL } from "@/lib/image-utils"
 import { cn } from "@/lib/utils"
 import { SlidersHorizontal } from "lucide-react"
+import { grandmaApiService } from "@/lib/grandma-api-service"
 
-type Category =
+export type Category =
   | "Boutique"
   | "Supermarket"
   | "Pharmacy"
@@ -66,7 +67,7 @@ type BurrowsApiProduct = {
   stock?: number | string
   in_stock?: boolean
   category?: string
-  item_state?: string
+
 }
 
 type BurrowsApiSeller = {
@@ -371,18 +372,47 @@ function readGrandmaPrefs(): { lang: GrandmaLang; payment: PaymentId; preferred:
 }
 
 function shopPayReceivingAccount(shop: ShopEntry | null): { bankName: string; account: string } {
-  if (!shop) return { bankName: "—", account: "—" }
-  return {
-    bankName: shop.bankName ?? "Bank of Kigali",
-    account: shop.payoutAccount ?? shop.momo,
-  }
+if (!shop) return { bankName: "—", account: "—" }
+return {
+bankName: shop.bankName ?? "Bank of Kigali",
+account: shop.payoutAccount ?? shop.momo,
+}
+}
+
+function getPaymentDetails(shop: ShopEntry | null, paymentMode: string): { bankName: string; account: string } {
+if (!shop) return { bankName: "—", account: "—" }
+
+switch (paymentMode) {
+case "momo":
+return {
+bankName: "MTN MoMo",
+account: shop.momo?.replace("MTN MoMo: ", "") ?? "—"
+}
+case "airtel":
+return {
+bankName: "Airtel Money",
+account: shop.momo?.replace("MTN MoMo: ", "") ?? "—" // Assuming same field for now
+}
+case "bk":
+return {
+bankName: shop.bankName ?? "Bank of Kigali",
+account: shop.payoutAccount ?? "—"
+}
+case "cash":
+return {
+bankName: "Cash on Delivery",
+account: "—"
+}
+default:
+return shopPayReceivingAccount(shop)
+}
 }
 
 const SHOP_LOGO_PATHS = [
-  "/img/shops/sawa.png",
-  "/img/shops/simba.png",
-  "/img/shops/spar.png",
-  "/img/shops/250strores.png",
+"/img/shops/sawa.png",
+"/img/shops/simba.png",
+"/img/shops/spar.png",
+"/img/shops/250strores.png",
 ] as const
 
 /** Per-shop logos (override cycling assignment from `SHOP_LOGO_PATHS`) */
@@ -736,7 +766,8 @@ function formatRwf(v: number): string {
 }
 
 function shopIdHash(id: string): number {
-  return [...id].reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 7)
+  if (!id) return 0
+  return id.split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 7)
 }
 
 function extractNumericPrice(v: unknown): number {
@@ -1015,66 +1046,45 @@ type CourierProfile = {
   distanceToShopKm: number
 }
 
-const COURIER_POOL: CourierProfile[] = [
-  {
-    id: "c1",
-    name: "Emma Uwase",
-    avatarEmoji: "👩‍🦱",
-    hobbies: "I like football; I like flowers.",
-    rating: 4.6,
-    reviewCount: 128,
-    distanceToShopKm: 0.42,
-  },
-  {
-    id: "c2",
-    name: "Jean Pierre N.",
-    avatarEmoji: "👨‍🦰",
-    hobbies: "I like cycling; I like jazz on Sundays.",
-    rating: 4.8,
-    reviewCount: 94,
-    distanceToShopKm: 0.58,
-  },
-  {
-    id: "c3",
-    name: "Aline Mukamana",
-    avatarEmoji: "👩‍🦳",
-    hobbies: "I like cooking; I like kids' books.",
-    rating: 4.4,
-    reviewCount: 56,
-    distanceToShopKm: 0.71,
-  },
-  {
-    id: "c4",
-    name: "David H.",
-    avatarEmoji: "🧔",
-    hobbies: "I like photography; I like tea.",
-    rating: 4.9,
-    reviewCount: 203,
-    distanceToShopKm: 0.89,
-  },
-  {
-    id: "c5",
-    name: "Grace I.",
-    avatarEmoji: "👩‍🦲",
-    hobbies: "I like choir; I like mangoes.",
-    rating: 4.5,
-    reviewCount: 41,
-    distanceToShopKm: 1.05,
-  },
-  {
-    id: "c6",
-    name: "Eric M.",
-    avatarEmoji: "👨",
-    hobbies: "I like running; I like electronics.",
-    rating: 4.3,
-    reviewCount: 88,
-    distanceToShopKm: 1.22,
-  },
-]
+// Dynamic courier fetching function
+const fetchAvailableCouriers = async (shopLocation?: { lat: number; lng: number }): Promise<CourierProfile[]> => {
+  try {
+    // TODO: Replace with actual API endpoint for couriers
+    // For now, return empty array or mock data until API is ready
+    console.log('Fetching available couriers for location:', shopLocation)
+    
+    // Example API call (replace with actual endpoint):
+    // const response = await fetch(`/api/couriers?lat=${shopLocation?.lat}&lng=${shopLocation?.lng}`)
+    // const couriers = await response.json()
+    // return couriers.map(transformCourierData)
+    
+    // Return empty array until API is implemented
+    return []
+  } catch (error) {
+    console.error('Failed to fetch couriers:', error)
+    return []
+  }
+}
+
+// Transform courier data from API to CourierProfile format
+const transformCourierData = (courier: any): CourierProfile => {
+  return {
+    id: courier.id || courier.driver_id,
+    name: courier.name || courier.driver_name,
+    avatarEmoji: courier.avatar_emoji || "",
+    hobbies: courier.hobbies || courier.bio || "Delivery specialist",
+    rating: courier.rating || courier.rating_star || 4.0,
+    reviewCount: courier.review_count || courier.total_ratings || 0,
+    distanceToShopKm: courier.distance_to_shop || courier.distance_km || 0,
+  }
+}
+
+// Fallback empty courier pool for when API is not ready
+const COURIER_POOL: CourierProfile[] = []
 
 function courierStarGlyphs(rating: number): string {
   const f = Math.min(5, Math.max(0, Math.round(rating)))
-  return "★".repeat(f) + "☆".repeat(5 - f)
+  return "".repeat(f) + "".repeat(5 - f)
 }
 
 type PrescriptionSlot = { id: string; file: File; url: string }
@@ -1197,14 +1207,46 @@ export default function GrandmaPage() {
   const [sellerOrders, setSellerOrders] = useState<SellerOrder[]>(SELLER_ORDERS_INIT)
   const [sellerFilter, setSellerFilter] = useState<SellerViewFilter>("open")
   const [expandedSellerOrderId, setExpandedSellerOrderId] = useState<number | null>(null)
+  
+  // API state for real data
+  const [apiShops, setApiShops] = useState<ShopEntry[]>([])
+  const [shopsLoading, setShopsLoading] = useState(false)
+  const [shopsError, setShopsError] = useState<string | null>(null)
+  const [apiProducts, setApiProducts] = useState<Product[]>([])
+  const [productsLoading, setProductsLoading] = useState(false)
+  const [productsError, setProductsError] = useState<string | null>(null)
+  
+  // All available shops for settings (across all categories)
+  const [allAvailableShops, setAllAvailableShops] = useState<ShopEntry[]>([])
+  const [allShopsLoading, setAllShopsLoading] = useState(false)
+  const [allShopsError, setAllShopsError] = useState<string | null>(null)
 
-  const selectedProducts = useMemo(() => products.filter((p) => p.qty > 0), [products])
+  // Combine API products with existing products, preserving quantities - FIXED FOR API INTEGRATION
+  const combinedProducts = useMemo(() => {
+    // If we have API products for selected shop, use them directly
+    if (apiProducts.length > 0 && selectedShopId) {
+      return apiProducts // API products already have quantities updated by changeQty
+    }
+    
+    return [] // Return empty if no API products
+  }, [apiProducts, selectedShopId])
+
+  const selectedProducts = useMemo(() => combinedProducts.filter((p) => p.qty > 0), [combinedProducts])
   const itemsCount = useMemo(() => selectedProducts.reduce((a, p) => a + p.qty, 0), [selectedProducts])
   const itemsTotal = useMemo(() => selectedProducts.reduce((a, p) => a + p.qty * p.price, 0), [selectedProducts])
 
   const selectedShop = useMemo(
-    () => (selectedShopId ? MOCK_SHOPS.find((s) => s.id === selectedShopId) ?? null : null),
-    [selectedShopId]
+    () => {
+      if (!selectedShopId) return null
+      
+      // First try to find in API shops
+      const apiShop = apiShops.find((s) => s.id === selectedShopId)
+      if (apiShop) return apiShop
+      
+      // Fallback to MOCK_SHOPS
+      return MOCK_SHOPS.find((s) => s.id === selectedShopId) ?? null
+    },
+    [selectedShopId, apiShops]
   )
 
   const liveMenuNickname = useMemo(() => {
@@ -1313,6 +1355,8 @@ export default function GrandmaPage() {
         const res = await fetch(`/api/shop-with-me?${params.toString()}`, { cache: "no-store" })
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const data = (await res.json()) as BurrowsApiResponse
+        console.log('API Response data:', data)
+        console.log('Data type:', Array.isArray(data) ? 'array' : typeof data)
         const sellers = data.sellers ?? []
         const seller = sellers[0]
         const list = seller?.products ?? []
@@ -1372,6 +1416,215 @@ export default function GrandmaPage() {
       clearTimeout(t)
     }
   }, [isLiveMenuSelected, liveMenuNickname, selectedShop?.category, search])
+  // Fetch real shops data when category changes - using same pattern as existing components
+useEffect(() => {
+  if (!category) return
+
+  let cancelled = false
+  const controller = new AbortController()
+
+  const fetchCategoryShops = async () => {
+    try {
+      setShopsLoading(true)
+      setShopsError(null)
+
+      // Use the same successful approach as settings - fetch all shops across all categories
+      const categoryToSectorMap: Record<string, string> = {
+        'Boutique': 'boutique',
+        'Supermarket': 'supermarket', 
+        'Pharmacy': 'pharmacy',
+        'Restaurant': 'restaurant',
+        'Liquor Store': 'bar-resto',
+        'Bakery': 'coffee-shop',
+        'Veterinary': 'veterinary',
+        'Others': 'others'
+      }
+        
+        const categories: Category[] = ['Boutique', 'Supermarket', 'Pharmacy', 'Restaurant', 'Liquor Store', 'Bakery', 'Veterinary', 'Others']
+        const allShops: ShopEntry[] = []
+        
+        // Fetch shops for each category using the same successful approach as settings
+        for (const cat of categories) {
+          try {
+            const sector = categoryToSectorMap[cat] || cat.toLowerCase()
+            const url = `/api/fetchSuggestions?listSuppliersWithProducts=${encodeURIComponent(sector)}&Currency=RWF&limit=500`
+            // console.log(`Category fetch: Fetching ${cat} (sector: ${sector}) from ${url}`)
+            const res = await fetch(url, { cache: "no-store" })
+            
+            if (res.ok) {
+              const data = await res.json()
+              // Handle both response formats: direct array or object with suppliersByName
+              const suppliers = Array.isArray(data) ? data : (data.suppliersByName || [])
+              // console.log(`Category fetch: ${cat} returned ${suppliers.length} suppliers`)
+              
+                            
+              // Transform suppliers to ShopEntry format
+              const transformedShops = (suppliers || []).map((d: any, index: number) => {
+                // Generate a unique ID that combines category with supplier ID to prevent duplicates
+                const baseId = String(d.ISHYIGA_ACCOUNT ?? d.seller_account ?? d.id ?? d.SELLER_ISHYIGA_ACCOUNT ?? "")
+                const uniqueId = baseId ? `${cat.toLowerCase()}_${baseId}` : `${cat.toLowerCase()}_supplier_${index}`
+                
+                return {
+                  id: uniqueId,
+                  name: String(d.OWNER ?? d.nickname ?? d.seller_name ?? d.name ?? d.NICKNAME ?? d.SELLER_NAMES ?? `${cat} Supplier ${index + 1}`),
+                  category: cat, // Keep original category for filtering
+                  tagline: d.DEPARTMENT ?? d.location ?? d.LOCATION ?? `${cat} shop`,
+                  favorite: false,
+                  orderedBefore: false,
+                  trending: false,
+                  onSale: false,
+                  distanceKm: 0,
+                  momo: `MTN MoMo: ${d.seller_momo ?? d.momo ?? 'N/A'}`,
+                  rating: d.rating_star,
+                  reviewCount: d.total_ratings,
+                  logoSrc: "/img/shops/default.png",
+                }
+              })
+              
+              allShops.push(...transformedShops)
+            }
+          } catch (error) {
+            console.warn(`Failed to fetch shops for category ${cat}:`, error)
+            // Continue with other categories even if one fails
+          }
+        }
+        
+        // console.log(`Category fetch: Total shops fetched across all categories: ${allShops.length}`)
+        // console.log(`Category fetch: Shops by category:`, allShops.reduce((acc, shop) => {
+        //   acc[shop.category] = (acc[shop.category] || 0) + 1
+        //   return acc
+        // }, {} as Record<string, number>))
+        
+        if (cancelled) return
+        
+        // Filter all shops by the selected category
+        const filteredShops = allShops.filter(shop => shop.category === category)
+        // console.log(`Filtered ${filteredShops.length} shops for category ${category}`)
+        
+        setApiShops(filteredShops)
+      } catch (error: any) {
+        if (!cancelled) {
+          setShopsError(error?.message || 'Failed to fetch shops')
+          setApiShops([])
+        }
+      } finally {
+        if (!cancelled) {
+          setShopsLoading(false)
+        }
+      }
+    }
+
+    fetchCategoryShops()
+
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
+  }, [category])
+
+  // Fetch real products data when a shop is selected
+  useEffect(() => {
+    if (!selectedShopId || !selectedShop) return
+
+    let cancelled = false
+    const fetchProducts = async () => {
+      try {
+        setProductsLoading(true)
+        setProductsError(null)
+        
+        console.log('Fetching products for shop:', selectedShopId, 'category:', selectedShop.category)
+        
+        // Map frontend categories to backend sector names (same as shops)
+        const categoryToSectorMap: Record<string, string> = {
+          'Boutique': 'boutique',
+          'Supermarket': 'supermarket', 
+          'Pharmacy': 'pharmacy',
+          'Restaurant': 'restaurant',
+          'Liquor Store': 'bar-resto',
+          'Bakery': 'coffee-shop',
+          'Veterinary': 'veterinary',
+          'Others': 'others'
+        }
+        
+        const sector = categoryToSectorMap[selectedShop.category] || selectedShop.category.toLowerCase()
+        
+        // Extract base supplier ID without category prefix for Redis pattern
+        // Backend expects supplier_ALG... pattern, not category_ALG...
+        const baseSupplierId = String(selectedShopId).split('_').slice(1).join('_')
+        
+        // Use supplierProducts parameter which uses Redis cache with supplier_ALG pattern
+        const url = `/api/fetchSuggestions?supplierProducts=${encodeURIComponent(baseSupplierId)}&limit=50&Currency=RWF`
+        console.log('Fetching products from URL:', url)
+        const res = await fetch(url, { cache: "no-store" })
+        
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const data = (await res.json()) as any
+        
+        console.log('Products API Response data:', data)
+        console.log('Data type:', Array.isArray(data) ? 'array' : typeof data)
+        
+        if (cancelled) return
+        
+        // Extract products from response - supplierProducts returns products directly
+        let products = []
+        if (data && data.products && Array.isArray(data.products)) {
+          products = data.products
+        } else if (Array.isArray(data)) {
+          products = data
+        }
+        
+        console.log('Products found:', products.length)
+        console.log('Product sources:', products.map((p: any) => p.source || 'unknown'))
+        console.log('Sample product fields:', products[0])
+        console.log('All product keys:', Object.keys(products[0] || {}))
+        console.log('Image-related fields:', Object.keys(products[0] || {}).filter(key => key.toLowerCase().includes('image')))
+        console.log('Image URL values:', {
+          image_url: products[0]?.image_url,
+          item_image_url: products[0]?.item_image_url,
+          IMAGE_URL: products[0]?.IMAGE_URL,
+          image: products[0]?.image,
+          img: products[0]?.img,
+          imageUrl: products[0]?.imageUrl
+        })
+        
+        // Transform products to Product format - fix field mapping based on actual Redis data
+        const transformedProducts = products.map((product: any, index: number) => {
+          // Extract numeric price from '9000 RWF' format
+          const priceString = product.selling_price || product.SALE_PRICE_INCLUSIVE || product.price || '0'
+          const numericPrice = Number(String(priceString).replace(/[^\d.]/g, '')) || 0
+          
+          return {
+            id: 2000 + index,
+            category: selectedShop.category,
+            name: String(product.item_commercial_name || product.ITEM_NAME || product.item_name || product.name || "Product"),
+            price: numericPrice,
+            emoji: "ð¦",
+            imageUrl: product.image_url || product.item_image_url || product.IMAGE_URL || product.image || product.img || product.imageUrl || "/img/shops/default.png",
+            qty: 0,
+          }
+        })
+        
+        console.log('Transformed products:', transformedProducts)
+        setApiProducts(transformedProducts)
+      } catch (error: any) {
+        if (!cancelled) {
+          console.error('Products fetch error:', error)
+          setProductsError(error?.message || 'Failed to fetch products')
+          setApiProducts([])
+        }
+      } finally {
+        if (!cancelled) {
+          setProductsLoading(false)
+        }
+      }
+    }
+
+    fetchProducts()
+    
+    return () => {
+      cancelled = true
+    }
+  }, [selectedShopId, selectedShop])
 
   /** Pay page (page 5) only — other screens stay English */
   const tPay = GRANDMA_LABELS[language]
@@ -1437,7 +1690,29 @@ export default function GrandmaPage() {
     }
   }, [appMode, page, category, language])
 
-  const shopsInCategory = useMemo(() => MOCK_SHOPS.filter((s) => s.category === category), [category])
+  const shopsInCategory = useMemo(() => {
+    console.log('=== shopsInCategory called ===')
+    console.log('Current category:', category)
+    console.log('apiShops.length:', apiShops.length)
+    console.log('shopsLoading:', shopsLoading)
+    console.log('apiShops array:', apiShops)
+    
+    // Use API data if available, otherwise fall back to MOCK_SHOPS
+    if (apiShops.length > 0 || shopsLoading) {
+      // Filter API shops by current category
+      const filtered = apiShops.filter((s) => {
+        console.log('Checking shop:', s.name, 'category:', s.category, 'matches?', s.category === category)
+        return s.category === category
+      })
+      console.log('Filtered API shops for category:', filtered)
+      return filtered
+    }
+    // Fallback to mock data if API has no data - COMMENTED OUT TO CONFIRM API INTEGRATION
+    // const mockFiltered = MOCK_SHOPS.filter((s) => s.category === category)
+    // console.log('Fallback to MOCK_SHOPS, filtered:', mockFiltered)
+    // return mockFiltered
+    return [] // Return empty array to force API data only
+  }, [category, apiShops, shopsLoading])
 
   const visibleShops = useMemo(() => {
     const q = shopSearch.trim().toLowerCase()
@@ -1481,16 +1756,21 @@ export default function GrandmaPage() {
   const multiShopMode = useMemo(() => isAllPreferred && !selectedShopId, [isAllPreferred, selectedShopId])
 
   const offerShopsForCategory = useMemo(() => {
-    const inCat = MOCK_SHOPS.filter((s) => s.category === category)
+    // Use API shops if available, otherwise fall back to MOCK_SHOPS - COMMENTED OUT TO CONFIRM API INTEGRATION
+    const apiShopsInCategory = apiShops.filter((s) => s.category === category)
+    // const mockShopsInCategory = MOCK_SHOPS.filter((s) => s.category === category)
+    // const inCat = apiShopsInCategory.length > 0 || shopsLoading ? apiShopsInCategory : mockShopsInCategory
+    const inCat = apiShopsInCategory // Use only API shops
+    
     const prefs = preferredShopIds.filter((x) => x !== PREFERRED_ALL_ID)
     if (prefs.length) return inCat.filter((s) => prefs.includes(s.id))
     return inCat
-  }, [category, preferredShopIds])
+  }, [category, preferredShopIds, apiShops, shopsLoading])
 
   /** Full item pool for price histogram / category chips (ignores live “sample 20”). */
   const itemsFilterStatsSource = useMemo(() => {
     if (multiShopMode) return [] as Product[]
-    let list = products.filter((p) => p.category === category)
+    let list = combinedProducts.filter((p) => p.category === category)
     const q = search.trim().toLowerCase()
     if (q) list = list.filter((p) => p.name.toLowerCase().includes(q))
     if (isLiveMenuSelected) {
@@ -1498,12 +1778,12 @@ export default function GrandmaPage() {
       if (liveInStockOnly) list = list.filter((p) => p.liveInStock === true)
     }
     return list
-  }, [multiShopMode, products, category, search, isLiveMenuSelected, liveInStockOnly])
+  }, [multiShopMode, combinedProducts, category, search, isLiveMenuSelected, liveInStockOnly])
 
   const offersBaseList = useMemo((): OfferRow[] => {
     if (!multiShopMode) return []
     const q = search.trim().toLowerCase()
-    return products
+    return combinedProducts
       .filter((p) => p.category === category)
       .filter((p) => !q || p.name.toLowerCase().includes(q))
       .flatMap((p) => {
@@ -1530,7 +1810,7 @@ export default function GrandmaPage() {
           )
         return offers
       })
-  }, [multiShopMode, products, category, search, offerShopsForCategory])
+  }, [multiShopMode, combinedProducts, category, search, offerShopsForCategory])
 
   const itemsPriceExtent = useMemo(() => {
     if (!itemsFilterStatsSource.length) return { min: 0, max: 0 }
@@ -1577,7 +1857,7 @@ export default function GrandmaPage() {
 
   const visibleProducts = useMemo(() => {
     const q = search.trim().toLowerCase()
-    let list = products.filter((p) => p.category === category && (!q || p.name.toLowerCase().includes(q)))
+    let list = combinedProducts.filter((p) => p.category === category && (!q || p.name.toLowerCase().includes(q)))
     if (isLiveMenuSelected) {
       list = list.filter((p) => p.id >= 100000)
       if (liveInStockOnly) list = list.filter((p) => p.liveInStock === true)
@@ -1597,7 +1877,7 @@ export default function GrandmaPage() {
     else if (itemsSort === "price_desc") list.sort((a, b) => b.price - a.price || a.name.localeCompare(b.name))
     return list
   }, [
-    products,
+    combinedProducts,
     category,
     search,
     isLiveMenuSelected,
@@ -1647,9 +1927,18 @@ export default function GrandmaPage() {
   }, [filterPriceExtent])
 
   const changeQty = (id: number, diff: number) => {
-    setProducts((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, qty: Math.max(0, p.qty + diff) } : p))
-    )
+    console.log('changeQty called with id:', id, 'diff:', diff)
+    // Update both products and apiProducts to ensure quantity changes persist
+    setProducts((prev) => {
+      const updated = prev.map((p) => (p.id === id ? { ...p, qty: Math.max(0, p.qty + diff) } : p))
+      console.log('Updated products state:', updated.filter(p => p.id === id))
+      return updated
+    })
+    setApiProducts((prev) => {
+      const updated = prev.map((p) => (p.id === id ? { ...p, qty: Math.max(0, p.qty + diff) } : p))
+      console.log('Updated apiProducts state:', updated.filter(p => p.id === id))
+      return updated
+    })
   }
 
   const goToPage = (p: PageId) => setPage(p)
@@ -1742,7 +2031,15 @@ export default function GrandmaPage() {
 
   const featuredCourierSafe = useMemo(() => {
     const fc = featuredCourier
-    return fc ?? COURIER_POOL[0]
+    return fc ?? COURIER_POOL[0] ?? {
+      id: "default",
+      name: "No couriers available",
+      avatarEmoji: "ð¨",
+      hobbies: "Delivery service unavailable",
+      rating: 0,
+      reviewCount: 0,
+      distanceToShopKm: 0,
+    }
   }, [featuredCourier])
 
   return (
@@ -2236,7 +2533,13 @@ export default function GrandmaPage() {
         </div>
 
         <div className="shop-list" id="shopList">
-          {visibleShops.length === 0 ? (
+          {shopsLoading ? (
+            <div className="card note">Loading shops...</div>
+          ) : shopsError ? (
+            <div className="card note" style={{ color: "#b42318" }}>
+              Error loading shops: {shopsError}
+            </div>
+          ) : visibleShops.length === 0 ? (
             <div className="card note">No shops match. Try another filter or search.</div>
           ) : (
             visibleShops.map((s) => (
@@ -2324,7 +2627,13 @@ export default function GrandmaPage() {
         </div>
 
         <div className="product-list" id="productList">
-          {multiShopMode
+          {productsLoading ? (
+            <div className="card note">Loading products...</div>
+          ) : productsError ? (
+            <div className="card note" style={{ color: "#b42318" }}>
+              Error loading products: {productsError}
+            </div>
+          ) : multiShopMode
             ? visibleOffers.map((o) => (
                 <div
                   className="product-row"
@@ -2359,7 +2668,9 @@ export default function GrandmaPage() {
                   </div>
                 </div>
               ))
-            : visibleProducts.map((p) => (
+            : visibleProducts.length === 0 ? (
+              <div className="card note">No products available for this shop.</div>
+            ) : visibleProducts.map((p) => (
                 <div className="product-row" key={p.liveKey ?? `p-${p.id}`}>
                   <div className="emoji" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
                     {p.imageUrl ? (
@@ -2627,15 +2938,28 @@ export default function GrandmaPage() {
           </div>
           <div className="pay-detail-row">
             <span className="pay-detail-label">{tPay.bankName}</span>
-            <span className="pay-detail-value">{shopPayReceivingAccount(selectedShop).bankName}</span>
+            <span className="pay-detail-value">{getPaymentDetails(selectedShop, selectedPayment).bankName}</span>
           </div>
           <div className="pay-detail-row">
             <span className="pay-detail-label">{tPay.account}</span>
-            <span className="pay-detail-value">{shopPayReceivingAccount(selectedShop).account}</span>
+            <span className="pay-detail-value">{getPaymentDetails(selectedShop, selectedPayment).account}</span>
           </div>
           <div className="pay-detail-row">
             <span className="pay-detail-label">{tPay.yourLocation}</span>
-            <span className="pay-detail-value">{displayUserLocation}</span>
+            <div className="flex items-center gap-2">
+              <span className="pay-detail-value">{displayUserLocation}</span>
+              <button
+                type="button"
+                onClick={() => setLocationDialogOpen(true)}
+                className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100 hover:border-blue-300 transition-colors"
+              >
+                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                {locationData ? "Change" : "Set Location"}
+              </button>
+            </div>
           </div>
           <div className="pay-detail-row">
             <span className="pay-detail-label">{tPay.eta}</span>
@@ -3145,21 +3469,35 @@ export default function GrandmaPage() {
                   </span>
                   <span className="min-w-0 flex-1 truncate text-sm font-semibold">All shops</span>
                 </label>
-                {MOCK_SHOPS.map((shop) => (
-                  <label
-                    key={shop.id}
-                    className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-muted/50"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={preferredShopIds.includes(shop.id)}
-                      onChange={() => togglePreferredShop(shop.id)}
-                      className="h-4 w-4 shrink-0 accent-blue-600"
-                    />
-                    <img src={shop.logoSrc} alt="" className="h-8 w-8 shrink-0 rounded-md border border-border bg-white object-contain" />
-                    <span className="min-w-0 flex-1 truncate text-sm font-semibold">{shop.name}</span>
-                  </label>
-                ))}
+                {allShopsLoading ? (
+                  <div className="flex items-center justify-center py-4">
+                    <div className="text-sm text-muted-foreground">Loading shops...</div>
+                  </div>
+                ) : allShopsError ? (
+                  <div className="flex items-center justify-center py-4">
+                    <div className="text-sm text-red-500">Error loading shops</div>
+                  </div>
+                ) : allAvailableShops.length > 0 ? (
+                  allAvailableShops.map((shop) => (
+                    <label
+                      key={shop.id}
+                      className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-muted/50"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={preferredShopIds.includes(shop.id)}
+                        onChange={() => togglePreferredShop(shop.id)}
+                        className="h-4 w-4 shrink-0 accent-blue-600"
+                      />
+                      <img src={shop.logoSrc} alt="" className="h-8 w-8 shrink-0 rounded-md border border-border bg-white object-contain" />
+                      <span className="min-w-0 flex-1 truncate text-sm font-semibold">{shop.name}</span>
+                    </label>
+                  ))
+                ) : (
+                  <div className="flex items-center justify-center py-4">
+                    <div className="text-sm text-muted-foreground">No shops available</div>
+                  </div>
+                )}
               </div>
             </div>
 
