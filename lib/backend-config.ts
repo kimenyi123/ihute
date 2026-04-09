@@ -11,12 +11,12 @@ function noTrailingSlash(s: string): string {
 }
 
 /** Java backend base URL (no trailing slash). Uses BACKEND_URL, JAVA_BACKEND_BASE, or NEXT_PUBLIC_API_URL from env. */
+/** Java backend base URL (no trailing slash). Uses NEXT_PUBLIC_API_URL or JAVA_BACKEND_BASE from env. */
 export function getBackendBase(): string {
   const raw = noTrailingSlash(
-    process.env.BACKEND_URL ||
-      process.env.JAVA_BACKEND_BASE ||
+    process.env.JAVA_BACKEND_BASE ||
       process.env.NEXT_PUBLIC_API_URL ||
-      "http://localhost:8080/Trading" // Changed to localhost for development
+      "https://ihute.rw/Trading"
   )
 
   // Some local/dev env values point only to the Tomcat host (e.g. http://localhost:8080)
