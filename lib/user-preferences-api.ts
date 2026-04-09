@@ -27,6 +27,7 @@ export async function getUserPreferences(userId: string): Promise<UserPreference
     }
     
     const data = await response.json()
+    console.log('User preferences response:', data)
     return data
   } catch (error) {
     console.error('Error fetching user preferences:', error)
@@ -38,6 +39,13 @@ export async function getUserPreferences(userId: string): Promise<UserPreference
 export async function loadUserPreferences(userId: string, allAvailableShops: any[]): Promise<string[]> {
   try {
     const response = await getUserPreferences(userId)
+    
+    // Check if response has preferences property
+    if (!response || !response.preferences) {
+      console.warn('No preferences found or invalid response structure:', response)
+      return []
+    }
+    
     const backendShopIds = response.preferences.map(p => p.shop_id)
     
     // Convert backend IDs to frontend format

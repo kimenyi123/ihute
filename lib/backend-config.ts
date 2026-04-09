@@ -17,6 +17,8 @@ export function getBackendBase(): string {
       process.env.NEXT_PUBLIC_API_URL ||
       "https://ihute.rw/Trading"
   )
+  
+  return raw
 
   // Some local/dev env values point only to the Tomcat host (e.g. http://localhost:8080)
   // while the Java servlets live under the `/Trading` context path.

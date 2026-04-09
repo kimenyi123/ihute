@@ -1451,14 +1451,16 @@ export default function GrandmaPage() {
           try {
             const sector = categoryToSectorMap[cat]
             const url = `${getBackendBase()}/Kaos/fetchSuggestions?listSuppliersWithProducts=${encodeURIComponent(sector)}&Currency=RWF&limit=500`
-            console.log(`Fetching ${cat} from ${url}`)
+            console.log(`=== Fetching ${cat} ===`)
+            console.log(`Backend URL: ${getBackendBase()}`)
+            console.log(`Full URL: ${url}`)
             const res = await fetch(url, { cache: "no-store" })
             
             if (res.ok) {
               const data = await res.json()
               console.log(`Raw API response for ${cat}:`, data)
               
-              const suppliers = Array.isArray(data) ? data : (data.suppliersByName || [])
+              const suppliers = Array.isArray(data) ? data : (data.suppliersByName || data.suppliers || [])
               console.log(`${cat} suppliers:`, suppliers.length)
               
               // Add suppliers to allShops array with their original category
