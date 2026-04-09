@@ -17,6 +17,19 @@ const IMAGE_KEYS = ["image_url", "item_image_url", "IMAGE_URL", "image"] as cons
 /** URL to show when no product image is available (KAOS "no image" graphic). Use this instead of a grey placeholder. */
 export const NO_IMAGE_URL = "https://ishyiga.rw/images_kaos_beta/no_image_found.jpg"
 
+/** KAOS CDN may store product images as jpg, jpeg, or png — try in this order before no_image. */
+export const KAOS_PRODUCT_IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png"] as const
+
+/** Push each extension variant for a KAOS base path without trailing extension (e.g. …/famille/NIKI). */
+export function addKaosProductImageExtensionVariants(
+  baseUrlWithoutExtension: string,
+  add: (url: string) => void
+): void {
+  for (const ext of KAOS_PRODUCT_IMAGE_EXTENSIONS) {
+    add(`${baseUrlWithoutExtension}${ext}`)
+  }
+}
+
 /** True if URL is not a "missing image" or generic placeholder (cart should retry resolution). */
 export function isConcreteProductImageUrl(url: string | null | undefined): boolean {
   if (!url || typeof url !== "string") return false
@@ -60,25 +73,6 @@ export function getNikiCodeFromSource(source: unknown): string {
     "item_code",
     "itemCode",
   ])
-}
-
-/**
- * Get the first non-empty image URL from a product-like object.
- * Tries all known backend field names and normalizes the result.
- */
-export function getProductImageUrl(
-  source: ProductImageSource | null | undefined,
-  options?: { placeholder?: string }
-): string | null {
-  if (!source || typeof source !== "object") return options?.placeholder ?? null
-  for (const key of IMAGE_KEYS) {
-    const raw = source[key]
-    if (raw == null) continue
-    const s = typeof raw === "string" ? raw.trim() : String(raw).trim()
-    if (s === "") continue
-    return normalizeImageUrl(s)
-  }
-  return options?.placeholder ?? null
 }
 
 /**
@@ -173,13 +167,13 @@ export function getProductImageCandidates(source: ProductImageSource | null | un
 
     if (nikiPath) {
       if (famille) {
-        const famillePath = `${KAOS_BASE}${sanitizeKaosSegment(famille)}/${nikiPath}.jpg`
-        add(famillePath)
-        console.log("[ImageUtils] KAOS famille URL:", famillePath)
+        const familleBase = `${KAOS_BASE}${sanitizeKaosSegment(famille)}/${nikiPath}`
+        addKaosProductImageExtensionVariants(familleBase, (u) => add(u))
+        console.log("[ImageUtils] KAOS famille URLs:", KAOS_PRODUCT_IMAGE_EXTENSIONS.map((e) => `${familleBase}${e}`))
       }
-      const nikiPathUrl = `${KAOS_BASE}${nikiPath}.jpg`
-      add(nikiPathUrl)
-      console.log("[ImageUtils] KAOS niki URL:", nikiPathUrl)
+      const nikiBase = `${KAOS_BASE}${nikiPath}`
+      addKaosProductImageExtensionVariants(nikiBase, (u) => add(u))
+      console.log("[ImageUtils] KAOS niki URLs:", KAOS_PRODUCT_IMAGE_EXTENSIONS.map((e) => `${nikiBase}${e}`))
       try {
         console.log("[ImageSrc] KAOS candidates", {
           id: getNikiCodeFromSource(source) || String((source as any).id ?? ""),
@@ -221,6 +215,27 @@ export function getProductImageSrc(
 ): string {
   const candidates = getProductImageCandidates(source)
   return candidates[0] ?? NO_IMAGE_URL
+}
+
+/**
+ * Get the first non-empty image URL from a product-like object.
+ * Tries backend fields first; if none, same resolution as display (KAOS jpg/jpeg/png + fallbacks).
+ */
+export function getProductImageUrl(
+  source: ProductImageSource | null | undefined,
+  options?: { placeholder?: string }
+): string | null {
+  if (!source || typeof source !== "object") return options?.placeholder ?? null
+  for (const key of IMAGE_KEYS) {
+    const raw = source[key]
+    if (raw == null) continue
+    const s = typeof raw === "string" ? raw.trim() : String(raw).trim()
+    if (s === "") continue
+    return normalizeImageUrl(s)
+  }
+  const resolved = getProductImageSrc(source, options?.placeholder ?? "/placeholder.svg?height=300&width=300")
+  if (resolved === NO_IMAGE_URL) return options?.placeholder ?? null
+  return resolved
 }
 
 /**

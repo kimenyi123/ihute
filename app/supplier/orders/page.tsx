@@ -449,7 +449,6 @@ export default function SupplierOrdersPage() {
       "Served Amount",
       "Status",
       "Date",
-      "Order Note",
     ]
     const values = [
       String(order.id ?? ""),
@@ -459,7 +458,6 @@ export default function SupplierOrdersPage() {
       String(Number(order.servedAmount ?? 0)),
       String(order.status ?? ""),
       String(order.createdAt ?? ""),
-      String(order.orderNote ?? ""),
     ]
     const esc = (v: string) => `"${v.replace(/"/g, '""')}"`
     const csv = `${fields.map(esc).join(",")}\n${values.map(esc).join(",")}\n`
@@ -664,10 +662,9 @@ export default function SupplierOrdersPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Order #</TableHead>
-                <TableHead>Customer</TableHead>
+                <TableHead>User</TableHead>
                 <TableHead>Company</TableHead>
                 <TableHead>Served Amount</TableHead>
-                <TableHead>Order Note</TableHead>
                 <TableHead>Date</TableHead>
                 <TableHead>Total</TableHead>
                 <TableHead>Payment</TableHead>
@@ -678,7 +675,7 @@ export default function SupplierOrdersPage() {
             <TableBody>
               {!loading && !err && pagedOrders.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                     {orders.length === 0
                       ? "No orders yet. Orders from customers will appear here."
                       : "No orders match your search or filters. Try different criteria."}
@@ -700,9 +697,6 @@ export default function SupplierOrdersPage() {
                     </TableCell>
                     <TableCell>{(order as any).buyerOwner || "—"}</TableCell>
                     <TableCell>{Number((order as any).servedAmount ?? 0).toLocaleString()} RWF</TableCell>
-                    <TableCell className="max-w-[240px] truncate" title={(order as any).orderNote || ""}>
-                      {(order as any).orderNote || "—"}
-                    </TableCell>
                     <TableCell>{formatOrderDate(order.createdAt)}</TableCell>
                     <TableCell>{order.subtotal.toLocaleString()} RWF</TableCell>
                     <TableCell>{order.paymentStatus}</TableCell>

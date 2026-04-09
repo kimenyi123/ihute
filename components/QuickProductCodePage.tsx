@@ -1,13 +1,14 @@
 "use client"
 
-import React, { useState, useEffect } from 'react';
-import { Heart } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from "react";
+import { Heart } from "lucide-react";
 import { useCartStore } from "@/lib/cart-store";
 import { useFavoritesStore } from "@/lib/favorites-store";
 import { useToast } from "@/components/ui/use-toast";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import Image from "next/image";
+import { getProductImageCandidates, getProductImageSrc, NO_IMAGE_URL } from "@/lib/image-utils";
 
 type QuickProductItem = {
   item_emballage?: string;
@@ -22,8 +23,35 @@ type QuickProductItem = {
   supplier_name?: string;
   supplier_location?: string;
   image?: string;
+  image_url?: string;
+  item_image_url?: string;
+  IMAGE_URL?: string;
+  item_key_words?: string;
+  famille?: string;
+  FAMILLE?: string;
   momo?: string;
 };
+
+function QuickProductImage({ product }: { product: QuickProductItem }) {
+  const candidates = useMemo(
+    () => getProductImageCandidates(product as Record<string, unknown>),
+    [product]
+  );
+  const [idx, setIdx] = useState(0);
+  const src = candidates[Math.min(idx, candidates.length - 1)] ?? NO_IMAGE_URL;
+
+  return (
+    <Image
+      fill
+      src={src}
+      alt={product.item_commercial_name ?? "Product"}
+      className="object-contain"
+      onError={() => {
+        setIdx((i) => (i + 1 < candidates.length ? i + 1 : i));
+      }}
+    />
+  );
+}
 
 type QuickProductResult = {
   products?: QuickProductItem[];
@@ -36,7 +64,6 @@ export default function QuickProductCodePage() {
   const [results, setResults] = useState<QuickProductResult | null>(null);
   const [error, setError] = useState('');
   const [searchCode, setSearchCode] = useState('');
-  const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
 
   const addItem = useCartStore((s) => s.addItem);
   const toggleFavorite = useFavoritesStore((s) => s.toggleFavorite);
@@ -68,9 +95,6 @@ export default function QuickProductCodePage() {
     performSearch(codeFromUrl, accountFromUrl);
   }, []);
 
-  useEffect(() => {
-    setBrokenImages({});
-  }, [results, searchCode]);
 
   const performSearch = async (code: string, account?: string) => {
     setLoading(true);
@@ -131,7 +155,7 @@ export default function QuickProductCodePage() {
         name: product.item_commercial_name ?? "Product",
         price: price,
         unit: unit,
-        image: product.image || "/placeholder.svg?height=300&width=300",
+        image: getProductImageSrc(product as Record<string, unknown>, "/placeholder.svg?height=300&width=300"),
         supplierId: product.supplier_account || "unknown",
         supplierName: product.supplier_name || "Supplier",
         supplierLocation: product.supplier_location,
@@ -167,7 +191,7 @@ export default function QuickProductCodePage() {
       name: product.item_commercial_name ?? "Product",
       price: price,
       unit: product.item_packet,
-      image: product.image || "/placeholder.svg?height=300&width=300",
+      image: getProductImageSrc(product as Record<string, unknown>, "/placeholder.svg?height=300&width=300"),
       description: undefined,
       supplierId: product.supplier_account,
       supplierName: product.supplier_name,
@@ -231,26 +255,15 @@ export default function QuickProductCodePage() {
             {results.products.map((product: QuickProductItem, idx: number) => {
               const productId = `${product.supplier_account ?? ""}_${product.item_code ?? ""}`;
               const fav = isFavorite(productId);
-              const imgSrc = brokenImages[productId]
-                ? "/placeholder.svg?height=300&width=300"
-                : (product.image || "/placeholder.svg?height=300&width=300");
 
               return (
                 <div
                   key={idx}
                   className="group bg-card border rounded-lg overflow-hidden hover:shadow-lg transition-all"
                 >
-                  {/* Product Image with Heart */}
+                  {/* Product Image with Heart — KAOS .jpg/.jpeg/.png + backend fallbacks */}
                   <div className="relative w-full aspect-square bg-muted">
-                    <Image
-                      fill
-                      src={imgSrc}
-                      alt={product.item_commercial_name ?? "Product"}
-                      className="object-contain"
-                      onError={() => {
-                        setBrokenImages((prev) => ({ ...prev, [productId]: true }));
-                      }}
-                    />
+                    <QuickProductImage key={productId} product={product} />
 
                     {/* Heart Button */}
                     <button

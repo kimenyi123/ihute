@@ -12,6 +12,13 @@ type Product = {
   price: number
   unit?: string
   image?: string
+  image_url?: string
+  item_image_url?: string
+  IMAGE_URL?: string
+  item_key_words?: string
+  item_code?: string
+  famille?: string
+  FAMILLE?: string
   /** Product code for cart merge (same code + same seller = one line) */
   itemCode?: string
   supplierId?: string
@@ -68,6 +75,13 @@ export function CartAlsoBuy({ cartItems }: { cartItems: CartItem[] }) {
         price,
         unit: p.UNIT ?? p.item_packet ?? "",
         image: p.image_url ?? p.item_image_url ?? p.IMAGE_URL ?? p.image,
+        image_url: p.image_url,
+        item_image_url: p.item_image_url,
+        IMAGE_URL: p.IMAGE_URL,
+        item_key_words: p.item_key_words ?? p.ITEM_CODE,
+        item_code: p.item_code ?? p.ITEM_CODE,
+        famille: p.famille ?? p.FAMILLE,
+        FAMILLE: p.FAMILLE,
         supplierId: p.SELLER_ISHYIGA_ACCOUNT ?? p.item_seller_account ?? supplierIdRaw ?? "",
         supplierName: p.SELLER_NAMES ?? p.supplier_name ?? supplierNameRaw ?? "",
         supplierLocation: p.LOCATION ?? p.supplier_location,

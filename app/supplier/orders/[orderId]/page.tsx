@@ -55,39 +55,6 @@ function getPaymentStatus(order: any): { status: string; displayName: string; is
   }
 }
 
-// Improved order status with payment consideration
-function getOrderStatus(order: any, paymentInfo: any) {
-  const orderStatus = (order?.ORDER_STATUS || "").toLowerCase()
-  
-  if (orderStatus.includes('delivered')) return { status: 'delivered', displayName: 'Delivered' }
-  if (orderStatus.includes('transit') || orderStatus.includes('shipped')) return { status: 'in-transit', displayName: 'In Transit' }
-  if (orderStatus.includes('processing')) return { status: 'processing', displayName: 'Processing' }
-  
-  // If payment is completed but order status is still open/pending
-  if (paymentInfo.isPaid && (orderStatus.includes('open') || orderStatus.includes('pending'))) {
-    return { status: 'processing', displayName: 'Processing Payment' }
-  }
-  
-  return { status: 'pending', displayName: 'Pending' }
-}
-
-/** Display timestamp as YYYY-MM-DD HH:mm:ss (no ISO T/Z or milliseconds). */
-function formatOrderDate(value: unknown): string {
-  if (value == null || value === "") return ""
-  const s = String(value).trim()
-  if (!s) return ""
-  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(s)) return s.replace(/\.\d+Z?$/i, "").slice(0, 19)
-  const d = new Date(s)
-  if (Number.isNaN(d.getTime())) return s
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, "0")
-  const day = String(d.getDate()).padStart(2, "0")
-  const h = String(d.getHours()).padStart(2, "0")
-  const min = String(d.getMinutes()).padStart(2, "0")
-  const sec = String(d.getSeconds()).padStart(2, "0")
-  return `${y}-${m}-${day} ${h}:${min}:${sec}`
-}
-
 function pickAnyNum(row: Record<string, unknown>, ...keys: string[]): number | null {
   for (const k of keys) {
     const v = row[k]
@@ -196,13 +163,10 @@ export default function SupplierOrderDetailsPage() {
   const totalRequestedOf = (it: any) => Math.round(qtyOf(it) * requestedPriceOf(it))
   const n = (v: number) => Number(v || 0).toLocaleString()
 
-  const { order, buyer, items, created, currency, grandTotal, servedOrderAmount, orderNote, paymentInfo, orderStatus, isGuestBuyer, displayBuyerName } = useMemo(() => {
+  const { order, buyer, items, currency, grandTotal, servedOrderAmount, orderNote, paymentInfo, isGuestBuyer, displayBuyerName } = useMemo(() => {
     const order = detail?.order
     const buyer = detail?.buyer
     const rawItems = detail?.items ?? []
-    const created = order?.CREATED_AT
-      ? new Date(typeof order.CREATED_AT === "number" ? order.CREATED_AT : order.CREATED_AT)
-      : null
     const currency = order?.CURRENCY || "RWF"
 
     // Combine items that share the same code, name, and ordered-by user
@@ -239,9 +203,8 @@ export default function SupplierOrderDetailsPage() {
       pickAnyNum(order ?? {}, "SERVED_AMOUNT", "servedAmount", "AMOUNT_SERVED", "SERVED_TOTAL") ?? 0
     const orderNote = pickAnyStr(order ?? {}, "CONDITIONS", "ORDER_NOTE", "orderNote", "NOTE")
 
-    // Get payment and order status
+    // Get payment status
     const paymentInfo = getPaymentStatus(order)
-    const orderStatus = getOrderStatus(order, paymentInfo)
 
     // Prefer explicit buyer identity fields; only show "Guest Buyer" when no usable identity exists.
     const buyerEmail = String(order?.BUYER_EMAIL || buyer?.EMAIL || "").trim()
@@ -269,7 +232,7 @@ export default function SupplierOrderDetailsPage() {
       ? (order?.TABLE_NAME ? `Table: ${order.TABLE_NAME}` : "Guest Buyer")
       : (cleanBuyerName || (buyerAccount ? `Buyer ${buyerAccount}` : "Guest Buyer"))
 
-    return { order, buyer, items, created, currency, grandTotal, servedOrderAmount, orderNote, paymentInfo, orderStatus, isGuestBuyer, displayBuyerName }
+    return { order, buyer, items, currency, grandTotal, servedOrderAmount, orderNote, paymentInfo, isGuestBuyer, displayBuyerName }
   }, [detail])
 
   const sellerMomo = (detail?.seller?.momo ?? "").toString().trim()
@@ -328,29 +291,9 @@ export default function SupplierOrderDetailsPage() {
             <div className="grid md:grid-cols-3 gap-4">
               <Card className="md:col-span-2">
                 <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <CardTitle>Order Summary</CardTitle>
-                    <div className="flex gap-2">
-                      <Badge variant={orderStatus.status === 'delivered' ? 'default' : orderStatus.status === 'in-transit' ? 'secondary' : 'outline'}>
-                        {orderStatus.displayName}
-                      </Badge>
-                      <Badge variant={paymentInfo.isPaid ? 'default' : paymentInfo.status === 'processing' ? 'secondary' : 'outline'}>
-                        {paymentInfo.isPaid ? '✅ Paid' : paymentInfo.displayName}
-                      </Badge>
-                    </div>
-                  </div>
-                  <CardDescription>{formatOrderDate(order?.CREATED_AT ?? order?.created_at ?? order?.heure) || ""}</CardDescription>
+                  <CardTitle>Order Summary</CardTitle>
                 </CardHeader>
-                <CardContent className="grid sm:grid-cols-3 gap-3">
-                  <div className="rounded-md border p-3">
-                    <div className="text-sm text-slate-600">Status</div>
-                    <div className="font-medium flex items-center gap-2">
-                      {orderStatus.status === 'delivered' ? '✅' : 
-                       orderStatus.status === 'in-transit' ? '🚚' : 
-                       orderStatus.status === 'processing' ? '⏳' : '📦'}
-                      {orderStatus.displayName}
-                    </div>
-                  </div>
+                <CardContent className="grid sm:grid-cols-2 gap-3">
                   <div className="rounded-md border p-3">
                     <div className="text-sm text-slate-600">Payment</div>
                     <div className="font-medium flex items-center gap-2">
@@ -420,7 +363,6 @@ export default function SupplierOrderDetailsPage() {
                     <tr className="[&>th]:py-2 [&>th]:px-3 text-xs text-slate-500 uppercase tracking-wide">
                       <th className="text-left pl-0 w-28">Code</th>
                       <th className="text-left">Item</th>
-                      <th className="text-left w-36">Ordered By</th>
                       <th className="text-right w-20">Qty</th>
                       <th className="text-right w-24">Served Qty</th>
                       <th className="text-right w-28">Requested Price</th>
@@ -448,9 +390,6 @@ export default function SupplierOrderDetailsPage() {
                         <tr key={`${code}-${name}-${buyer?.OWNER || "anon"}`}>
                           <td className="py-2 px-3 pl-0 align-middle">{code}</td>
                           <td className="py-2 px-3 align-middle">{name}</td>
-                          <td className="py-2 px-3 align-middle text-sm text-slate-700">
-                            {buyer?.OWNER || "—"}
-                          </td>
                           <td className="py-2 px-3 text-right align-middle font-mono tabular-nums">
                             {n(qty)}
                           </td>

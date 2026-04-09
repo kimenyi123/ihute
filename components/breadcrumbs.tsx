@@ -4,9 +4,10 @@ import Link from "next/link"
 import { ChevronRight, Home } from "lucide-react"
 import Image from "next/image"
 import { useMemo, useState, useEffect } from "react"
-import { 
-  isValidImageUrl, 
-  NO_IMAGE_URL 
+import {
+  isValidImageUrl,
+  NO_IMAGE_URL,
+  KAOS_PRODUCT_IMAGE_EXTENSIONS,
 } from "@/lib/image-utils"
 
 interface BreadcrumbsProps {
@@ -23,15 +24,19 @@ function CategoryBreadcrumbImage({ categoryId, categoryName }: { categoryId?: st
       // Try KAOS URLs based on categoryId
       const KAOS_BASE = "https://ishyiga.rw/images_kaos_beta/"
       const sanitizedCategory = categoryId.replace(/[^a-zA-Z0-9]/g, "_")
-      
-      candidates.push(`${KAOS_BASE}${sanitizedCategory}.jpg`)
-      candidates.push(`${KAOS_BASE}category_${sanitizedCategory}.jpg`)
-      
+
+      for (const ext of KAOS_PRODUCT_IMAGE_EXTENSIONS) {
+        candidates.push(`${KAOS_BASE}${sanitizedCategory}${ext}`)
+        candidates.push(`${KAOS_BASE}category_${sanitizedCategory}${ext}`)
+      }
+
       // Add fallback to static images
       const staticImages = [
         `/${categoryId}.jpg`,
+        `/${categoryId}.jpeg`,
         `/${categoryId}.png`,
         `/category-${categoryId}.jpg`,
+        `/category-${categoryId}.jpeg`,
         `/category-${categoryId}.png`,
       ]
       
