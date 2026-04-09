@@ -10,7 +10,6 @@ function noTrailingSlash(s: string): string {
   return (s || "").replace(/\/+$/, "")
 }
 
-/** Java backend base URL (no trailing slash). Uses BACKEND_URL, JAVA_BACKEND_BASE, or NEXT_PUBLIC_API_URL from env. */
 /** Java backend base URL (no trailing slash). Uses NEXT_PUBLIC_API_URL or JAVA_BACKEND_BASE from env. */
 export function getBackendBase(): string {
   const raw = noTrailingSlash(
