@@ -36,6 +36,7 @@ export default function QuickProductCodePage() {
   const [results, setResults] = useState<QuickProductResult | null>(null);
   const [error, setError] = useState('');
   const [searchCode, setSearchCode] = useState('');
+  const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
 
   const addItem = useCartStore((s) => s.addItem);
   const toggleFavorite = useFavoritesStore((s) => s.toggleFavorite);
@@ -66,6 +67,10 @@ export default function QuickProductCodePage() {
     setSearchCode(codeFromUrl);
     performSearch(codeFromUrl, accountFromUrl);
   }, []);
+
+  useEffect(() => {
+    setBrokenImages({});
+  }, [results, searchCode]);
 
   const performSearch = async (code: string, account?: string) => {
     setLoading(true);
@@ -132,6 +137,8 @@ export default function QuickProductCodePage() {
         supplierLocation: product.supplier_location,
         momo: product.momo,
         selectedUnit: unit,
+        itemCode: product.item_code,
+        item_key_words: product.item_code,
       },
       1
     );
@@ -224,6 +231,9 @@ export default function QuickProductCodePage() {
             {results.products.map((product: QuickProductItem, idx: number) => {
               const productId = `${product.supplier_account ?? ""}_${product.item_code ?? ""}`;
               const fav = isFavorite(productId);
+              const imgSrc = brokenImages[productId]
+                ? "/placeholder.svg?height=300&width=300"
+                : (product.image || "/placeholder.svg?height=300&width=300");
 
               return (
                 <div
@@ -234,9 +244,12 @@ export default function QuickProductCodePage() {
                   <div className="relative w-full aspect-square bg-muted">
                     <Image
                       fill
-                      src={product.image || "/placeholder.svg?height=300&width=300"}
+                      src={imgSrc}
                       alt={product.item_commercial_name ?? "Product"}
-                      className="object-cover"
+                      className="object-contain"
+                      onError={() => {
+                        setBrokenImages((prev) => ({ ...prev, [productId]: true }));
+                      }}
                     />
 
                     {/* Heart Button */}

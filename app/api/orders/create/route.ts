@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getOrdersUrl } from "@/lib/backend-config"
+import { DEFAULT_GUEST_ISHYIGA_ACCOUNT } from "@/lib/guest-checkout"
 
 function describeConnectFailure(raw?: string): string {
   if (!raw?.trim()) {
@@ -52,12 +53,30 @@ type LineIn = {
   name?: string
   item_name?: string
   itemCode?: string
+  NIKI_CODE?: string
+  nikiCode?: string
+  item_code?: string
+  ITEM_CODE?: string
+  item_key_words?: string
   qty?: number | string
   quantity?: number | string
   unitPrice?: number | string
   price?: number | string
   unit?: string
   measurement?: string
+}
+
+function normalizeItemCode(it: LineIn): string | undefined {
+  const raw =
+    it.itemCode ??
+    it.NIKI_CODE ??
+    it.nikiCode ??
+    it.item_code ??
+    it.ITEM_CODE ??
+    it.item_key_words ??
+    ""
+  const s = String(raw).trim()
+  return s || undefined
 }
 
 /* =========================
@@ -84,7 +103,7 @@ export async function POST(req: Request) {
     const rawItems: LineIn[] = Array.isArray(bodyIn.items) ? bodyIn.items : []
     const items = rawItems.map((it, i) => ({
       name: String(it.name ?? it.item_name ?? `Item ${i + 1}`),
-      itemCode: String(it.itemCode ?? "").trim() || undefined,
+      itemCode: normalizeItemCode(it),
       qty: Number(it.qty ?? it.quantity ?? 1),
       unitPrice: Number(it.unitPrice ?? it.price ?? 0),
       unit: String(it.unit ?? it.measurement ?? ""),
@@ -128,6 +147,22 @@ export async function POST(req: Request) {
       else if (paymentName.includes("CARD")) paymentId = `CARD_${Date.now()}`
       else paymentId = `COD_${Date.now()}`
     }
+    const reference = String(bodyIn.reference ?? "").trim()
+    const isDigitalPayment =
+      paymentName.includes("MOMO") || paymentName.includes("AIRTEL") || paymentName.includes("CARD")
+    const paymentStatus = isDigitalPayment || reference.length > 0 ? "PAID" : "PENDING"
+
+    /** Browser guest checkout — Java OrdersServlet must null-check buyer or read this flag (see GUEST_CHECKOUT_BUYER_ACCOUNT). */
+    const isGuestCheckout = Boolean(
+      bodyIn.isGuestCheckout ?? bodyIn.guestCheckout ?? /^guest_/i.test(buyerEmail.trim()),
+    )
+    let buyerAccount = String(bodyIn.buyerAccount ?? "").trim()
+    if (!buyerAccount) buyerAccount = String(process.env.GUEST_CHECKOUT_BUYER_ACCOUNT ?? "").trim()
+    if (!buyerAccount && isGuestCheckout) {
+      buyerAccount = String(
+        process.env.DEFAULT_GUEST_ISHYIGA_ACCOUNT ?? DEFAULT_GUEST_ISHYIGA_ACCOUNT,
+      ).trim()
+    }
 
     /* -------- shared payload -------- */
     const shared = {
@@ -140,12 +175,15 @@ export async function POST(req: Request) {
       sellerPhone: String(bodyIn.sellerPhone ?? ""),
       paymentName,
       paymentId,
-      reference: String(bodyIn.reference ?? ""),
+      reference,
       currency: String(bodyIn.currency ?? "RWF"),
+      paymentStatus,
       items,
       isTableCommand: Boolean(bodyIn.isTableCommand),
       tableName: String(bodyIn.tableName ?? ""),
       tableLocation: String(bodyIn.tableLocation ?? ""),
+      isGuestCheckout,
+      buyerAccount,
     }
 
     let lastErr:
@@ -186,6 +224,8 @@ export async function POST(req: Request) {
         form.set("paymentId", shared.paymentId)
         form.set("reference", shared.reference)
         form.set("currency", shared.currency)
+        form.set("paymentStatus", shared.paymentStatus)
+        form.set("PAYMENT_STATUS", shared.paymentStatus)
         form.set("items", JSON.stringify(shared.items))
 
         if (shared.buyerName) form.set("buyerName", shared.buyerName)
@@ -198,6 +238,8 @@ export async function POST(req: Request) {
           form.set("tableLocation", shared.tableLocation)
         }
         form.set("skipStockCheck", "true")
+        if (shared.isGuestCheckout) form.set("isGuestCheckout", "true")
+        if (shared.buyerAccount) form.set("buyerAccount", shared.buyerAccount)
 
         const controller = new AbortController()
         const timeoutId = setTimeout(() => controller.abort(), 15000)
@@ -252,11 +294,15 @@ export async function POST(req: Request) {
                 paymentId: shared.paymentId,
                 reference: shared.reference,
                 currency: shared.currency,
+                paymentStatus: shared.paymentStatus,
+                PAYMENT_STATUS: shared.paymentStatus,
                 items: shared.items,
                 isTableCommand: shared.isTableCommand,
                 tableName: shared.tableName,
                 tableLocation: shared.tableLocation,
                 skipStockCheck: true,
+                isGuestCheckout: shared.isGuestCheckout,
+                ...(shared.buyerAccount ? { buyerAccount: shared.buyerAccount } : {}),
               }),
               signal: c2.signal,
               cache: "no-store",
@@ -280,6 +326,7 @@ export async function POST(req: Request) {
           via: url,
           sellerTel: json?.sellerTel ?? "",
           paymentName: shared.paymentName,
+          paymentStatus: shared.paymentStatus,
         })
       }
 

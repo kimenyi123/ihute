@@ -194,7 +194,7 @@ export function ProductCard({
             key={resolvedUrl}
             src={src}
             alt={name}
-            className="absolute inset-0 h-full w-full object-cover"
+            className="absolute inset-0 h-full w-full object-contain"
             loading="lazy"
             decoding="async"
             referrerPolicy="no-referrer"
@@ -223,7 +223,7 @@ export function ProductCard({
             fill
             src={src}
             alt={name}
-            className="object-cover"
+            className="object-contain"
             onError={() => {
               console.log("[ProductCard] Next.js Image failed to load:", {
                 name: name,

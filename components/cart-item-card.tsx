@@ -42,7 +42,7 @@ export function CartItemCard({ item }: { item: CartItem }) {
   return (
     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4 rounded-lg border p-3">
       <div className="flex items-center gap-3 flex-1 w-full sm:w-auto">
-        <div className="relative h-16 w-16 flex-shrink-0 rounded bg-muted overflow-hidden">
+        <div className="relative h-[72px] w-[72px] flex-shrink-0 rounded bg-muted overflow-hidden">
           {isRemote ? (
             <img
               key={src}

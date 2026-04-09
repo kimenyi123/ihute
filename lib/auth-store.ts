@@ -48,7 +48,6 @@ interface AuthState {
   login: (user: User) => void
   logout: () => void
   updateUser: (user: Partial<User>) => void
-  updateActivity: () => void
   checkSession: () => boolean
   setSessionTimeout: (timeout: number) => void
 }
@@ -59,7 +58,7 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       isAuthenticated: false,
       loginTime: null,
-      sessionTimeout: 24 * 60 * 60 * 1000,
+      sessionTimeout: 60 * 60 * 1000, // 60 minutes
       hasHydrated: false,
 
       login: (user) => {
@@ -90,13 +89,6 @@ export const useAuthStore = create<AuthState>()(
 
       updateUser: (updates) =>
         set((state) => ({ user: state.user ? { ...state.user, ...updates } : null })),
-
-      updateActivity: () => {
-        const state = get()
-        if (state.isAuthenticated) {
-          set({ loginTime: Date.now() })
-        }
-      },
 
       checkSession: () => {
         const state = get()

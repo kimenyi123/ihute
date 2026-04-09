@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Label } from "@/components/ui/label"
 import { formatPaymentMethod } from "@/lib/payment-utils"
@@ -21,6 +22,7 @@ import {
 import { Copy, PhoneCall, CheckCircle2, RotateCcw, MessageCircle, Truck, CreditCard, Wallet, Users, Lock, MapPin } from "lucide-react"
 import { isBarOrRestaurant } from "@/lib/constants"
 import { useTableCommandStore } from "@/lib/table-command-store"
+import { GUEST_POOL_EMAIL, getGuestBuyerAccount, ensureGuestPoolBuyerAccount } from "@/lib/guest-checkout"
 import { getSavedAddresses, saveAddress, type SavedAddress } from "@/lib/saved-addresses"
 import {
   Select,
@@ -172,8 +174,11 @@ function CartSummaryBody() {
   const [momoOpen, setMomoOpen] = useState(false)
   const [momoForSeller, setMomoForSeller] = useState<string | null>(null)
   const [momoPaymentProvider, setMomoPaymentProvider] = useState<"mtn" | "airtel">("mtn")
-  // Fallback: fetch supplier MoMo from profile when cart items don't have it (e.g. Burrows has momo in account_signup)
+  const [momoAwaitingProof, setMomoAwaitingProof] = useState(false)
+  const [momoProofDraft, setMomoProofDraft] = useState("")
+  // From GET /api/account/profile (account_signup): MoMo when missing on cart; TEL as canonical seller phone
   const [supplierMomoFallback, setSupplierMomoFallback] = useState<Record<string, string>>({})
+  const [supplierAccountTel, setSupplierAccountTel] = useState<Record<string, string>>({})
 
   // Cart suggestions popup (before checkout). Skip popup for rest of session once user chose "No thanks" or "Continue to checkout"
   const [suggestionsPopupOpen, setSuggestionsPopupOpen] = useState(false)
@@ -198,27 +203,56 @@ function CartSummaryBody() {
   const getMomoForGroup = (g: { supplierId: string; momo?: string | null }) =>
     (g.momo ?? "").trim() || (supplierMomoFallback[g.supplierId] ?? "").trim()
 
-  // Fetch supplier profile (momo) when group has no momo so QR code can still show (e.g. PANGOLIN'S BURROWS)
-  const requestedMomoRef = useRef<Set<string>>(new Set())
+  /** Seller contact: account_signup.TEL (via profile API `phone`), then cart `sellerPhone`; not MoMo. */
+  const getSellerContactLine = (g: { supplierId: string; phone?: string | null }) => {
+    const fromSignup = (supplierAccountTel[g.supplierId] ?? "").trim()
+    const fromCart = (g.phone ?? "").trim()
+    const raw = fromSignup || fromCart
+    if (!raw) return ""
+    const n = normalizePhone(raw)
+    return n || raw
+  }
+
+  const getSellerTelForOrder = (g: { supplierId: string; phone?: string | null }) =>
+    (supplierAccountTel[g.supplierId] ?? "").trim() || (g.phone ?? "").trim() || ""
+
+  // One profile fetch per supplier: MoMo fallback + TEL (account_signup)
+  const requestedProfileRef = useRef<Set<string>>(new Set())
   useEffect(() => {
     groups.forEach((g) => {
       const account = (g.supplierId ?? "").trim()
-      if (!account || (g.momo ?? "").trim()) return
-      if (requestedMomoRef.current.has(account)) return
-      requestedMomoRef.current.add(account)
+      if (!account) return
+      if (requestedProfileRef.current.has(account)) return
+      requestedProfileRef.current.add(account)
       fetch(`/api/account/profile?account=${encodeURIComponent(account)}`)
         .then((res) => res.json())
         .then((data) => {
-          const momo = (data?.ok && data?.profile?.momo) ? String(data.profile.momo).trim() : ""
+          if (!data?.ok || !data?.profile) return
+          const p = data.profile as { momo?: string; phone?: string }
+          const momo = String(p.momo ?? "").trim()
+          const tel = String(p.phone ?? "").trim()
           if (momo) setSupplierMomoFallback((prev) => ({ ...prev, [account]: momo }))
+          if (tel) setSupplierAccountTel((prev) => ({ ...prev, [account]: tel }))
         })
         .catch(() => {})
     })
   }, [groups])
+
+  // Prefetch shared guest pool account (ISHYIGA_ACCOUNT) so checkout is fast and order servlet can resolve buyer
+  useEffect(() => {
+    if (!paymentMethodOpen || checkoutMode !== "anonymous") return
+    void ensureGuestPoolBuyerAccount()
+  }, [paymentMethodOpen, checkoutMode])
+
   const discountPercent = appliedPromo?.percent ?? 0
   const discountAmount = Math.round((grandTotal * discountPercent) / 100)
   const totalAfterDiscount = grandTotal - discountAmount
-  const myPhone = checkoutMode === "anonymous" ? anonymousPhone : (user?.phone || "")
+  const myPhone =
+    checkoutMode === "anonymous"
+      ? isInTableCommand()
+        ? anonymousPhone
+        : ""
+      : user?.phone || ""
 
   const applyPromo = async () => {
     const code = promoCode.trim().toUpperCase()
@@ -351,12 +385,9 @@ function CartSummaryBody() {
       return
     }
 
-    // Validate anonymous user info
-    if (checkoutMode === "anonymous") {
-      if (!anonymousName.trim() || !anonymousPhone.trim()) {
-        alert("Please fill in your name and phone number")
-        return
-      }
+    if (checkoutMode === "anonymous" && isInTableCommand() && !anonymousName.trim()) {
+      alert("Please enter your name so the supplier knows who ordered")
+      return
     }
 
     if (paymentMethod === "cod") {
@@ -370,6 +401,8 @@ function CartSummaryBody() {
       setPaymentMethodOpen(false)
       setMomoForSeller(selectedSeller)
       setMomoPaymentProvider(paymentMethod === "airtel" ? "airtel" : "mtn")
+      setMomoAwaitingProof(false)
+      setMomoProofDraft("")
       setMomoOpen(true)
       setSelectedSeller(null)
     }
@@ -391,13 +424,19 @@ function CartSummaryBody() {
       setBusy(g.supplierId)
       setPaymentStatus(g.supplierId, "pending")
 
-      const items = g.items.map(it => ({
-        name: it.name,
-        qty: it.qty,
-        unitPrice: it.price,
-        unit: it.unit ?? "",
-        itemCode: it.itemCode ?? it.id,
-      }))
+      const items = g.items.map((it) => {
+        const code =
+          String(it.itemCode ?? "").trim() ||
+          String(it.item_key_words ?? "").trim() ||
+          String(it.id ?? "").trim()
+        return {
+          name: it.name,
+          qty: it.qty,
+          unitPrice: it.price,
+          unit: it.unit ?? "",
+          itemCode: code,
+        }
+      })
 
       const paymentId = opts.paymentId || `${opts.paymentName}_${Date.now()}`
 
@@ -413,24 +452,39 @@ function CartSummaryBody() {
       const isOrderingFromOwnShop = Boolean(user?.ishyigaAccount && g.supplierId && user.ishyigaAccount === g.supplierId);
       const resolvedBuyerName = isInTableCommand()
         ? (checkoutMode === "anonymous" ? (anonymousName?.trim() || "Guest") : (user?.name || "Guest"))
-        : (tableInfo?.customerName && String(tableInfo.customerName).trim()) ||
-          (checkoutMode === "anonymous" ? anonymousName : null) ||
-          (isOrderingFromOwnShop ? (tableInfo?.customerName || anonymousName || "Guest") : user?.name) ||
-          anonymousName ||
-          user?.name ||
-          "Guest";
+        : checkoutMode === "anonymous"
+          ? (anonymousName?.trim() || "Guest")
+          : (tableInfo?.customerName && String(tableInfo.customerName).trim()) ||
+            (isOrderingFromOwnShop ? (tableInfo?.customerName || anonymousName || "Guest") : user?.name) ||
+            anonymousName ||
+            user?.name ||
+            "Guest"
+
+      let guestBuyerAccount = getGuestBuyerAccount()
+      if (checkoutMode === "anonymous") {
+        guestBuyerAccount = await ensureGuestPoolBuyerAccount()
+      }
 
       const res = await fetch("/api/orders/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          buyerEmail: checkoutMode === "anonymous" ? `guest_${Date.now()}@ihute.rw` : user?.email,
-          buyerPhone: opts.buyerPhone || (checkoutMode === "anonymous" ? anonymousPhone : user?.phone || ""),
+          // Must match account_signup.EMAIL (guest_pool@ihute.rw) so Java OrdersServlet resolves buyer — not a random guest_* address.
+          buyerEmail: checkoutMode === "anonymous" ? GUEST_POOL_EMAIL : user?.email,
+          isGuestCheckout: checkoutMode === "anonymous",
+          ...(checkoutMode === "anonymous" ? { buyerAccount: guestBuyerAccount } : {}),
+          buyerPhone:
+            opts.buyerPhone ??
+            (checkoutMode === "anonymous"
+              ? isInTableCommand()
+                ? anonymousPhone
+                : ""
+              : user?.phone || ""),
           buyerLocation: opts.buyerLocation || (checkoutMode === "anonymous" ? deliveryLocation : user?.location || "NA"),
           buyerName: String(resolvedBuyerName || "").trim() || "Guest",
           sellerAccount: g.supplierId,
           sellerName: g.supplierName,
-          sellerPhone: g.phone || "",
+          sellerPhone: getSellerTelForOrder(g),
           paymentName: opts.paymentName,
           paymentId: paymentId,
           reference: opts.reference || "",
@@ -474,7 +528,7 @@ function CartSummaryBody() {
               g.supplierId,
               json.tableCommand.tableLocation,
               checkoutMode === "anonymous" ? anonymousName : user?.name || "Guest",
-              checkoutMode === "anonymous" ? `guest_${Date.now()}@ihute.rw` : user?.email || "",
+              checkoutMode === "anonymous" ? GUEST_POOL_EMAIL : user?.email || "",
               {
                 shareableLink: json.tableCommand.shareableLink,
                 shareableToken: json.tableCommand.shareableToken,
@@ -523,7 +577,12 @@ function CartSummaryBody() {
             orderId,
             sellerName: g.supplierName,
             sellerPhone: sellerTel || "",
-            buyerPhone: checkoutMode === "anonymous" ? anonymousPhone : (user?.phone || ""),
+            buyerPhone:
+              checkoutMode === "anonymous"
+                ? isInTableCommand()
+                  ? anonymousPhone
+                  : ""
+                : user?.phone || "",
             total: String(g.subtotal),
             paymentMethod: opts.paymentName
           })
@@ -589,14 +648,33 @@ function CartSummaryBody() {
   const confirmMoMoPayment = async () => {
     if (!momoForSeller) return
     const g = groups.find(x => x.supplierId === momoForSeller)
-    if (!g) { setMomoOpen(false); return }
+    if (!g) {
+      setMomoOpen(false)
+      setMomoAwaitingProof(false)
+      setMomoProofDraft("")
+      return
+    }
+
+    if (!momoAwaitingProof) {
+      setMomoAwaitingProof(true)
+      return
+    }
+
+    const proof = momoProofDraft.trim()
+    if (!proof) {
+      alert("Please enter your MoMo transaction reference or proof of payment (as shown on your receipt).")
+      return
+    }
+
     await placeOrder(g, {
       paymentName: momoPaymentProvider === "airtel" ? "PAID_AIRTEL_MOMO" : "PAID_MTN_MOMO",
-      reference: `MOMO_${Date.now()}`,
-      paymentId: `MOMO_${Date.now()}`
+      reference: proof,
+      paymentId: proof,
     })
     setMomoOpen(false)
     setMomoForSeller(null)
+    setMomoAwaitingProof(false)
+    setMomoProofDraft("")
   }
 
   const renderContent = () => (
@@ -837,38 +915,55 @@ function CartSummaryBody() {
             </div>
           )}
 
-          {/* Anonymous user info: for table orders do NOT pre-fill name — user enters their name so "Ordered By" shows person, not table */}
+          {/* Guest: table orders still need a name for "Ordered By"; otherwise show seller phone for tracking */}
           {checkoutMode === "anonymous" && (
             <div className="space-y-3 pb-4 border-b">
-              <div className="space-y-1">
-                <Label className="text-sm font-medium">Your Name *</Label>
-                <Input
-                  value={anonymousName}
-                  onChange={(e) => setAnonymousName(e.target.value)}
-                  placeholder={isInTableCommand() ? "e.g., John, Alice" : "Enter your full name"}
-                  className={!isInTableCommand() && tableInfo?.customerName ? "bg-muted" : ""}
-                />
-                {isInTableCommand() ? (
+              {isInTableCommand() ? (
+                <div className="space-y-1">
+                  <Label className="text-sm font-medium">Your Name *</Label>
+                  <Input
+                    value={anonymousName}
+                    onChange={(e) => setAnonymousName(e.target.value)}
+                    placeholder="e.g., John, Alice"
+                  />
                   <p className="text-xs text-muted-foreground">
                     Enter your name so the supplier knows who ordered (table is already shown above).
                   </p>
-                ) : tableInfo?.customerName ? (
-                  <p className="text-xs text-muted-foreground">
-                    Pre-filled from shop information
-                  </p>
-                ) : null}
-              </div>
-              <div className="space-y-1">
-                <Label className="text-sm font-medium">Phone Number *</Label>
-                <Input
-                  value={anonymousPhone}
-                  onChange={(e) => setAnonymousPhone(e.target.value)}
-                  placeholder="+250..."
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Your order details and tracking link will be sent via WhatsApp
-              </p>
+                </div>
+              ) : (
+                selectedSeller &&
+                (() => {
+                  const g = groups.find((x) => x.supplierId === selectedSeller)
+                  if (!g) return null
+                  const sellerTel = getSellerContactLine(g)
+                  return (
+                    <div className="rounded-xl border border-emerald-200/90 bg-gradient-to-br from-emerald-50 via-white to-slate-50 p-4 shadow-sm ring-1 ring-emerald-100/60">
+                      <div className="flex items-start gap-3">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 shadow-inner">
+                          <PhoneCall className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0 flex-1 space-y-2">
+                          <p className="text-sm font-semibold tracking-tight text-emerald-950">Track your order</p>
+                          <p className="text-xs leading-relaxed text-muted-foreground">
+                            Use the seller&apos;s phone number below. Call or WhatsApp this number to check status and follow up on your order.
+                          </p>
+                          <div className="rounded-lg border border-emerald-100 bg-white/90 px-3 py-2.5 shadow-sm">
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700/90">
+                              Seller phone
+                            </p>
+                            <p className="break-all font-mono text-base font-semibold text-slate-900">
+                              {sellerTel || "Not on file — contact the shop"}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      <p className="mt-3 border-t border-emerald-100/80 pt-3 text-xs text-muted-foreground">
+                        After payment, enter your MoMo proof in the next step so we can match your payment to this order.
+                      </p>
+                    </div>
+                  )
+                })()
+              )}
             </div>
           )}
 
@@ -970,14 +1065,33 @@ function CartSummaryBody() {
               <h4 className="font-medium text-sm text-muted-foreground">CUSTOMER INFORMATION</h4>
               {checkoutMode === "anonymous" && (
                 <>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Name:</span>
-                    <span className="font-medium">{anonymousName}</span>
+                  <div className="flex justify-between text-sm gap-2">
+                    <span className="text-muted-foreground shrink-0">Name:</span>
+                    <span className="font-medium text-right">
+                      {isInTableCommand() ? anonymousName || "—" : "Guest"}
+                    </span>
                   </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Phone:</span>
-                    <span className="font-medium">{anonymousPhone}</span>
-                  </div>
+                  {!isInTableCommand() && codForSeller && (() => {
+                    const g = groups.find((x) => x.supplierId === codForSeller)
+                    const tel = g ? getSellerContactLine(g) : ""
+                    return (
+                      <>
+                        <div className="flex justify-between text-sm gap-2">
+                          <span className="text-muted-foreground shrink-0">Seller phone:</span>
+                          <span className="font-medium text-right break-all">{tel || "—"}</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Use this number to track your order.
+                        </p>
+                      </>
+                    )
+                  })()}
+                  {isInTableCommand() && (
+                    <div className="flex justify-between text-sm gap-2">
+                      <span className="text-muted-foreground shrink-0">Phone:</span>
+                      <span className="font-medium text-right break-all">{anonymousPhone || "—"}</span>
+                    </div>
+                  )}
                 </>
               )}
               {isAuthenticated && (
@@ -1094,16 +1208,21 @@ function CartSummaryBody() {
                         </p>
                       )}
                     </div>
-                    {checkoutMode !== "anonymous" && (
-                      <div className="space-y-1">
-                        <label className="text-sm font-medium">Contact phone</label>
-                        <Input
-                          value={contactPhone}
-                          onChange={(e) => setContactPhone(e.target.value)}
-                          placeholder="+2507…"
-                        />
-                      </div>
-                    )}
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">
+                        {checkoutMode === "anonymous" ? "Delivery contact phone (optional)" : "Contact phone"}
+                      </label>
+                      <Input
+                        value={contactPhone}
+                        onChange={(e) => setContactPhone(e.target.value)}
+                        placeholder="+2507…"
+                      />
+                      {checkoutMode === "anonymous" && (
+                        <p className="text-xs text-muted-foreground">
+                          So the rider can reach you. Tracking stays on the seller number above.
+                        </p>
+                      )}
+                    </div>
                     {deliveryLocation.trim() && (
                       <Button
                         type="button"
@@ -1142,108 +1261,183 @@ function CartSummaryBody() {
       </Dialog>
 
       {/* MoMo payment dialog */}
-      <Dialog open={momoOpen} onOpenChange={setMomoOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
+      <Dialog
+        open={momoOpen}
+        onOpenChange={(open) => {
+          setMomoOpen(open)
+          if (!open) {
+            setMomoForSeller(null)
+            setMomoAwaitingProof(false)
+            setMomoProofDraft("")
+          }
+        }}
+      >
+        <DialogContent className="max-w-md max-h-[min(90vh,720px)] flex flex-col gap-0 overflow-hidden p-0">
+          <DialogHeader className="px-6 pt-6 pb-2">
             <DialogTitle>
               {momoPaymentProvider === "airtel" ? "Pay with Airtel Money" : "Pay with MTN Mobile Money"}
             </DialogTitle>
             <DialogDescription>Complete payment to confirm your order</DialogDescription>
           </DialogHeader>
 
-          {momoForSeller && (() => {
-            const g = groups.find(x => x.supplierId === momoForSeller)
-            if (!g) return null
+          <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-4">
+            {momoForSeller && (() => {
+              const g = groups.find(x => x.supplierId === momoForSeller)
+              if (!g) return null
 
-            const momoTarget = getMomoForGroup(g)
-            const hasUssdTarget = momoTarget.length > 0
-            const payload = buildMoMoUssd(momoTarget, g.subtotal)
-            const telHref = `tel:${encodeURIComponent(payload)}`
+              const momoTarget = getMomoForGroup(g)
+              const hasUssdTarget = momoTarget.length > 0
+              const payload = buildMoMoUssd(momoTarget, g.subtotal)
+              const telHref = `tel:${encodeURIComponent(payload)}`
+              const sellerLine = getSellerContactLine(g)
 
-            return (
-              <div className="space-y-4">
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Amount to pay:</span>
-                    <span className="font-bold text-lg">{g.subtotal.toLocaleString()} RWF</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Seller:</span>
-                    <span className="font-medium">{g.supplierName}</span>
-                  </div>
-                </div>
-
-                {hasUssdTarget && (
-                  <>
-                    <div className="text-center space-y-2">
-                      <p className="text-sm font-medium">Scan QR code with your phone camera</p>
-                      <div className="bg-white p-4 rounded-lg inline-block border-2">
-                        <QRCode value={payload} size={200} />
-                      </div>
-                      <p className="text-xs font-semibold text-slate-800">USSD code (dial on your phone):</p>
-                      <p className="font-mono text-sm bg-white border rounded px-2 py-1 break-all select-all" title="Copy or dial">
-                        {payload}
+              return (
+                <div className="space-y-4">
+                  <div className="rounded-xl bg-gradient-to-br from-amber-50 to-yellow-50/80 border border-amber-200/90 p-4 space-y-3 shadow-sm">
+                    <div className="flex items-center justify-between gap-2 text-sm">
+                      <span className="text-muted-foreground">Amount to pay</span>
+                      <span className="font-bold text-lg tabular-nums">{g.subtotal.toLocaleString()} RWF</span>
+                    </div>
+                    <div className="flex items-start justify-between gap-2 text-sm">
+                      <span className="text-muted-foreground shrink-0">Seller</span>
+                      <span className="font-semibold text-right leading-snug">{g.supplierName}</span>
+                    </div>
+                    <div className="rounded-lg border border-amber-100 bg-white/70 px-3 py-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-900/70">Seller phone (tracking)</p>
+                      <p className="font-mono text-sm font-semibold text-slate-900 break-all">
+                        {sellerLine || "—"}
                       </p>
-                      <p className="text-xs text-muted-foreground">Or tap &quot;Dial now&quot; below to open your dialer with this code.</p>
+                      {checkoutMode === "anonymous" && !isInTableCommand() && (
+                        <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
+                          Guest checkout: use this number to follow up or track your order with the seller.
+                        </p>
+                      )}
                     </div>
+                  </div>
 
-                    <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        className="flex-1"
-                        onClick={async () => {
-                          try {
-                            await navigator.clipboard.writeText(momoTarget)
-                            alert(`Copied: ${momoTarget}`)
-                          } catch {}
-                        }}
-                      >
-                        <Copy className="h-4 w-4 mr-2" />
-                        Copy number
-                      </Button>
-                      <Button
-                        variant="outline"
-                        className="flex-1"
-                        asChild
-                      >
-                        <a href={telHref}>
-                          <PhoneCall className="h-4 w-4 mr-2" />
-                          Dial now
-                        </a>
-                      </Button>
+                  {hasUssdTarget && (
+                    <>
+                      <div className="text-center space-y-2">
+                        <p className="text-sm font-medium">Scan QR code with your phone camera</p>
+                        <div className="bg-white p-4 rounded-xl inline-block border-2 shadow-inner">
+                          <QRCode value={payload} size={200} />
+                        </div>
+                        <p className="text-xs font-semibold text-slate-800">USSD code (dial on your phone):</p>
+                        <p className="font-mono text-sm bg-white border rounded-lg px-2 py-1.5 break-all select-all" title="Copy or dial">
+                          {payload}
+                        </p>
+                        <p className="text-xs text-muted-foreground">Or tap &quot;Dial now&quot; below to open your dialer with this code.</p>
+                      </div>
+
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          className="flex-1"
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(momoTarget)
+                              alert(`Copied: ${momoTarget}`)
+                            } catch {}
+                          }}
+                        >
+                          <Copy className="h-4 w-4 mr-2" />
+                          Copy number
+                        </Button>
+                        <Button
+                          variant="outline"
+                          className="flex-1"
+                          asChild
+                        >
+                          <a href={telHref}>
+                            <PhoneCall className="h-4 w-4 mr-2" />
+                            Dial now
+                          </a>
+                        </Button>
+                      </div>
+                    </>
+                  )}
+
+                  {!hasUssdTarget && (
+                    <div className="text-center p-6 bg-muted/80 rounded-xl border border-dashed">
+                      <p className="text-sm text-muted-foreground">
+                        No MoMo code available for this seller. Please contact them using the seller phone above.
+                      </p>
                     </div>
-                  </>
-                )}
+                  )}
 
-                {!hasUssdTarget && (
-                  <div className="text-center p-6 bg-muted rounded-lg">
-                    <p className="text-sm text-muted-foreground">
-                      No MoMo code available for this seller. Please contact them directly.
+                  <div className="rounded-lg bg-blue-50 border border-blue-200 p-3">
+                    <p className="text-xs text-blue-950 leading-relaxed">
+                      <strong>Note:</strong>{" "}
+                      {momoAwaitingProof
+                        ? "Enter the transaction reference from your MoMo SMS or receipt, then place your order."
+                        : "After you pay, tap “I’ve paid” and enter your proof of payment so we can match it to your order."}
                     </p>
                   </div>
-                )}
 
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                  <p className="text-xs text-blue-900">
-                    <strong>Note:</strong> After completing the MoMo payment, click "I've Paid" below to confirm your order.
-                  </p>
+                  {momoAwaitingProof && (
+                    <div className="rounded-xl border-2 border-emerald-200/90 bg-gradient-to-b from-emerald-50/90 to-white p-4 space-y-2 shadow-sm ring-1 ring-emerald-100/80">
+                      <Label htmlFor="momo-proof" className="text-sm font-semibold text-emerald-950">
+                        Proof of payment
+                      </Label>
+                      <Textarea
+                        id="momo-proof"
+                        value={momoProofDraft}
+                        onChange={(e) => setMomoProofDraft(e.target.value)}
+                        placeholder="e.g. MTN transaction ID, reference, or receipt number"
+                        rows={3}
+                        className="resize-none font-mono text-sm min-h-[88px] border-emerald-200 focus-visible:ring-emerald-500"
+                      />
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">
+                        This reference is stored with your order so the seller can verify your MoMo transfer.
+                      </p>
+                    </div>
+                  )}
                 </div>
-              </div>
-            )
-          })()}
+              )
+            })()}
+          </div>
 
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => { setMomoOpen(false); setMomoForSeller(null) }}>
-              Cancel
-            </Button>
-            <Button
-              onClick={confirmMoMoPayment}
-              disabled={busy === momoForSeller}
-              className="bg-green-600 hover:bg-green-700"
-            >
-              <CheckCircle2 className="h-4 w-4 mr-2" />
-              {busy === momoForSeller ? "Processing..." : "I've Paid"}
-            </Button>
+          <DialogFooter className="flex-shrink-0 gap-2 border-t bg-background px-6 py-4 flex flex-row flex-wrap items-center justify-end">
+            {momoAwaitingProof && (
+              <Button
+                type="button"
+                variant="ghost"
+                className="text-muted-foreground mr-auto"
+                onClick={() => {
+                  setMomoAwaitingProof(false)
+                  setMomoProofDraft("")
+                }}
+              >
+                Back
+              </Button>
+            )}
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setMomoOpen(false)
+                  setMomoForSeller(null)
+                  setMomoAwaitingProof(false)
+                  setMomoProofDraft("")
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={confirmMoMoPayment}
+                disabled={busy === momoForSeller}
+                className="bg-green-600 hover:bg-green-700 min-w-[8.5rem]"
+              >
+                <CheckCircle2 className="h-4 w-4 mr-2" />
+                {busy === momoForSeller
+                  ? "Processing…"
+                  : momoAwaitingProof
+                    ? "Place order"
+                    : "I’ve paid"}
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

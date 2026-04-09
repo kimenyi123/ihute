@@ -15,13 +15,19 @@ function normalizeOrders(input: any): any[] {
   const arr = Array.isArray(input?.orders) ? input.orders : []
   return arr.map((order: any) => ({
     ...order,  // This spreads all fields from the original order
-
+    
     // ✅ Explicitly ensure TIN fields are included and mapped correctly
     SELLER_TIN: order.SELLER_TIN ?? order.sellerTin ?? "",
     BUYER_TIN: order.BUYER_TIN ?? order.buyerTin ?? "",
-    // Prefer joined account owner name; avoid generic placeholders like BUYER_OWNER="Customer".
-    BUYER_OWNER: order.BUYER_OWNER_NAME ?? order.buyerOwnerName ?? order.OWNER ?? order.owner ?? order.BUYER_OWNER ?? order.buyerOwner ?? "",
-    BUYER_OWNER_NAME: order.BUYER_OWNER_NAME ?? order.buyerOwnerName ?? order.OWNER ?? order.owner ?? order.BUYER_OWNER ?? order.buyerOwner ?? "",
+    
+    // ✅ Get buyer/owner info from account_signup using BUYER_ISHYIGA_ACCOUNT
+    BUYER_OWNER: order.BUYER_ACCOUNT_OWNER ?? order.BUYER_OWNER_NAME ?? order.BUYER_OWNER ?? order.OWNER ?? order.owner ?? "",
+    BUYER_OWNER_NAME: order.BUYER_ACCOUNT_OWNER ?? order.BUYER_OWNER_NAME ?? order.OWNER ?? order.owner ?? "",
+    BUYER_EMAIL: order.BUYER_ACCOUNT_EMAIL ?? order.BUYER_EMAIL ?? order.EMAIL ?? order.email ?? "",
+    BUYER_PHONE: order.BUYER_ACCOUNT_PHONE ?? order.BUYER_PHONE ?? order.PHONE ?? order.phone ?? "",
+    
+    // ✅ Remove ORDERED_BY field completely
+    // ORDERED_BY: order.ORDERED_BY ?? order.ordered_by ?? "",  // REMOVED
 
     items: (Array.isArray(order?.items) ? order.items : []).map((item: any) => {
       const qty = Number(item.QUANTITY ?? item.qty ?? item.quantity ?? 0)
@@ -35,6 +41,8 @@ function normalizeOrders(input: any): any[] {
         total: qty * unitPrice,
         UNIT: item.UNIT ?? item.unit ?? item.measurement ?? "",
         ITEM_CODE: item.ITEM_CODE ?? item.code,
+        // ✅ Remove ORDERED_BY from items too
+        // ORDERED_BY: item.ORDERED_BY ?? item.ordered_by ?? "",  // REMOVED
       }
     }),
   }))
