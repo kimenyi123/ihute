@@ -18,6 +18,8 @@ import { getProductImageSrc, NO_IMAGE_URL } from "@/lib/image-utils"
 import { cn } from "@/lib/utils"
 import { SlidersHorizontal } from "lucide-react"
 import { grandmaApiService } from "@/lib/grandma-api-service"
+import { getUserPreferences, toggleUserPreference, saveUserPreferences, getCurrentUserId, loadUserPreferences } from "@/lib/user-preferences-api"
+import { getBackendBase } from "@/lib/backend-config"
 
 export type Category =
   | "Boutique"
@@ -1239,14 +1241,18 @@ export default function GrandmaPage() {
     () => {
       if (!selectedShopId) return null
       
-      // First try to find in API shops
+      // First try to find in allAvailableShops (the actual loaded shops)
+      const availableShop = allAvailableShops.find((s) => s.id === selectedShopId)
+      if (availableShop) return availableShop
+      
+      // Fallback to API shops (if any)
       const apiShop = apiShops.find((s) => s.id === selectedShopId)
       if (apiShop) return apiShop
       
-      // Fallback to MOCK_SHOPS
+      // Final fallback to MOCK_SHOPS
       return MOCK_SHOPS.find((s) => s.id === selectedShopId) ?? null
     },
-    [selectedShopId, apiShops]
+    [selectedShopId, allAvailableShops, apiShops]
   )
 
   const liveMenuNickname = useMemo(() => {
@@ -1416,115 +1422,173 @@ export default function GrandmaPage() {
       clearTimeout(t)
     }
   }, [isLiveMenuSelected, liveMenuNickname, selectedShop?.category, search])
-  // Fetch real shops data when category changes - using same pattern as existing components
-useEffect(() => {
-  if (!category) return
 
-  let cancelled = false
-  const controller = new AbortController()
-
-  const fetchCategoryShops = async () => {
-    try {
-      setShopsLoading(true)
-      setShopsError(null)
-
-      // Use the same successful approach as settings - fetch all shops across all categories
-      const categoryToSectorMap: Record<string, string> = {
-        'Boutique': 'boutique',
-        'Supermarket': 'supermarket', 
-        'Pharmacy': 'pharmacy',
-        'Restaurant': 'restaurant',
-        'Liquor Store': 'bar-resto',
-        'Bakery': 'coffee-shop',
-        'Veterinary': 'veterinary',
-        'Others': 'others'
-      }
+  // Fetch all available shops for settings section
+  useEffect(() => {
+    const fetchAllShops = async () => {
+      console.log('=== fetchAllShops called ===')
+      setAllShopsLoading(true)
+      setAllShopsError(null)
+      
+      try {
+        // Fetch shops across all categories using same successful approach as main shops
+        const categoryToSectorMap: Record<string, string> = {
+          'Boutique': 'boutique',
+          'Supermarket': 'supermarket', 
+          'Pharmacy': 'pharmacy',
+          'Restaurant': 'restaurant',
+          'Liquor Store': 'bar-resto',
+          'Bakery': 'coffee-shop',
+          'Veterinary': 'veterinary',
+          'Others': 'others'
+        }
         
-        const categories: Category[] = ['Boutique', 'Supermarket', 'Pharmacy', 'Restaurant', 'Liquor Store', 'Bakery', 'Veterinary', 'Others']
-        const allShops: ShopEntry[] = []
+        const allShops: any[] = []
+        const categories = Object.keys(categoryToSectorMap)
         
-        // Fetch shops for each category using the same successful approach as settings
+        // Fetch shops for each category
         for (const cat of categories) {
           try {
-            const sector = categoryToSectorMap[cat] || cat.toLowerCase()
-            const url = `/api/fetchSuggestions?listSuppliersWithProducts=${encodeURIComponent(sector)}&Currency=RWF&limit=500`
-            // console.log(`Category fetch: Fetching ${cat} (sector: ${sector}) from ${url}`)
+            const sector = categoryToSectorMap[cat]
+            const url = `${getBackendBase()}/Kaos/fetchSuggestions?listSuppliersWithProducts=${encodeURIComponent(sector)}&Currency=RWF&limit=500`
+            console.log(`Fetching ${cat} from ${url}`)
             const res = await fetch(url, { cache: "no-store" })
             
             if (res.ok) {
               const data = await res.json()
-              // Handle both response formats: direct array or object with suppliersByName
+              console.log(`Raw API response for ${cat}:`, data)
+              
               const suppliers = Array.isArray(data) ? data : (data.suppliersByName || [])
-              // console.log(`Category fetch: ${cat} returned ${suppliers.length} suppliers`)
+              console.log(`${cat} suppliers:`, suppliers.length)
               
-                            
-              // Transform suppliers to ShopEntry format
-              const transformedShops = (suppliers || []).map((d: any, index: number) => {
-                // Generate a unique ID that combines category with supplier ID to prevent duplicates
-                const baseId = String(d.ISHYIGA_ACCOUNT ?? d.seller_account ?? d.id ?? d.SELLER_ISHYIGA_ACCOUNT ?? "")
-                const uniqueId = baseId ? `${cat.toLowerCase()}_${baseId}` : `${cat.toLowerCase()}_supplier_${index}`
-                
-                return {
-                  id: uniqueId,
-                  name: String(d.OWNER ?? d.nickname ?? d.seller_name ?? d.name ?? d.NICKNAME ?? d.SELLER_NAMES ?? `${cat} Supplier ${index + 1}`),
-                  category: cat, // Keep original category for filtering
-                  tagline: d.DEPARTMENT ?? d.location ?? d.LOCATION ?? `${cat} shop`,
-                  favorite: false,
-                  orderedBefore: false,
-                  trending: false,
-                  onSale: false,
-                  distanceKm: 0,
-                  momo: `MTN MoMo: ${d.seller_momo ?? d.momo ?? 'N/A'}`,
-                  rating: d.rating_star,
-                  reviewCount: d.total_ratings,
-                  logoSrc: "/img/shops/default.png",
-                }
-              })
-              
-              allShops.push(...transformedShops)
+              // Add suppliers to allShops array with their original category
+              allShops.push(...suppliers.map((supplier: any) => ({
+                ...supplier,
+                fetchedCategory: cat // Track which category this supplier was fetched from
+              })))
+            } else {
+              console.warn(`Failed to fetch ${cat}: HTTP ${res.status}`)
             }
           } catch (error) {
-            console.warn(`Failed to fetch shops for category ${cat}:`, error)
-            // Continue with other categories even if one fails
+            console.warn(`Error fetching ${cat}:`, error)
           }
         }
         
-        // console.log(`Category fetch: Total shops fetched across all categories: ${allShops.length}`)
-        // console.log(`Category fetch: Shops by category:`, allShops.reduce((acc, shop) => {
-        //   acc[shop.category] = (acc[shop.category] || 0) + 1
-        //   return acc
-        // }, {} as Record<string, number>))
+        console.log('Total suppliers from all categories:', allShops.length)
         
-        if (cancelled) return
+        // Remove duplicates based on base supplier ID
+        const uniqueSuppliers = allShops.filter((supplier, index, self) => {
+          const baseId = String(supplier.ISHYIGA_ACCOUNT ?? supplier.seller_account ?? supplier.id ?? supplier.SELLER_ISHYIGA_ACCOUNT ?? "")
+          return self.findIndex(s => 
+            String(s.ISHYIGA_ACCOUNT ?? s.seller_account ?? s.id ?? s.SELLER_ISHYIGA_ACCOUNT ?? "") === baseId
+          ) === index
+        })
         
-        // Filter all shops by the selected category
-        const filteredShops = allShops.filter(shop => shop.category === category)
-        // console.log(`Filtered ${filteredShops.length} shops for category ${category}`)
+        console.log('Unique suppliers after deduplication:', uniqueSuppliers.length)
         
-        setApiShops(filteredShops)
-      } catch (error: any) {
-        if (!cancelled) {
-          setShopsError(error?.message || 'Failed to fetch shops')
-          setApiShops([])
+        // Transform all shops with consistent IDs
+        const transformedShops = uniqueSuppliers.map((supplier: any, index: number) => {
+          const baseId = String(supplier.ISHYIGA_ACCOUNT ?? supplier.seller_account ?? supplier.id ?? supplier.SELLER_ISHYIGA_ACCOUNT ?? "")
+          // Use base supplier ID directly without index suffix
+          const uniqueId = baseId ? `supplier_${baseId}` : `supplier_unknown_${Math.random()}`
+          
+          // Map sector back to category name
+          const sectorToCategoryMap: Record<string, Category> = {
+            'boutique': 'Boutique',
+            'supermarket': 'Supermarket',
+            'pharmacy': 'Pharmacy',
+            'restaurant': 'Restaurant',
+            'bar-resto': 'Liquor Store',
+            'coffee-shop': 'Bakery',
+            'veterinary': 'Veterinary',
+            'others': 'Others'
+          }
+          
+          return {
+            id: uniqueId,
+            name: supplier.seller_name || supplier.seller_account || baseId,
+            category: supplier.fetchedCategory as Category,
+            tagline: "Local supplier",
+            favorite: false,
+            orderedBefore: false,
+            trending: false,
+            onSale: false,
+            distanceKm: Math.random() * 5 + 0.5, // Mock distance
+            momo: `MTN MoMo: ${supplier.seller_momo || 'N/A'}`,
+            rating: 4.0,
+            reviewCount: 0,
+            logoSrc: "/placeholder.jpg",
+          }
+        })
+        
+        setAllAvailableShops(transformedShops)
+        console.log('setAllAvailableShops called with:', transformedShops.length, 'shops')
+        console.log('Shop IDs in allAvailableShops:', transformedShops.map(s => s.id))
+        console.log('Current preferredShopIds:', preferredShopIds)
+        
+        // Load user preferences from backend and convert ID formats
+        try {
+          const userId = getCurrentUserId()
+          const backendPreferences = await loadUserPreferences(userId, transformedShops)
+          setPreferredShopIds(backendPreferences)
+          console.log('Loaded preferences from backend:', backendPreferences)
+        } catch (error) {
+          console.error('Failed to load preferences from backend:', error)
         }
+        
+      } catch (error) {
+        console.error('Failed to fetch all shops:', error)
+        setAllShopsError('Failed to load shops')
       } finally {
-        if (!cancelled) {
-          setShopsLoading(false)
-        }
+        setAllShopsLoading(false)
       }
     }
+    
+    fetchAllShops()
+  }, [])
 
-    fetchCategoryShops()
-
-    return () => {
-      cancelled = true
-      controller.abort()
+  // Debug toggle rendering
+  useEffect(() => {
+    console.log('=== Toggle rendering debug ===')
+    console.log('allAvailableShops.length:', allAvailableShops.length)
+    console.log('allAvailableShops:', allAvailableShops.map(s => ({ id: s.id, name: s.name, checked: preferredShopIds.includes(s.id) })))
+    console.log('preferredShopIds:', preferredShopIds)
+    console.log('Settings panel open:', settingsOpen)
+    
+    // Log when shops are available for rendering
+    if (allAvailableShops.length > 0) {
+      console.log('=== RENDERING TOGGLES ===')
+      console.log('Shops ready for toggle rendering:', allAvailableShops.length)
+      console.log('Sample shop data:', allAvailableShops[0])
+      
+      // Check if toggle elements are in DOM
+      setTimeout(() => {
+        const toggleElements = document.querySelectorAll('input[type="checkbox"][data-shop-id]')
+        console.log('Toggle checkboxes found in DOM:', toggleElements.length)
+        
+        // Log first few toggle elements
+        for (let i = 0; i < Math.min(3, toggleElements.length); i++) {
+          const element = toggleElements[i] as HTMLInputElement
+          console.log(`Toggle ${i}:`, {
+            id: element.getAttribute('data-shop-id'),
+            checked: element.checked,
+            visible: element.offsetParent !== null,
+            className: element.className
+          })
+        }
+      }, 100)
     }
-  }, [category])
+  }, [allAvailableShops, preferredShopIds, settingsOpen])
 
   // Fetch real products data when a shop is selected
   useEffect(() => {
-    if (!selectedShopId || !selectedShop) return
+    console.log('=== Product fetching useEffect triggered ===')
+    console.log('selectedShopId:', selectedShopId)
+    console.log('selectedShop:', selectedShop)
+    if (!selectedShopId || !selectedShop) {
+      console.log('Product fetching skipped - missing selectedShopId or selectedShop')
+      return
+    }
 
     let cancelled = false
     const fetchProducts = async () => {
@@ -1548,12 +1612,12 @@ useEffect(() => {
         
         const sector = categoryToSectorMap[selectedShop.category] || selectedShop.category.toLowerCase()
         
-        // Extract base supplier ID without category prefix for Redis pattern
-        // Backend expects supplier_ALG... pattern, not category_ALG...
-        const baseSupplierId = String(selectedShopId).split('_').slice(1).join('_')
+        // Extract supplier account for Redis pattern
+        // Frontend uses supplier_ALG0384774, backend expects supplier_ALG0384774 (without supplier_ prefix)
+        const baseSupplierId = String(selectedShopId).replace('supplier_', '')
         
         // Use supplierProducts parameter which uses Redis cache with supplier_ALG pattern
-        const url = `/api/fetchSuggestions?supplierProducts=${encodeURIComponent(baseSupplierId)}&limit=50&Currency=RWF`
+        const url = `${getBackendBase()}/Kaos/fetchSuggestions?supplierProducts=${encodeURIComponent(baseSupplierId)}&limit=50&Currency=RWF`
         console.log('Fetching products from URL:', url)
         const res = await fetch(url, { cache: "no-store" })
         
@@ -1562,6 +1626,8 @@ useEffect(() => {
         
         console.log('Products API Response data:', data)
         console.log('Data type:', Array.isArray(data) ? 'array' : typeof data)
+        console.log('Response keys:', Object.keys(data || {}))
+        console.log('Products array length:', Array.isArray(data) ? data.length : (data.products ? data.products.length : 0))
         
         if (cancelled) return
         
@@ -1693,26 +1759,18 @@ useEffect(() => {
   const shopsInCategory = useMemo(() => {
     console.log('=== shopsInCategory called ===')
     console.log('Current category:', category)
-    console.log('apiShops.length:', apiShops.length)
-    console.log('shopsLoading:', shopsLoading)
-    console.log('apiShops array:', apiShops)
+    console.log('allAvailableShops.length:', allAvailableShops.length)
     
-    // Use API data if available, otherwise fall back to MOCK_SHOPS
-    if (apiShops.length > 0 || shopsLoading) {
-      // Filter API shops by current category
-      const filtered = apiShops.filter((s) => {
-        console.log('Checking shop:', s.name, 'category:', s.category, 'matches?', s.category === category)
-        return s.category === category
-      })
-      console.log('Filtered API shops for category:', filtered)
+    // Use allAvailableShops data instead of separate apiShops
+    if (allAvailableShops.length > 0) {
+      // Filter all shops by current category
+      const filtered = allAvailableShops.filter((s) => s.category === category)
+      console.log('Filtered shops for category:', filtered)
       return filtered
     }
-    // Fallback to mock data if API has no data - COMMENTED OUT TO CONFIRM API INTEGRATION
-    // const mockFiltered = MOCK_SHOPS.filter((s) => s.category === category)
-    // console.log('Fallback to MOCK_SHOPS, filtered:', mockFiltered)
-    // return mockFiltered
-    return [] // Return empty array to force API data only
-  }, [category, apiShops, shopsLoading])
+    // Fallback to empty if no data
+    return []
+  }, [category, allAvailableShops])
 
   const visibleShops = useMemo(() => {
     const q = shopSearch.trim().toLowerCase()
@@ -1947,14 +2005,31 @@ useEffect(() => {
     setPage((p) => (p > 1 ? ((p - 1) as PageId) : p))
   }
 
-  const togglePreferredShop = (id: string) => {
-    setPreferredShopIds((prev) => {
-      if (id === PREFERRED_ALL_ID) {
+  const togglePreferredShop = async (id: string) => {
+    if (id === PREFERRED_ALL_ID) {
+      // Handle "All shops" toggle locally
+      setPreferredShopIds((prev) => {
         return prev.includes(PREFERRED_ALL_ID) ? prev.filter((x) => x !== PREFERRED_ALL_ID) : [PREFERRED_ALL_ID]
-      }
-      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev.filter((x) => x !== PREFERRED_ALL_ID), id]
-      return next
-    })
+      })
+      return
+    }
+
+    try {
+      const userId = getCurrentUserId()
+      await toggleUserPreference(userId, id)
+      
+      setPreferredShopIds((prev) => {
+        const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev.filter((x) => x !== PREFERRED_ALL_ID), id]
+        return next
+      })
+    } catch (error) {
+      console.error('Failed to toggle shop preference:', error)
+      // Still update local state even if backend fails
+      setPreferredShopIds((prev) => {
+        const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev.filter((x) => x !== PREFERRED_ALL_ID), id]
+        return next
+      })
+    }
   }
   const updateSellerOrderStatus = (id: number, status: SellerOrderStatus) => {
     setSellerOrders((prev) => prev.map((order) => (order.id === id ? { ...order, status } : order)))
@@ -3469,35 +3544,38 @@ useEffect(() => {
                   </span>
                   <span className="min-w-0 flex-1 truncate text-sm font-semibold">All shops</span>
                 </label>
-                {allShopsLoading ? (
-                  <div className="flex items-center justify-center py-4">
-                    <div className="text-sm text-muted-foreground">Loading shops...</div>
-                  </div>
-                ) : allShopsError ? (
-                  <div className="flex items-center justify-center py-4">
-                    <div className="text-sm text-red-500">Error loading shops</div>
-                  </div>
-                ) : allAvailableShops.length > 0 ? (
-                  allAvailableShops.map((shop) => (
-                    <label
-                      key={shop.id}
-                      className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-muted/50"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={preferredShopIds.includes(shop.id)}
-                        onChange={() => togglePreferredShop(shop.id)}
-                        className="h-4 w-4 shrink-0 accent-blue-600"
-                      />
-                      <img src={shop.logoSrc} alt="" className="h-8 w-8 shrink-0 rounded-md border border-border bg-white object-contain" />
-                      <span className="min-w-0 flex-1 truncate text-sm font-semibold">{shop.name}</span>
-                    </label>
-                  ))
-                ) : (
-                  <div className="flex items-center justify-center py-4">
-                    <div className="text-sm text-muted-foreground">No shops available</div>
-                  </div>
-                )}
+                <div className="space-y-4">
+                  {allShopsLoading ? (
+                    <div className="flex items-center justify-center py-4">
+                      <div className="text-sm text-muted-foreground">Loading shops...</div>
+                    </div>
+                  ) : allShopsError ? (
+                    <div className="flex items-center justify-center py-4">
+                      <div className="text-sm text-red-500">Error loading shops</div>
+                    </div>
+                  ) : allAvailableShops.length > 0 ? (
+                    allAvailableShops.map((shop) => (
+                      <label
+                        key={shop.id}
+                        className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-muted/50"
+                      >
+                        <input
+                          type="checkbox"
+                          data-shop-id={shop.id}
+                          checked={preferredShopIds.includes(shop.id)}
+                          onChange={() => togglePreferredShop(shop.id)}
+                          className="h-4 w-4 shrink-0 accent-blue-600"
+                        />
+                        <img src={shop.logoSrc} alt="" className="h-8 w-8 shrink-0 rounded-md border border-border bg-white object-contain" />
+                        <span className="min-w-0 flex-1 truncate text-sm font-semibold">{shop.name}</span>
+                      </label>
+                    ))
+                  ) : (
+                    <div className="flex items-center justify-center py-4">
+                      <div className="text-sm text-muted-foreground">No shops available</div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
