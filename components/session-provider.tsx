@@ -17,7 +17,6 @@ interface SessionProviderProps {
  */
 export function SessionProvider({ children }: SessionProviderProps) {
   const { isAuthenticated, checkSession } = useSession()
-  const updateActivity = useAuthStore((state) => state.updateActivity)
   const user = useAuthStore((state) => state.user)
   const hasHydrated = useAuthStore((state) => state.hasHydrated)
   const favorites = useFavoritesStore((state) => state.favorites)
@@ -67,23 +66,16 @@ export function SessionProvider({ children }: SessionProviderProps) {
     run()
   }, [isAuthenticated, user?.email, hasHydrated, favorites, setFavorites])
 
-  // Track user activity to prevent inactivity timeout
+  // Session tracking without activity extension (fixed 60-minute timeout)
   useEffect(() => {
     if (!isAuthenticated) return
 
-    // Events that indicate user activity
+    // Events that indicate user activity (for tracking only, not extending session)
     const activityEvents = ['mousedown', 'keydown', 'scroll', 'touchstart', 'click']
 
-    // Throttle activity updates to avoid excessive state changes
-    let lastUpdate = 0
-    const THROTTLE_MS = 30000 // Update at most once per 30 seconds
-
     const handleActivity = () => {
-      const now = Date.now()
-      if (now - lastUpdate > THROTTLE_MS) {
-        updateActivity()
-        lastUpdate = now
-      }
+      // Activity tracking only - session timeout is fixed at 60 minutes
+      console.log('[Session] User activity detected (timeout remains 60 minutes)')
     }
 
     // Add event listeners
@@ -97,7 +89,7 @@ export function SessionProvider({ children }: SessionProviderProps) {
         window.removeEventListener(event, handleActivity)
       })
     }
-  }, [isAuthenticated, updateActivity])
+  }, [isAuthenticated])
 
   return (
     <>

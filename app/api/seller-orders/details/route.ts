@@ -84,7 +84,6 @@ function normalize(data: any) {
       total: qty * requestPrice,
       UNIT: it.UNIT ?? it.unit ?? it.measurement ?? "",
       ITEM_CODE: it.ITEM_CODE ?? it.code ?? String(it.ID_ORDER ?? ""),
-      ORDERED_BY: it.ORDERED_BY ?? it.ordered_by ?? "",
     }
   })
 

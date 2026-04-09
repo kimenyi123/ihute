@@ -453,7 +453,8 @@ ${items}
             <tbody>
               {order.items.map((item, idx) => {
                 const name = item.ITEM_NAME || item.name
-                const orderedBy = String((item as any).ORDERED_BY ?? "").trim() || "—"
+                // ✅ Remove ORDERED_BY field - use buyer info from account_signup instead
+                // const orderedBy = String((item as any).ORDERED_BY ?? "").trim() || "—"
                 const qty = item.QUANTITY || item.qty || 0
                 const servedQty =
                   pickAnyNum(item as unknown as Record<string, unknown>, "CONFIRMED_RECEIVED_QTY", "SERVED_QTY", "servedQty", "CONFIRMED_QTY") ??

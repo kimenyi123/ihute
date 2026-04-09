@@ -290,7 +290,6 @@ export async function POST(req: NextRequest) {
           unitPrice: Number(item.UNIT_PRICE ?? item.unitPrice ?? 0),
           UNIT: item.UNIT || item.unit,
           unit: item.UNIT || item.unit,
-          ORDERED_BY: item.ORDERED_BY ?? item.ordered_by ?? "",
         }))
       : []
     const totalAmount = Number(data.AMOUNT ?? data.total ?? 0)

@@ -210,8 +210,9 @@ export default function SupplierOrderDetailsPage() {
     rawItems.forEach((it: any, index: number) => {
       const code = it.ITEM_CODE ?? it.code ?? `${index}`
       const name = it.ITEM_NAME ?? it.name ?? "-"
-      const orderedBy = (it.ORDERED_BY ?? buyer?.OWNER ?? "").toString().trim()
-      const key = `${code}||${name}||${orderedBy}`
+      // ✅ Remove ORDERED_BY field - use buyer info from account_signup instead
+      // const orderedBy = (it.ORDERED_BY ?? buyer?.OWNER ?? "").toString().trim()
+      const key = `${code}||${name}||${buyer?.OWNER || ""}`
       const existing = groupedMap.get(key)
       if (existing) {
         const merged = { ...existing }
@@ -389,10 +390,10 @@ export default function SupplierOrderDetailsPage() {
                     <Phone className="h-4 w-4" />
                     <span>{order?.BUYER_PHONE || buyer?.TEL || buyer?.PHONE || order?.BUYER_TEL || "Not provided"}</span>
                   </div>
-                  <div className="flex items-center gap-2 text-slate-700">
+                  {/* <div className="flex items-center gap-2 text-slate-700">
                     <MapPin className="h-4 w-4" />
                     <span>{order?.DELIVERY_LOCATION || "Not provided"}</span>
-                  </div>
+                  </div> */}
                   {isGuestBuyer && (
                     <div className="mt-3 pt-3 border-t">
                       <p className="text-xs text-amber-700 bg-amber-50 p-2 rounded">
@@ -440,14 +441,15 @@ export default function SupplierOrderDetailsPage() {
                       const servedPrice = servedPriceOf(it)
                       const totalRequested = totalRequestedOf(it)
                       const totalServed = servedQty * servedPrice
-                      const orderedBy = (it.ORDERED_BY ?? buyer?.OWNER ?? "").toString().trim()
+                      // ✅ Remove ORDERED_BY field - use buyer info from account_signup instead
+                      // const orderedBy = (it.ORDERED_BY ?? buyer?.OWNER ?? "").toString().trim()
 
                       return (
-                        <tr key={`${code}-${name}-${orderedBy || "anon"}`}>
+                        <tr key={`${code}-${name}-${buyer?.OWNER || "anon"}`}>
                           <td className="py-2 px-3 pl-0 align-middle">{code}</td>
                           <td className="py-2 px-3 align-middle">{name}</td>
                           <td className="py-2 px-3 align-middle text-sm text-slate-700">
-                            {orderedBy || "—"}
+                            {buyer?.OWNER || "—"}
                           </td>
                           <td className="py-2 px-3 text-right align-middle font-mono tabular-nums">
                             {n(qty)}
