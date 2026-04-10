@@ -289,7 +289,7 @@ export default function BuyerOrdersPage() {
             subtotal: raw.subtotal ?? raw.AMOUNT ?? 0,
             buyerTIN: raw.buyerTIN || raw.BUYER_TIN || "",
             supplierTIN: raw.SUPPLIER_TIN || raw.SELLER_TIN || "",
-            servedAmount: pickRawNum(raw, "SERVED_AMOUNT", "servedAmount", "AMOUNT_SERVED"),
+            servedAmount: pickRawNum(raw, "SERVED_AMOUNT", "servedAmount", "AMOUNT_SERVED", "SERVED_TOTAL"),
             servedQty: pickRawNum(raw, "CONFIRMED_RECEIVED_QTY", "SERVED_QTY", "servedQty", "SERVED_QUANTITY", "received_quantity"),
             orderNote: pickRawStr(raw, "CONDITIONS", "ORDER_NOTE", "orderNote", "NOTE"),
           }
@@ -477,6 +477,7 @@ export default function BuyerOrdersPage() {
                   <th className="px-4 py-3 text-left text-sm font-semibold">Company</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold">Seller</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold">Amount</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold">Served Amount</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold">Order Note</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold">Status</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold">Date</th>
@@ -492,6 +493,9 @@ export default function BuyerOrdersPage() {
                     <td className="px-4 py-3">{o.seller}</td>
                     <td className="px-4 py-3 font-medium">
                       {(o.amount ?? o.subtotal ?? 0).toLocaleString()} RWF
+                    </td>
+                    <td className="px-4 py-3 font-medium">
+                      {Number((o as any).servedAmount ?? 0).toLocaleString()} RWF
                     </td>
                     <td className="px-4 py-3 max-w-[220px] truncate" title={(o as any).orderNote || ""}>
                       {(o as any).orderNote || "—"}

@@ -6,10 +6,11 @@ import Image from "next/image"
 import { Card, CardContent } from "@/components/ui/card"
 import { useTranslation } from "@/hooks/use-translation"
 import type { TranslationKey } from "@/lib/translations"
-import { 
-  normalizeImageUrl, 
-  isValidImageUrl, 
-  NO_IMAGE_URL 
+import {
+  normalizeImageUrl,
+  isValidImageUrl,
+  NO_IMAGE_URL,
+  KAOS_PRODUCT_IMAGE_EXTENSIONS,
 } from "@/lib/image-utils"
 
 interface Category {
@@ -100,16 +101,19 @@ function CategoryImage({ category, alt }: { category: Category; alt: string }) {
     // Try KAOS URLs based on categoryId
     const KAOS_BASE = "https://ishyiga.rw/images_kaos_beta/"
     const sanitizedCategory = category.categoryId.replace(/[^a-zA-Z0-9]/g, "_")
-    
-    // Try category-specific image
-    candidates.push(`${KAOS_BASE}${sanitizedCategory}.jpg`)
-    candidates.push(`${KAOS_BASE}category_${sanitizedCategory}.jpg`)
-    
+
+    for (const ext of KAOS_PRODUCT_IMAGE_EXTENSIONS) {
+      candidates.push(`${KAOS_BASE}${sanitizedCategory}${ext}`)
+      candidates.push(`${KAOS_BASE}category_${sanitizedCategory}${ext}`)
+    }
+
     // Add fallback to static images
     const staticImages = [
       `/${category.categoryId}.jpg`,
+      `/${category.categoryId}.jpeg`,
       `/${category.categoryId}.png`,
       `/category-${category.categoryId}.jpg`,
+      `/category-${category.categoryId}.jpeg`,
       `/category-${category.categoryId}.png`,
     ]
     
