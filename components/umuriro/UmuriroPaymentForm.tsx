@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Copy, Check, ChevronDown, ArrowLeft, Globe } from "lucide-react"
+import { Copy, Check, ChevronDown, ArrowLeft, Globe, Info } from "lucide-react"
 
 interface UmuriroPayment {
   shopName: string
@@ -62,13 +62,18 @@ export default function UmuriroPaymentForm() {
     setLoading(true)
     setResponse(null)
 
+    const submitData = {
+      ...formData,
+      momoCode: cleanMomoCode(formData.momoCode),
+    }
+
     try {
       const res = await fetch("/api/umuriro", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(submitData),
       })
 
       const data: PaymentResponse = await res.json()
@@ -104,45 +109,86 @@ export default function UmuriroPaymentForm() {
     }
   }
 
+  // Extract only the merchant digits from any input format
+  // Rwanda format: *182*8*1*MERCHANT*AMOUNT# or standalone MERCHANT
+  const cleanMomoCode = (code: string): string => {
+    let cleaned = code.trim()
+    
+    // Check if it's a full Rwanda USSD code: *182*8*1*MERCHANT*...#
+    if (cleaned.startsWith("*182*8*1*")) {
+      // Extract just the merchant portion between *182*8*1* and the next *
+      // Pattern: *182*8*1*MERCHANT*...#
+      const afterPrefix = cleaned.substring(9) // Remove "*182*8*1*"
+      const nextStar = afterPrefix.indexOf("*")
+      
+      if (nextStar !== -1) {
+        // There's more after merchant (like *amount#), extract just merchant
+        return afterPrefix.substring(0, nextStar).replace(/[^0-9]/g, "")
+      } else {
+        // No more stars, just remove trailing # if present
+        return afterPrefix.replace(/#$/, "").replace(/[^0-9]/g, "")
+      }
+    }
+    
+    // Check for other *182* format but without 8*1
+    if (cleaned.startsWith("*182*")) {
+      // Generic *182*MERCHANT*...# format
+      const after182 = cleaned.substring(5) // Remove "*182*"
+      const parts = after182.split("*")
+      // First part should be merchant
+      if (parts.length >= 1) {
+        return parts[0].replace(/#$/, "").replace(/[^0-9]/g, "")
+      }
+    }
+    
+    // Plain merchant code (no USSD format) - just remove non-digits
+    return cleaned.replace(/[^0-9]/g, "").substring(0, 15)
+  }
+
   const totalRwf = formData.priceRwf * formData.quantity
-  const momoUssd = formData.momoCode && totalRwf > 0
-    ? `*182*${formData.momoCode}*${Math.round(totalRwf)}#`
+  const momoDigits = cleanMomoCode(formData.momoCode)
+  // Rwanda format: *182*8*1*MERCHANT*AMOUNT#
+  const momoUssd = momoDigits && totalRwf > 0
+    ? `*182*8*1*${momoDigits}*${Math.round(totalRwf)}#`
     : "—"
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-lg mx-auto">
-        {/* Header */}
-        <header className="bg-sky-500 text-white px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button className="p-1 hover:bg-white/20 rounded">
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center">
-                <span className="text-sky-500 font-bold text-sm">U</span>
-              </div>
-              <div>
-                <h1 className="font-semibold text-lg leading-tight">Umuriro</h1>
-                <p className="text-xs text-sky-100">Save a shop & pay (Umuriro)</p>
-              </div>
+    <div className="max-w-lg mx-auto min-h-screen bg-gray-50 relative">
+      {/* Sticky Header - inside scrollable container like grandma */}
+      <header className="sticky top-0 z-50 bg-sky-500 text-white px-4 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <button className="p-1 hover:bg-white/20 rounded">
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center overflow-hidden">
+              <img src="/img/logo.png" alt="Umuriro" className="w-5 h-5 object-contain" />
+            </div>
+            <div>
+              <h1 className="font-semibold text-lg leading-tight">Umuriro</h1>
+              <p className="text-xs text-sky-100">Save a shop & pay (Umuriro)</p>
             </div>
           </div>
-          <button className="flex items-center gap-1 text-sm hover:bg-white/20 px-2 py-1 rounded">
-            <Globe className="w-4 h-4" />
-            <span>English</span>
-          </button>
-        </header>
+        </div>
+        <button className="flex items-center gap-1 text-sm hover:bg-white/20 px-2 py-1 rounded">
+          <Globe className="w-4 h-4" />
+          <span>English</span>
+        </button>
+      </header>
 
-        {/* Sign in banner */}
-        <div className="bg-amber-50 border-b border-amber-100 px-4 py-3 text-sm">
-          <span className="text-gray-700">Sign in to save shops to your account. </span>
-          <a href="#" className="text-blue-600 font-medium underline">Sign in</a>
+      {/* Sign in banner */}
+      <div className="bg-amber-50 border-b border-amber-100 px-4 py-3">
+        <div className="flex items-start gap-2">
+          <Info className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+          <p className="text-sm text-gray-700">
+            Sign in to save shops to your account.{" "}
+            <a href="#" className="text-blue-600 font-medium hover:underline">Sign in</a>
+          </p>
         </div>
       </div>
 
       {/* Main content */}
-      <main className="max-w-lg mx-auto p-4">
+      <main className="p-4 pb-20">
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Section title */}
           <h2 className="text-xl font-semibold text-gray-800">
@@ -178,8 +224,9 @@ export default function UmuriroPaymentForm() {
                 onChange={handleChange}
                 required
                 className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-transparent outline-none"
-                placeholder=""
+                placeholder="85857"
               />
+              <p className="text-xs text-gray-500 mt-1">Enter only the merchant digits</p>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">
