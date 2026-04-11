@@ -18,6 +18,7 @@ import { ProductCard } from "@/components/product-card"
 import { ProductQuickView, type QuickViewProduct } from "@/components/product-quick-view"
 import { fetchSearchSuggestions } from "@/lib/search-suggestions"
 import { usePriceDropToasts } from "@/lib/use-price-drop-toasts"
+import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price"
 import {
   getProductImageCandidates,
   getProductImageUrl,
@@ -34,6 +35,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import Image from "next/image"
+import { cn } from "@/lib/utils"
 
 type Shop = {
   supplier_account: string
@@ -147,12 +149,75 @@ function inferSectorFromQuery(q: string): string {
   return ""
 }
 
+function normalizeItemCodeForMatch(s: string): string {
+  return s
+    .trim()
+    .toLowerCase()
+    .replace(/^[([{.,;:\s_-]+/g, "")
+    .replace(/[)\].,;:\s_-]+$/g, "")
+    .trim()
+}
+
+/** All normalized codes we might compare to `item` URL param (handles Redis/DB field names). */
+function collectNormalizedProductCodes(p: Product): string[] {
+  const q = p as Record<string, unknown>
+  const raw = [
+    p.item_code,
+    p.item_key_words,
+    q.ITEM_CODE,
+    q.ITEM_KEY_WORDS,
+  ]
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const x of raw) {
+    if (typeof x !== "string" || !x.trim()) continue
+    const n = normalizeItemCodeForMatch(x)
+    if (!n || seen.has(n)) continue
+    seen.add(n)
+    out.push(n)
+  }
+  return out
+}
+
+/**
+ * Match `item` query param to a product. For SKU-like params (no spaces), require exact code match
+ * so we don't pull in unrelated rows when deep-linking from global search.
+ */
+function productMatchesItemParam(p: Product, normalizedItem: string): boolean {
+  if (!normalizedItem) return false
+  const codes = collectNormalizedProductCodes(p)
+  const skuLike = !/\s/.test(normalizedItem) && normalizedItem.length >= 2
+  return codes.some((c) => {
+    if (c === normalizedItem) return true
+    if (skuLike) return false
+    if (!c.length || !normalizedItem.length) return false
+    return c.includes(normalizedItem) || normalizedItem.includes(c)
+  })
+}
+
 // -------- helpers --------
 function extractNumericPrice(value: any): number {
   if (typeof value === "number") return value
   const n = String(value ?? "").replace(/[^\d.,-]/g, "").replace(",", ".")
   const parsed = parseFloat(n)
   return Number.isFinite(parsed) ? parsed : 0
+}
+
+function productItemEmballageRaw(p: Product): unknown {
+  return (p as any).item_emballage ?? (p as any).ITEM_EMBALLAGE
+}
+
+function productBaseSellingPrice(p: Product): number {
+  return (
+    extractNumericPrice(p.selling_price) ||
+    extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) ||
+    extractNumericPrice((p as any).price) ||
+    0
+  )
+}
+
+function productGeneralSellingPrice(p: Product): number {
+  return generalSellingPrice(productBaseSellingPrice(p), productItemEmballageRaw(p))
 }
 
 function toCardProduct(p: Product & { search_priority?: string; contains_ingredient?: string }) {
@@ -185,6 +250,7 @@ function toCardProduct(p: Product & { search_priority?: string; contains_ingredi
     IMAGE_URL: (p as any).IMAGE_URL,
     searchPriority: (p.search_priority === "direct" || p.search_priority === "contains" ? p.search_priority : undefined) as "direct" | "contains" | undefined,
     containsIngredient: typeof p.contains_ingredient === "string" ? p.contains_ingredient : undefined,
+    itemEmballage: productItemEmballageRaw(p) as string | number | undefined,
   }
 }
 
@@ -339,6 +405,7 @@ export default function SearchPage() {
   const supplierNameParam = searchParams.get("supplierName")
   const locationParam = searchParams.get("location") || ""
   const sectorParam = searchParams.get("sector") || ""
+  const itemParam = searchParams.get("item")?.trim() ?? ""
 
   const [q, setQ] = useState(initialQ)
   const [debouncedQ, setDebouncedQ] = useState("")
@@ -370,16 +437,19 @@ export default function SearchPage() {
   const [supplierProductsPerPage, setSupplierProductsPerPage] = useState(15)
 
   function toQuickViewProduct(p: Product): QuickViewProduct {
-    const price = extractNumericPrice(p.selling_price) || extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) || extractNumericPrice((p as any).price) || 0
+    const base = productBaseSellingPrice(p)
+    const emb = productItemEmballageRaw(p)
     return {
       id: p.item_code || p.item_key_words || "",
       name: p.item_commercial_name || "Product",
-      price,
+      price: generalSellingPrice(base, emb),
       currency: p.currency || "RWF",
+      unit: p.item_packet ?? "",
       image: getProductImageSrc(p),
       itemCode: p.item_code || p.item_key_words,
       supplierId: p.supplier_account,
       supplierName: p.supplier_name,
+      itemEmballage: normalizeItemEmballageForCart(emb),
     }
   }
 
@@ -405,12 +475,9 @@ export default function SearchPage() {
     const itemCode = (p.item_code || p.item_key_words || "").toString().trim()
     const id = itemCode || `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`
     const unit = p.item_packet || ""
-    // Price: selling_price (Redis) or SALE_PRICE_INCLUSIVE/price (DB). item_emballage is not price.
-    const price =
-      extractNumericPrice(p.selling_price) ||
-      extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) ||
-      extractNumericPrice((p as any).price) ||
-      0
+    const embRaw = productItemEmballageRaw(p)
+    const price = generalSellingPrice(productBaseSellingPrice(p), embRaw)
+    const itemEmballage = normalizeItemEmballageForCart(embRaw)
     const supplierId = (p.supplier_account || "unknown").toString().trim()
     const supplierName = p.supplier_name || p.supplier_account || "Supplier"
     const baseItem = {
@@ -431,6 +498,7 @@ export default function SearchPage() {
       item_key_words: p.item_key_words,
       famille: (p as any).famille ?? (p as any).FAMILLE,
       momo: p.momo || (p as any)?.seller_momo || "",
+      ...(itemEmballage ? { itemEmballage } : {}),
     }
 
     // Check if we're in a table command context
@@ -462,6 +530,8 @@ export default function SearchPage() {
     if (debouncedQ) params.set("q", debouncedQ)
     if (supplierParam) params.set("supplier", supplierParam)
     if (supplierNameParam) params.set("supplierName", supplierNameParam)
+    const itemFromUrl = searchParams.get("item")?.trim()
+    if (itemFromUrl && supplierParam) params.set("item", itemFromUrl)
 
     // location: if explicitly provided in updates, use it (empty string => remove)
     const locProvided = Object.prototype.hasOwnProperty.call(updates, "location")
@@ -747,15 +817,33 @@ export default function SearchPage() {
     } else {
       raw = supplierSearchResults ?? []
     }
-    const filtered = raw.filter(p => {
-      const price = extractNumericPrice(p.selling_price) || extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) || extractNumericPrice((p as any).price)
-      return price > 0
+    const filtered = raw.filter((p) => {
+      const base =
+        extractNumericPrice(p.selling_price) ||
+        extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) ||
+        extractNumericPrice((p as any).price)
+      return base > 0
     })
-    const price = (p: Product) => extractNumericPrice(p.selling_price) || extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) || extractNumericPrice((p as any).price)
-    if (supplierProductSort === "price-asc") return [...filtered].sort((a, b) => price(a) - price(b))
-    if (supplierProductSort === "price-desc") return [...filtered].sort((a, b) => price(b) - price(a))
-    return filtered
-  }, [debouncedSupplierSearch, supplierSearchResults, shopProducts, supplierProductSort])
+    let ordered: Product[]
+    if (supplierProductSort === "price-asc")
+      ordered = [...filtered].sort((a, b) => productGeneralSellingPrice(a) - productGeneralSellingPrice(b))
+    else if (supplierProductSort === "price-desc")
+      ordered = [...filtered].sort((a, b) => productGeneralSellingPrice(b) - productGeneralSellingPrice(a))
+    else ordered = filtered
+
+    if (itemParam) {
+      const norm = normalizeItemCodeForMatch(itemParam)
+      let matches = ordered.filter((p) => productMatchesItemParam(p, norm))
+      if (matches.length === 0 && debouncedQ.trim()) {
+        const qn = debouncedQ.trim().toLowerCase().replace(/\s+/g, " ").trim()
+        matches = ordered.filter(
+          (p) => (p.item_commercial_name || "").toLowerCase().replace(/\s+/g, " ").trim() === qn
+        )
+      }
+      if (matches.length > 0) ordered = matches
+    }
+    return ordered
+  }, [debouncedSupplierSearch, supplierSearchResults, shopProducts, supplierProductSort, itemParam, debouncedQ])
 
   // Reset supplier products page when list or sort changes
   useEffect(() => {
@@ -765,19 +853,33 @@ export default function SearchPage() {
   // Main search products (global): exclude 0 price, then sort
   const searchProductsWithPrice = useMemo(() => {
     const list = searchResult?.products ?? []
-    const filtered = list.filter(p => {
-      const price = extractNumericPrice(p.selling_price) || extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) || extractNumericPrice((p as any).price)
-      return price > 0
+    const filtered = list.filter((p) => {
+      const base =
+        extractNumericPrice(p.selling_price) ||
+        extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) ||
+        extractNumericPrice((p as any).price)
+      return base > 0
     })
-    const priceNum = (p: Product) => extractNumericPrice(p.selling_price) || extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) || extractNumericPrice((p as any).price)
-    if (productSort === "price-asc") {
-      return [...filtered].sort((a, b) => priceNum(a) - priceNum(b))
+    let ordered: Product[]
+    if (productSort === "price-asc")
+      ordered = [...filtered].sort((a, b) => productGeneralSellingPrice(a) - productGeneralSellingPrice(b))
+    else if (productSort === "price-desc")
+      ordered = [...filtered].sort((a, b) => productGeneralSellingPrice(b) - productGeneralSellingPrice(a))
+    else ordered = filtered
+
+    if (itemParam) {
+      const norm = normalizeItemCodeForMatch(itemParam)
+      let matches = ordered.filter((p) => productMatchesItemParam(p, norm))
+      if (matches.length === 0 && debouncedQ.trim()) {
+        const qn = debouncedQ.trim().toLowerCase().replace(/\s+/g, " ").trim()
+        matches = ordered.filter(
+          (p) => (p.item_commercial_name || "").toLowerCase().replace(/\s+/g, " ").trim() === qn
+        )
+      }
+      if (matches.length > 0) ordered = matches
     }
-    if (productSort === "price-desc") {
-      return [...filtered].sort((a, b) => priceNum(b) - priceNum(a))
-    }
-    return filtered
-  }, [searchResult?.products, productSort])
+    return ordered
+  }, [searchResult?.products, productSort, itemParam, debouncedQ])
 
   // Group products by supplier so the page is ordered (not a mix of many suppliers)
   const productsBySupplier = useMemo(() => {
@@ -787,15 +889,17 @@ export default function SearchPage() {
       if (!map.has(sid)) map.set(sid, [])
       map.get(sid)!.push(p)
     }
-    return Array.from(map.entries()).map(([supplierId, products]) => {
-      const first = products[0]
-      return {
-        supplierId,
-        supplierName: (first?.supplier_name ?? first?.supplier_account ?? supplierId).toString(),
-        supplierLocation: first?.supplier_location,
-        products,
-      }
-    })
+    return Array.from(map.entries())
+      .map(([supplierId, products]) => {
+        const first = products[0]
+        return {
+          supplierId,
+          supplierName: (first?.supplier_name ?? first?.supplier_account ?? supplierId).toString(),
+          supplierLocation: first?.supplier_location,
+          products,
+        }
+      })
+      .filter((g) => g.products.length > 0)
   }, [searchProductsWithPrice])
 
   // Notify when watched products in search results have dropped in price
@@ -808,7 +912,7 @@ export default function SearchPage() {
       const key = `${id}|${sid}`
       if (!id || seen.has(key)) return
       seen.add(key)
-      const price = extractNumericPrice(p.selling_price) || extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) || extractNumericPrice((p as any).price)
+      const price = productGeneralSellingPrice(p)
       if (price <= 0) return
       out.push({
         productId: id,
@@ -862,6 +966,19 @@ export default function SearchPage() {
     setSelectedShop(null)
     setSupplierSearch("")
     const params = new URLSearchParams()
+    if (locationParam) params.set("location", locationParam)
+    if (sectorParam) params.set("sector", sectorParam)
+    router.push(`/search?${params.toString()}`)
+  }
+
+  /** Drop `item` from URL but keep supplier + query so user can browse the full catalog. */
+  const openSellerCatalogWithoutItem = () => {
+    if (!selectedShop) return
+    const params = new URLSearchParams()
+    const term = debouncedQ.trim() || q.trim()
+    if (term) params.set("q", term)
+    params.set("supplier", selectedShop.supplier_account)
+    params.set("supplierName", selectedShop.supplier_name)
     if (locationParam) params.set("location", locationParam)
     if (sectorParam) params.set("sector", sectorParam)
     router.push(`/search?${params.toString()}`)
@@ -922,14 +1039,63 @@ export default function SearchPage() {
   // Calculate total items in table cart
   const tableCartItemCount = tableCartItems.reduce((total, item) => total + item.qty, 0)
 
+  /** Deep-linked from global search (?item=&supplier=): show only this product, minimal chrome. */
+  const isFocusedProductView = Boolean(itemParam && supplierParam)
+
+  const focusedSupplierLabel =
+    selectedShop?.supplier_name ?? supplierNameParam ?? supplierParam ?? ""
+
+  const startNewSearch = () => {
+    setQ("")
+    setDebouncedQ("")
+    setSupplierSearch("")
+    setSelectedShop(null)
+    const params = new URLSearchParams()
+    if (locationParam) params.set("location", locationParam)
+    if (sectorParam) params.set("sector", sectorParam)
+    const qs = params.toString()
+    router.push(qs ? `/search?${qs}` : "/search")
+  }
+
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
       <main className="container mx-auto flex-1 px-4 py-8">
-        <div className="flex items-center justify-between mb-4">
-          <h1 className="text-2xl font-semibold">Global Search</h1>
-          <LocationBadge />
-        </div>
+        {!isFocusedProductView ? (
+          <div className="flex items-center justify-between mb-4">
+            <h1 className="text-2xl font-semibold">Global Search</h1>
+            <LocationBadge />
+          </div>
+        ) : (
+          <div className="mb-6 w-full max-w-5xl mx-auto">
+            {loadingProducts ? (
+              <div className="space-y-3">
+                <span className="inline-block h-8 w-48 max-w-full bg-muted animate-pulse rounded-md" aria-hidden />
+                <span className="inline-block h-4 w-64 max-w-full bg-muted animate-pulse rounded-md" aria-hidden />
+              </div>
+            ) : (
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Seller</p>
+                  {focusedSupplierLabel ? (
+                    <p className="text-lg font-semibold text-foreground mt-0.5">{focusedSupplierLabel}</p>
+                  ) : null}
+                  <p className="text-sm text-muted-foreground mt-1 max-w-xl">
+                    Review the product and add to cart below.
+                  </p>
+                </div>
+                {/* <div className="flex flex-wrap gap-2 shrink-0"> */}
+                  {/* <Button type="button" variant="outline" size="sm" onClick={openSellerCatalogWithoutItem}>
+                    Browse all from this seller
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm" className="text-blue-600" onClick={startNewSearch}>
+                    New search
+                  </Button> */}
+                {/* </div> */}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Table Context Indicator */}
         {tableCommand && (
@@ -959,6 +1125,8 @@ export default function SearchPage() {
           </div>
         )}
 
+        {!isFocusedProductView && (
+          <>
         {/* Search Row — quick search: backend hit after 200ms debounce */}
         <div className="flex gap-2 items-center mb-3">
           <input
@@ -1097,6 +1265,8 @@ export default function SearchPage() {
             )}
           </div>
         </div>
+          </>
+        )}
 
         {searchResult?.error && (
           <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700">
@@ -1105,14 +1275,14 @@ export default function SearchPage() {
         )}
 
         {/* When item is not in NIKI (Redis), backend returns DB results; show hint */}
-        {searchResult && (searchResult.products.length > 0 || searchResult.suppliersByName.length > 0 || searchResult.suppliersByProduct.length > 0) && (searchResult.source === "database" || searchResult.fromNiki === false) && (
+        {!isFocusedProductView && searchResult && (searchResult.products.length > 0 || searchResult.suppliersByName.length > 0 || searchResult.suppliersByProduct.length > 0) && (searchResult.source === "database" || searchResult.fromNiki === false) && (
           <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-sm">
             Showing results from full catalog (not in NIKI cache).
           </div>
         )}
 
         {/* Location-Aware Search Indicator */}
-        {(() => {
+        {!isFocusedProductView && (() => {
           const locationData = useLocationStoreEnhanced.getState().location
           if (locationData?.district) {
             return (
@@ -1140,11 +1310,11 @@ export default function SearchPage() {
           return null
         })()}
 
-        <div className="max-w-5xl mx-auto">
+        <div className={cn("mx-auto max-w-5xl", isFocusedProductView && "w-full")}>
           {/* Main content (single column; no right sidebar) */}
           <div className="space-y-6">
             {/* Sector Spotlight */}
-            {sectorParam && (
+            {sectorParam && !isFocusedProductView && (
               <section className="bg-white rounded-xl border p-4">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-3">
@@ -1201,7 +1371,9 @@ export default function SearchPage() {
                       </div>
                       {Array.isArray(s.products) && s.products.length > 0 && (
                         <div className="mt-3 space-y-2">
-                          {s.products.slice(0, 3).map((p, idx) => (
+                          {s.products.slice(0, 3).map((p, idx) => {
+                            const showPrice = productGeneralSellingPrice(p as Product)
+                            return (
                             <div
                               key={`${p.item_code}-${p.supplier_account || s.seller_account}-${idx}`}
                               className="p-2 rounded border hover:border-blue-300 cursor-pointer"
@@ -1218,10 +1390,13 @@ export default function SearchPage() {
                               <div className="text-sm font-medium">{p.item_commercial_name}</div>
                               <div className="text-xs text-gray-600">{p.item_packet || ""}</div>
                               <div className="text-sm font-semibold text-green-700">
-                                {p.selling_price != null ? `${Number(p.selling_price).toLocaleString()} ${p.currency || "RWF"}` : "Price not available"}
+                                {showPrice > 0
+                                  ? `${showPrice.toLocaleString()} ${p.currency || "RWF"}`
+                                  : "Price not available"}
                               </div>
                             </div>
-                          ))}
+                            )
+                          })}
                         </div>
                       )}
                     </div>
@@ -1232,64 +1407,106 @@ export default function SearchPage() {
 
             {/* Supplier products in main area when supplier selected */}
             {selectedShop && (
-              <section className="bg-white rounded-xl border p-4">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-                  <h2 className="font-semibold text-lg">
-                    Products from <span className="text-blue-700">{selectedShop.supplier_name}</span>
-                  </h2>
-                  <div className="flex items-center gap-2 flex-1 sm:max-w-xs">
-                    <input
-                      value={supplierSearch}
-                      onChange={(e) => setSupplierSearch(e.target.value)}
-                      placeholder={`Search in ${selectedShop.supplier_name}...`}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      aria-label="Search products from this supplier"
-                    />
-                    {(loadingSupplierSearch || (supplierSearch.trim() && supplierSearch.trim() !== debouncedSupplierSearch)) && (
-                      <span className="text-xs text-gray-500 animate-pulse whitespace-nowrap">Searching…</span>
-                    )}
+              <section
+                className={cn(
+                  "rounded-xl border bg-white p-4 sm:p-6",
+                  itemParam && "border-0 bg-transparent p-0 shadow-none",
+                )}
+              >
+                {!itemParam ? (
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                    <div className="space-y-1">
+                      <h2 className="font-semibold text-lg">
+                        Products from <span className="text-blue-700">{selectedShop.supplier_name}</span>
+                      </h2>
+                    </div>
+                    <div className="flex items-center gap-2 flex-1 sm:max-w-xs">
+                      <input
+                        value={supplierSearch}
+                        onChange={(e) => setSupplierSearch(e.target.value)}
+                        placeholder={`Search in ${selectedShop.supplier_name}...`}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        aria-label="Search products from this supplier"
+                      />
+                      {(loadingSupplierSearch || (supplierSearch.trim() && supplierSearch.trim() !== debouncedSupplierSearch)) && (
+                        <span className="text-xs text-gray-500 animate-pulse whitespace-nowrap">Searching…</span>
+                      )}
+                    </div>
                   </div>
-                </div>
+                ) : null}
                 {loadingProducts ? (
                   <div className="py-8 text-center text-gray-500 text-sm">Loading products…</div>
                 ) : loadingSupplierSearch && debouncedSupplierSearch.trim() ? (
                   <div className="py-8 text-center text-gray-500 text-sm">Searching…</div>
                 ) : displayedSupplierProducts.length > 0 ? (
                   <>
-                    <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                      <p className="text-sm text-gray-500">
-                        {displayedSupplierProducts.length} product{displayedSupplierProducts.length !== 1 ? "s" : ""}
-                        {debouncedSupplierSearch.trim() ? ` matching "${debouncedSupplierSearch.trim()}"` : ""}
-                      </p>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <Select value={supplierProductSort} onValueChange={(v: "relevance" | "price-asc" | "price-desc") => setSupplierProductSort(v)}>
-                          <SelectTrigger className="w-[140px] h-9">
-                            <SelectValue placeholder="Sort by" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="relevance">Relevance</SelectItem>
-                            <SelectItem value="price-asc">Price: Low to High</SelectItem>
-                            <SelectItem value="price-desc">Price: High to Low</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-                      {displayedSupplierProducts.map((p, index) => (
-                        <div key={`${p.item_code}-${p.supplier_account || ""}-${index}`} className="relative">
-                          <div role="button" tabIndex={0} onClick={() => addProductToCart(p)} onKeyDown={(e) => onTileKey(e, p)} title="Click to add to cart">
-                            <ProductCard product={toCardProduct(p)} />
-                          </div>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="absolute bottom-2 right-2 text-xs z-10"
-                            onClick={(e) => { e.stopPropagation(); setQuickViewProduct(p); setQuickViewOpen(true); }}
-                          >
-                            Quick view
-                          </Button>
+                    {!itemParam ? (
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                        <p className="text-sm text-gray-500">
+                          {displayedSupplierProducts.length} product{displayedSupplierProducts.length !== 1 ? "s" : ""}
+                          {debouncedSupplierSearch.trim() ? ` matching "${debouncedSupplierSearch.trim()}"` : ""}
+                        </p>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Select value={supplierProductSort} onValueChange={(v: "relevance" | "price-asc" | "price-desc") => setSupplierProductSort(v)}>
+                            <SelectTrigger className="w-[140px] h-9">
+                              <SelectValue placeholder="Sort by" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="relevance">Relevance</SelectItem>
+                              <SelectItem value="price-asc">Price: Low to High</SelectItem>
+                              <SelectItem value="price-desc">Price: High to Low</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </div>
-                      ))}
+                      </div>
+                    ) : null}
+                    <div
+                      className={cn(
+                        "grid gap-4",
+                        itemParam ? "grid-cols-1" : "grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4",
+                      )}
+                    >
+                      {displayedSupplierProducts.map((p, index) =>
+                        itemParam ? (
+                          <div
+                            key={`${p.item_code}-${p.supplier_account || ""}-${index}`}
+                            className="flex justify-start"
+                          >
+                            <ProductCard
+                              product={toCardProduct(p)}
+                              layout="spotlight"
+                              onQuickView={() => {
+                                setQuickViewProduct(p)
+                                setQuickViewOpen(true)
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <div key={`${p.item_code}-${p.supplier_account || ""}-${index}`} className="relative">
+                            <div
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => addProductToCart(p)}
+                              onKeyDown={(e) => onTileKey(e, p)}
+                              title="Click to add to cart"
+                            >
+                              <ProductCard product={toCardProduct(p)} />
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="absolute bottom-2 right-2 z-10 text-xs"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setQuickViewProduct(p)
+                                setQuickViewOpen(true)
+                              }}
+                            >
+                              Quick view
+                            </Button>
+                          </div>
+                        ),
+                      )}
                     </div>
                   </> 
                 ) : (

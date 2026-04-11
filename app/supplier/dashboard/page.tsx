@@ -41,6 +41,7 @@ import {
 import Link from "next/link";
 import AddProductModal, { ProductFormData } from "@/components/supplier/AddProductModal";
 import { isRestoBarPreferredCategories } from "@/lib/supplier-sector";
+import { parsePackageMultiplier } from "@/lib/package-price";
 
 /** Redis / API may send last_sync_time, LAST_SYNC_TIME, or lastSyncTime */
 function parseSupplierProductLastSyncMs(p: Record<string, unknown>): number | null {
@@ -381,10 +382,13 @@ function SupplierDashboard() {
   const totalProducts = supplierProducts.length;
   const lowStock = supplierProducts.filter((p) => p.stock <= 10 && p.stock > 0).length;
   const outOfStock = supplierProducts.filter((p) => p.stock === 0).length;
-  const totalValue = supplierProducts.reduce(
-    (sum, p) => sum + Number(p.costPrice ?? 0) * Number(p.stock ?? 0),
-    0
-  );
+  const totalValue = supplierProducts.reduce((sum, p) => {
+    const raw =
+      p.item_emballage ?? p.ITEM_EMBALLAGE ?? p.itemEmballage ?? "";
+    const mult = parsePackageMultiplier(raw);
+    const baseCost = Number(p.costPrice ?? 0);
+    return sum + baseCost * mult * Number(p.stock ?? 0);
+  }, 0);
 
   const latestInventorySyncLabel = (() => {
     let best: number | null = null;
@@ -915,10 +919,13 @@ function SupplierDashboard() {
                           Product
                         </th>
                         <th className="text-left px-4 py-3 text-sm font-semibold text-slate-700">
-                          Price
+                          Selling Price
                         </th>
                         <th className="text-left px-4 py-3 text-sm font-semibold text-slate-700">
                           Cost Price
+                        </th>
+                        <th className="text-left px-4 py-3 text-sm font-semibold text-slate-700">
+                          Package
                         </th>
                         <th className="text-center px-4 py-3 text-sm font-semibold text-slate-700">
                           Stock
@@ -943,10 +950,26 @@ function SupplierDashboard() {
 
                     <tbody className="divide-y divide-slate-200">
                       {paginatedProducts.map((p, rowIndex) => {
-                        const revenue = Number(p.costPrice ?? 0) * Number(p.stock ?? 0);
                         const displayName = p.ITEM_NAME || p.itemName || "Unknown";
                         const displayCode = p.ITEM_CODE || p.itemCode || "";
                         const uniqueKey = `${displayCode}-${startIndex + rowIndex}`;
+                        const emballageRaw =
+                          p.item_emballage ??
+                          p.ITEM_EMBALLAGE ??
+                          p.itemEmballage ??
+                          "";
+                        const packageMult = parsePackageMultiplier(emballageRaw);
+                        const baseSell = Number(p.price ?? 0);
+                        const baseCost = Number(p.costPrice ?? 0);
+                        const displaySelling = baseSell * packageMult;
+                        const displayCost = baseCost * packageMult;
+                        const revenue = displayCost * Number(p.stock ?? 0);
+                        const emballageDisplay =
+                          emballageRaw !== null &&
+                          emballageRaw !== undefined &&
+                          String(emballageRaw).trim() !== ""
+                            ? String(emballageRaw).trim()
+                            : "1";
 
                         return (
                           <tr
@@ -967,9 +990,9 @@ function SupplierDashboard() {
                               </div>
                             </td>
                             <td className="px-4 py-4">
-                              {p.price > 0 ? (
+                              {baseSell > 0 ? (
                                 <span className="font-medium text-slate-900">
-                                  {p.price.toLocaleString()} {p.currency ?? "RWF"}
+                                  {displaySelling.toLocaleString()} {p.currency ?? "RWF"}
                                 </span>
                               ) : (
                                 <span className="text-slate-400 text-sm italic">
@@ -978,15 +1001,18 @@ function SupplierDashboard() {
                               )}
                             </td>
                             <td className="px-4 py-4">
-                              {Number(p.costPrice ?? 0) > 0 ? (
-                                <span className="font-medium text-slate-900">
-                                  {Number(p.costPrice ?? 0).toLocaleString()} {p.currency ?? "RWF"}
-                                </span>
-                              ) : (
-                                <span className="text-slate-400 text-sm italic">
-                                  No cost
-                                </span>
-                              )}
+                              <span className="font-medium text-slate-900">
+                                {displayCost.toLocaleString(undefined, {
+                                  minimumFractionDigits: 1,
+                                  maximumFractionDigits: 1,
+                                })}{" "}
+                                {p.currency ?? "RWF"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-4 text-sm text-slate-700 max-w-[140px]">
+                              <span className="break-words" title={emballageDisplay}>
+                                {emballageDisplay}
+                              </span>
                             </td>
                             <td className="px-4 py-4 text-center">
                               <span

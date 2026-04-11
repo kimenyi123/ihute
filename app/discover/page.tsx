@@ -34,6 +34,7 @@ interface Product {
   category?: string
   inStock?: boolean
   rating?: number
+  itemEmballage?: string
 }
 
 interface RecommendationSection {
@@ -120,14 +121,17 @@ export default function DiscoverPage() {
           const code = p.item_code || p.ITEM_CODE || p.item_commercial_name || ""
           if (seen.has(code)) continue
           seen.add(code)
-          const price = parsePrice(p.item_emballage ?? p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? "0")
-          if (price <= 0) continue
+          const base = parsePrice(p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? p.price ?? "0")
+          const embRaw = p.item_emballage ?? p.ITEM_EMBALLAGE
+          if (base <= 0) continue
           const img = p.image_url ?? p.item_image_url ?? p.image ?? p.IMAGE_URL
           products.push({
             id: code || `burrows-${products.length}`,
             name: p.item_commercial_name ?? p.ITEM_NAME ?? p.item_name ?? "Product",
             description: undefined,
-            price,
+            price: base,
+            itemEmballage:
+              embRaw != null && String(embRaw).trim() !== "" ? String(embRaw).trim() : undefined,
             unit: p.item_packet ?? p.UNIT ?? "",
             image: typeof img === "string" ? img : undefined,
             image_url: p.image_url,
@@ -261,14 +265,22 @@ export default function DiscoverPage() {
             if (seenIds.has(productId)) continue
             seenIds.add(productId)
 
-            const price = parseFloat(p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? p.price ?? "0")
+            const base = parseFloat(
+              String(p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? p.price ?? "0").replace(
+                /[^\d.-]/g,
+                ""
+              )
+            )
+            const embRaw = p.item_emballage ?? p.ITEM_EMBALLAGE
             const rawCategory = p.FAMILLE || p.famille || p.category || ""
 
             allProducts.push({
               id: productId,
               name: p.ITEM_NAME || p.item_commercial_name || p.name || productName,
               description: p.DESCRIPTION_KEYWORD || p.item_key_words || "",
-              price: isNaN(price) ? 0 : price,
+              price: Number.isFinite(base) && !isNaN(base) ? base : 0,
+              itemEmballage:
+                embRaw != null && String(embRaw).trim() !== "" ? String(embRaw).trim() : undefined,
               unit: p.UNIT || p.item_packet || "",
               image: p.image_url ?? p.item_image_url ?? p.IMAGE_URL ?? p.image ?? undefined,
               image_url: p.image_url,
