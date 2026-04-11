@@ -12,6 +12,7 @@ import { CartAlsoBuy } from "@/components/cart-also-buy"
 import { BarcodeScanner } from "@/components/barcode-scanner"
 import { useToast } from "@/components/ui/use-toast"
 import { usePriceDropToasts } from "@/lib/use-price-drop-toasts"
+import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price"
 
 export function CartContent() {
   const items = useCartStore((state) => state.items)
@@ -49,7 +50,18 @@ export function CartContent() {
         return
       }
       const name = first.item_commercial_name ?? first.ITEM_NAME ?? "Product"
-      const price = Number(first.selling_price ?? first.UNIT_PRICE ?? 0) || 0
+      const base =
+        Number(
+          String(first.selling_price ?? first.SALE_PRICE_INCLUSIVE ?? first.price ?? 0).replace(
+            /[^\d.-]/g,
+            ""
+          )
+        ) || 0
+      const embRaw =
+        (first as { item_emballage?: unknown }).item_emballage ??
+        (first as { ITEM_EMBALLAGE?: unknown }).ITEM_EMBALLAGE
+      const price = generalSellingPrice(base, embRaw)
+      const itemEmballage = normalizeItemEmballageForCart(embRaw)
       const code = first.item_key_words ?? first.item_code ?? first.ITEM_CODE ?? first.id ?? barcode
       const supplierId = (first.supplier_account ?? first.seller_account ?? "unknown").toString().trim()
       const supplierName = first.supplier_name ?? first.OWNER ?? "Supplier"
@@ -64,6 +76,7 @@ export function CartContent() {
         supplierName,
         supplierLocation: first.supplier_location,
         momo: first.momo,
+        ...(itemEmballage ? { itemEmballage } : {}),
       }, 1)
       toast({ title: "Added to cart", description: name })
     } catch {

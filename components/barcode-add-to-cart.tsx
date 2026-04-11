@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog"
 import { Barcode, Loader2 } from "lucide-react"
 import { useCartStore } from "@/lib/cart-store"
+import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price"
 
 type Props = {
   open: boolean
@@ -53,7 +54,10 @@ export function BarcodeAddToCart({ open, onOpenChange }: Props) {
         return
       }
       const name = String(first.item_commercial_name ?? first.item_name ?? first.ITEM_NAME ?? "Product")
-      const price = parsePrice(first.selling_price ?? first.item_emballage ?? first.SALE_PRICE_INCLUSIVE ?? 0)
+      const base = parsePrice(first.selling_price ?? first.SALE_PRICE_INCLUSIVE ?? first.price ?? 0)
+      const embRaw = first.item_emballage ?? first.ITEM_EMBALLAGE
+      const price = generalSellingPrice(base, embRaw)
+      const itemEmballage = normalizeItemEmballageForCart(embRaw)
       const itemCode = String(first.item_code ?? first.item_key_words ?? first.ITEM_CODE ?? trimmed)
       const supplierId = String(first.supplier_account ?? first.supplierAccount ?? "").trim()
       const supplierName = String(first.supplier_name ?? first.supplierName ?? "Supplier")
@@ -67,6 +71,7 @@ export function BarcodeAddToCart({ open, onOpenChange }: Props) {
           supplierId: supplierId || "unknown",
           supplierName,
           image: typeof first.image_url === "string" ? first.image_url : typeof first.image === "string" ? first.image : undefined,
+          ...(itemEmballage ? { itemEmballage } : {}),
         },
         1
       )

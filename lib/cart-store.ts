@@ -36,6 +36,12 @@ export type CartItem = {
   /** Set when adding from shop-with-me bar/resto (DEPARTMENT or PREFERRED_CATEGORIES); enables table-command autofill in cart */
   isBarResto?: boolean
 
+  /**
+   * Package/packet multiplier from catalog (`item_emballage`). Sent on order create for DB line items.
+   * `price` is already general selling price (base × multiplier).
+   */
+  itemEmballage?: string
+
   qty: number
 }
 
@@ -200,6 +206,7 @@ export const useCartStore = create<CartState>()(
               famille: first.famille ?? item.famille,
               momo: first.momo ?? item.momo,
               sellerPhone: first.sellerPhone ?? item.sellerPhone,
+              itemEmballage: first.itemEmballage ?? item.itemEmballage,
             }
             return {
               items: state.items.filter((x) => !keyMatch(x)).concat([mergedLine]),
@@ -314,6 +321,7 @@ export const useCartStore = create<CartState>()(
               famille: first.famille ?? item.famille,
               momo: first.momo ?? item.momo,
               sellerPhone: first.sellerPhone ?? item.sellerPhone,
+              itemEmballage: first.itemEmballage ?? item.itemEmballage,
             }
             return {
               items: state.items.filter((x) => !keyMatch(x)).concat([mergedLine]),
@@ -389,6 +397,7 @@ export const useCartStore = create<CartState>()(
                 IMAGE_URL: pickBestCartImage(cur.IMAGE_URL, it.IMAGE_URL),
                 item_key_words: cur.item_key_words ?? it.item_key_words,
                 famille: cur.famille ?? it.famille,
+                itemEmballage: cur.itemEmballage ?? it.itemEmballage,
               }
             } else {
               merged.push({ ...it, itemCode: (it.itemCode ?? it.id).toString().trim() || it.itemCode })

@@ -15,12 +15,15 @@ import { useCartStore } from "@/lib/cart-store"
 import { DEFAULT_CURRENCY, DEFAULT_PLACEHOLDER_IMAGE } from "@/lib/constants"
 import { getProductImageSrc } from "@/lib/image-utils"
 import { Loader2, Plus, Check, ChevronDown, ExternalLink } from "lucide-react"
+import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price"
 import Image from "next/image"
 
 export type CartSuggestionItem = {
   product_id: string
   name: string
   price: number
+  item_emballage?: string | number
+  ITEM_EMBALLAGE?: string | number
   image_url?: string
   reason?: string
   confidence?: number
@@ -111,14 +114,18 @@ export function CartSuggestionsPopup({
   }, [open, cartItems])
 
   const handleAdd = (s: CartSuggestionItem) => {
+    const embRaw = s.item_emballage ?? s.ITEM_EMBALLAGE
+    const linePrice = generalSellingPrice(s.price, embRaw)
+    const itemEmballage = normalizeItemEmballageForCart(embRaw)
     addItem({
       id: s.product_id,
       itemCode: s.item_code ?? s.product_id,
       name: s.name,
-      price: s.price,
+      price: linePrice,
       supplierId: s.supplier_id ?? "",
       supplierName: s.supplier_name ?? "Supplier",
       image: s.image_url,
+      ...(itemEmballage ? { itemEmballage } : {}),
     }, 1)
     setAddedIds((prev) => new Set(prev).add(`${s.product_id}|${s.supplier_id ?? ""}`))
   }
@@ -182,7 +189,11 @@ export function CartSuggestionsPopup({
                         <p className="text-xs text-muted-foreground">{getSuggestionReasonLabel(s.reason)}</p>
                       )}
                       <p className="text-sm text-muted-foreground">
-                        {s.price.toLocaleString()} {DEFAULT_CURRENCY}
+                        {generalSellingPrice(
+                          s.price,
+                          s.item_emballage ?? s.ITEM_EMBALLAGE
+                        ).toLocaleString()}{" "}
+                        {DEFAULT_CURRENCY}
                       </p>
                     </div>
                     <Button

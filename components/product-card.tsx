@@ -20,14 +20,19 @@ import {
   isValidImageUrl,
   NO_IMAGE_URL,
 } from "@/lib/image-utils"
+import { unitMeaningfulForDisplay } from "@/lib/product-unit-display"
+import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price"
 
 type Product = {
   id: string
   name: string
   description?: string
+  /** Base catalog unit selling price (before × item_emballage). */
   price: number
   currency?: string
   unit?: string
+  /** Package/packet multiplier from API (`item_emballage` / `ITEM_EMBALLAGE`). */
+  itemEmballage?: string | number
   inStock?: boolean
   rating?: number
   itemCode?: string
@@ -51,11 +56,21 @@ type Product = {
 export function ProductCard({
   product,
   navigateAfterAdd = false,
+  layout = "card",
+  onQuickView,
 }: {
   product: Product
   /** If true, "Buy" navigates to /cart after adding. If false, only adds to cart and shows a toast so user can keep adding. */
   navigateAfterAdd?: boolean
+  /**
+   * `spotlight` = single-product style: same vertical card as the grid, but larger and centered
+   * (image on top, title/price/seller, Buy + Watch price, optional Quick view below).
+   */
+  layout?: "card" | "spotlight"
+  /** When set, renders a full-width “Quick view” button under the main actions (typical for spotlight). */
+  onQuickView?: () => void
 }) {
+  const isSpotlight = layout === "spotlight"
   const router = useRouter()
   const addOrInc = useCartStore((s) => s.addOrInc ?? s.addItem)
   const cartItems = useCartStore((s) => s.items)
@@ -81,7 +96,17 @@ export function ProductCard({
     IMAGE_URL,
     searchPriority,
     containsIngredient,
+    itemEmballage,
   } = product
+
+  const displayPrice = useMemo(
+    () => generalSellingPrice(price, itemEmballage ?? (product as { ITEM_EMBALLAGE?: unknown }).ITEM_EMBALLAGE),
+    [price, itemEmballage, product]
+  )
+  const itemEmballageForCart = useMemo(
+    () => normalizeItemEmballageForCart(itemEmballage ?? (product as { ITEM_EMBALLAGE?: unknown }).ITEM_EMBALLAGE),
+    [itemEmballage, product]
+  )
 
   const fav = isFavorite(id)
   const checkPriceDrop = usePriceWatchStore((s) => s.checkPriceDrop)
@@ -171,22 +196,33 @@ export function ProductCard({
   // Notify when watched price has dropped
   useEffect(() => {
     const sid = (supplierId || "unknown").toString().trim()
-    const dropped = checkPriceDrop(id, sid, price)
+    const dropped = checkPriceDrop(id, sid, displayPrice)
     if (dropped) {
       toast({
         title: "Price drop",
-        description: `${name} is now ${price.toLocaleString()} RWF (was ${dropped.priceWhenWatched.toLocaleString()} when you watched)`,
+        description: `${name} is now ${displayPrice.toLocaleString()} RWF (was ${dropped.priceWhenWatched.toLocaleString()} when you watched)`,
         duration: 5000,
       })
     }
-  }, [id, supplierId, price, name, checkPriceDrop, toast])
+  }, [id, supplierId, displayPrice, name, checkPriceDrop, toast])
 
   return (
-    <Card className="group h-full overflow-hidden transition-all hover:shadow-lg">
+    <Card
+      className={cn(
+        "group overflow-hidden transition-all",
+        isSpotlight
+          ? "flex h-[560px] w-[280px] shrink-0 flex-col gap-0 rounded-[14px] border border-gray-200 bg-white py-0 shadow-[0_4px_14px_rgba(15,23,42,0.08)]"
+          : "h-full hover:shadow-lg",
+      )}
+    >
       <div
         className={cn(
-          "relative w-full aspect-square bg-muted",
-          cartQty > 0 && "ring-2 ring-emerald-500/90 ring-inset"
+          "relative w-full bg-muted",
+          /* Reference: ~58% of card height ≈ 325px; green accent on top + sides */
+          isSpotlight
+            ? "h-[325px] shrink-0 border-l-2 border-r-2 border-t-2 border-[#00a676]"
+            : "aspect-square",
+          !isSpotlight && cartQty > 0 && "ring-2 ring-emerald-500 ring-inset",
         )}
       >
         {isRemote ? (
@@ -249,10 +285,15 @@ export function ProductCard({
         {/* In-cart badge on image */}
         {cartQty > 0 && (
           <div
-            className="absolute bottom-2 left-2 z-10 flex items-center gap-1 rounded-full bg-emerald-600 px-2 py-1 text-[10px] font-bold text-white shadow-md"
+            className={cn(
+              "absolute bottom-2 left-2 z-10 flex items-center gap-1 rounded-full font-bold text-white shadow-md",
+              isSpotlight
+                ? "bg-[#00a676] px-2.5 py-1.5 text-xs"
+                : "bg-emerald-600 px-2 py-1 text-[10px]",
+            )}
             aria-label={`In cart, quantity ${cartQty}`}
           >
-            <ShoppingCart className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            <ShoppingCart className={cn("shrink-0", isSpotlight ? "h-4 w-4" : "h-3.5 w-3.5")} aria-hidden />
             <span>{cartQty}</span>
           </div>
         )}
@@ -267,7 +308,7 @@ export function ProductCard({
             toggleFavorite({
               id,
               name,
-              price,
+              price: displayPrice,
               unit,
               image: imageUrlForCart,
               description,
@@ -283,57 +324,114 @@ export function ProductCard({
             })
           }}
           className={cn(
-            "absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white/90 backdrop-blur transition",
-            "hover:bg-white",
-            fav ? "text-red-600" : "text-muted-foreground"
+            "absolute right-2 top-2 inline-flex items-center justify-center rounded-full border bg-white shadow-sm transition hover:bg-white",
+            isSpotlight ? "h-9 w-9 border-gray-300" : "h-8 w-8 border-transparent bg-white/90 backdrop-blur",
+            fav ? "text-red-600" : "text-muted-foreground",
           )}
           title={fav ? "Remove from favorites" : "Add to favorites"}
         >
-          <Heart className={cn("h-4 w-4", fav && "fill-current")} />
+          <Heart className={cn(isSpotlight ? "h-5 w-5" : "h-4 w-4", fav && "fill-current")} />
         </button>
       </div>
 
-      <CardContent className="p-3 flex flex-col gap-2">
-        <div className="min-h-[38px]">
-          <h3 className="text-sm font-semibold leading-tight line-clamp-2">{name}</h3>
-          {(searchPriority === "direct" || containsIngredient) && (
-            <div className="mt-1 flex flex-wrap gap-1">
-              {searchPriority === "direct" && (
-                <span className="inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
-                  Main Ingredient
-                </span>
-              )}
-              {containsIngredient && searchPriority !== "direct" && (
-                <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-700">
-                  Contains: {containsIngredient}
-                </span>
+      <CardContent
+        className={cn(
+          "flex flex-col",
+          isSpotlight
+            ? "min-h-0 flex-1 justify-between gap-2 px-5 pb-5 pt-4"
+            : "gap-2 p-3",
+        )}
+      >
+        {isSpotlight ? (
+          <div className="flex min-h-0 flex-1 flex-col space-y-2 overflow-hidden">
+            <h3 className="line-clamp-3 text-sm font-semibold uppercase tracking-wide leading-snug text-black">
+              {name}
+            </h3>
+            {(searchPriority === "direct" || containsIngredient) && (
+              <div className="flex flex-wrap gap-1">
+                {searchPriority === "direct" && (
+                  <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800">
+                    Main Ingredient
+                  </span>
+                )}
+                {containsIngredient && searchPriority !== "direct" && (
+                  <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">
+                    Contains: {containsIngredient}
+                  </span>
+                )}
+              </div>
+            )}
+            {description && description !== id && (
+              <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">{description}</p>
+            )}
+            <div className="mt-auto space-y-1 pt-1">
+              <div className="text-base font-semibold tabular-nums text-black">
+                {displayPrice.toLocaleString()} {currency}
+                {unitMeaningfulForDisplay(unit) ? (
+                  <span className="text-sm font-normal text-muted-foreground"> / {unit}</span>
+                ) : null}
+              </div>
+              {supplierName && (
+                <div className="text-[11px] font-medium uppercase tracking-wide text-[#7c8ba1]">
+                  {supplierName}
+                  {supplierLocation ? ` — ${supplierLocation}` : ""}
+                </div>
               )}
             </div>
-          )}
-        </div>
-
-        {description && description !== id && (
-          <p className="text-xs text-muted-foreground line-clamp-2">
-            {description}
-          </p>
+          </div>
+        ) : (
+          <>
+            <div className="min-h-[38px]">
+              <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-foreground">{name}</h3>
+              {(searchPriority === "direct" || containsIngredient) && (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {searchPriority === "direct" && (
+                    <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
+                      Main Ingredient
+                    </span>
+                  )}
+                  {containsIngredient && searchPriority !== "direct" && (
+                    <span className="inline-flex items-center rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-700">
+                      Contains: {containsIngredient}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+            {description && description !== id && (
+              <p className="line-clamp-2 text-xs text-muted-foreground">{description}</p>
+            )}
+            <div className="text-sm">
+              <div className="font-semibold tabular-nums text-foreground">
+                {displayPrice.toLocaleString()} {currency}
+                {unitMeaningfulForDisplay(unit) ? (
+                  <span className="text-sm font-normal text-muted-foreground"> / {unit}</span>
+                ) : null}
+              </div>
+              {supplierName && (
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                  <span className="text-foreground/90">{supplierName}</span>
+                  {supplierLocation ? ` — ${supplierLocation}` : ""}
+                </div>
+              )}
+            </div>
+          </>
         )}
 
-        <div className="text-sm">
-          <div className="font-semibold">
-            {price.toLocaleString()} {currency}
-          </div>
-          {supplierName && (
-            <div className="text-xs text-muted-foreground">
-              {supplierName}
-              {supplierLocation ? ` — ${supplierLocation}` : ""}
-            </div>
+        <div
+          className={cn(
+            "flex shrink-0 flex-col gap-2",
+            isSpotlight ? "mt-2" : "",
           )}
-        </div>
-
-        <div className="mt-1 flex flex-wrap gap-1">
+        >
+        <div className={cn("flex flex-wrap gap-2", !isSpotlight && "mt-1 gap-1")}>
         <Button
-          size="sm"
-          className="flex-1 min-w-0"
+          size={isSpotlight ? "default" : "sm"}
+          className={cn(
+            isSpotlight
+              ? "h-9 w-[40%] shrink-0 rounded-md border-0 bg-[#1a3d5f] px-2 text-sm text-white hover:bg-[#153550]"
+              : "min-w-0 flex-1",
+          )}
           onClick={(e) => {
             e.stopPropagation()
             trackClick("product", id, name)
@@ -342,7 +440,7 @@ export function ProductCard({
                 id,
                 itemCode: itemCode ?? id,
                 name,
-                price,
+                price: displayPrice,
                 unit,
                 image: imageUrlForCart,
                 image_url,
@@ -355,6 +453,7 @@ export function ProductCard({
                 supplierLocation,
                 momo,
                 selectedUnit: unit,
+                ...(itemEmballageForCart ? { itemEmballage: itemEmballageForCart } : {}),
               },
               1
             )
@@ -375,12 +474,35 @@ export function ProductCard({
           productId={id}
           supplierId={(supplierId || "unknown").toString().trim()}
           name={name}
-          currentPrice={price}
+          currentPrice={displayPrice}
           supplierName={supplierName}
           image={imageUrlForCart}
-          size="sm"
+          size={isSpotlight ? "default" : "sm"}
           variant="outline"
+          className={
+            isSpotlight
+              ? "h-9 min-w-0 flex-1 rounded-md border-gray-300 text-sm text-foreground"
+              : undefined
+          }
         />
+        </div>
+        {onQuickView && (
+          <Button
+            type="button"
+            variant="outline"
+            size={isSpotlight ? "default" : "sm"}
+            className={cn(
+              "w-full",
+              isSpotlight ? "h-9 rounded-md border-gray-300 text-sm text-foreground" : "",
+            )}
+            onClick={(e) => {
+              e.stopPropagation()
+              onQuickView()
+            }}
+          >
+            Quick view
+          </Button>
+        )}
         </div>
       </CardContent>
     </Card>

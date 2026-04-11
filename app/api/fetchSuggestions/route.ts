@@ -8,7 +8,11 @@ import {
   SUGGESTIONS_TTL_SEC,
 } from "@/lib/redis-cache"
 
-const DEFAULT_TIMEOUT_MS = Math.max(30000, getProxyTimeoutMs())
+/**
+ * Global search can spend ~8–15s on Redis (many supplier_* blobs) plus NIKI MySQL.
+ * A cap near 10–12s aborts before the servlet returns 72 DB rows → empty UI + "took too long".
+ */
+const DEFAULT_TIMEOUT_MS = Math.min(90000, Math.max(35000, getProxyTimeoutMs()))
 
 function paramsToRecord(searchParams: URLSearchParams): Record<string, string> {
   const out: Record<string, string> = {}

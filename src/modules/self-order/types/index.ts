@@ -34,6 +34,7 @@ export interface KioskMenuItem {
   sector?: string
   item_department?: string  // for category tab grouping
   keywords?: string
+  item_emballage?: string | number
 
   // Optional option groups coming from backend JSON (sizes/modifiers/toppings)
   sizes?: KioskModifierGroup[]
@@ -82,6 +83,8 @@ export interface KioskOrderLine {
   unit_price: number
   line_total: number
   seller_account: string
+  /** Package/packet multiplier for persistence on order lines. */
+  item_emballage?: string
 }
 
 // Kaos native statuses mapped to kiosk states

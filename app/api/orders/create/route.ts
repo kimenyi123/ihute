@@ -64,6 +64,10 @@ type LineIn = {
   price?: number | string
   unit?: string
   measurement?: string
+  /** Package/packet multiplier — persisted on order line (e.g. order_transaction_list.ITEM_EMBALLAGE). */
+  item_emballage?: string | number
+  ITEM_EMBALLAGE?: string | number
+  itemEmballage?: string | number
 }
 
 function normalizeItemCode(it: LineIn): string | undefined {
@@ -77,6 +81,16 @@ function normalizeItemCode(it: LineIn): string | undefined {
     ""
   const s = String(raw).trim()
   return s || undefined
+}
+
+type NormalizedOrderLine = {
+  name: string
+  itemCode?: string
+  qty: number
+  unitPrice: number
+  unit: string
+  item_emballage?: string
+  ITEM_EMBALLAGE?: string
 }
 
 /* =========================
@@ -101,13 +115,20 @@ export async function POST(req: Request) {
 
     /* -------- normalize items -------- */
     const rawItems: LineIn[] = Array.isArray(bodyIn.items) ? bodyIn.items : []
-    const items = rawItems.map((it, i) => ({
-      name: String(it.name ?? it.item_name ?? `Item ${i + 1}`),
-      itemCode: normalizeItemCode(it),
-      qty: Number(it.qty ?? it.quantity ?? 1),
-      unitPrice: Number(it.unitPrice ?? it.price ?? 0),
-      unit: String(it.unit ?? it.measurement ?? ""),
-    }))
+    const items: NormalizedOrderLine[] = rawItems.map((it, i) => {
+      const embRaw = it.item_emballage ?? it.ITEM_EMBALLAGE ?? it.itemEmballage
+      const embStr =
+        embRaw != null && String(embRaw).trim() !== "" ? String(embRaw).trim() : undefined
+      const base: NormalizedOrderLine = {
+        name: String(it.name ?? it.item_name ?? `Item ${i + 1}`),
+        itemCode: normalizeItemCode(it),
+        qty: Number(it.qty ?? it.quantity ?? 1),
+        unitPrice: Number(it.unitPrice ?? it.price ?? 0),
+        unit: String(it.unit ?? it.measurement ?? ""),
+      }
+      if (embStr == null) return base
+      return { ...base, item_emballage: embStr, ITEM_EMBALLAGE: embStr }
+    })
 
     console.log("[orders/create] Request items (NIKI_CODE in logs only):", items.map((it) => ({ name: it.name, qty: it.qty, NIKI_CODE: it.itemCode, unitPrice: it.unitPrice })))
 

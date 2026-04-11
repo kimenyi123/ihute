@@ -435,6 +435,9 @@ function CartSummaryBody() {
           unitPrice: it.price,
           unit: it.unit ?? "",
           itemCode: code,
+          ...(it.itemEmballage
+            ? { item_emballage: it.itemEmballage, ITEM_EMBALLAGE: it.itemEmballage }
+            : {}),
         }
       })
 

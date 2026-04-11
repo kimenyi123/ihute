@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Search, Store, Loader2 } from "lucide-react";
 import { filterProductsByRelevance, filterSuppliersByRelevance } from "@/lib/search-utils";
+import { generalSellingPrice } from "@/lib/package-price";
 
 type ServerProduct = {
   item_commercial_name?: string;
@@ -74,7 +75,7 @@ function normalizeProduct(
   return {
     item_commercial_name: p.item_commercial_name ?? p.ITEM_NAME ?? p.name ?? "Product",
     item_packet: p.item_packet ?? p.UNIT ?? p.pack ?? "",
-    item_emballage: p.item_emballage ?? "",
+    item_emballage: p.item_emballage ?? p.ITEM_EMBALLAGE ?? "",
     selling_price: p.selling_price,
     cost_price: p.cost_price,
     currency: p.currency,
@@ -368,11 +369,15 @@ export function ProductGrid({
         toRouteCategoryId(p.sector) ||
         toRouteCategoryId(p.category);
 
+      const embRaw = p.item_emballage ?? (p as { ITEM_EMBALLAGE?: string }).ITEM_EMBALLAGE;
+      const embStr =
+        embRaw != null && String(embRaw).trim() !== "" ? String(embRaw).trim() : undefined;
       return {
         id: `${categoryId}-${idx}`,
         name: p.item_commercial_name || "Product",
         description: undefined,
         price: extractNumericPrice(p.selling_price),
+        itemEmballage: embStr,
         currency: p.currency || "RWF",
         unit: p.item_packet,
         inStock: true,
@@ -426,10 +431,18 @@ export function ProductGrid({
     // sort
     switch (sortBy) {
       case "price-low":
-        items = [...items].sort((a, b) => a.price - b.price);
+        items = [...items].sort(
+          (a, b) =>
+            generalSellingPrice(a.price, a.itemEmballage) -
+            generalSellingPrice(b.price, b.itemEmballage)
+        );
         break;
       case "price-high":
-        items = [...items].sort((a, b) => b.price - a.price);
+        items = [...items].sort(
+          (a, b) =>
+            generalSellingPrice(b.price, b.itemEmballage) -
+            generalSellingPrice(a.price, a.itemEmballage)
+        );
         break;
       case "rating":
         items = [...items].sort((a, b) => b.rating - a.rating);

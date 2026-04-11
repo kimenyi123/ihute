@@ -117,13 +117,27 @@ export default function TableCommandCartFixed() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          items: items.map(item => ({
-            name: item.name,
-            qty: item.qty,
-            unitPrice: item.price,
-            unit: item.unit || "pcs",
-            itemCode: (item as { itemCode?: string; id: string | number }).itemCode ?? String((item as { id: string | number }).id),
-          })),
+          items: items.map((item) => {
+            const row = item as {
+              name: string
+              qty: number
+              price: number
+              unit?: string
+              itemCode?: string
+              id: string | number
+              itemEmballage?: string
+            }
+            return {
+              name: row.name,
+              qty: row.qty,
+              unitPrice: row.price,
+              unit: row.unit || "pcs",
+              itemCode: row.itemCode ?? String(row.id),
+              ...(row.itemEmballage
+                ? { item_emballage: row.itemEmballage, ITEM_EMBALLAGE: row.itemEmballage }
+                : {}),
+            }
+          }),
           sellerAccount: activeSession.locationId,
           sellerName: activeSession.locationName,
           buyerEmail: activeSession.userEmail,

@@ -149,6 +149,10 @@ export function CheckoutForm() {
             qty: it.qty,
             unitPrice: it.price,
             unit: it.unit || "pcs",
+            itemCode: it.itemCode ?? it.id,
+            ...(it.itemEmballage
+              ? { item_emballage: it.itemEmballage, ITEM_EMBALLAGE: it.itemEmballage }
+              : {}),
           })),
 
           subtotal: getTotalPrice(),

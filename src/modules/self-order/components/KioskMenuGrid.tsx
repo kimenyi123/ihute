@@ -10,6 +10,7 @@ import type {
   KioskModifierOption,
 } from "@/src/modules/self-order/types"
 import { useCartStore } from "@/lib/cart-store"
+import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price"
 
 interface Props {
   items: KioskMenuItem[]
@@ -355,7 +356,8 @@ function ItemExpandPanel({
   const [qty, setQty] = useState(1)
   const [selectedOptions, setSelectedOptions] = useState<Record<string, KioskModifierOption>>({})
 
-  const basePrice = Number(item.selling_price || 0)
+  const baseUnit = Number(item.selling_price || 0)
+  const basePrice = generalSellingPrice(baseUnit, item.item_emballage)
   const groups = getOptionGroupsForItem(item)
   const extra = Object.values(selectedOptions).reduce((sum, opt) => sum + (opt.priceDelta || 0), 0)
   const unitPrice = basePrice + extra
@@ -492,7 +494,7 @@ function ItemCard({
   isExpanded: boolean
   onToggle: () => void
 }) {
-  const price = Number(item.selling_price || 0)
+  const price = generalSellingPrice(Number(item.selling_price || 0), item.item_emballage)
   // Show multilingual description if different from name
   const description = item.item_name && item.item_name !== item.item_commercial_name
     ? item.item_name
@@ -940,6 +942,7 @@ export function KioskMenuGrid({
             item_commercial_name: String(p.item_commercial_name ?? p.ITEM_NAME ?? p.item_name ?? "Product"),
             item_name: p.item_name ?? p.ITEM_NAME,
             selling_price: Number(p.selling_price ?? p.price ?? p.SALE_PRICE_INCLUSIVE ?? 0),
+            item_emballage: p.item_emballage ?? p.ITEM_EMBALLAGE,
             unit: String(p.unit ?? p.UNIT ?? "pcs"),
             image_url: p.image_url ?? p.item_image_url ?? p.image,
             supplier_account: String(seller.ISHYIGA_ACCOUNT ?? seller.seller_account ?? ""),
@@ -974,12 +977,15 @@ export function KioskMenuGrid({
   }, [query, category, shopNickname])
 
   function handleAdd(item: KioskMenuItem, qty: number, _selected: Record<string, KioskModifierOption> = {}) {
+    const base = Number(item.selling_price || 0)
+    const linePrice = generalSellingPrice(base, item.item_emballage)
+    const itemEmballage = normalizeItemEmballageForCart(item.item_emballage)
     addItem(
       {
         id: item.item_code,
         itemCode: item.item_code,
         name: item.item_commercial_name || item.item_name || item.item_code,
-        price: Number(item.selling_price || 0),
+        price: linePrice,
         unit: item.unit || "",
         image: item.image_url,
         supplierId: item.supplier_account,
@@ -988,6 +994,7 @@ export function KioskMenuGrid({
         momo: item.momo,
         sellerPhone: item.sellerPhone,
         isBarResto: true,
+        ...(itemEmballage ? { itemEmballage } : {}),
       },
       qty,
     )

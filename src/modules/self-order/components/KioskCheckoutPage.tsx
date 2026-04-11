@@ -165,6 +165,7 @@ export function KioskCheckoutPage() {
         unit_price: it.price,
         line_total: it.price * it.qty,
         seller_account: it.supplierId,
+        ...(it.itemEmballage ? { item_emballage: it.itemEmballage } : {}),
       }))
 
       const payload: KioskOrderPayload = {

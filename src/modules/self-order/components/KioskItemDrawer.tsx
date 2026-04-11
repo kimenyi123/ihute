@@ -5,6 +5,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Button } from "@/components/ui/button"
 import type { KioskMenuItem } from "@/src/modules/self-order/types"
 import { useCartStore } from "@/lib/cart-store"
+import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price"
 
 interface KioskItemDrawerProps {
   item: KioskMenuItem | null
@@ -18,7 +19,8 @@ export function KioskItemDrawer({ item, open, onOpenChange }: KioskItemDrawerPro
 
   if (!item) return null
 
-  const price = Number(item.selling_price || 0)
+  const price = generalSellingPrice(Number(item.selling_price || 0), item.item_emballage)
+  const itemEmballage = normalizeItemEmballageForCart(item.item_emballage)
 
   const handleAdd = () => {
     if (!item) return
@@ -35,6 +37,7 @@ export function KioskItemDrawer({ item, open, onOpenChange }: KioskItemDrawerPro
       supplierName: item.supplier_name,
       supplierLocation: item.supplier_location,
       qty: 0, // will be set by store
+      ...(itemEmballage ? { itemEmballage } : {}),
     }
     addItem(cartLine, qty)
     setQty(1)
