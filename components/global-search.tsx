@@ -8,17 +8,14 @@ import { Search, Package, Store, Clock, Trash2, MapPin } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { usePrefsStore } from "@/lib/prefs-store"
-import { useCartStore } from "@/lib/cart-store"
 import { filterSuppliersByRelevance, filterProductsByRelevance } from "@/lib/search-utils"
 import { useAuthStore } from "@/lib/auth-store"
 import { getRecentSearches, recordSearch, markSearchClick, clearLocalSearchHistory } from "@/lib/search-intent-tracker"
 import { useLocationStoreEnhanced } from "@/lib/location-store-enhanced"
-import { useToast } from "@/components/ui/use-toast"
 import { useGeolocation } from "@/hooks/use-geolocation"
 import { searchNearbyProducts, NearbyProduct } from "@/lib/location-search-api"
 import { DistanceBadge } from "@/components/distance-badge"
 import { Badge } from "@/components/ui/badge"
-import { getProductImageSrc } from "@/lib/image-utils"
 
 export interface GlobalResult {
   type?: "product" | "supplier"
@@ -55,6 +52,8 @@ type GlobalSearchResponse = {
   query: string
   timestamp?: number
   error?: string
+  /** Set when Next proxy or backend times out / degrades gracefully */
+  warning?: string
   /** When item is not in NIKI (Redis), backend falls back to DB */
   source?: "redis" | "database"
   fromNiki?: boolean
@@ -66,11 +65,64 @@ type GlobalSearchResponse = {
   }
 }
 
-function extractNumericPrice(value: any): number {
-  if (typeof value === "number") return value
-  const n = String(value ?? "").replace(/[^\d.,-]/g, "").replace(",", ".")
-  const parsed = parseFloat(n)
-  return Number.isFinite(parsed) ? parsed : 0
+function productMatchScore(p: GlobalResult): number {
+  return p.relevance_score ?? p.finalScore ?? 0
+}
+
+/** Within each supplier: best relevance first, then nearest distance. */
+function sortProductsWithinSupplier(products: GlobalResult[]): GlobalResult[] {
+  return [...products].sort((a, b) => {
+    const scoreDiff = productMatchScore(b) - productMatchScore(a)
+    if (scoreDiff !== 0) return scoreDiff
+    const da = a.calculated_distance_km ?? Infinity
+    const db = b.calculated_distance_km ?? Infinity
+    return da - db
+  })
+}
+
+/**
+ * For specific multi-word queries, collapse the dropdown to one row when there is an
+ * obvious best match (exact title, unique phrase match, or large score gap vs #2).
+ */
+function narrowGlobalDropdownToBestMatch(
+  products: Array<GlobalResult & { finalScore?: number }>,
+  searchQuery: string
+): GlobalResult[] {
+  const q = searchQuery.trim().toLowerCase().replace(/\s+/g, " ")
+  if (products.length <= 1 || q.length < 3) return products
+
+  const words = q.split(/\s+/).filter((w) => w.length > 0)
+  const isMultiWord = words.length >= 2
+
+  const normName = (p: GlobalResult) =>
+    (p.item_commercial_name || "").toLowerCase().replace(/\s+/g, " ").trim()
+
+  if (isMultiWord) {
+    const exact = products.filter((p) => normName(p) === q)
+    if (exact.length === 1) return exact
+
+    const phraseHits = products.filter((p) => {
+      const n = normName(p)
+      return n.includes(q)
+    })
+    if (phraseHits.length === 1) return phraseHits
+  }
+
+  const sorted = [...products].sort(
+    (a, b) => (b.finalScore ?? 0) - (a.finalScore ?? 0)
+  )
+  const top = sorted[0]
+  const second = sorted[1]
+  if (!top || !second) return products
+
+  const topS = top.finalScore ?? 0
+  const secondS = second.finalScore ?? 0
+  if (topS < 70) return products
+  if (secondS >= topS - 5) return products
+  if (isMultiWord && topS >= 85 && secondS < topS * 0.55) return [top]
+  if (!isMultiWord && topS >= 95 && secondS < topS * 0.45) return [top]
+
+  return products
 }
 
 // Group products by supplier for better display
@@ -84,6 +136,10 @@ function groupProductsBySupplier(products: GlobalResult[]): Map<string, GlobalRe
     }
     grouped.get(supplierId)!.push(p)
   })
+
+  for (const [key, list] of grouped) {
+    grouped.set(key, sortProductsWithinSupplier(list))
+  }
 
   return grouped
 }
@@ -106,7 +162,10 @@ export function GlobalSearch({
   const [suppliers, setSuppliers] = useState<GlobalResult[]>([])
   const [stats, setStats] = useState<GlobalSearchResponse["searchStats"] | null>(null)
   const [fromNiki, setFromNiki] = useState<boolean | null>(null)
+  const [searchWarning, setSearchWarning] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
+  /** Invalidates in-flight fetch results when the user types again (avoids stuck loading / stale data). */
+  const searchRequestIdRef = useRef(0)
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const dropdownRef = useRef<HTMLDivElement | null>(null)
@@ -118,8 +177,6 @@ export function GlobalSearch({
   const [recentSearches, setRecentSearches] = useState<string[]>([])
   const [nearbySuppliers, setNearbySuppliers] = useState<GlobalResult[]>([])
   const [loadingNearby, setLoadingNearby] = useState(false)
-  const { toast } = useToast()
-
   // GPS-based nearby product search
   const { location: userGPS, loading: gpsLoading, denied: gpsDenied } = useGeolocation()
   const [nearbyProducts, setNearbyProducts] = useState<{ results: NearbyProduct[]; query: string; radius_used_km: number } | null>(null)
@@ -127,8 +184,6 @@ export function GlobalSearch({
 
   // Supplier GPS coordinates map for distance calculation
   const [supplierGPSMap, setSupplierGPSMap] = useState<Map<string, { lat: number; lng: number }>>(new Map())
-
-  const addToCartFn = useCartStore((s: any) => s.addOrInc ?? s.add)
 
   // Helper function to calculate distance using Haversine formula
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
@@ -265,48 +320,52 @@ export function GlobalSearch({
     }
   }, [q, userGPS])
 
-  const addProductAndGoToCart = (p: GlobalResult) => {
-    if (!addToCartFn) return
+  /** Full search page: user adds to cart there, not from the dropdown. */
+  const openProductInSearch = (p: GlobalResult) => {
+    const term = q.trim() || (p.item_commercial_name || "").toString().trim()
+    const supplierAccount = (p.supplier_account || p.item_seller_account || "").toString().trim()
+    const supplierName = (p.supplier_name || "").toString().trim()
     const itemCode = (p.item_code || p.item_key_words || "").toString().trim()
-    const id = itemCode || `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`
-    const unit = p.item_packet || ""
-    const price = extractNumericPrice(p.selling_price)
-    const supplierId = (p.supplier_account || p.item_seller_account || "unknown").toString().trim()
 
-    addToCartFn({
-      id,
-      itemCode: itemCode || id,
-      name: p.item_commercial_name,
-      price,
-      unit,
-      selectedUnit: unit,
-      qty: 1,
-      supplierId,
-      supplierName: p.supplier_name || p.supplier_account || "Supplier",
-      supplierLocation: p.supplier_location,
-      image: getProductImageSrc(p as Record<string, unknown>, "/placeholder.svg?height=300&width=300"),
-      momo: p.momo,
-    })
-
-    // Track search click for search intent
-    if (q.trim()) {
-      markSearchClick(
-        q.trim(),
-        id,
-        p.supplier_account || p.item_seller_account
-      ).catch(err => console.warn("[SearchIntent] Failed to mark click:", err))
+    if (term) {
+      markSearchClick(term, itemCode || undefined, supplierAccount || undefined).catch((err) =>
+        console.warn("[SearchIntent] Failed to mark click:", err)
+      )
     }
 
-    // Show success toast instead of redirecting
-    toast({
-      title: "Added to cart!",
-      description: p.item_commercial_name || "Product",
-      duration: 2000,
+    const params = new URLSearchParams({
+      ...(term ? { q: term } : {}),
+      ...(supplierAccount ? { supplier: supplierAccount } : {}),
+      ...(supplierName ? { supplierName } : {}),
+      ...(itemCode ? { item: itemCode } : {}),
+      ...(sector ? { sector } : {}),
+      ...(location ? { location } : {}),
     })
-
-    // User stays on current page - they can click cart icon when ready
     setOpen(false)
     setQ("")
+    router.push(`/search?${params.toString()}`)
+  }
+
+  const openNearbyProductInSearch = (product: NearbyProduct) => {
+    const term = q.trim() || product.item_name
+    const supplierAccount = product.best_offer.supplier_id
+    const supplierName = product.best_offer.nickname
+    if (term) {
+      markSearchClick(term, product.item_code, supplierAccount).catch((err) =>
+        console.warn("[SearchIntent] Failed to mark click:", err)
+      )
+    }
+    const params = new URLSearchParams({
+      q: term,
+      supplier: supplierAccount,
+      supplierName,
+      item: product.item_code,
+      ...(sector ? { sector } : {}),
+      ...(location ? { location } : {}),
+    })
+    setOpen(false)
+    setQ("")
+    router.push(`/search?${params.toString()}`)
   }
 
   useEffect(() => {
@@ -315,33 +374,46 @@ export function GlobalSearch({
       setSuppliers([])
       setStats(null)
       setFromNiki(null)
+      setSearchWarning(null)
+      setErr(null)
       setOpen(false)
       return
     }
 
-    const id = setTimeout(async () => {
+    const requestId = ++searchRequestIdRef.current
+    const abortController = new AbortController()
+    /** Hard cap so the dropdown never spins until the browser default if the proxy hangs. */
+    /** Must allow Redis scan + DB fallback on slow local Kaos; stay under typical browser limits. */
+    const CLIENT_SEARCH_TIMEOUT_MS = 40000
+    const clientTimeout = setTimeout(() => abortController.abort(), CLIENT_SEARCH_TIMEOUT_MS)
+
+    const debounceTimer = setTimeout(async () => {
       setLoading(true)
       setErr(null)
+      setSearchWarning(null)
 
-      console.log(`[GlobalSearch] Searching for: "${q}"`)
+      const trimmedQuery = q.trim()
+      console.log(`[GlobalSearch] Searching for: "${trimmedQuery}"`)
 
       try {
         const locationData = useLocationStoreEnhanced.getState().location
         const params = new URLSearchParams({
-          globalSearch: q,
+          globalSearch: trimmedQuery,
           limit: String(maxSuggestions),
           Currency: "RWF",
           ...(sector ? { sector } : {}),
           ...(location ? { location } : {}),
-          // Add location-aware parameters (district and cell)
           ...(locationData?.district ? { district: locationData.district } : {}),
           ...(locationData?.cell ? { cell: locationData.cell } : {}),
         }).toString()
 
         const res = await fetch(`/api/fetchSuggestions?${params}`, {
           cache: "no-store",
-          headers: { 'Accept': 'application/json' }
+          headers: { Accept: "application/json" },
+          signal: abortController.signal,
         })
+
+        if (requestId !== searchRequestIdRef.current) return
 
         if (!res.ok) {
           throw new Error(`Search failed: ${res.status}`)
@@ -349,11 +421,18 @@ export function GlobalSearch({
 
         const json: GlobalSearchResponse = await res.json()
 
+        if (requestId !== searchRequestIdRef.current) return
+
+        if (json.warning) {
+          setSearchWarning(json.warning)
+        }
+
         console.log("[GlobalSearch] Raw response:", {
           products: json.products?.length || 0,
           suppliersByName: json.suppliersByName?.length || 0,
           suppliersByProduct: json.suppliersByProduct?.length || 0,
-          stats: json.searchStats
+          stats: json.searchStats,
+          warning: json.warning,
         })
 
         // Validate response structure
@@ -367,25 +446,20 @@ export function GlobalSearch({
           return
         }
 
-        // Filter products with threshold of 10 for more results with multilingual support
         const allProducts = json.products || []
-        const filteredProducts = filterProductsByRelevance(allProducts, q.trim(), 10)
+        const filteredProducts = narrowGlobalDropdownToBestMatch(
+          filterProductsByRelevance(allProducts, trimmedQuery, 10),
+          trimmedQuery
+        )
 
-        // Filter suppliers with lower threshold when no products are found
-        const allSuppliers = [
-          ...(json.suppliersByName || []),
-          ...(json.suppliersByProduct || [])
-        ]
-        // Filter out suppliers without names, then cast to proper type
-        const validSuppliers = allSuppliers.filter(s =>
-          s.supplier_name
-        ) as Array<GlobalResult & { supplier_name: string }>
+        const allSuppliers = [...(json.suppliersByName || []), ...(json.suppliersByProduct || [])]
+        const validSuppliers = allSuppliers.filter((s) => s.supplier_name) as Array<
+          GlobalResult & { supplier_name: string }
+        >
 
-        // Use lower threshold (8) if we have products, higher (20) if we don't to show suppliers
         const supplierThreshold = filteredProducts.length > 0 ? 8 : 20
-        const filteredSuppliers = filterSuppliersByRelevance(validSuppliers, q.trim(), supplierThreshold)
+        const filteredSuppliers = filterSuppliersByRelevance(validSuppliers, trimmedQuery, supplierThreshold)
 
-        // Deduplicate suppliers that appear in both suppliersByName and suppliersByProduct
         const dedupedSuppliers: typeof filteredSuppliers = []
         const seenSupplierKeys = new Set<string>()
         for (const sup of filteredSuppliers) {
@@ -402,37 +476,59 @@ export function GlobalSearch({
         console.log("[GlobalSearch] Filtered results:", {
           products: p.length,
           suppliers: s.length,
-          topProductScores: p.slice(0, 3).map(x => x.finalScore)
+          topProductScores: p.slice(0, 3).map((x) => x.finalScore),
         })
 
         setProducts(p)
         setSuppliers(s)
         setStats(json.searchStats || null)
-        setFromNiki(json.fromNiki ?? (json.source === "database" ? false : json.source === "redis" ? true : null))
+        setFromNiki(
+          json.fromNiki ?? (json.source === "database" ? false : json.source === "redis" ? true : null)
+        )
         setOpen(true)
 
-        // Track search intent
-        if (q.trim().length >= 2) {
+        if (trimmedQuery.length >= 2) {
           const totalResults = p.length + s.length
-          recordSearch(q.trim(), totalResults, "global").catch(err =>
+          recordSearch(trimmedQuery, totalResults, "global").catch((err) =>
             console.warn("[SearchIntent] Failed to record search:", err)
           )
         }
+      } catch (e: unknown) {
+        const aborted = e instanceof Error && e.name === "AbortError"
+        if (requestId !== searchRequestIdRef.current) return
 
-      } catch (e: any) {
-        console.error("[GlobalSearch] Error:", e)
-        setErr(e?.message || "Search failed")
-        setProducts([])
-        setSuppliers([])
-        setStats(null)
-        setFromNiki(null)
-        setOpen(true)
+        if (aborted) {
+          setProducts([])
+          setSuppliers([])
+          setStats(null)
+          setFromNiki(null)
+          setErr(
+            "Search timed out — the catalog may be busy. Press Enter to open full search, or try fewer words."
+          )
+          setOpen(true)
+        } else {
+          console.error("[GlobalSearch] Error:", e)
+          setErr(e instanceof Error ? e.message : "Search failed")
+          setProducts([])
+          setSuppliers([])
+          setStats(null)
+          setFromNiki(null)
+          setOpen(true)
+        }
       } finally {
-        setLoading(false)
+        clearTimeout(clientTimeout)
+        if (requestId === searchRequestIdRef.current) {
+          setLoading(false)
+        }
       }
     }, 300)
 
-    return () => clearTimeout(id)
+    return () => {
+      clearTimeout(debounceTimer)
+      clearTimeout(clientTimeout)
+      abortController.abort()
+      setLoading(false)
+    }
   }, [q, maxSuggestions, sector, location])
 
   // Click outside detection
@@ -585,6 +681,12 @@ export function GlobalSearch({
             <div className="px-3 py-2 text-sm text-destructive">{err}</div>
           )}
 
+          {searchWarning && !loading && !err && (
+            <div className="px-3 py-2 text-xs text-amber-900 bg-amber-50 border-b border-amber-100">
+              {searchWarning}
+            </div>
+          )}
+
           {/* Recent Searches Suggestions */}
           {!loading && !err && q.trim().length === 0 && recentSearches.length > 0 && (
             <div className="p-3 space-y-2">
@@ -683,7 +785,7 @@ export function GlobalSearch({
                 <div className="px-3 py-2 bg-green-50 border-t border-green-200 flex items-center gap-2">
                   <MapPin className="h-3 w-3 text-green-600" />
                   <span className="text-xs text-green-700">
-                    Showing nearby results based on your location
+                    {/* Showing nearby results based on your location */}
                     {loadingNearbyProducts && <span className="ml-2 animate-pulse">• Searching...</span>}
                   </span>
                 </div>
@@ -714,36 +816,7 @@ export function GlobalSearch({
                   <button
                     key={product.item_code}
                     className="w-full rounded-lg border-2 border-green-200 bg-white p-3 hover:border-green-400 hover:shadow-md transition-all cursor-pointer group text-left"
-                    onClick={() => {
-                      // Add to cart
-                      if (!addToCartFn) return
-
-                      const id = product.item_code
-                      const price = product.best_offer.sale_price
-
-                      addToCartFn({
-                        id,
-                        name: product.item_name,
-                        price,
-                        unit: "",
-                        selectedUnit: "",
-                        qty: 1,
-                        supplierId: product.best_offer.supplier_id,
-                        supplierName: product.best_offer.nickname,
-                        supplierLocation: "",
-                        image: "/placeholder.svg?height=300&width=300",
-                        momo: "",
-                      })
-
-                      toast({
-                        title: "Added to cart!",
-                        description: product.item_name,
-                        duration: 2000,
-                      })
-
-                      setOpen(false)
-                      setQ("")
-                    }}
+                    onClick={() => openNearbyProductInSearch(product)}
                   >
                     <div className="flex justify-between items-start">
                       <div className="flex-1">
@@ -779,6 +852,9 @@ export function GlobalSearch({
                         </div>
                       </div>
                     )}
+                    <div className="mt-2 text-[11px] text-green-700 opacity-0 group-hover:opacity-100 transition-opacity">
+                      View product on search →
+                    </div>
                   </button>
                 ))}
               </div>
@@ -793,17 +869,17 @@ export function GlobalSearch({
                 </div>
               )}
               {/* Search Stats */}
-              {stats && (
+              {(stats || products.length > 0) && (
                 <div className="px-2 py-1 text-[10px] text-muted-foreground flex items-center gap-3">
                   <span className="flex items-center gap-1">
                     <Package className="h-3 w-3" />
-                    {stats.totalProducts} products
+                    {products.length} product{products.length !== 1 ? "s" : ""}
                   </span>
                   <span className="flex items-center gap-1">
                     <Store className="h-3 w-3" />
-                    {supplierCount} suppliers
+                    {supplierCount} supplier{supplierCount !== 1 ? "s" : ""}
                   </span>
-                  {stats.cacheHit && (
+                  {stats?.cacheHit && (
                     <span className="text-green-600">⚡ Cached</span>
                   )}
                 </div>
@@ -838,18 +914,8 @@ export function GlobalSearch({
                               <button
                                 key={`${supplierId}-${p.item_code}-${i}`}
                                 className="w-full text-left rounded-lg border p-3 hover:border-blue-300 hover:bg-accent transition-colors group"
-                                onClick={() => {
-                                  // Track search click
-                                  if (q.trim()) {
-                                    markSearchClick(
-                                      q.trim(),
-                                      p.item_code || "",
-                                      supplierId
-                                    ).catch(err => console.warn("[SearchIntent] Failed to mark click:", err))
-                                  }
-                                  addProductAndGoToCart(p)
-                                }}
-                                title="Click to add & go to cart"
+                                onClick={() => openProductInSearch(p)}
+                                title="Open full search to view and add to cart"
                               >
                                 <div className="font-medium text-gray-900 group-hover:text-blue-700 text-sm">
                                   {p.item_commercial_name}
@@ -861,7 +927,7 @@ export function GlobalSearch({
                                   {p.item_emballage ?? ""}
                                 </div>
                                 <div className="mt-1 text-[11px] text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
-                                  Add & go to cart →
+                                  View product →
                                 </div>
                               </button>
                             ))}

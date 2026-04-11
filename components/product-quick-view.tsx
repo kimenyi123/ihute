@@ -14,6 +14,7 @@ import Image from "next/image"
 import { useMemo, useState, useEffect } from "react"
 import { usePriceDropToasts } from "@/lib/use-price-drop-toasts"
 import { getProductImageCandidates, getProductImageSrc, NO_IMAGE_URL, isValidImageUrl } from "@/lib/image-utils"
+import { unitMeaningfulForDisplay } from "@/lib/product-unit-display"
 
 export type QuickViewProduct = {
   id: string
@@ -26,6 +27,8 @@ export type QuickViewProduct = {
   itemCode?: string
   supplierId?: string
   supplierName?: string
+  /** Package/packet multiplier — forwarded to cart / orders when adding from quick view. */
+  itemEmballage?: string
 }
 
 type ProductQuickViewProps = {
@@ -49,33 +52,32 @@ export function ProductQuickView({ product, open, onOpenChange, onAddToCart }: P
       : []
   usePriceDropToasts(priceCheckItems)
 
-  if (!product) return null
-
   const placeholder = "/placeholder.svg?height=300&width=300"
 
   const candidates = useMemo(() => {
+    if (!product) return [NO_IMAGE_URL]
     try {
       return getProductImageCandidates(product as any)
     } catch {
       return [NO_IMAGE_URL]
     }
-  }, [
-    product.id,
-    product.image,
-    (product as any).image_url,
-    (product as any).item_image_url,
-    (product as any).IMAGE_URL,
-    (product as any).item_key_words,
-    (product as any).famille,
-  ])
+  }, [product])
 
   const [candidateIdx, setCandidateIdx] = useState(0)
+  const candidatesKey = candidates.join("\x1e")
   useEffect(() => {
     setCandidateIdx(0)
-  }, [candidates.join("\x1e")])
+  }, [candidatesKey])
 
   const candidateSrc = candidates[Math.min(candidateIdx, candidates.length - 1)] ?? NO_IMAGE_URL
-  const src = isValidImageUrl(candidateSrc) ? candidateSrc : getProductImageSrc(product as any, placeholder)
+  const src =
+    product && isValidImageUrl(candidateSrc)
+      ? candidateSrc
+      : product
+        ? getProductImageSrc(product as any, placeholder)
+        : placeholder
+
+  if (!product) return null
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -120,7 +122,9 @@ export function ProductQuickView({ product, open, onOpenChange, onAddToCart }: P
           <div className="flex items-center justify-between">
             <span className="text-lg font-semibold">
               {product.price.toLocaleString()} {product.currency || "RWF"}
-              {product.unit && <span className="text-sm font-normal text-muted-foreground"> / {product.unit}</span>}
+              {unitMeaningfulForDisplay(product.unit) && (
+                <span className="text-sm font-normal text-muted-foreground"> / {product.unit}</span>
+              )}
             </span>
           </div>
         </div>
