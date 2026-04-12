@@ -41,6 +41,9 @@ import {
 import Link from "next/link";
 import AddProductModal, { ProductFormData } from "@/components/supplier/AddProductModal";
 import { isRestoBarPreferredCategories } from "@/lib/supplier-sector";
+import { parsePackageMultiplier } from "@/lib/package-price";
+import { parseItemStateBatchExpiry } from "@/lib/item-state-display";
+import { SupplierProductTableImage } from "@/components/supplier-product-table-image";
 
 /** Redis / API may send last_sync_time, LAST_SYNC_TIME, or lastSyncTime */
 function parseSupplierProductLastSyncMs(p: Record<string, unknown>): number | null {
@@ -258,7 +261,9 @@ function SupplierDashboard() {
               DESCRIPTION: p.item_description || p.item_state || "",
               UNIT: p.item_unit || "PCS",
               currency: p.currency ?? "RWF",
-              imageUrl: p.item_image_url || p.IMAGE_URL || p.image_url || "",
+              imageUrl:
+                p.item_image_url || p.IMAGE_URL || p.image_url || (p as { image?: string }).image || "",
+              famille: p.famille ?? (p as { FAMILLE?: string }).FAMILLE,
               last_sync_time:
                 p.last_sync_time ?? p.LAST_SYNC_TIME ?? p.lastSyncTime ?? p.last_sync ?? "",
             };
@@ -296,7 +301,9 @@ function SupplierDashboard() {
               category: p.category || "uncategorized",
               sales: 0,
               currency: p.currency ?? "RWF",
-              imageUrl: p.IMAGE_URL || p.image_url || p.item_image_url || "",
+              imageUrl:
+                p.IMAGE_URL || p.image_url || p.item_image_url || (p as { image?: string }).image || "",
+              famille: p.famille ?? (p as { FAMILLE?: string }).FAMILLE,
               last_sync_time:
                 p.last_sync_time ?? p.LAST_SYNC_TIME ?? p.lastSyncTime ?? p.last_sync ?? "",
             };
@@ -353,9 +360,22 @@ function SupplierDashboard() {
 
   // Filter products
   const filteredProducts = supplierProducts.filter((p) => {
+    const stateHay =
+      String(p.item_state ?? p.batchInfo ?? p.DESCRIPTION ?? "").toLowerCase();
+    const { batch, expiryLabel } = parseItemStateBatchExpiry(
+      p.item_state ?? p.batchInfo ?? p.DESCRIPTION ?? ""
+    );
+    const batchHay = (batch ?? "").toLowerCase();
+    const expHay = (expiryLabel ?? "").toLowerCase();
+    const q = searchTerm.toLowerCase();
     const matchesSearch =
-      p.itemName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.ITEM_NAME?.toLowerCase().includes(searchTerm.toLowerCase());
+      p.itemName?.toLowerCase().includes(q) ||
+      p.ITEM_NAME?.toLowerCase().includes(q) ||
+      (p.itemCode && String(p.itemCode).toLowerCase().includes(q)) ||
+      (p.ITEM_CODE && String(p.ITEM_CODE).toLowerCase().includes(q)) ||
+      stateHay.includes(q) ||
+      batchHay.includes(q) ||
+      expHay.includes(q);
     const matchesCategory =
       categoryFilter === "all" || p.category === categoryFilter;
     const matchesStatus =
@@ -381,10 +401,13 @@ function SupplierDashboard() {
   const totalProducts = supplierProducts.length;
   const lowStock = supplierProducts.filter((p) => p.stock <= 10 && p.stock > 0).length;
   const outOfStock = supplierProducts.filter((p) => p.stock === 0).length;
-  const totalValue = supplierProducts.reduce(
-    (sum, p) => sum + Number(p.costPrice ?? 0) * Number(p.stock ?? 0),
-    0
-  );
+  const totalValue = supplierProducts.reduce((sum, p) => {
+    const raw =
+      p.item_emballage ?? p.ITEM_EMBALLAGE ?? p.itemEmballage ?? "";
+    const mult = parsePackageMultiplier(raw);
+    const baseCost = Number(p.costPrice ?? 0);
+    return sum + baseCost * mult * Number(p.stock ?? 0);
+  }, 0);
 
   const latestInventorySyncLabel = (() => {
     let best: number | null = null;
@@ -915,10 +938,19 @@ function SupplierDashboard() {
                           Product
                         </th>
                         <th className="text-left px-4 py-3 text-sm font-semibold text-slate-700">
-                          Price
+                          Selling Price
                         </th>
                         <th className="text-left px-4 py-3 text-sm font-semibold text-slate-700">
                           Cost Price
+                        </th>
+                        <th className="text-left px-4 py-3 text-sm font-semibold text-slate-700">
+                          Package
+                        </th>
+                        <th className="text-left px-4 py-3 text-sm font-semibold text-slate-700">
+                          Batch
+                        </th>
+                        <th className="text-left px-4 py-3 text-sm font-semibold text-slate-700 whitespace-nowrap">
+                          Expiry
                         </th>
                         <th className="text-center px-4 py-3 text-sm font-semibold text-slate-700">
                           Stock
@@ -943,10 +975,38 @@ function SupplierDashboard() {
 
                     <tbody className="divide-y divide-slate-200">
                       {paginatedProducts.map((p, rowIndex) => {
-                        const revenue = Number(p.costPrice ?? 0) * Number(p.stock ?? 0);
                         const displayName = p.ITEM_NAME || p.itemName || "Unknown";
                         const displayCode = p.ITEM_CODE || p.itemCode || "";
                         const uniqueKey = `${displayCode}-${startIndex + rowIndex}`;
+                        const emballageRaw =
+                          p.item_emballage ??
+                          p.ITEM_EMBALLAGE ??
+                          p.itemEmballage ??
+                          "";
+                        const packageMult = parsePackageMultiplier(emballageRaw);
+                        const baseSell = Number(p.price ?? 0);
+                        const baseCost = Number(p.costPrice ?? 0);
+                        const displaySelling = baseSell * packageMult;
+                        const displayCost = baseCost * packageMult;
+                        const revenue = displayCost * Number(p.stock ?? 0);
+                        const emballageDisplay =
+                          emballageRaw !== null &&
+                          emballageRaw !== undefined &&
+                          String(emballageRaw).trim() !== ""
+                            ? String(emballageRaw).trim()
+                            : "1";
+
+                        const itemStateRaw =
+                          p.item_state ?? p.batchInfo ?? p.DESCRIPTION ?? "";
+                        const {
+                          batch,
+                          expiryLabel,
+                          isExpired,
+                          expiryRaw,
+                          exDdMmYyEncoded,
+                          expiryAt,
+                        } = parseItemStateBatchExpiry(itemStateRaw);
+                        const expiryAsEncodedOnly = Boolean(exDdMmYyEncoded && !expiryAt);
 
                         return (
                           <tr
@@ -967,9 +1027,9 @@ function SupplierDashboard() {
                               </div>
                             </td>
                             <td className="px-4 py-4">
-                              {p.price > 0 ? (
+                              {baseSell > 0 ? (
                                 <span className="font-medium text-slate-900">
-                                  {p.price.toLocaleString()} {p.currency ?? "RWF"}
+                                  {displaySelling.toLocaleString()} {p.currency ?? "RWF"}
                                 </span>
                               ) : (
                                 <span className="text-slate-400 text-sm italic">
@@ -978,14 +1038,64 @@ function SupplierDashboard() {
                               )}
                             </td>
                             <td className="px-4 py-4">
-                              {Number(p.costPrice ?? 0) > 0 ? (
-                                <span className="font-medium text-slate-900">
-                                  {Number(p.costPrice ?? 0).toLocaleString()} {p.currency ?? "RWF"}
+                              <span className="font-medium text-slate-900">
+                                {displayCost.toLocaleString(undefined, {
+                                  minimumFractionDigits: 1,
+                                  maximumFractionDigits: 1,
+                                })}{" "}
+                                {p.currency ?? "RWF"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-4 text-sm text-slate-700 max-w-[140px]">
+                              <span className="break-words" title={emballageDisplay}>
+                                {emballageDisplay}
+                              </span>
+                            </td>
+                            <td className="px-4 py-4 text-sm text-slate-700 max-w-[120px]">
+                              {batch ? (
+                                <span className="break-words font-mono text-xs" title={batch}>
+                                  {batch}
                                 </span>
                               ) : (
-                                <span className="text-slate-400 text-sm italic">
-                                  No cost
-                                </span>
+                                <span className="text-slate-400">—</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-4 text-sm">
+                              {expiryLabel ? (
+                                <div>
+                                  <span
+                                    className={
+                                      isExpired
+                                        ? "text-red-700 font-medium"
+                                        : expiryRaw
+                                          ? "text-amber-800"
+                                          : "text-slate-800 font-mono"
+                                    }
+                                    title={
+                                      isExpired
+                                        ? "Expired (valid calendar date from Ex)"
+                                        : expiryRaw
+                                          ? "Non-standard Ex value"
+                                          : expiryAsEncodedOnly
+                                            ? "Shown as dd/mm/yy from Ex (not adjusted)"
+                                            : "Ex dd/mm/yy (valid calendar date)"
+                                    }
+                                  >
+                                    {expiryLabel}
+                                    {isExpired ? (
+                                      <span className="ml-1.5 inline-flex items-center rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-red-800">
+                                        Expired
+                                      </span>
+                                    ) : null}
+                                    {expiryRaw && !isExpired ? (
+                                      <span className="ml-1.5 inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-900">
+                                        Check
+                                      </span>
+                                    ) : null}
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-slate-400">—</span>
                               )}
                             </td>
                             <td className="px-4 py-4 text-center">
@@ -1028,19 +1138,11 @@ function SupplierDashboard() {
                                 </span>
                               )}
                             </td>
-                            <td className="px-4 py-4">
-                              {p.imageUrl ? (
-                                <a
-                                  href={p.imageUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-blue-600 hover:text-blue-800 underline text-sm"
-                                >
-                                  View Image
-                                </a>
-                              ) : (
-                                <span className="text-slate-400 text-sm">—</span>
-                              )}
+                            <td className="px-4 py-4 align-top">
+                              <SupplierProductTableImage
+                                product={p as Record<string, unknown>}
+                                alt={displayName}
+                              />
                             </td>
                             <td className="px-4 py-4">
                               <div className="flex items-center justify-center gap-2">

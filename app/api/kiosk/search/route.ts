@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getFetchSuggestionsUrl } from "@/lib/backend-config"
+import { dedupeSearchProductsByItemCodeAndSellingPrice } from "@/lib/dedupe-search-products"
 import type {
   KioskCategory,
   KioskMenuItem,
@@ -66,7 +67,9 @@ export async function GET(req: NextRequest) {
     }
 
     const raw = await resp.json()
-    const products: any[] = Array.isArray(raw.products) ? raw.products : []
+    const products: any[] = dedupeSearchProductsByItemCodeAndSellingPrice(
+      Array.isArray(raw.products) ? raw.products : [],
+    ) as any[]
 
     const items: KioskMenuItem[] = products.map((p) => {
       const sizes = (p.sizes as KioskModifierGroup[] | undefined) ??

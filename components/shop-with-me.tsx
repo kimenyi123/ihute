@@ -52,6 +52,7 @@ import {
   normalizeImageUrl,
   NO_IMAGE_URL,
 } from "@/lib/image-utils";
+import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price";
 
 type ShopWithMeProduct = {
   item_name?: string;
@@ -492,9 +493,10 @@ export default function ShopWithMePage() {
     const categoryMap = new Map<string, ShopWithMeProduct[]>();
 
     currentSeller.products.forEach((product) => {
-      const price = extractNumericPrice(product.price || product.item_emballage)
-        || extractNumericPrice((product as Record<string, unknown>).selling_price as string);
-      if (price <= 0) return; // don't show 0-price items
+      const r = product as Record<string, unknown>;
+      const base =
+        extractNumericPrice(r.selling_price ?? product.price ?? r.UNITY_PRICE ?? r.SALE_PRICE_INCLUSIVE);
+      if (base <= 0) return; // don't show 0-price items
       const fam = (product as Record<string, unknown>).famille ?? (product as Record<string, unknown>).FAMILLE;
       const category = (fam && String(fam).trim()) ? String(fam).trim() : categorizeProduct(product);
       if (!categoryMap.has(category)) {
@@ -564,15 +566,31 @@ export default function ShopWithMePage() {
     switch (sortBy) {
       case "price-low":
         sorted.sort((a, b) => {
-          const priceA = extractNumericPrice(a.selling_price ?? a.price);
-          const priceB = extractNumericPrice(b.selling_price ?? b.price);
+          const ra = a as Record<string, unknown>;
+          const rb = b as Record<string, unknown>;
+          const priceA = generalSellingPrice(
+            extractNumericPrice(ra.selling_price ?? a.price ?? ra.UNITY_PRICE ?? ra.SALE_PRICE_INCLUSIVE),
+            ra.item_emballage ?? ra.ITEM_EMBALLAGE
+          );
+          const priceB = generalSellingPrice(
+            extractNumericPrice(rb.selling_price ?? b.price ?? rb.UNITY_PRICE ?? rb.SALE_PRICE_INCLUSIVE),
+            rb.item_emballage ?? rb.ITEM_EMBALLAGE
+          );
           return priceA - priceB;
         });
         break;
       case "price-high":
         sorted.sort((a, b) => {
-          const priceA = extractNumericPrice(a.selling_price ?? a.price);
-          const priceB = extractNumericPrice(b.selling_price ?? b.price);
+          const ra = a as Record<string, unknown>;
+          const rb = b as Record<string, unknown>;
+          const priceA = generalSellingPrice(
+            extractNumericPrice(ra.selling_price ?? a.price ?? ra.UNITY_PRICE ?? ra.SALE_PRICE_INCLUSIVE),
+            ra.item_emballage ?? ra.ITEM_EMBALLAGE
+          );
+          const priceB = generalSellingPrice(
+            extractNumericPrice(rb.selling_price ?? b.price ?? rb.UNITY_PRICE ?? rb.SALE_PRICE_INCLUSIVE),
+            rb.item_emballage ?? rb.ITEM_EMBALLAGE
+          );
           return priceB - priceA;
         });
         break;
@@ -1085,7 +1103,10 @@ function ProductCard({
   // API/Redis format: item_commercial_name, item_emballage (as-is), item_key_words, item_packet, image_url; price from selling_price
   const productName = String(p.item_commercial_name ?? p.item_name ?? p.ITEM_NAME ?? p.ITEM_COMMERCIAL_NAME ?? "").trim() || "Product";
   const priceRaw = p.selling_price ?? p.price ?? p.UNITY_PRICE ?? p.SALE_PRICE_INCLUSIVE;
-  const price = extractNumericPrice(priceRaw);
+  const baseUnit = extractNumericPrice(priceRaw);
+  const embRaw = p.item_emballage ?? p.ITEM_EMBALLAGE;
+  const price = generalSellingPrice(baseUnit, embRaw);
+  const itemEmballageCart = normalizeItemEmballageForCart(embRaw);
 
   /** Try KAOS famille → flat NIKI → each backend URL → no_image (same order as getProductImageSrc, but advance on 404). */
   const imageCandidates = useMemo(
@@ -1165,6 +1186,7 @@ function ProductCard({
         momo: product.momo,
         selectedUnit: "pcs",
         isBarResto: isBarOrRestaurant,
+        ...(itemEmballageCart ? { itemEmballage: itemEmballageCart } : {}),
       },
       1
     );

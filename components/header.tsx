@@ -109,9 +109,9 @@ export function Header() {
             />
           </Link>
 
-          {/* Global Search - Desktop */}
-          <div className="hidden lg:flex flex-1 max-w-md relative items-center gap-2">
-            <GlobalSearch placeholder={t("searchPlaceholder")} className="w-full" />
+          {/* Global Search - Desktop (flex-1 + wide max so the field can grow into middle space) */}
+          <div className="hidden lg:flex min-w-0 flex-1 max-w-3xl relative items-center gap-2">
+            <GlobalSearch placeholder={t("searchPlaceholder")} className="w-full min-w-0" />
             <LocationBadge />
           </div>
 

@@ -7,8 +7,15 @@ import {
   setCached,
   SUGGESTIONS_TTL_SEC,
 } from "@/lib/redis-cache"
+import { dedupeSearchProductsByItemCodeAndSellingPrice } from "@/lib/dedupe-search-products"
+import { enrichFetchSuggestionsProducts } from "@/lib/fetch-suggestions-enrich"
+import { stripExpiredFromFetchSuggestionsBody } from "@/lib/catalog-expiry-filter"
 
-const DEFAULT_TIMEOUT_MS = Math.max(30000, getProxyTimeoutMs())
+/**
+ * Global search can spend ~8–15s on Redis (many supplier_* blobs) plus NIKI MySQL.
+ * A cap near 10–12s aborts before the servlet returns 72 DB rows → empty UI + "took too long".
+ */
+const DEFAULT_TIMEOUT_MS = Math.min(90000, Math.max(35000, getProxyTimeoutMs()))
 
 function paramsToRecord(searchParams: URLSearchParams): Record<string, string> {
   const out: Record<string, string> = {}
@@ -30,6 +37,32 @@ async function forward(req: NextRequest) {
   const cached = await getCached(cacheKey)
   if (cached) {
     console.log("[fetchSuggestions] Redis cache hit")
+    try {
+      const parsed = JSON.parse(cached) as { products?: unknown[] }
+      const globalSearchQ = incoming.searchParams.get("globalSearch")?.trim()
+      // Drop expired lots first so dedupe never picks an expired row as representative when a valid batch exists.
+      stripExpiredFromFetchSuggestionsBody(parsed)
+      if (
+        globalSearchQ &&
+        Array.isArray(parsed.products) &&
+        parsed.products.length > 1
+      ) {
+        parsed.products = dedupeSearchProductsByItemCodeAndSellingPrice(parsed.products)
+      }
+      enrichFetchSuggestionsProducts(parsed)
+      return new Response(JSON.stringify(parsed), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization",
+          "X-Cache": "HIT",
+        },
+      })
+    } catch {
+      /* invalid JSON or parse error — return raw body */
+    }
     return new Response(cached, {
       status: 200,
       headers: {
@@ -150,6 +183,31 @@ async function forward(req: NextRequest) {
       const supplierParam = incoming.searchParams.get("supplier") || ""
       console.log("[fetchSuggestions] Data source: unknown (no products array) | supplier=" + (supplierParam || "n/a"))
     }
+
+    // Remove strictly expired lots before dedupe so merged rows reflect sellable batches only (same idea Kaos validateStock should use).
+    stripExpiredFromFetchSuggestionsBody(parsed ?? {})
+
+    // Keyword search: collapse same supplier + item code + selling price (multiple lots → one card).
+    const globalSearchQ = incoming.searchParams.get("globalSearch")?.trim()
+    if (
+      globalSearchQ &&
+      parsed &&
+      Array.isArray(parsed.products) &&
+      parsed.products.length > 1
+    ) {
+      const before = parsed.products.length
+      parsed.products = dedupeSearchProductsByItemCodeAndSellingPrice(parsed.products)
+      if (before !== parsed.products.length) {
+        console.log(
+          "[fetchSuggestions] Deduped products (code + price per supplier):",
+          before,
+          "→",
+          parsed.products.length
+        )
+      }
+    }
+
+    enrichFetchSuggestionsProducts(parsed ?? {})
 
     // Store in Redis for next time (Redis first, then DB)
     await setCached(cacheKey, JSON.stringify(parsed ?? {}), SUGGESTIONS_TTL_SEC)

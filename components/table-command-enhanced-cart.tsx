@@ -16,6 +16,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { kaosCatalogBaseUnitPrice } from "@/lib/kaos-catalog-price";
+import { parsePackageMultiplier } from "@/lib/package-price";
 import {
   ShoppingCart,
   AlertTriangle,
@@ -32,6 +34,8 @@ interface CartItem {
   quantity: number;
   unitPrice: number;
   unit: string;
+  /** Catalog package multiplier — forwarded to Kaos validateStock when set */
+  itemEmballage?: string;
 }
 
 interface EnhancedTableCartProps {
@@ -113,11 +117,18 @@ export function EnhancedTableCart({
     if (!autoValidate || items.length === 0) return;
 
     const validateTimer = setTimeout(() => {
-      const stockItems = items.map((item) => ({
-        itemCode: item.itemCode,
-        itemName: item.itemName,
-        quantity: item.quantity,
-      }));
+      const stockItems = items.map((item) => {
+        const mult = parsePackageMultiplier(item.itemEmballage);
+        const embStr = String(mult > 0 ? mult : 1);
+        return {
+          itemCode: item.itemCode,
+          itemName: item.itemName,
+          quantity: item.quantity,
+          unitPrice: kaosCatalogBaseUnitPrice(item.unitPrice, item.itemEmballage),
+          item_emballage: embStr,
+          ITEM_EMBALLAGE: embStr,
+        };
+      });
 
       validate(stockItems);
       setLastValidation(new Date());
@@ -131,11 +142,18 @@ export function EnhancedTableCart({
    */
   const handleCheckout = async () => {
     // 1. Validate stock
-    const stockItems = items.map((item) => ({
-      itemCode: item.itemCode,
-      itemName: item.itemName,
-      quantity: item.quantity,
-    }));
+    const stockItems = items.map((item) => {
+      const mult = parsePackageMultiplier(item.itemEmballage);
+      const embStr = String(mult > 0 ? mult : 1);
+      return {
+        itemCode: item.itemCode,
+        itemName: item.itemName,
+        quantity: item.quantity,
+        unitPrice: kaosCatalogBaseUnitPrice(item.unitPrice, item.itemEmballage),
+        item_emballage: embStr,
+        ITEM_EMBALLAGE: embStr,
+      };
+    });
 
     const validation = await validate(stockItems);
 

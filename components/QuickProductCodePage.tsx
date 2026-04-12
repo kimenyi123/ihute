@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import Image from "next/image";
 import { getProductImageCandidates, getProductImageSrc, NO_IMAGE_URL } from "@/lib/image-utils";
+import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price";
 
 type QuickProductItem = {
   item_emballage?: string;
@@ -139,13 +140,18 @@ export default function QuickProductCodePage() {
 
   /** Display: selling_price with currency concatenated (from account_signup). */
   const formatPrice = (product: QuickProductItem) => {
-    const price = getPrice(product);
+    const display = generalSellingPrice(
+      getPrice(product),
+      product.item_emballage ?? (product as { ITEM_EMBALLAGE?: string }).ITEM_EMBALLAGE
+    );
     const curr = getCurrency(product);
-    return price > 0 ? `${Number(price).toLocaleString()} ${curr}` : '—';
+    return display > 0 ? `${Number(display).toLocaleString()} ${curr}` : '—';
   };
 
   const handleAddToCart = (product: QuickProductItem) => {
-    const price = getPrice(product);
+    const embRaw = product.item_emballage ?? (product as { ITEM_EMBALLAGE?: string }).ITEM_EMBALLAGE;
+    const price = generalSellingPrice(getPrice(product), embRaw);
+    const itemEmballage = normalizeItemEmballageForCart(embRaw);
     const unit = product.item_packet || 'Unit';
     const productId = `${product.supplier_account ?? ""}_${product.item_code ?? ""}`;
 
@@ -163,6 +169,7 @@ export default function QuickProductCodePage() {
         selectedUnit: unit,
         itemCode: product.item_code,
         item_key_words: product.item_code,
+        ...(itemEmballage ? { itemEmballage } : {}),
       },
       1
     );

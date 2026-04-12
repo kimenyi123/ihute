@@ -1,0 +1,12 @@
+-- Optional MySQL migration: store package/packet multiplier on each order line.
+-- Frontend sends `item_emballage` / `ITEM_EMBALLAGE` in order item JSON (see app/api/orders/create/route.ts).
+-- Kaos Java persists this on insert via `insertrekizisiyo` + `OrdersServlet` (createOrder, table merge copy, kiosk order).
+-- Runtime: `MySQLConnector.ensureOrderTransactionListItemEmballageColumn` may ADD the column if missing (needs ALTER privilege).
+
+-- If your table name differs, adjust accordingly.
+-- ALTER TABLE order_transaction_list
+--   ADD COLUMN ITEM_EMBALLAGE DOUBLE NULL
+--   COMMENT 'Package/packet multiplier from product item_emballage'
+--   AFTER UNITY_PRICE;
+-- If you already added VARCHAR(64), migrate with:
+-- ALTER TABLE order_transaction_list MODIFY COLUMN ITEM_EMBALLAGE DOUBLE NULL;

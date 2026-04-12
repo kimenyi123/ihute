@@ -12,6 +12,7 @@ import { formatPaymentMethod } from "@/lib/payment-utils"
 import { RatingModal } from "@/components/RatingModal"
 import { useOrderTracking } from "@/hooks/useOrderTracking"
 import { DeliveryCountdown } from "@/components/delivery-countdown"
+import { unitMeaningfulForDisplay } from "@/lib/product-unit-display"
 
 // Updated to match supplier statuses
 type OrderStatus = "open" | "processing" | "invoice" | "delivered" | "pending" | "in-transit"
@@ -655,7 +656,7 @@ export default function TrackOrderPage() {
                       <p className="font-medium">{item.name}</p>
                       <p className="text-sm text-muted-foreground">
                         {item.qty} × {item.unitPrice.toLocaleString()} RWF
-                        {item.unit && ` (${item.unit})`}
+                        {unitMeaningfulForDisplay(item.unit) ? ` (${item.unit})` : ""}
                       </p>
                     </div>
                     <p className="font-bold">{(item.qty * item.unitPrice).toLocaleString()} RWF</p>

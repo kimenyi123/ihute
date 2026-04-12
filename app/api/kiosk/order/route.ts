@@ -39,14 +39,23 @@ export async function POST(req: NextRequest) {
 
     const paymentName = mapPaymentToOrdersPaymentName(body.payment_method)
 
-    const items = body.items.map((it, idx) => ({
-      itemCode: it.item_code,
-      itemName: it.item_name || `Item ${idx + 1}`,
-      qty: it.quantity,
-      unit: it.unit,
-      unitPrice: it.unit_price,
-      lineTotal: it.line_total,
-    }))
+    const items = body.items.map((it, idx) => {
+      const base: Record<string, unknown> = {
+        itemCode: it.item_code,
+        itemName: it.item_name || `Item ${idx + 1}`,
+        qty: it.quantity,
+        unit: it.unit,
+        unitPrice: it.unit_price,
+        lineTotal: it.line_total,
+      }
+      const emb = it.item_emballage
+      if (emb != null && String(emb).trim() !== "") {
+        const s = String(emb).trim()
+        base.item_emballage = s
+        base.ITEM_EMBALLAGE = s
+      }
+      return base
+    })
 
     const form = new URLSearchParams()
     form.set("action", "createKioskOrder")

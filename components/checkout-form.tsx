@@ -10,6 +10,10 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { CheckoutSummary } from "@/components/checkout-summary"
+import { validateStock } from "@/lib/api/table-commands"
+import { orderErrorMessageWithProductNames } from "@/lib/order-error-display"
+import { kaosCatalogBaseUnitPrice } from "@/lib/kaos-catalog-price"
+import { parsePackageMultiplier } from "@/lib/package-price"
 import { CreditCard, Smartphone, ArrowLeft, Check, MapPin, Users } from "lucide-react"
 import Link from "next/link"
 import { useForm } from "react-hook-form"
@@ -118,6 +122,43 @@ export function CheckoutForm() {
 
     setIsProcessing(true)
     try {
+      const sellerAccount = items[0]?.supplierId || ""
+      if (sellerAccount) {
+        const stockItems = items.map((it) => {
+          const rawCode = (it.itemCode ?? it.id).toString().trim()
+          const itemCode = rawCode.replace(/__p\d+$/i, "") || rawCode
+          const emb = it.itemEmballage
+          const mult = parsePackageMultiplier(emb)
+          const embStr = String(mult > 0 ? mult : 1)
+          return {
+            itemCode,
+            itemName: it.name,
+            quantity: it.qty,
+            unitPrice: kaosCatalogBaseUnitPrice(it.price, emb),
+            item_emballage: embStr,
+            ITEM_EMBALLAGE: embStr,
+          }
+        })
+        const validation = await validateStock(stockItems, sellerAccount)
+        if (!validation.allAvailable) {
+          const bad =
+            validation.items?.filter((i) => !i.isAvailable) ?? []
+          const detail =
+            bad.length > 0
+              ? bad
+                  .map(
+                    (i) =>
+                      `${i.itemName || i.itemCode}: need ${i.requestedQty}, available ${i.availableQty}`,
+                  )
+                  .join("\n")
+              : validation.error || "Stock could not be confirmed"
+          throw new Error(orderErrorMessageWithProductNames(detail, items))
+        }
+        if (!validation.ok && validation.error) {
+          throw new Error(orderErrorMessageWithProductNames(validation.error, items))
+        }
+      }
+
       const res = await fetch("/api/orders/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -144,12 +185,23 @@ export function CheckoutForm() {
           reference: data.notes || `ORDER-${Date.now()}`,
           currency: "RWF",
 
-          items: items.map((it) => ({
-            name: it.name,
-            qty: it.qty,
-            unitPrice: it.price,
-            unit: it.unit || "pcs",
-          })),
+          items: items.map((it) => {
+            const rawCode = (it.itemCode ?? it.id).toString().trim()
+            const itemCode = rawCode.replace(/__p\d+$/i, "") || rawCode
+            const catalogBase = kaosCatalogBaseUnitPrice(it.price, it.itemEmballage)
+            return {
+              name: it.name,
+              qty: it.qty,
+              unitPrice: catalogBase,
+              unit: it.unit || "pcs",
+              itemCode,
+              ...(it.itemEmballage
+                ? { item_emballage: it.itemEmballage, ITEM_EMBALLAGE: it.itemEmballage }
+                : {}),
+              ...(it.item_state ? { item_state: it.item_state } : {}),
+              ...(it.expiryLabel ? { expiry_label: it.expiryLabel } : {}),
+            }
+          }),
 
           subtotal: getTotalPrice(),
         }),
@@ -158,7 +210,12 @@ export function CheckoutForm() {
       const json = await res.json()
 
       if (!res.ok || !json?.ok) {
-        throw new Error(json?.error || "Order creation failed")
+        throw new Error(
+          orderErrorMessageWithProductNames(
+            json?.error || "Order creation failed",
+            items,
+          ),
+        )
       }
 
       console.log("✅ Order created successfully:", json)
@@ -168,7 +225,8 @@ export function CheckoutForm() {
 
     } catch (e: any) {
       console.error("❌ Order creation error:", e)
-      alert(e?.message || "Failed to create order. Please try again.")
+      const raw = e?.message || "Failed to create order. Please try again."
+      alert(orderErrorMessageWithProductNames(raw, items))
     } finally {
       setIsProcessing(false)
     }

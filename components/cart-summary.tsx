@@ -35,6 +35,8 @@ import { TableCommandDialog } from "@/components/table-command-dialog"
 import { TableCommandShareModal } from "@/components/table-command-share-modal"
 import { CartSuggestionsPopup } from "@/components/cart-suggestions-popup"
 import { displayUnitForPrice } from "@/lib/cart-display-utils"
+import { orderErrorMessageWithProductNames } from "@/lib/order-error-display"
+import { kaosCatalogBaseUnitPrice } from "@/lib/kaos-catalog-price"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -429,12 +431,16 @@ function CartSummaryBody() {
           String(it.itemCode ?? "").trim() ||
           String(it.item_key_words ?? "").trim() ||
           String(it.id ?? "").trim()
+        const catalogBase = kaosCatalogBaseUnitPrice(it.price, it.itemEmballage)
         return {
           name: it.name,
           qty: it.qty,
-          unitPrice: it.price,
+          unitPrice: catalogBase,
           unit: it.unit ?? "",
           itemCode: code,
+          ...(it.itemEmballage
+            ? { item_emballage: it.itemEmballage, ITEM_EMBALLAGE: it.itemEmballage }
+            : {}),
         }
       })
 
@@ -595,7 +601,10 @@ function CartSummaryBody() {
         router.refresh()
       } else {
         setPaymentStatus(g.supplierId, "failed")
-        const errMsg = json?.error || "Unknown error"
+        const errMsg = orderErrorMessageWithProductNames(
+          json?.error || "Unknown error",
+          g.items,
+        )
         const hint =
           typeof json?.hint === "string" && json.hint.trim()
             ? `\n\n${json.hint.trim()}`
