@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getAuthUrl } from "@/lib/backend-config"
+import { getJavaSetCookieValues, rewriteForwardedSetCookie } from "@/lib/java-proxy-cookies"
 
 const JAVA_AUTH_URL = getAuthUrl()
 
@@ -99,17 +100,11 @@ export async function POST(req: Request) {
     // Forward Set-Cookie headers from Java backend to client
     const response = NextResponse.json({ ...json, rid, javaRid: javaMeta.javaRid })
 
-    // Try to read multiple Set-Cookie headers if available
-    // Some fetch implementations expose a single combined header, others provide get('set-cookie')
-    const setCookieHeader = res.headers.get("set-cookie")
-    if (setCookieHeader) {
-      // Rewrite Path=/Trading -> Path=/ so cookie is sent for all frontend routes
-      let rewritten = setCookieHeader.replace(/Path=\/Trading/gi, "Path=/")
-      // Ensure SameSite is present for modern browsers
-      if (!/samesite=/i.test(rewritten)) {
-        rewritten += "; SameSite=Lax"
+    const setCookies = getJavaSetCookieValues(res.headers)
+    if (setCookies.length > 0) {
+      for (const raw of setCookies) {
+        response.headers.append("Set-Cookie", rewriteForwardedSetCookie(raw))
       }
-      response.headers.append("Set-Cookie", rewritten)
     } else {
       console.warn(`[api/auth/login][proxyRid=${rid}] no Set-Cookie from Java`)
     }

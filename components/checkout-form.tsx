@@ -13,6 +13,7 @@ import { CheckoutSummary } from "@/components/checkout-summary"
 import { validateStock } from "@/lib/api/table-commands"
 import { orderErrorMessageWithProductNames } from "@/lib/order-error-display"
 import { kaosCatalogBaseUnitPrice } from "@/lib/kaos-catalog-price"
+import { parsePackageMultiplier } from "@/lib/package-price"
 import { CreditCard, Smartphone, ArrowLeft, Check, MapPin, Users } from "lucide-react"
 import Link from "next/link"
 import { useForm } from "react-hook-form"
@@ -127,12 +128,15 @@ export function CheckoutForm() {
           const rawCode = (it.itemCode ?? it.id).toString().trim()
           const itemCode = rawCode.replace(/__p\d+$/i, "") || rawCode
           const emb = it.itemEmballage
+          const mult = parsePackageMultiplier(emb)
+          const embStr = String(mult > 0 ? mult : 1)
           return {
             itemCode,
             itemName: it.name,
             quantity: it.qty,
             unitPrice: kaosCatalogBaseUnitPrice(it.price, emb),
-            ...(emb ? { item_emballage: emb, ITEM_EMBALLAGE: emb } : {}),
+            item_emballage: embStr,
+            ITEM_EMBALLAGE: embStr,
           }
         })
         const validation = await validateStock(stockItems, sellerAccount)

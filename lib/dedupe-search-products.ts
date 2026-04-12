@@ -115,9 +115,13 @@ function mergeGroup(arr: Record<string, unknown>[]): Record<string, unknown> {
   const out: Record<string, unknown> = { ...rep }
   if (sumSellable > 0) {
     out.item_packet = sumSellable
-    out.item_emballage = "1"
-    /** After forcing emballage to 1, base×1 must not replace real shelf price (e.g. base 1.5 × 100 → 150 RWF). */
-    out.selling_price = preservedLine
+    /** Keep representative package multiplier (e.g. 100) so cart / validateStock send real ITEM_EMBALLAGE to Kaos. */
+    const repEmb = rep.item_emballage ?? rep.ITEM_EMBALLAGE
+    out.item_emballage =
+      repEmb != null && String(repEmb).trim() !== ""
+        ? String(repEmb).trim()
+        : "1"
+    /** Line price for UI; leave `selling_price` as catalog base from `rep` for Redis row matching. */
     out.final_selling_price = preservedLine
   }
   out.merged_lot_count = arr.length
@@ -126,7 +130,7 @@ function mergeGroup(arr: Record<string, unknown>[]): Record<string, unknown> {
 
 /**
  * One row per (supplier, item code, selling price). Rows without a code are left in place (no merging).
- * Merged row: summed non-expired sellable qty, `item_emballage` "1", `merged_lot_count`.
+ * Merged row: summed non-expired sellable qty, preserved `item_emballage` when present, `merged_lot_count`.
  */
 export function dedupeSearchProductsByItemCodeAndSellingPrice(
   products: unknown[]

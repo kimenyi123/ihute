@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getAuthUrl } from "@/lib/backend-config"
+import { getJavaSetCookieValues, rewriteForwardedSetCookie } from "@/lib/java-proxy-cookies"
 import { getStrongPasswordError } from "@/lib/password-policy"
 
 const JAVA_AUTH_URL = getAuthUrl()
@@ -71,13 +72,8 @@ export async function POST(req: Request) {
     }
 
     const response = NextResponse.json({ ok: true, rid, message: json?.message })
-    const setCookieHeader = res.headers.get("set-cookie")
-    if (setCookieHeader) {
-      let rewritten = setCookieHeader.replace(/Path=\/Trading/gi, "Path=/")
-      if (!/samesite=/i.test(rewritten)) {
-        rewritten += "; SameSite=Lax"
-      }
-      response.headers.append("Set-Cookie", rewritten)
+    for (const raw of getJavaSetCookieValues(res.headers)) {
+      response.headers.append("Set-Cookie", rewriteForwardedSetCookie(raw))
     }
     return response
   } catch (e: any) {

@@ -6,6 +6,7 @@
  */
 
 import { getBackendBase } from "@/lib/backend-config";
+import { parsePackageMultiplier } from "@/lib/package-price";
 
 function getApiBase(): string {
   try {
@@ -409,6 +410,29 @@ export interface StockItem {
   /** Package multiplier — helps servlet interpret qty vs Redis `item_packet` / stock. */
   item_emballage?: string | number;
   ITEM_EMBALLAGE?: string | number;
+  /** Same as `item_emballage` (camelCase) — normalized onto snake_case for Kaos JSON. */
+  itemEmballage?: string | number;
+  /** Alias for `quantity` used by some payloads. */
+  qty?: number;
+}
+
+/** Kaos expects `item_emballage` on every line; Java defaults to 1 if omitted. */
+function normalizeKaosStockItemLine(
+  raw: StockItem,
+): Record<string, string | number | undefined> {
+  const quantity = Number(raw.quantity ?? raw.qty ?? 0);
+  const embRaw =
+    raw.item_emballage ?? raw.ITEM_EMBALLAGE ?? raw.itemEmballage;
+  const mult = parsePackageMultiplier(embRaw);
+  const embStr = String(mult > 0 ? mult : 1);
+  return {
+    itemCode: raw.itemCode,
+    itemName: raw.itemName,
+    quantity,
+    unitPrice: raw.unitPrice,
+    item_emballage: embStr,
+    ITEM_EMBALLAGE: embStr,
+  };
 }
 
 export interface StockValidationResponse {
@@ -448,7 +472,7 @@ export async function validateStock(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        items,
+        items: items.map(normalizeKaosStockItemLine),
         sellerAccount,
       }),
     });
@@ -483,7 +507,7 @@ export async function reserveStock(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        items,
+        items: items.map(normalizeKaosStockItemLine),
         buyerEmail,
         sellerAccount,
         tableName,

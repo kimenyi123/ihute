@@ -1757,26 +1757,30 @@ export default function SearchPage() {
                         )}
                         <span className="font-normal text-muted-foreground">({products.length})</span>
                       </h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                         {products.map((product, index) => (
-                          <div key={`${product.item_code}-${product.supplier_account || ""}-${index}`} className="space-y-3">
-                            {/* Debug: Log product data for search results */}
-                            {(() => {
-                              console.log("[Search] Product data for search results:", {
-                                name: product.item_commercial_name,
-                                item_key_words: product.item_key_words,
-                                famille: (product as any).famille,
-                                FAMILLE: (product as any).FAMILLE,
-                                image_url: product.image_url,
-                                item_image_url: product.item_image_url,
-                                IMAGE_URL: (product as any).IMAGE_URL,
-                                supplier: product.supplier_account
-                              })
-                              return null
-                            })()}
-                            <ProductCard
-                              product={toCardProduct(product)}
-                            />
+                          <div key={`${product.item_code}-${product.supplier_account || ""}-${index}`} className="relative">
+                            <div
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => addProductToCart(product)}
+                              onKeyDown={(e) => onTileKey(e, product)}
+                              title="Click to add to cart"
+                            >
+                              <ProductCard product={toCardProduct(product)} />
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="absolute bottom-2 right-2 z-10 text-xs"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setQuickViewProduct(product)
+                                setQuickViewOpen(true)
+                              }}
+                            >
+                              Quick view
+                            </Button>
                           </div>
                         ))}
                       </div>
