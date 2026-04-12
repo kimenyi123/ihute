@@ -398,8 +398,17 @@ export async function completeTableOrder(
 
 export interface StockItem {
   itemCode: string;
-  itemName: string;
+  /** Optional — servlet may ignore but useful for logging / responses */
+  itemName?: string;
   quantity: number;
+  /**
+   * Catalog **base** unit price (Redis `selling_price`), not customer line price when item_emballage &gt; 1.
+   * See `kaosCatalogBaseUnitPrice` in `@/lib/kaos-catalog-price`.
+   */
+  unitPrice?: number;
+  /** Package multiplier — helps servlet interpret qty vs Redis `item_packet` / stock. */
+  item_emballage?: string | number;
+  ITEM_EMBALLAGE?: string | number;
 }
 
 export interface StockValidationResponse {
@@ -410,8 +419,9 @@ export interface StockValidationResponse {
     itemName: string;
     requestedQty: number;
     availableQty: number;
-    reserved: number;
     isAvailable: boolean;
+    /** Present when validation failed for this line (e.g. missing code). */
+    error?: string;
   }>;
   error?: string;
 }

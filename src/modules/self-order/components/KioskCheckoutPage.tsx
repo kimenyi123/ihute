@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import dynamic from "next/dynamic"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useCartStore } from "@/lib/cart-store"
+import { kaosCatalogBaseUnitPrice } from "@/lib/kaos-catalog-price"
 import { ChevronLeft, CreditCard, Banknote, Smartphone, Copy, CheckCircle2 } from "lucide-react"
 import type { KioskCategory, KioskOrderLine, KioskOrderPayload } from "@/src/modules/self-order/types"
 
@@ -157,16 +158,20 @@ export function KioskCheckoutPage() {
     setSubmitting(true)
     setError(null)
     try {
-      const lines: KioskOrderLine[] = items.map((it) => ({
-        item_code: it.itemCode ?? it.id,
-        item_name: it.name,
-        quantity: it.qty,
-        unit: it.unit ?? it.selectedUnit ?? "",
-        unit_price: it.price,
-        line_total: it.price * it.qty,
-        seller_account: it.supplierId,
-        ...(it.itemEmballage ? { item_emballage: it.itemEmballage } : {}),
-      }))
+      const lines: KioskOrderLine[] = items.map((it) => {
+        const lineUnit = it.price
+        const catalogBase = kaosCatalogBaseUnitPrice(lineUnit, it.itemEmballage)
+        return {
+          item_code: it.itemCode ?? it.id,
+          item_name: it.name,
+          quantity: it.qty,
+          unit: it.unit ?? it.selectedUnit ?? "",
+          unit_price: catalogBase,
+          line_total: lineUnit * it.qty,
+          seller_account: it.supplierId,
+          ...(it.itemEmballage ? { item_emballage: it.itemEmballage } : {}),
+        }
+      })
 
       const payload: KioskOrderPayload = {
         buyer_account: undefined,

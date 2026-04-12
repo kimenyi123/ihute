@@ -7,6 +7,9 @@ import {
   setCached,
   SUGGESTIONS_TTL_SEC,
 } from "@/lib/redis-cache"
+import { dedupeSearchProductsByItemCodeAndSellingPrice } from "@/lib/dedupe-search-products"
+import { enrichFetchSuggestionsProducts } from "@/lib/fetch-suggestions-enrich"
+import { stripExpiredFromFetchSuggestionsBody } from "@/lib/catalog-expiry-filter"
 
 function withTrailingSlash(u: string) { return u.endsWith("/") ? u : u + "/" }
 
@@ -29,6 +32,31 @@ async function forward(req: NextRequest) {
   const cached = await getCached(cacheKey)
   if (cached) {
     console.log("[global-search] Redis cache hit")
+    try {
+      const parsed = JSON.parse(cached) as { products?: unknown[] }
+      const globalSearchQ = incoming.searchParams.get("globalSearch")?.trim()
+      if (
+        globalSearchQ &&
+        Array.isArray(parsed.products) &&
+        parsed.products.length > 1
+      ) {
+        parsed.products = dedupeSearchProductsByItemCodeAndSellingPrice(parsed.products)
+      }
+      enrichFetchSuggestionsProducts(parsed)
+      stripExpiredFromFetchSuggestionsBody(parsed)
+      return new Response(JSON.stringify(parsed), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization",
+          "X-Cache": "HIT",
+        },
+      })
+    } catch {
+      /* invalid JSON — fall through */
+    }
     return new Response(cached, {
       status: 200,
       headers: {
@@ -57,15 +85,27 @@ async function forward(req: NextRequest) {
     const resp = await fetch(target.toString(), { method, headers, body, signal: controller.signal, cache: "no-store" })
     const outBody = await resp.text()
     const contentType = resp.headers.get("content-type") ?? "application/json"
+    let responseBody = outBody
     if (resp.ok) {
       try {
-        JSON.parse(outBody)
-        await setCached(cacheKey, outBody, SUGGESTIONS_TTL_SEC)
+        const parsed = JSON.parse(outBody) as { products?: unknown[] }
+        const globalSearchQ = incoming.searchParams.get("globalSearch")?.trim()
+        if (
+          globalSearchQ &&
+          Array.isArray(parsed.products) &&
+          parsed.products.length > 1
+        ) {
+          parsed.products = dedupeSearchProductsByItemCodeAndSellingPrice(parsed.products)
+        }
+        enrichFetchSuggestionsProducts(parsed)
+        stripExpiredFromFetchSuggestionsBody(parsed)
+        responseBody = JSON.stringify(parsed)
+        await setCached(cacheKey, responseBody, SUGGESTIONS_TTL_SEC)
       } catch {
         // not JSON, don't cache
       }
     }
-    return new Response(outBody, {
+    return new Response(responseBody, {
       status: resp.status,
       headers: {
         "content-type": contentType,

@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { kaosCatalogBaseUnitPrice } from "@/lib/kaos-catalog-price";
 import {
   ShoppingCart,
   AlertTriangle,
@@ -32,6 +33,8 @@ interface CartItem {
   quantity: number;
   unitPrice: number;
   unit: string;
+  /** Catalog package multiplier — forwarded to Kaos validateStock when set */
+  itemEmballage?: string;
 }
 
 interface EnhancedTableCartProps {
@@ -117,6 +120,10 @@ export function EnhancedTableCart({
         itemCode: item.itemCode,
         itemName: item.itemName,
         quantity: item.quantity,
+        unitPrice: kaosCatalogBaseUnitPrice(item.unitPrice, item.itemEmballage),
+        ...(item.itemEmballage
+          ? { item_emballage: item.itemEmballage, ITEM_EMBALLAGE: item.itemEmballage }
+          : {}),
       }));
 
       validate(stockItems);
@@ -135,6 +142,10 @@ export function EnhancedTableCart({
       itemCode: item.itemCode,
       itemName: item.itemName,
       quantity: item.quantity,
+      unitPrice: kaosCatalogBaseUnitPrice(item.unitPrice, item.itemEmballage),
+      ...(item.itemEmballage
+        ? { item_emballage: item.itemEmballage, ITEM_EMBALLAGE: item.itemEmballage }
+        : {}),
     }));
 
     const validation = await validate(stockItems);

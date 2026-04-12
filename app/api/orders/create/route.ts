@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { getOrdersUrl } from "@/lib/backend-config"
 import { DEFAULT_GUEST_ISHYIGA_ACCOUNT } from "@/lib/guest-checkout"
+import { orderErrorMessageWithProductNames } from "@/lib/order-error-display"
 
 function describeConnectFailure(raw?: string): string {
   if (!raw?.trim()) {
@@ -352,7 +353,10 @@ export async function POST(req: Request) {
       }
 
       if (json?.ok === false) {
-        lastBackendError = json.error || "Backend error"
+        lastBackendError = orderErrorMessageWithProductNames(
+          json.error || "Backend error",
+          items,
+        )
         return NextResponse.json(
           { ok: false, error: lastBackendError, details: json },
           { status: 400 },

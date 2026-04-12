@@ -48,6 +48,10 @@ type Product = {
   item_code?: string
   famille?: string
   IMAGE_URL?: string
+  item_state?: string
+  expiryLabel?: string
+  /** From `/api/fetchSuggestions` enrichment — customer line price (base × emballage). */
+  final_selling_price?: number
   /** IHUTE: direct match vs contains — from backend search ranking */
   searchPriority?: "direct" | "contains"
   containsIngredient?: string
@@ -99,10 +103,20 @@ export function ProductCard({
     itemEmballage,
   } = product
 
-  const displayPrice = useMemo(
-    () => generalSellingPrice(price, itemEmballage ?? (product as { ITEM_EMBALLAGE?: unknown }).ITEM_EMBALLAGE),
-    [price, itemEmballage, product]
-  )
+  const displayPrice = useMemo(() => {
+    const fp = (product as { final_selling_price?: unknown }).final_selling_price
+    if (fp != null && fp !== "") {
+      const n =
+        typeof fp === "number"
+          ? fp
+          : parseFloat(String(fp).replace(/[^\d.,-]/g, "").replace(",", "."))
+      if (Number.isFinite(n) && n >= 0) return n
+    }
+    return generalSellingPrice(
+      price,
+      itemEmballage ?? (product as { ITEM_EMBALLAGE?: unknown }).ITEM_EMBALLAGE,
+    )
+  }, [price, itemEmballage, product])
   const itemEmballageForCart = useMemo(
     () => normalizeItemEmballageForCart(itemEmballage ?? (product as { ITEM_EMBALLAGE?: unknown }).ITEM_EMBALLAGE),
     [itemEmballage, product]
@@ -111,21 +125,21 @@ export function ProductCard({
   const fav = isFavorite(id)
   const checkPriceDrop = usePriceWatchStore((s) => s.checkPriceDrop)
 
-  /** Qty in cart for this product (same seller + code + unit as addOrInc uses) */
+  /** Qty in cart for this line (id distinguishes same NIKI at different prices) */
   const cartQty = useMemo(() => {
     const sid = (supplierId || "unknown").toString().trim()
-    const code = (itemCode ?? id).toString().trim()
+    const lineId = id.toString().trim()
     const unitKey = (unit ?? "").toString().trim()
-    if (!code) return 0
+    if (!lineId) return 0
     return cartItems.reduce((sum, item) => {
       const itemSid = (item.supplierId || "").toString().trim()
-      const itemCodeKey = (item.itemCode ?? item.id).toString().trim()
+      const itemLineId = (item.id ?? "").toString().trim()
       const itemUnit = (item.selectedUnit ?? item.unit ?? "").toString().trim()
-      if (itemSid !== sid || itemCodeKey !== code) return sum
+      if (itemSid !== sid || itemLineId !== lineId) return sum
       if (unitKey !== itemUnit) return sum
       return sum + (typeof item.qty === "number" ? item.qty : 0)
     }, 0)
-  }, [cartItems, supplierId, itemCode, id, unit])
+  }, [cartItems, supplierId, id, unit])
   const placeholder = "/placeholder.svg?height=300&width=300"
 
   // Same strategy as Shop With Me:
@@ -371,6 +385,11 @@ export function ProductCard({
                   <span className="text-sm font-normal text-muted-foreground"> / {unit}</span>
                 ) : null}
               </div>
+              {product.expiryLabel ? (
+                <div className="text-[11px] font-medium text-amber-800/90">
+                  Expiry: {product.expiryLabel}
+                </div>
+              ) : null}
               {supplierName && (
                 <div className="text-[11px] font-medium uppercase tracking-wide text-[#7c8ba1]">
                   {supplierName}
@@ -408,6 +427,11 @@ export function ProductCard({
                   <span className="text-sm font-normal text-muted-foreground"> / {unit}</span>
                 ) : null}
               </div>
+              {product.expiryLabel ? (
+                <div className="text-[11px] text-amber-800/90 mt-0.5">
+                  Expiry: {product.expiryLabel}
+                </div>
+              ) : null}
               {supplierName && (
                 <div className="text-xs uppercase tracking-wide text-muted-foreground">
                   <span className="text-foreground/90">{supplierName}</span>
@@ -454,6 +478,8 @@ export function ProductCard({
                 momo,
                 selectedUnit: unit,
                 ...(itemEmballageForCart ? { itemEmballage: itemEmballageForCart } : {}),
+                ...(product.item_state ? { item_state: product.item_state } : {}),
+                ...(product.expiryLabel ? { expiryLabel: product.expiryLabel } : {}),
               },
               1
             )
@@ -471,7 +497,7 @@ export function ProductCard({
           Buy
         </Button>
         <PriceWatchButton
-          productId={id}
+          productId={(itemCode ?? id).toString().trim()}
           supplierId={(supplierId || "unknown").toString().trim()}
           name={name}
           currentPrice={displayPrice}

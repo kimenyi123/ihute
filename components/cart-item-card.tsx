@@ -97,6 +97,11 @@ export function CartItemCard({ item }: { item: CartItem }) {
             ) : (
               "Price not available"
             )}
+            {item.expiryLabel ? (
+              <div className="text-xs text-amber-900/90 mt-1 font-medium">
+                Expiry: {item.expiryLabel}
+              </div>
+            ) : null}
           </div>
         </div>
       </div>

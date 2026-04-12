@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getShopWithMeUrl } from '@/lib/backend-config';
 import { buildCacheKey, getCached, setCached, DATA_TTL_SEC } from '@/lib/redis-cache';
+import { stripExpiredFromShopWithMeBody } from '@/lib/catalog-expiry-filter';
 
 /**
  * Shop-with-me API: forwards to Java backend with nickname only.
@@ -47,6 +48,7 @@ export async function GET(request: NextRequest) {
       console.log('[API shop-with-me] Redis cache hit for variant');
       try {
         const data = JSON.parse(cached);
+        stripExpiredFromShopWithMeBody(data);
         const sellers = Array.isArray(data?.sellers) ? data.sellers : [];
         if (data?.ok === true && sellers.length > 0) {
           return NextResponse.json(data, { headers: { 'X-Cache': 'HIT' } });
@@ -83,6 +85,7 @@ export async function GET(request: NextRequest) {
       }
 
       const data = await response.json();
+      stripExpiredFromShopWithMeBody(data);
       const sellers = Array.isArray(data?.sellers) ? data.sellers : [];
 
       // Only cache successful non-empty seller results.

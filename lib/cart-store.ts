@@ -42,6 +42,11 @@ export type CartItem = {
    */
   itemEmballage?: string
 
+  /** Catalog `item_state` (batch/expiry); optional on order payload */
+  item_state?: string
+  /** Expiry label (e.g. dd/mm/yy from Ex:) for price-variant lines */
+  expiryLabel?: string
+
   qty: number
 }
 
@@ -118,6 +123,15 @@ type CartState = {
 }
 
 /** Prefer a real product image URL when merging duplicate cart lines. */
+/** Same line only if price matches to 1 cent (different lot prices = separate cart lines). */
+function cartPriceCents(price: unknown): number {
+  const n =
+    typeof price === "number" && Number.isFinite(price)
+      ? price
+      : Number(String(price ?? "").replace(/[^\d.-]/g, "")) || 0
+  return Math.round(n * 100)
+}
+
 function pickBestCartImage(...candidates: (string | undefined)[]): string | undefined {
   for (const c of candidates) {
     const s = typeof c === "string" ? c.trim() : ""
@@ -144,22 +158,38 @@ export const useCartStore = create<CartState>()(
           const productCode = (item.itemCode ?? item.id).toString().trim()
           const nameKey = (item.name ?? "").toString().trim().toLowerCase()
           const sid = (item.supplierId ?? "").toString().trim()
+          const itemCents = cartPriceCents(item.price)
 
           const matchExact = (x: CartItem) => {
             const xCode = (x.itemCode ?? x.id).toString().trim()
             const xUnit = (x.selectedUnit ?? x.unit) ?? ""
-            return (x.supplierId ?? "").toString().trim() === sid && xCode === productCode && (x.selectedUnit ?? x.unit) === selectedUnit
+            return (
+              (x.supplierId ?? "").toString().trim() === sid &&
+              xCode === productCode &&
+              (x.selectedUnit ?? x.unit) === selectedUnit &&
+              cartPriceCents(x.price) === itemCents
+            )
           }
           const matchByCode = (x: CartItem) => {
             const xCode = (x.itemCode ?? x.id).toString().trim()
-            return (x.supplierId ?? "").toString().trim() === sid && xCode === productCode
+            return (
+              (x.supplierId ?? "").toString().trim() === sid &&
+              xCode === productCode &&
+              cartPriceCents(x.price) === itemCents
+            )
           }
           const matchByName = (x: CartItem) => {
             const xName = (x.name ?? "").toString().trim().toLowerCase()
-            return (x.supplierId ?? "").toString().trim() === sid && xName === nameKey && nameKey !== ""
+            return (
+              (x.supplierId ?? "").toString().trim() === sid &&
+              xName === nameKey &&
+              nameKey !== "" &&
+              cartPriceCents(x.price) === itemCents
+            )
           }
 
-          const existing = state.items.find(matchExact) ?? state.items.find(matchByCode) ?? state.items.find(matchByName)
+          const existing =
+            state.items.find(matchExact) ?? state.items.find(matchByCode) ?? state.items.find(matchByName)
 
           try {
             trackClick("product", item.id, item.name)
@@ -207,6 +237,8 @@ export const useCartStore = create<CartState>()(
               momo: first.momo ?? item.momo,
               sellerPhone: first.sellerPhone ?? item.sellerPhone,
               itemEmballage: first.itemEmballage ?? item.itemEmballage,
+              item_state: first.item_state ?? item.item_state,
+              expiryLabel: first.expiryLabel ?? item.expiryLabel,
             }
             return {
               items: state.items.filter((x) => !keyMatch(x)).concat([mergedLine]),
@@ -269,18 +301,33 @@ export const useCartStore = create<CartState>()(
           const productCode = (item.itemCode ?? item.id).toString().trim()
           const nameKey = (item.name ?? "").toString().trim().toLowerCase()
           const sid = (item.supplierId ?? "").toString().trim()
+          const itemCents = cartPriceCents(item.price)
 
           const matchExact = (x: CartItem) => {
             const xCode = (x.itemCode ?? x.id).toString().trim()
-            return (x.supplierId ?? "").toString().trim() === sid && xCode === productCode && (x.selectedUnit ?? x.unit) === selectedUnit
+            return (
+              (x.supplierId ?? "").toString().trim() === sid &&
+              xCode === productCode &&
+              (x.selectedUnit ?? x.unit) === selectedUnit &&
+              cartPriceCents(x.price) === itemCents
+            )
           }
           const matchByCode = (x: CartItem) => {
             const xCode = (x.itemCode ?? x.id).toString().trim()
-            return (x.supplierId ?? "").toString().trim() === sid && xCode === productCode
+            return (
+              (x.supplierId ?? "").toString().trim() === sid &&
+              xCode === productCode &&
+              cartPriceCents(x.price) === itemCents
+            )
           }
           const matchByName = (x: CartItem) => {
             const xName = (x.name ?? "").toString().trim().toLowerCase()
-            return (x.supplierId ?? "").toString().trim() === sid && xName === nameKey && nameKey !== ""
+            return (
+              (x.supplierId ?? "").toString().trim() === sid &&
+              xName === nameKey &&
+              nameKey !== "" &&
+              cartPriceCents(x.price) === itemCents
+            )
           }
 
           const idx = state.items.findIndex(matchExact)
@@ -322,6 +369,8 @@ export const useCartStore = create<CartState>()(
               momo: first.momo ?? item.momo,
               sellerPhone: first.sellerPhone ?? item.sellerPhone,
               itemEmballage: first.itemEmballage ?? item.itemEmballage,
+              item_state: first.item_state ?? item.item_state,
+              expiryLabel: first.expiryLabel ?? item.expiryLabel,
             }
             return {
               items: state.items.filter((x) => !keyMatch(x)).concat([mergedLine]),
@@ -379,6 +428,7 @@ export const useCartStore = create<CartState>()(
             const existingIdx = merged.findIndex((m) => {
               const msid = (m.supplierId ?? "").toString().trim()
               if (msid !== sid) return false
+              if (cartPriceCents(m.price) !== cartPriceCents(it.price)) return false
               const mCode = (m.itemCode ?? m.id).toString().trim()
               if (code && mCode === code) return true
               const mName = (m.name ?? "").toString().trim().toLowerCase()
@@ -398,6 +448,8 @@ export const useCartStore = create<CartState>()(
                 item_key_words: cur.item_key_words ?? it.item_key_words,
                 famille: cur.famille ?? it.famille,
                 itemEmballage: cur.itemEmballage ?? it.itemEmballage,
+                item_state: cur.item_state ?? it.item_state,
+                expiryLabel: cur.expiryLabel ?? it.expiryLabel,
               }
             } else {
               merged.push({ ...it, itemCode: (it.itemCode ?? it.id).toString().trim() || it.itemCode })
