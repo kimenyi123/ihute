@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { useCartStore } from "@/lib/cart-store"
 import { isBarOrRestaurant } from "@/lib/constants"
 import {
   Sheet,
@@ -20,6 +19,16 @@ import { SlidersHorizontal } from "lucide-react"
 import { grandmaApiService } from "@/lib/grandma-api-service"
 import { getUserPreferences, toggleUserPreference, saveUserPreferences, getCurrentUserId, loadUserPreferences } from "@/lib/user-preferences-api"
 import { getBackendBase } from "@/lib/backend-config"
+import { GRANDMA_PATHS } from "@/lib/grandma-urls"
+import { GRANDMA_CATEGORY_TO_SECTOR_SLUG } from "@/lib/seller-category-sector"
+import { useAuthStore } from "@/lib/auth-store"
+import { userCanAccessSellerSpace } from "@/lib/auth-login-client"
+import { GrandmaSellerDashboard } from "@/components/grandma-seller-dashboard"
+import { GrandmaSellerItemsPanel } from "@/components/grandma-seller-items-panel"
+import { normalizePhoneDigitsForAuth } from "@/lib/rwanda-phone"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Button } from "@/components/ui/button"
 
 export type Category =
   | "Boutique"
@@ -90,6 +99,22 @@ type LogisticsOption = { id: LogisticsId; icon: string; label: string; baseRwf: 
 type PaymentId = "momo" | "airtel" | "bk" | "cash"
 type PaymentMode = { id: PaymentId; label: string; iconSrc: string }
 
+/** Kaos {@code OrdersServlet} {@code paymentName} values */
+function grandmaPaymentToOrdersPaymentName(id: PaymentId): string {
+  switch (id) {
+    case "momo":
+      return "MOMO"
+    case "airtel":
+      return "AIRTEL_MONEY"
+    case "bk":
+      return "BANK_TRANSFER"
+    case "cash":
+      return "PAY_ON_DELIVERY"
+    default:
+      return "PAY_ON_DELIVERY"
+  }
+}
+
 type ShopFilterTab = "favorites" | "reorder" | "trending" | "onsale"
 
 type ItemsSortId = "default" | "name" | "price_asc" | "price_desc"
@@ -130,6 +155,7 @@ type OfferRow = {
 
 type GrandmaLang = "en" | "rw" | "fr"
 type AppMode = "buyer" | "seller"
+type SellerView = "home" | "orders" | "items"
 const PREFERRED_ALL_ID = "__ALL__"
 
 function formatStoredLocation(loc: LocationData | null, fallback: string): string {
@@ -162,12 +188,17 @@ const GRANDMA_LABELS: Record<
     bankName: string
     account: string
     yourLocation: string
+    yourPhone: string
+    yourPhoneHint: string
     eta: string
     etaSub: string
     etaSubNoMode: string
     paymentModeSection: string
     shopsIntro: string
     sortDistance: string
+    /** Home (page 1) — sector grid landing */
+    sectorsTitle: string
+    sectorsSub: string
     footerHome: string
     footerShops: string
     footerItems: string
@@ -214,6 +245,8 @@ const GRANDMA_LABELS: Record<
     bankName: "Bank name",
     account: "Account",
     yourLocation: "Your location",
+    yourPhone: "Your phone (delivery)",
+    yourPhoneHint: "The shop uses this to reach you. Leave blank to use your Ihute account phone when signed in.",
     eta: "Estimated time of arrival",
     etaSub: "From ~{km} km · {mode} delivery",
     etaSubNoMode: "~{km} km from the shop. Choose a delivery option on Summary to see arrival time.",
@@ -221,6 +254,8 @@ const GRANDMA_LABELS: Record<
     sortDistance: " Sorted by distance.",
     shopsIntro:
       "Choose a shop in {cat}. Favorites and shops you used before are listed first.{sort}",
+    sectorsTitle: "Choose a sector",
+    sectorsSub: "Tap a category to browse shops and place an order.",
     footerHome: "Home",
     footerShops: "Shops",
     footerItems: "Items",
@@ -266,12 +301,16 @@ const GRANDMA_LABELS: Record<
     bankName: "Izina rya banki",
     account: "Konti",
     yourLocation: "Aho uherereye",
+    yourPhone: "Telefoni yawe (kohereza)",
+    yourPhoneHint: "Iduka rikoresha iyi kugufata. Siga ubusa ukoreshe telefoni ya konti yawe Ihute niba winjiye.",
     eta: "Igihe cyateganyijwe cyo kugera",
     etaSub: "Kuva kuri km ~{km} · {mode}",
     etaSubNoMode: "Km ~{km} kuva ku iduka. Hitamo uburyo bwo kohereza ku incamake kugira ngo ubone igihe cyo kugera.",
     paymentModeSection: "Uburyo bwo kwishyura",
     sortDistance: " Byagenwe ku ntambwe.",
     shopsIntro: "Hitamo iduka muri {cat}. Ukunda n'ibyakoreshejwe mbere biri ku rutonde rwa mbere.{sort}",
+    sectorsTitle: "Hitamo umutungo",
+    sectorsSub: "Kanda ku rwego kugirango ubone amaduka ukagura.",
     footerHome: "Ahabanza",
     footerShops: "Amaduka",
     footerItems: "Ibintu",
@@ -317,12 +356,16 @@ const GRANDMA_LABELS: Record<
     bankName: "Banque",
     account: "Compte",
     yourLocation: "Votre position",
+    yourPhone: "Votre téléphone (livraison)",
+    yourPhoneHint: "Le magasin vous joint sur ce numéro. Laissez vide pour utiliser le téléphone de votre compte Ihute si vous êtes connecté.",
     eta: "Heure d'arrivée estimée",
     etaSub: "Depuis ~{km} km · livraison {mode}",
     etaSubNoMode: "À ~{km} km du magasin. Choisissez une livraison sur le récapitulatif pour voir l’heure d’arrivée.",
     paymentModeSection: "Mode de paiement",
     sortDistance: " Triés par distance.",
     shopsIntro: "Choisissez un magasin dans {cat}. Favoris et commandes passées en premier.{sort}",
+    sectorsTitle: "Choisissez un secteur",
+    sectorsSub: "Touchez une catégorie pour voir les magasins et commander.",
     footerHome: "Accueil",
     footerShops: "Magasins",
     footerItems: "Articles",
@@ -422,7 +465,13 @@ const SHOP_LOGO_OVERRIDE: Record<string, string> = {
   ph_rite: "/shops/rite-pharmacy-logo.png",
 }
 
-/** Demo shops per category — replace with API + real GPS sort */
+/** Set `NEXT_PUBLIC_GRANDMA_DEMO_SHOPS=1` in `.env.local` only if you want fake shops when the API returns none. */
+const GRANDMA_SHOW_DEMO_SHOPS = process.env.NEXT_PUBLIC_GRANDMA_DEMO_SHOPS === "1"
+
+const GRANDMA_NO_LIVE_SHOPS_HINT =
+  "No shops for this category yet. Needs: LIVE account_seller and preferedcategories matching the sector (e.g. pharmacy → PHARMACY). Stock is only for product rows. Column name is preferedcategories (one r). Rebuild the WAR after backend changes."
+
+/** Demo shops per category — only used when GRANDMA_SHOW_DEMO_SHOPS is on */
 const MOCK_SHOPS: ShopEntry[] = (
   [
   {
@@ -1188,6 +1237,7 @@ export default function GrandmaPage() {
   const [imagePreviewTitle, setImagePreviewTitle] = useState<string>("")
   const [selectedLogistics, setSelectedLogistics] = useState<LogisticsId | null>(null)
   const [appMode, setAppMode] = useState<AppMode>("buyer")
+  const [sellerView, setSellerView] = useState<SellerView>("home")
   const [language, setLanguage] = useState<GrandmaLang>("rw")
   const [preferredShopIds, setPreferredShopIds] = useState<string[]>([])
   const [selectedPayment, setSelectedPayment] = useState<PaymentId>("momo")
@@ -1201,6 +1251,9 @@ export default function GrandmaPage() {
   const [priceRangeRwf, setPriceRangeRwf] = useState<[number, number] | null>(null)
   const [locationDialogOpen, setLocationDialogOpen] = useState(false)
   const [orderNotes, setOrderNotes] = useState("")
+  const [grandmaBuyerPhoneInput, setGrandmaBuyerPhoneInput] = useState("")
+  const [grandmaOrderSubmitting, setGrandmaOrderSubmitting] = useState(false)
+  const [grandmaOrderSubmitError, setGrandmaOrderSubmitError] = useState<string | null>(null)
   const [prescriptionSlots, setPrescriptionSlots] = useState<PrescriptionSlot[]>([])
   const prescriptionInputRef = useRef<HTMLInputElement>(null)
   const [courierModalOpen, setCourierModalOpen] = useState(false)
@@ -1318,6 +1371,16 @@ export default function GrandmaPage() {
     setPrefsHydrated(true)
   }, [])
 
+  /** S1: persisted "seller" mode without a valid seller session → fall back to buyer */
+  useEffect(() => {
+    if (!prefsHydrated) return
+    const st = useAuthStore.getState()
+    if (appMode === "seller" && (!st.isAuthenticated || !userCanAccessSellerSpace(st.user))) {
+      setAppMode("buyer")
+      setSellerView("home")
+    }
+  }, [prefsHydrated, appMode])
+
   useEffect(() => {
     if (typeof window === "undefined" || !prefsHydrated) return
     localStorage.setItem("grandma:lang", language)
@@ -1431,49 +1494,79 @@ export default function GrandmaPage() {
       setAllShopsError(null)
       
       try {
-        // Fetch shops across all categories using same successful approach as main shops
-        const categoryToSectorMap: Record<string, string> = {
-          'Boutique': 'boutique',
-          'Supermarket': 'supermarket', 
-          'Pharmacy': 'pharmacy',
-          'Restaurant': 'restaurant',
-          'Liquor Store': 'bar-resto',
-          'Bakery': 'coffee-shop',
-          'Veterinary': 'veterinary',
-          'Others': 'others'
-        }
-        
+        // Sector slugs align with DB `preferedcategories` (e.g. pharmacy, liquor-store) — not bar-resto for liquor
+        const categoryToSectorMap = GRANDMA_CATEGORY_TO_SECTOR_SLUG
+
         const allShops: any[] = []
         const categories = Object.keys(categoryToSectorMap)
         
+        let browseFailures = 0
         // Fetch shops for each category
         for (const cat of categories) {
           try {
             const sector = categoryToSectorMap[cat]
-            const url = `${getBackendBase()}/Kaos/fetchSuggestions?listSuppliersWithProducts=${encodeURIComponent(sector)}&Currency=RWF&limit=500`
+            let suppliers: any[] = []
+
+            const qs = new URLSearchParams({
+              sector,
+              sellerLimit: "48",
+              productsPerSeller: "2",
+              Currency: "RWF",
+            })
+            const browseUrl = `/api/grandma/suppliers/browse?${qs.toString()}`
             console.log(`=== Fetching ${cat} ===`)
-            console.log(`Backend URL: ${getBackendBase()}`)
-            console.log(`Full URL: ${url}`)
-            const res = await fetch(url, { cache: "no-store" })
-            
+            console.log(`Browse URL: ${browseUrl}`)
+            const res = await fetch(browseUrl, { cache: "no-store" })
+
             if (res.ok) {
               const data = await res.json()
               console.log(`Raw API response for ${cat}:`, data)
-              
-              const suppliers = Array.isArray(data) ? data : (data.suppliersByName || data.suppliers || [])
-              console.log(`${cat} suppliers:`, suppliers.length)
-              
-              // Add suppliers to allShops array with their original category
-              allShops.push(...suppliers.map((supplier: any) => ({
-                ...supplier,
-                fetchedCategory: cat // Track which category this supplier was fetched from
-              })))
+              if (Array.isArray(data) && data.length > 0) {
+                suppliers = data
+              } else if (data && typeof data === "object" && (data as { ok?: boolean }).ok === false) {
+                browseFailures++
+              }
             } else {
-              console.warn(`Failed to fetch ${cat}: HTTP ${res.status}`)
+              browseFailures++
+              console.warn(`Browse failed for ${cat}: HTTP ${res.status}`)
             }
+
+            // Same SQL family as browse, different servlet path — helps if Grandma browse404/503 or returns [].
+            if (suppliers.length === 0) {
+              const legacyUrl = `/api/fetchSuggestions?listSuppliersBySector=${encodeURIComponent(sector)}&Currency=RWF`
+              const res2 = await fetch(legacyUrl, { cache: "no-store" })
+              if (res2.ok) {
+                const data2 = await res2.json()
+                if (Array.isArray(data2) && data2.length > 0) {
+                  suppliers = data2.map((row: any) => ({
+                    seller_account: row.SELLER_ISHYIGA_ACCOUNT || row.id,
+                    seller_name: row.SELLER_NAMES || row.OWNER,
+                    seller_momo: row.momo ?? row.MOMO,
+                    seller_location: row.LOCATION,
+                  }))
+                  console.log(`${cat} suppliers (listSuppliersBySector fallback):`, suppliers.length)
+                }
+              }
+            } else {
+              console.log(`${cat} suppliers (browse):`, suppliers.length)
+            }
+
+            allShops.push(
+              ...suppliers.map((supplier: any) => ({
+                ...supplier,
+                fetchedCategory: cat,
+              }))
+            )
           } catch (error) {
+            browseFailures++
             console.warn(`Error fetching ${cat}:`, error)
           }
+        }
+
+        if (allShops.length === 0 && browseFailures > 0) {
+          setAllShopsError(
+            "Could not load shops from the backend. Is Tomcat running and BACKEND_URL / NEXT_PUBLIC_API_URL set to your context (e.g. http://localhost:8080/trading_ai)?"
+          )
         }
         
         console.log('Total suppliers from all categories:', allShops.length)
@@ -1493,18 +1586,6 @@ export default function GrandmaPage() {
           const baseId = String(supplier.ISHYIGA_ACCOUNT ?? supplier.seller_account ?? supplier.id ?? supplier.SELLER_ISHYIGA_ACCOUNT ?? "")
           // Use base supplier ID directly without index suffix
           const uniqueId = baseId ? `supplier_${baseId}` : `supplier_unknown_${Math.random()}`
-          
-          // Map sector back to category name
-          const sectorToCategoryMap: Record<string, Category> = {
-            'boutique': 'Boutique',
-            'supermarket': 'Supermarket',
-            'pharmacy': 'Pharmacy',
-            'restaurant': 'Restaurant',
-            'bar-resto': 'Liquor Store',
-            'coffee-shop': 'Bakery',
-            'veterinary': 'Veterinary',
-            'others': 'Others'
-          }
           
           return {
             id: uniqueId,
@@ -1599,21 +1680,7 @@ export default function GrandmaPage() {
         setProductsError(null)
         
         console.log('Fetching products for shop:', selectedShopId, 'category:', selectedShop.category)
-        
-        // Map frontend categories to backend sector names (same as shops)
-        const categoryToSectorMap: Record<string, string> = {
-          'Boutique': 'boutique',
-          'Supermarket': 'supermarket', 
-          'Pharmacy': 'pharmacy',
-          'Restaurant': 'restaurant',
-          'Liquor Store': 'bar-resto',
-          'Bakery': 'coffee-shop',
-          'Veterinary': 'veterinary',
-          'Others': 'others'
-        }
-        
-        const sector = categoryToSectorMap[selectedShop.category] || selectedShop.category.toLowerCase()
-        
+
         // Extract supplier account for Redis pattern
         // Frontend uses supplier_ALG0384774, backend expects supplier_ALG0384774 (without supplier_ prefix)
         const baseSupplierId = String(selectedShopId).replace('supplier_', '')
@@ -1741,8 +1808,16 @@ export default function GrandmaPage() {
     })
   }
 
+  const sellerShopLabel = useAuthStore((s) => s.user?.businessName || s.user?.name || "My shop")
+  const sellerIshyigaAccount = useAuthStore((s) => s.user?.ishyigaAccount ?? "")
+  const sellerBusinessCategory = useAuthStore((s) => s.user?.businessCategory ?? "")
+
   const title = useMemo(() => {
-    if (appMode === "seller") return "IHUTE.RW"
+    if (appMode === "seller") {
+      if (sellerView === "home") return "Dashboard"
+      if (sellerView === "items") return "Items"
+      return "IHUTE.RW"
+    }
     const catLabel = categoryLabel(category, language)
     switch (page) {
       case 1:
@@ -1756,23 +1831,26 @@ export default function GrandmaPage() {
       default:
         return "Payment Mode"
     }
-  }, [appMode, page, category, language])
+  }, [appMode, sellerView, page, category, language])
 
   const shopsInCategory = useMemo(() => {
     console.log('=== shopsInCategory called ===')
     console.log('Current category:', category)
     console.log('allAvailableShops.length:', allAvailableShops.length)
-    
-    // Use allAvailableShops data instead of separate apiShops
+
+    if (allShopsLoading) {
+      return []
+    }
     if (allAvailableShops.length > 0) {
-      // Filter all shops by current category
       const filtered = allAvailableShops.filter((s) => s.category === category)
       console.log('Filtered shops for category:', filtered)
       return filtered
     }
-    // Fallback to empty if no data
+    if (GRANDMA_SHOW_DEMO_SHOPS) {
+      return MOCK_SHOPS.filter((s) => s.category === category)
+    }
     return []
-  }, [category, allAvailableShops])
+  }, [category, allAvailableShops, allShopsLoading])
 
   const visibleShops = useMemo(() => {
     const q = shopSearch.trim().toLowerCase()
@@ -2003,7 +2081,14 @@ export default function GrandmaPage() {
 
   const goToPage = (p: PageId) => setPage(p)
   const goBack = () => {
-    if (appMode === "seller") return
+    if (appMode === "seller") {
+      if (sellerView === "orders" || sellerView === "items") {
+        setSellerView("home")
+        return
+      }
+      setAppMode("buyer")
+      return
+    }
     setPage((p) => (p > 1 ? ((p - 1) as PageId) : p))
   }
 
@@ -2061,7 +2146,7 @@ export default function GrandmaPage() {
     return tr.etaSub.replace("{km}", km).replace("{mode}", mode)
   }, [language, deliveryKm, selectedLogistics])
 
-  const proceedToMainCartCheckout = useCallback(() => {
+  const submitGrandmaOrder = useCallback(async () => {
     if (!selectedShop || selectedProducts.length === 0) {
       const msg =
         language === "rw"
@@ -2072,39 +2157,115 @@ export default function GrandmaPage() {
       window.alert(msg)
       return
     }
-    const st = useCartStore.getState()
-    st.clear()
-    st.clearTableInfo()
-    const isBar =
-      selectedShop.category === "Restaurant" || isBarOrRestaurant(selectedShop.name)
-    const notesFirst = orderNotes.trim() || undefined
-    selectedProducts.forEach((p, idx) => {
-      const id = String(p.liveKey ?? p.id)
-      st.addItem(
-        {
-          id,
-          itemCode: (p.liveKey ?? String(p.id)).toString(),
-          name: p.name,
-          price: p.price,
-          image: p.imageUrl,
-          supplierId: selectedShop.id,
-          supplierName: selectedShop.name,
-          momo: selectedShop.momo,
-          isBarResto: isBar,
-          notes: idx === 0 ? notesFirst : undefined,
-        },
-        p.qty
-      )
-    })
-    setProducts((prev) => prev.map((x) => ({ ...x, qty: 0 })))
-    setOrderNotes("")
-    setPrescriptionSlots((prev) => {
-      prev.forEach((s) => URL.revokeObjectURL(s.url))
-      return []
-    })
-    setPage(1)
-    router.push("/cart")
-  }, [language, orderNotes, router, selectedProducts, selectedShop])
+    setGrandmaOrderSubmitting(true)
+    setGrandmaOrderSubmitError(null)
+    try {
+      const sellerAccount = String(selectedShop.id).replace(/^supplier_/, "").trim()
+      if (!sellerAccount) {
+        setGrandmaOrderSubmitError("Invalid shop id")
+        return
+      }
+
+      const authUser = useAuthStore.getState().user
+      const buyerEmail =
+        authUser?.email?.trim() || `guest_grandma_${Date.now()}@ihute.local`
+      const buyerName = authUser?.name?.trim() || "Grandma guest"
+      const buyerPhone = (authUser?.phone?.replace(/\D/g, "") || "250780000000").slice(0, 15)
+
+      const locParts = [
+        locationData?.province,
+        locationData?.district,
+        locationData?.cell,
+      ].filter(Boolean)
+      const locFromGps = locParts.length ? locParts.join(" · ") : ""
+      const buyerLocation = (
+        authUser?.location?.trim() ||
+        locFromGps ||
+        displayUserLocationEn ||
+        "NA"
+      ).slice(0, 500)
+
+      const momoDigits = selectedShop.momo.replace(/\D/g, "").slice(-12)
+      const sellerPhone = momoDigits ? (momoDigits.startsWith("250") ? momoDigits : `250${momoDigits}`) : ""
+
+      const items = selectedProducts.map((p) => ({
+        itemCode: String(p.liveKey ?? p.id),
+        name: p.name,
+        qty: p.qty,
+        unitPrice: p.price,
+      }))
+
+      const res = await fetch("/api/grandma/order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sellerAccount,
+          sellerName: selectedShop.name,
+          sellerPhone,
+          buyerEmail,
+          buyerName,
+          buyerPhone,
+          buyerLocation,
+          paymentName: grandmaPaymentToOrdersPaymentName(selectedPayment),
+          currency: "RWF",
+          items,
+          reference: orderNotes.trim() || undefined,
+        }),
+      })
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean
+        orderId?: number | string
+        error?: string
+      }
+
+      if (!res.ok || data.ok === false) {
+        setGrandmaOrderSubmitError(data.error || `Order failed (${res.status})`)
+        return
+      }
+
+      const oid = data.orderId
+      if (oid == null || oid === "") {
+        setGrandmaOrderSubmitError("No order id returned from server")
+        return
+      }
+
+      try {
+        localStorage.setItem("grandma:lastOrderId", String(oid))
+      } catch {
+        /* ignore */
+      }
+
+      setProducts((prev) => prev.map((x) => ({ ...x, qty: 0 })))
+      setOrderNotes("")
+      setPrescriptionSlots((prev) => {
+        prev.forEach((s) => URL.revokeObjectURL(s.url))
+        return []
+      })
+      setPage(1)
+
+      const q = new URLSearchParams({
+        orderId: String(oid),
+        sellerName: selectedShop.name,
+        buyerPhone,
+        total: String(Math.round(grandTotal)),
+      })
+      router.push(`/order-success?${q.toString()}`)
+    } catch (e: unknown) {
+      setGrandmaOrderSubmitError(e instanceof Error ? e.message : "Order request failed")
+    } finally {
+      setGrandmaOrderSubmitting(false)
+    }
+  }, [
+    language,
+    orderNotes,
+    router,
+    selectedProducts,
+    selectedShop,
+    selectedPayment,
+    locationData,
+    displayUserLocationEn,
+    grandTotal,
+  ])
 
   const featuredCourierSafe = useMemo(() => {
     const fc = featuredCourier
@@ -2149,6 +2310,9 @@ export default function GrandmaPage() {
         .cat-card{padding:18px 10px;text-align:center;cursor:pointer;}
         .cat-icon{font-size:34px;margin-bottom:10px;}
         .cat-name{font-size:16px;font-weight:700;line-height:1.2;}
+        .sector-landing{text-align:center;padding:16px 14px;margin-bottom:14px;background:linear-gradient(180deg,#fff 0%,#f2f8ff 100%);border:1px solid var(--line);}
+        .sector-landing-title{font-size:18px;font-weight:800;color:var(--text);margin:0 0 8px;line-height:1.25;}
+        .sector-landing-sub{margin:0;font-size:13px;color:var(--muted);line-height:1.45;}
         .search{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:12px;box-shadow:0 8px 18px rgba(24,151,224,.08);}
         .search input{border:none;outline:none;width:100%;font-size:16px;background:transparent;}
         .reorder-btn{border:none;background:#e8f3ff;color:var(--blue-dark);border-radius:10px;padding:8px 10px;font-weight:700;cursor:pointer;}
@@ -2367,10 +2531,31 @@ export default function GrandmaPage() {
         </div>
       </div>
 
-      {appMode === "seller" ? (
+      {appMode === "seller" && sellerView === "home" ? (
+        <GrandmaSellerDashboard
+          shopLabel={sellerShopLabel}
+          openOrders={sellerDashboard.open}
+          openCap={500}
+          formatRwf={formatRwf}
+          onOrders={() => setSellerView("orders")}
+          onClients={() => window.alert("Clients — coming soon")}
+          onItems={() => setSellerView("items")}
+          onSales={() => window.alert("Sales — coming soon")}
+        />
+      ) : null}
+
+      {appMode === "seller" && sellerView === "items" ? (
+        <GrandmaSellerItemsPanel
+          sellerAccount={sellerIshyigaAccount}
+          businessCategoryLabel={sellerBusinessCategory}
+          formatRwf={formatRwf}
+        />
+      ) : null}
+
+      {appMode === "seller" && sellerView === "orders" ? (
         <section className="seller-screen">
           <div className="card seller-shop-head">
-            <div className="seller-shop-name">Nyamirambo Shop</div>
+            <div className="seller-shop-name">{sellerShopLabel}</div>
             <div className="seller-online">
               <span className="seller-dot" aria-hidden />
               ONLINE
@@ -2527,8 +2712,14 @@ export default function GrandmaPage() {
         </section>
       ) : null}
 
-      {/* Page 1 */}
+      {/* Page 1 — sector landing (buyer home) */}
       <section className={`page ${page === 1 ? "active" : ""}`} id="page1">
+        {appMode === "buyer" ? (
+          <div className="card sector-landing">
+            <div className="sector-landing-title">{tPay.sectorsTitle}</div>
+            <p className="sector-landing-sub">{tPay.sectorsSub}</p>
+          </div>
+        ) : null}
         <div className="grid">
           {CATEGORIES.map((c) => (
             <div
@@ -2545,6 +2736,16 @@ export default function GrandmaPage() {
               }}
               role="button"
               tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" && e.key !== " ") return
+                e.preventDefault()
+                setCategory(c.name)
+                setSearch("")
+                setShopSearch("")
+                setShopTab(null)
+                setSelectedShopId(null)
+                goToPage(isAllPreferred ? 3 : 2)
+              }}
             >
               <div className="cat-icon">{c.icon}</div>
               <div className="cat-name">{categoryLabel(c.name, language)}</div>
@@ -2610,15 +2811,28 @@ export default function GrandmaPage() {
         </div>
 
         <div className="shop-list" id="shopList">
-          {shopsLoading ? (
-            <div className="card note">Loading shops...</div>
+          {allShopsLoading ? (
+            <div className="card note">Loading shops…</div>
+          ) : shopsLoading ? (
+            <div className="card note">Loading shops…</div>
           ) : shopsError ? (
             <div className="card note" style={{ color: "#b42318" }}>
               Error loading shops: {shopsError}
             </div>
-          ) : visibleShops.length === 0 ? (
-            <div className="card note">No shops match. Try another filter or search.</div>
-          ) : (
+          ) : allShopsError && allAvailableShops.length === 0 ? (
+            <div className="card note" style={{ color: "#5a6b7a" }}>
+              {allShopsError}
+            </div>
+          ) : null}
+          {!allShopsLoading && !shopsLoading && !shopsError && visibleShops.length === 0 ? (
+            <div className="card note">
+              {!GRANDMA_SHOW_DEMO_SHOPS && allAvailableShops.length === 0 ? (
+                <p style={{ marginBottom: 10, color: "#5a6b7a", fontSize: "0.92rem" }}>{GRANDMA_NO_LIVE_SHOPS_HINT}</p>
+              ) : null}
+              No shops match. Try another filter or search.
+            </div>
+          ) : null}
+          {!allShopsLoading && !shopsLoading && !shopsError && visibleShops.length > 0 ? (
             visibleShops.map((s) => (
               <div
                 key={s.id}
@@ -2665,7 +2879,7 @@ export default function GrandmaPage() {
                 <div className="shop-row-dist">{s.distanceKm.toFixed(1)} km</div>
               </div>
             ))
-          )}
+          ) : null}
         </div>
       </section>
 
@@ -3211,9 +3425,22 @@ export default function GrandmaPage() {
           </div>
         ) : null}
 
-        <button type="button" className="primary-btn" onClick={proceedToMainCartCheckout}>
-          {tPay.sendOrder}
+        {grandmaOrderSubmitError ? (
+          <div className="card note" style={{ color: "#b42318", marginBottom: 12 }}>
+            {grandmaOrderSubmitError}
+          </div>
+        ) : null}
+        <button
+          type="button"
+          className="primary-btn"
+          disabled={grandmaOrderSubmitting}
+          onClick={() => void submitGrandmaOrder()}
+        >
+          {grandmaOrderSubmitting ? "…" : tPay.sendOrder}
         </button>
+        <p className="card note" style={{ marginTop: 12, fontSize: 12, color: "var(--muted)" }}>
+          After payment you’ll see your <strong>order id</strong> and can <strong>track</strong> the order (same as the main Ihute site).
+        </p>
       </section>
 
       <div className="footer">
@@ -3480,7 +3707,17 @@ export default function GrandmaPage() {
                   <button
                     key={mode}
                     type="button"
-                    onClick={() => setAppMode(mode)}
+                    onClick={() => {
+                      if (mode === "buyer") {
+                        setAppMode("buyer")
+                        setSellerView("home")
+                        return
+                      }
+                      setSettingsOpen(false)
+                      router.push(
+                        `${GRANDMA_PATHS.login}?redirect=${encodeURIComponent(GRANDMA_PATHS.appRoot)}`,
+                      )
+                    }}
                     className={cn(
                       "rounded-xl border px-3 py-2.5 text-sm font-bold transition-colors",
                       appMode === mode

@@ -1,4 +1,8 @@
-import { getBackendBase } from './backend-config'
+/** Same-origin proxy so browser code does not call Java directly (CORS + non‑public env vars). */
+function fetchSuggestionsUrl(query: string): string {
+  const q = query.startsWith("?") ? query.slice(1) : query
+  return `/api/fetchSuggestions?${q}`
+}
 
 export interface UserPreference {
   shop_id: string
@@ -20,7 +24,10 @@ export interface SavePreferenceResponse {
 // Get current user's preferred shops
 export async function getUserPreferences(userId: string): Promise<UserPreferenceResponse> {
   try {
-    const response = await fetch(`${getBackendBase()}/Kaos/fetchSuggestions?getUserPreferences=${userId}`)
+    const response = await fetch(
+      fetchSuggestionsUrl(`getUserPreferences=${encodeURIComponent(userId)}`),
+      { cache: "no-store" },
+    )
     
     if (!response.ok) {
       throw new Error('Failed to fetch user preferences')
@@ -77,15 +84,16 @@ export async function toggleUserPreference(userId: string, shopId: string): Prom
     // Extract base ID from frontend format (e.g., supplier_ALGGG1047005 -> ALGGG1047005)
     const baseShopId = shopId.replace('supplier_', '')
     
-    const response = await fetch(`${getBackendBase()}/Kaos/fetchSuggestions?toggleUserPreference`, {
-      method: 'POST',
+    const response = await fetch(fetchSuggestionsUrl("toggleUserPreference"), {
+      method: "POST",
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
+        "Content-Type": "application/x-www-form-urlencoded",
       },
       body: new URLSearchParams({
         userId,
         shopId: baseShopId,
       }),
+      cache: "no-store",
     })
     
     if (!response.ok) {
@@ -103,15 +111,16 @@ export async function toggleUserPreference(userId: string, shopId: string): Prom
 // Save all user preferences at once
 export async function saveUserPreferences(userId: string, shopIds: string[]): Promise<SavePreferenceResponse> {
   try {
-    const response = await fetch(`${getBackendBase()}/Kaos/fetchSuggestions?saveUserPreferences`, {
-      method: 'POST',
+    const response = await fetch(fetchSuggestionsUrl("saveUserPreferences"), {
+      method: "POST",
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
+        "Content-Type": "application/x-www-form-urlencoded",
       },
       body: new URLSearchParams({
         userId,
-        shopIds: shopIds.join(','),
+        shopIds: shopIds.join(","),
       }),
+      cache: "no-store",
     })
     
     if (!response.ok) {

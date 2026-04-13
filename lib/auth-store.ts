@@ -59,7 +59,8 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       isAuthenticated: false,
       loginTime: null,
-      sessionTimeout: 24 * 60 * 60 * 1000,
+      /** Default 30 days — “keep me signed in” for marketplace flows (was 24h). */
+      sessionTimeout: 30 * 24 * 60 * 60 * 1000,
       hasHydrated: false,
 
       login: (user) => {
@@ -124,6 +125,10 @@ export const useAuthStore = create<AuthState>()(
       onRehydrateStorage: () => (state) => {
         if (state) {
           state.hasHydrated = true
+          const minSession = 30 * 24 * 60 * 60 * 1000
+          if (typeof state.sessionTimeout === "number" && state.sessionTimeout < minSession) {
+            state.sessionTimeout = minSession
+          }
         }
       },
     }

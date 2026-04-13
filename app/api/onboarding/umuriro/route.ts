@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server"
 import mysql from "mysql2/promise"
+import { isValidRwandaMobileE164, normalizeRwandaMobileE164 } from "@/lib/rwanda-phone"
+import { sendSms } from "@/lib/sms/send-sms"
+import { buildUmuriroSellerSmsBody } from "@/lib/umuriro-seller-sms"
 
 /**
  * Umuriro: minimal “shop contact + purchase line + MoMo USSD” payload.
  * Persists to `shop_onboarding_draft` when ONBOARDING_MYSQL_* is set (same as crazy-shopping).
+ * When `shop.shopPhoneOptional` is a valid Rwandan mobile, sends SMS to that seller (Twilio or SMS_WEBHOOK_URL).
  */
 
 async function persistPayload(body: unknown): Promise<boolean> {
@@ -28,7 +32,19 @@ export type UmuriroPayload = {
   kind: "umuriro"
   incompleteSeller: true
   savedBy: { email: string; name: string; phone: string }
-  shop: { companyName: string; momoCode: string; momoDigits: string }
+  /** Creator + reserved 100 RWF ledger line (discount or fee — product rules). */
+  policy?: {
+    createdBy: { email: string; name: string; phone: string }
+    adjustmentRwf: number
+  }
+  shop: {
+    companyName: string
+    momoCode: string
+    momoDigits: string
+    shopPhoneOptional?: string
+    shopCategory?: string
+    sectorSlug?: string
+  }
   line: {
     itemName: string
     unitPriceRwf: number
@@ -37,6 +53,7 @@ export type UmuriroPayload = {
   }
   ussd: string
   submittedAt: string
+  rid?: string
 }
 
 export async function POST(req: Request) {
@@ -52,9 +69,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Expected kind: umuriro", rid }, { status: 400 })
     }
 
+    const enriched = { ...record, rid }
+
     let persisted = false
     try {
-      persisted = await persistPayload(body)
+      persisted = await persistPayload(enriched)
     } catch (e: unknown) {
       console.warn(`[umuriro ${rid}] draft insert:`, (e as Error)?.message || e)
     }
@@ -63,10 +82,46 @@ export async function POST(req: Request) {
       console.log(`[umuriro ${rid}] No ONBOARDING_MYSQL_* — echo only`)
     }
 
+    const shop = record.shop as Record<string, unknown> | undefined
+    const line = record.line as Record<string, unknown> | undefined
+    const rawPhone =
+      typeof shop?.shopPhoneOptional === "string" ? shop.shopPhoneOptional.trim() : ""
+    const itemName = typeof line?.itemName === "string" ? line.itemName : ""
+
+    let sms: {
+      attempted: boolean
+      sent: boolean
+      reason?: string
+      to?: string
+    } = { attempted: false, sent: false }
+    /** Exact text sent (or that would be sent) — returned for team training / QA. */
+    let smsPreview: string | undefined
+
+    if (rawPhone) {
+      const e164 = normalizeRwandaMobileE164(rawPhone)
+      if (e164 && isValidRwandaMobileE164(e164)) {
+        sms.attempted = true
+        sms.to = e164
+        const text = buildUmuriroSellerSmsBody(itemName, rid)
+        smsPreview = text
+        const out = await sendSms(e164, text)
+        sms.sent = out.ok
+        if (!out.ok) {
+          sms.reason = out.error || "send failed"
+          console.warn(`[umuriro ${rid}] SMS not sent:`, out.error)
+        }
+      } else {
+        sms.attempted = false
+        sms.reason = "invalid_rwanda_phone"
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       rid,
       persisted,
+      sms,
+      smsPreview,
       message: persisted
         ? "Stored draft (if table exists)."
         : "Received. Add ONBOARDING_MYSQL_* + shop_onboarding_draft to persist.",

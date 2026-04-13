@@ -10,7 +10,14 @@ function noTrailingSlash(s: string): string {
   return (s || "").replace(/\/+$/, "")
 }
 
-/** Java backend base URL (no trailing slash). Uses BACKEND_URL, JAVA_BACKEND_BASE, or NEXT_PUBLIC_API_URL from env. */
+/**
+ * Java backend base URL (no trailing slash).
+ * Uses BACKEND_URL, JAVA_BACKEND_BASE, or NEXT_PUBLIC_API_URL from env.
+ *
+ * The path segment must match Tomcat’s **context path** (the `webapps/<Context>` name):
+ * `Trading.war` → `/Trading`; `trading_ai.war` → `/trading_ai`. If `.env.local` still says
+ * `…/trading_ai` but you only deployed `Trading.war`, Grandma APIs 404 at `/trading_ai/Api/…`.
+ */
 export function getBackendBase(): string {
   const raw = noTrailingSlash(
     process.env.BACKEND_URL ||
@@ -92,6 +99,78 @@ export function getShopWithMeUrl(): string {
 
 export function getAuthUrl(): string {
   return process.env.JAVA_AUTH_URL || `${getBackendBase()}/Kaos/user-auth`
+}
+
+/**
+ * Grandma buyer POST — `grandmaAPIs.CreateBuyerServlet` at `/Api/grandma/buyers` (not `/grandma`).
+ * Override with `GRANDMA_BUYER_API_URL` or point `BACKEND_URL` / `JAVA_BACKEND_BASE` at your Tomcat context.
+ */
+export function getGrandmaBuyerApiUrl(): string {
+  if (process.env.GRANDMA_BUYER_API_URL) {
+    return process.env.GRANDMA_BUYER_API_URL
+  }
+  return `${getBackendBase()}/Api/grandma/buyers`
+}
+
+/** Grandma seller POST — `grandmaAPIs.CreateSellerServlet` at `/Api/grandma/sellers`. */
+export function getGrandmaSellerApiUrl(): string {
+  if (process.env.GRANDMA_SELLER_API_URL) {
+    return process.env.GRANDMA_SELLER_API_URL
+  }
+  return `${getBackendBase()}/Api/grandma/sellers`
+}
+
+/** Bulk stock lines for an existing Grandma seller — `POST` JSON `{ sellerAccount, lines }`. */
+export function getGrandmaSellerStockApiUrl(): string {
+  if (process.env.GRANDMA_SELLER_STOCK_API_URL) {
+    return process.env.GRANDMA_SELLER_STOCK_API_URL
+  }
+  // Short path matches web.xml `/grandma/sellers/stock` (same servlet as `/Api/grandma/sellers/stock`).
+  return `${getBackendBase()}/grandma/sellers/stock`
+}
+
+/** S5/S6: `GET`/`POST` — list stock, search Niki, adjust quantity. */
+export function getGrandmaSellerInventoryApiUrl(): string {
+  if (process.env.GRANDMA_INVENTORY_API_URL) {
+    return process.env.GRANDMA_INVENTORY_API_URL
+  }
+  // Short path: `/grandma/sellers/inventory` — same servlet as `/Api/grandma/sellers/inventory` (Kaos web.xml).
+  // Some deployments/proxies only exercised the short mapping; Grandma home documents it for `/trading_ai`.
+  return `${getBackendBase()}/grandma/sellers/inventory`
+}
+
+/** Long path for the same inventory servlet if the short path404s (`null` when URL is fully overridden). */
+export function getGrandmaSellerInventoryApiUrlFallback(): string | null {
+  if (process.env.GRANDMA_INVENTORY_API_URL) {
+    return null
+  }
+  return `${getBackendBase()}/Api/grandma/sellers/inventory`
+}
+
+/** S7: `POST` — temp item + `PEND-{id}` stock row. */
+export function getGrandmaSellerTempItemApiUrl(): string {
+  if (process.env.GRANDMA_TEMP_ITEM_API_URL) {
+    return process.env.GRANDMA_TEMP_ITEM_API_URL
+  }
+  return `${getBackendBase()}/grandma/sellers/items/temp`
+}
+
+/**
+ * Redis-first sector browse (same payload as `fetchSuggestions?listSuppliersWithProducts`).
+ * Short path `/grandma/suppliers/browse`; long `/Api/grandma/suppliers/browse`.
+ */
+export function getGrandmaListSuppliersBrowseUrl(): string {
+  if (process.env.GRANDMA_LIST_SUPPLIERS_URL) {
+    return process.env.GRANDMA_LIST_SUPPLIERS_URL
+  }
+  return `${getBackendBase()}/grandma/suppliers/browse`
+}
+
+export function getGrandmaListSuppliersBrowseUrlFallback(): string | null {
+  if (process.env.GRANDMA_LIST_SUPPLIERS_URL) {
+    return null
+  }
+  return `${getBackendBase()}/Api/grandma/suppliers/browse`
 }
 
 /** Account profile (account_signup): GET by email/account, PUT to update. */

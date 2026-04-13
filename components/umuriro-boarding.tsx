@@ -6,6 +6,13 @@ import Image from "next/image"
 import { Check, Copy, Flame, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -22,7 +29,8 @@ import { useAuthStore } from "@/lib/auth-store"
 import { getShopPublicUrl } from "@/lib/shop-public-url"
 import { filterProductsByRelevance } from "@/lib/search-utils"
 import { shopCategoryToSectorSlug } from "@/lib/seller-category-sector"
-import { cn } from "@/lib/utils"
+import { isValidRwandaMobileE164, normalizeRwandaMobileE164 } from "@/lib/rwanda-phone"
+import { buildUmuriroSellerSmsBody } from "@/lib/umuriro-seller-sms"
 
 const LS_KEY = "ihute:umuriro:lastShop"
 
@@ -39,7 +47,7 @@ const SHOP_CATEGORIES = [
 ].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
 
 const cardClass =
-  "rounded-2xl border-[#dbe7f3] bg-white shadow-[0_8px_18px_rgba(24,151,224,.08)]"
+  "min-w-0 w-full max-w-full overflow-x-hidden rounded-2xl border-[#dbe7f3] bg-white shadow-[0_8px_18px_rgba(24,151,224,.08)]"
 
 /** Minimal product row from fetchSuggestions — do not import `global-search` (large module can blank the page). */
 type CatalogHit = {
@@ -62,9 +70,11 @@ export function UmuriroBoarding() {
   const user = useAuthStore((s) => s.user)
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
   const hasHydrated = useAuthStore((s) => s.hasHydrated)
+  const updateActivity = useAuthStore((s) => s.updateActivity)
 
   const [shopName, setShopName] = useState("")
   const [momoCode, setMomoCode] = useState("")
+  const [shopPhoneOptional, setShopPhoneOptional] = useState("")
   const [shopCategory, setShopCategory] = useState("")
   const [itemName, setItemName] = useState("")
   const [itemSuggestions, setItemSuggestions] = useState<CatalogHit[]>([])
@@ -79,19 +89,35 @@ export function UmuriroBoarding() {
   const [loading, setLoading] = useState(false)
   const [doneMsg, setDoneMsg] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  /** Team training: show SMS copy in-app (replaces alert). */
+  const [smsTraining, setSmsTraining] = useState<{
+    to: string
+    sent: boolean
+    body: string
+  } | null>(null)
 
   useEffect(() => {
     try {
       const raw = localStorage.getItem(LS_KEY)
       if (!raw) return
-      const o = JSON.parse(raw) as { shopName?: string; momoCode?: string; shopCategory?: string }
+      const o = JSON.parse(raw) as {
+        shopName?: string
+        momoCode?: string
+        shopPhoneOptional?: string
+        shopCategory?: string
+      }
       if (o.shopName) setShopName(o.shopName)
       if (o.momoCode) setMomoCode(o.momoCode)
+      if (o.shopPhoneOptional) setShopPhoneOptional(o.shopPhoneOptional)
       if (o.shopCategory) setShopCategory(o.shopCategory)
     } catch {
       /* ignore */
     }
   }, [])
+
+  useEffect(() => {
+    if (user && isAuthenticated) updateActivity()
+  }, [user, isAuthenticated, updateActivity])
 
   const totalRwf = useMemo(() => {
     const p = parseFloat(unitPrice.replace(",", "."))
@@ -103,6 +129,18 @@ export function UmuriroBoarding() {
   const momoDigits = useMemo(() => digitsOnly(momoCode), [momoCode])
   const ussd = useMemo(() => buildUssd(momoDigits, totalRwf), [momoDigits, totalRwf])
 
+  const shopPhoneE164 = useMemo(() => {
+    const r = normalizeRwandaMobileE164(shopPhoneOptional)
+    return r && isValidRwandaMobileE164(r) ? r : null
+  }, [shopPhoneOptional])
+
+  /** Live preview — same copy as server SMS; link uses `preview` until save returns `rid`. */
+  const sellerSmsPreviewText = useMemo(() => {
+    const n = itemName.trim()
+    if (!n) return null
+    return buildUmuriroSellerSmsBody(n, "preview")
+  }, [itemName])
+
   const persistLocalShop = () => {
     try {
       localStorage.setItem(
@@ -110,6 +148,7 @@ export function UmuriroBoarding() {
         JSON.stringify({
           shopName: shopName.trim(),
           momoCode: momoCode.trim(),
+          shopPhoneOptional: shopPhoneOptional.trim(),
           shopCategory: shopCategory.trim(),
         })
       )
@@ -231,7 +270,8 @@ export function UmuriroBoarding() {
   const submit = async () => {
     setErr(null)
     setDoneMsg(null)
-    if (!hasHydrated || !isAuthenticated || !user) {
+    if (!hasHydrated) return
+    if (!isAuthenticated || !user) {
       setErr(pickLang(UMURIRO_UI.loginRequired, lang))
       return
     }
@@ -249,10 +289,20 @@ export function UmuriroBoarding() {
           name: user.name,
           phone: user.phone || "",
         },
+        /** Creator + reserved 100 RWF adjustment (discount or fee — backend rules). */
+        policy: {
+          createdBy: {
+            email: user.email,
+            name: user.name,
+            phone: user.phone || "",
+          },
+          adjustmentRwf: 100,
+        },
         shop: {
           companyName: shopName.trim(),
           momoCode: momoCode.trim(),
           momoDigits,
+          shopPhoneOptional: shopPhoneOptional.trim() || undefined,
           shopCategory: shopCategory.trim(),
           sectorSlug: sectorSlug || undefined,
         },
@@ -273,6 +323,12 @@ export function UmuriroBoarding() {
       })
       const json = await res.json()
       if (!res.ok || !json?.ok) throw new Error(json?.error || "Save failed")
+
+      if (typeof json.smsPreview === "string" && json.smsPreview.trim()) {
+        const to = typeof json.sms?.to === "string" ? json.sms.to : ""
+        const sent = json.sms?.sent === true
+        setSmsTraining({ to: to || "—", sent, body: json.smsPreview.trim() })
+      }
 
       persistLocalShop()
       setDoneMsg(
@@ -295,11 +351,12 @@ export function UmuriroBoarding() {
     }
   }
 
-  const canSubmit = hasHydrated && isAuthenticated && !!user
+  /** Logged-in user required to persist; button stays enabled so users get a clear error instead of a dead control. */
+  const canSave = hasHydrated && isAuthenticated && !!user
 
   return (
-    <div className="min-h-screen bg-[#eef4fb] text-[#17324d]">
-      <div className="mx-auto max-w-[430px] min-h-screen bg-gradient-to-b from-[#f7fbff] to-[#eef4fb] pb-28">
+    <div className="min-h-screen overflow-x-hidden bg-[#eef4fb] text-[#17324d]">
+      <div className="mx-auto min-h-screen w-full min-w-0 max-w-[430px] overflow-x-hidden bg-gradient-to-b from-[#f7fbff] to-[#eef4fb] pb-28">
         <header className="sticky top-0 z-30 bg-gradient-to-r from-[#1897e0] via-[#30acef] to-[#127fc0] text-white shadow-[0_8px_20px_rgba(0,0,0,.1)]">
           <div className="flex items-center gap-2 px-3 py-3.5">
             <Link
@@ -324,8 +381,66 @@ export function UmuriroBoarding() {
           </div>
         </header>
 
-        <div className="space-y-4 px-3 pt-4">
-          {hasHydrated && !canSubmit && (
+        <div className="min-w-0 space-y-4 px-3 pt-4">
+          <Dialog open={!!smsTraining} onOpenChange={(open) => !open && setSmsTraining(null)}>
+            <DialogContent className="max-h-[90vh] max-w-[min(100vw-1.5rem,420px)] gap-3 overflow-y-auto border-[#dbe7f3] bg-white p-4 sm:p-5">
+              <DialogHeader className="space-y-2 text-left">
+                <DialogTitle className="text-[#17324d]">Umuriro — SMS to seller (team training)</DialogTitle>
+              </DialogHeader>
+              {smsTraining && (
+                <>
+                  <div className="rounded-xl border border-amber-200 bg-amber-50/95 px-3 py-2 text-sm text-amber-950">
+                    <span className="font-medium">To:</span> {smsTraining.to}
+                  </div>
+                  {smsTraining.sent ? (
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50/95 px-3 py-2 text-sm text-emerald-900">
+                      SMS sent to the seller number.
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-red-200 bg-red-50/95 px-3 py-2 text-sm text-red-800">
+                      SMS was not sent (configure Twilio or SMS_WEBHOOK_URL on the server). Message below is the exact
+                      text for training.
+                    </div>
+                  )}
+                  <div className="rounded-xl border border-[#dbe7f3] bg-[#f7fbff] p-3">
+                    <p className="mb-2 text-xs font-medium text-[#6f8399]">Message</p>
+                    <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-[#17324d]">
+                      {smsTraining.body}
+                    </pre>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="border-[#dbe7f3]"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(smsTraining.body)
+                        } catch {
+                          /* ignore */
+                        }
+                      }}
+                    >
+                      <Copy className="mr-1 h-4 w-4" />
+                      Copy message
+                    </Button>
+                  </div>
+                  <DialogFooter className="sm:justify-stretch">
+                    <Button
+                      type="button"
+                      className="w-full bg-gradient-to-r from-[#1897e0] to-[#127fc0] text-white"
+                      onClick={() => setSmsTraining(null)}
+                    >
+                      OK
+                    </Button>
+                  </DialogFooter>
+                </>
+              )}
+            </DialogContent>
+          </Dialog>
+
+          {hasHydrated && !canSave && (
             <div className="rounded-xl border border-amber-200 bg-amber-50/95 px-3 py-2 text-sm text-amber-950">
               {pickLang(UMURIRO_UI.loginRequired, lang)}{" "}
               <Link href="/login" className="font-semibold text-[#127fc0] underline">
@@ -358,8 +473,8 @@ export function UmuriroBoarding() {
                 />
               </CardTitle>
             </CardHeader>
-            <CardContent className="grid gap-4">
-              <div className="space-y-2">
+            <CardContent className="grid min-w-0 gap-4 overflow-x-hidden">
+              <div className="min-w-0 space-y-2">
                 <Label className="text-[#17324d]">{pickLang(UMURIRO_UI.shoppingAt, lang)}</Label>
                 <Input
                   value={shopName}
@@ -368,20 +483,34 @@ export function UmuriroBoarding() {
                   autoComplete="organization"
                 />
               </div>
-              <div className="space-y-2">
-                <Label className="text-[#17324d]">{pickLang(L.momo, lang)}</Label>
-                <Input
-                  value={momoCode}
-                  onChange={(e) => setMomoCode(e.target.value)}
-                  className="border-[#dbe7f3]"
-                  inputMode="numeric"
-                />
+              <div className="grid min-w-0 grid-cols-2 gap-3 [grid-template-columns:minmax(0,1fr)_minmax(0,1fr)]">
+                <div className="min-w-0 space-y-2">
+                  <Label className="text-[#17324d]">{pickLang(L.momo, lang)}</Label>
+                  <Input
+                    value={momoCode}
+                    onChange={(e) => setMomoCode(e.target.value)}
+                    className="border-[#dbe7f3]"
+                    inputMode="numeric"
+                  />
+                </div>
+                <div className="min-w-0 space-y-2">
+                  <Label className="text-[#17324d]">{pickLang(UMURIRO_UI.phoneOptional, lang)}</Label>
+                  <Input
+                    value={shopPhoneOptional}
+                    onChange={(e) => setShopPhoneOptional(e.target.value)}
+                    className="border-[#dbe7f3]"
+                    type="tel"
+                    placeholder="250…"
+                    inputMode="tel"
+                    autoComplete="tel"
+                  />
+                </div>
               </div>
-              <div className="space-y-2">
+              <div className="min-w-0 space-y-2">
                 <Label className="text-[#17324d]">{pickLang(UMURIRO_UI.shopCategory, lang)}</Label>
                 <p className="text-xs text-[#6f8399]">{pickLang(UMURIRO_UI.shopCategoryHint, lang)}</p>
                 <Select value={shopCategory} onValueChange={setShopCategory}>
-                  <SelectTrigger className="border-[#dbe7f3]">
+                  <SelectTrigger className="min-w-0 border-[#dbe7f3]">
                     <SelectValue placeholder="—" />
                   </SelectTrigger>
                   <SelectContent>
@@ -393,10 +522,10 @@ export function UmuriroBoarding() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1">
+              <div className="min-w-0 space-y-1">
                 <Label className="text-[#17324d]">{pickLang(UMURIRO_UI.imBuying, lang)}</Label>
                 <p className="text-xs text-[#6f8399]">{pickLang(UMURIRO_UI.imBuyingHint, lang)}</p>
-                <div className="relative" ref={itemWrapRef}>
+                <div className="relative min-w-0" ref={itemWrapRef}>
                   <Input
                     value={itemName}
                     onChange={(e) => {
@@ -448,8 +577,8 @@ export function UmuriroBoarding() {
                   )}
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
+              <div className="grid min-w-0 grid-cols-2 gap-3 [grid-template-columns:minmax(0,1fr)_minmax(0,1fr)]">
+                <div className="min-w-0 space-y-2">
                   <Label className="text-[#17324d]">{pickLang(UMURIRO_UI.unitPrice, lang)}</Label>
                   <Input
                     value={unitPrice}
@@ -458,7 +587,7 @@ export function UmuriroBoarding() {
                     inputMode="decimal"
                   />
                 </div>
-                <div className="space-y-2">
+                <div className="min-w-0 space-y-2">
                   <Label className="text-[#17324d]">{pickLang(UMURIRO_UI.quantity, lang)}</Label>
                   <Input
                     value={quantity}
@@ -474,11 +603,11 @@ export function UmuriroBoarding() {
                 <span className="tabular-nums text-[#127fc0]">{totalRwf.toLocaleString()} RWF</span>
               </div>
 
-              <div className="space-y-2">
+              <div className="min-w-0 space-y-2">
                 <Label className="text-[#17324d]">{pickLang(UMURIRO_UI.ussdLabel, lang)}</Label>
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
                   <code className="min-w-0 flex-1 break-all rounded-lg bg-[#17324d]/5 px-2 py-2 text-xs font-mono text-[#17324d]">
-                    {momoDigits.length >= 6 && totalRwf > 0 ? ussd : "—"}
+                    {momoDigits.length >= 1 && totalRwf > 0 ? ussd : "—"}
                   </code>
                   <Button
                     type="button"
@@ -486,23 +615,38 @@ export function UmuriroBoarding() {
                     size="sm"
                     className="shrink-0 border-[#dbe7f3]"
                     onClick={copyUssd}
-                    disabled={momoDigits.length < 6 || totalRwf < 1}
+                    disabled={momoDigits.length < 1 || totalRwf < 1}
                   >
                     {copied ? <Check className="h-4 w-4" /> : <Copy className="mr-1 h-4 w-4" />}
                     {pickLang(UMURIRO_UI.copyUssd, lang)}
                   </Button>
                 </div>
-                <p className="text-xs text-[#6f8399]">*182 × MoMo digits × total (RWF) #</p>
+                <p className="text-xs text-[#6f8399]">
+                  *182 × MoMo digits × total (RWF) # — use at least 6 MoMo digits to pay.
+                </p>
               </div>
+
+              {sellerSmsPreviewText && (
+                <div className="min-w-0 space-y-2 overflow-x-hidden rounded-xl border border-[#dbe7f3] bg-[#f7fbff] p-3">
+                  <Label className="text-[#17324d]">{pickLang(UMURIRO_UI.sellerSmsPreview, lang)}</Label>
+                  <pre className="max-h-48 min-w-0 overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-[#17324d]">
+                    {sellerSmsPreviewText}
+                  </pre>
+                  {shopPhoneE164 ? (
+                    <p className="text-xs text-emerald-800">
+                      SMS to {shopPhoneE164} after save (if Twilio/webhook is configured).
+                    </p>
+                  ) : (
+                    <p className="text-xs text-amber-900">{pickLang(UMURIRO_UI.sellerSmsPreviewHint, lang)}</p>
+                  )}
+                </div>
+              )}
 
               <Button
                 type="button"
-                disabled={loading || !canSubmit}
+                disabled={loading}
                 onClick={submit}
-                className={cn(
-                  "w-full bg-gradient-to-r from-[#1897e0] to-[#127fc0] text-white shadow-[0_10px_20px_rgba(24,151,224,.22)] hover:opacity-95",
-                  !canSubmit && "opacity-60"
-                )}
+                className="min-w-0 w-full max-w-full bg-gradient-to-r from-[#1897e0] to-[#127fc0] text-white shadow-[0_10px_20px_rgba(24,151,224,.22)] hover:opacity-95"
               >
                 {loading ? (
                   <>

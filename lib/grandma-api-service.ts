@@ -70,6 +70,8 @@ export interface ShopEntry {
 
 class GrandmaApiService {
   private baseUrl = '/api/fetchSuggestions'
+  /** Redis → `seller_add_stock` sector browse (Grandma servlet); same array shape as `listSuppliersWithProducts`. */
+  private browseUrl = '/api/grandma/suppliers/browse'
 
   /**
    * Fetch suppliers by sector/category
@@ -115,8 +117,8 @@ class GrandmaApiService {
   }
 
   /**
-   * Fetch suppliers with their products for a specific sector
-   * Uses listSuppliersWithProducts parameter from fetchSuggestions
+   * Fetch suppliers with their products for a specific sector.
+   * Uses Grandma browse API (Redis cache, then `seller_add_stock` + `account_signup`) — same JSON array as Kaos `listSuppliersWithProducts`.
    */
   async getSuppliersWithProducts(
     sector: string, 
@@ -125,14 +127,14 @@ class GrandmaApiService {
     currency: string = 'RWF'
   ): Promise<Supplier[]> {
     const params = new URLSearchParams({
-      listSuppliersWithProducts: sector,
+      sector,
       sellerLimit: sellerLimit.toString(),
       productsPerSeller: productsPerSeller.toString(),
       Currency: currency,
     })
 
     try {
-      const response = await fetch(`${this.baseUrl}?${params.toString()}`, {
+      const response = await fetch(`${this.browseUrl}?${params.toString()}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -144,7 +146,10 @@ class GrandmaApiService {
       }
 
       const data = await response.json()
-      return data.suppliersByName || []
+      if (Array.isArray(data)) {
+        return data as Supplier[]
+      }
+      return []
     } catch (error) {
       console.error('Error fetching suppliers with products:', error)
       return []

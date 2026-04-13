@@ -49,8 +49,11 @@ async function forward(req: NextRequest) {
 
   const method = req.method
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'Accept': 'application/json'
+    Accept: "application/json",
+  }
+  if (method !== "GET" && method !== "HEAD") {
+    const ct = req.headers.get("content-type")
+    headers["Content-Type"] = ct && ct.trim() ? ct : "application/json"
   }
 
   const body = method === "GET" || method === "HEAD" ? undefined : await req.text()
