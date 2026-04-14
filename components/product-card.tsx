@@ -588,8 +588,11 @@ export function ProductCard({
             variant="outline"
             size={isSpotlight ? "default" : "sm"}
             className={cn(
-              "w-full",
-              isSpotlight ? "h-9 rounded-md border-gray-300 text-sm text-foreground" : "",
+              isSpotlight
+                ? "h-9 w-full rounded-md border-gray-300 text-sm text-foreground"
+                : isCompact
+                  ? "ml-auto h-6 w-auto rounded-md px-2 text-[10px] leading-none"
+                  : "ml-auto h-7 w-auto rounded-md px-2.5 text-xs",
             )}
             onClick={(e) => {
               e.stopPropagation()
