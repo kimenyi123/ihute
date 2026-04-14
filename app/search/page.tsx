@@ -1776,20 +1776,15 @@ export default function SearchPage() {
                               title="Click to add to cart"
                               className="rounded-md transition duration-200 group-hover:ring-1 group-hover:ring-blue-200/90"
                             >
-                              <ProductCard product={toCardProduct(p)} layout="compact" />
+                              <ProductCard
+                                product={toCardProduct(p)}
+                                layout="compact"
+                                onQuickView={() => {
+                                  setQuickViewProduct(p)
+                                  setQuickViewOpen(true)
+                                }}
+                              />
                             </div>
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              className="absolute bottom-1 right-1 z-10 h-6 px-1.5 text-[9px] opacity-90 shadow-sm transition group-hover:opacity-100"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                setQuickViewProduct(p)
-                                setQuickViewOpen(true)
-                              }}
-                            >
-                              Quick view
-                            </Button>
                           </div>
                         ),
                       )}
@@ -1911,20 +1906,14 @@ export default function SearchPage() {
                               onKeyDown={(e) => onTileKey(e, product)}
                               title="Click to add to cart"
                             >
-                              <ProductCard product={toCardProduct(product)} />
+                              <ProductCard
+                                product={toCardProduct(product)}
+                                onQuickView={() => {
+                                  setQuickViewProduct(product)
+                                  setQuickViewOpen(true)
+                                }}
+                              />
                             </div>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="absolute bottom-2 right-2 z-10 text-xs"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                setQuickViewProduct(product)
-                                setQuickViewOpen(true)
-                              }}
-                            >
-                              Quick view
-                            </Button>
                           </div>
                         ))}
                       </div>
