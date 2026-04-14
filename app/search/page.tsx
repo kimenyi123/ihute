@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { filterSuppliersByRelevance } from "@/lib/search-utils"
 import { getTranslations } from "@/lib/keyword-mapping"
-import { MapPin, Store } from "lucide-react"
+import { MapPin, Search, Store } from "lucide-react"
 import { useTableCommandStore } from "@/lib/table-command-store"
 import { useLocationStoreEnhanced } from "@/lib/location-store-enhanced"
 import { LocationBadge } from "@/components/location-badge"
@@ -192,6 +192,11 @@ function normalizeItemCodeForMatch(s: string): string {
     .replace(/^[([{.,;:\s_-]+/g, "")
     .replace(/[)\].,;:\s_-]+$/g, "")
     .trim()
+}
+
+/** For supplier in-page search: compare display names with collapsed whitespace. */
+function normalizeCommercialNameForSearchMatch(s: string): string {
+  return s.trim().toLowerCase().replace(/\s+/g, " ")
 }
 
 /** All normalized codes we might compare to `item` URL param (handles Redis/DB field names). */
@@ -912,12 +917,25 @@ export default function SearchPage() {
     })
     // Same as `/api/fetchSuggestions` keyword path: one card per supplier + item code + base selling price (multi-lot → merged).
     const deduped = dedupeSearchProductsByItemCodeAndSellingPrice(filtered) as Product[]
+    // Supplier search uses backend `globalSearch`, which is keyword/fuzzy — similar SKUs (e.g. N-22 vs N-23) can both match.
+    // If at least one product's commercial name equals the query (normalized), show only those exact matches.
+    const supplierQ = debouncedSupplierSearch.trim()
+    let listForSort = deduped
+    if (supplierQ) {
+      const qn = normalizeCommercialNameForSearchMatch(supplierQ)
+      const exactMatches = deduped.filter(
+        (p) => normalizeCommercialNameForSearchMatch(p.item_commercial_name ?? "") === qn,
+      )
+      if (exactMatches.length > 0) {
+        listForSort = exactMatches
+      }
+    }
     let ordered: Product[]
     if (supplierProductSort === "price-asc")
-      ordered = [...deduped].sort((a, b) => productLinePrice(a) - productLinePrice(b))
+      ordered = [...listForSort].sort((a, b) => productLinePrice(a) - productLinePrice(b))
     else if (supplierProductSort === "price-desc")
-      ordered = [...deduped].sort((a, b) => productLinePrice(b) - productLinePrice(a))
-    else ordered = deduped
+      ordered = [...listForSort].sort((a, b) => productLinePrice(b) - productLinePrice(a))
+    else ordered = listForSort
 
     if (itemParam) {
       const norm = normalizeItemCodeForMatch(itemParam)
@@ -1052,6 +1070,8 @@ export default function SearchPage() {
     return Array.from(supplierMap.values())
   }, [searchResult])
 
+  const shouldPickSupplierFirst = !selectedShop && !!debouncedQ && allSuppliers.length > 1
+
   // Upgrade selected shop info if a richer copy arrives
   useEffect(() => {
     if (!selectedShop || allSuppliers.length === 0) return
@@ -1062,6 +1082,32 @@ export default function SearchPage() {
       (selectedShop.supplier_location ?? "") !== (full.supplier_location ?? "")
     if (needsUpgrade) setSelectedShop(full)
   }, [allSuppliers, selectedShop])
+
+  // Auto-open supplier when global search resolves to a single supplier.
+  useEffect(() => {
+    if (!debouncedQ || debouncedQ.length < 2) return
+    if (!searchResult) return
+    if (selectedShop) return
+    if (supplierParam) return
+    if (allSuppliers.length === 0) return
+
+    const normalizedQuery = debouncedQ.trim().toLowerCase()
+    const exactMatch = allSuppliers.find(
+      (s) => s.supplier_name?.trim().toLowerCase() === normalizedQuery
+    )
+    const candidate = exactMatch || (allSuppliers.length === 1 ? allSuppliers[0] : undefined)
+    if (!candidate) return
+
+    setSelectedShop(candidate)
+    const params = new URLSearchParams({
+      q: debouncedQ,
+      supplier: candidate.supplier_account,
+      supplierName: candidate.supplier_name,
+    })
+    if (locationParam) params.set("location", locationParam)
+    if (sectorParam) params.set("sector", sectorParam)
+    router.replace(`/search?${params.toString()}`)
+  }, [allSuppliers, debouncedQ, locationParam, router, searchResult, sectorParam, selectedShop, supplierParam])
 
   const handleSelectShop = (shop: Shop) => {
     // Clear global search when selecting a new seller
@@ -1158,6 +1204,12 @@ export default function SearchPage() {
   /** Deep-linked from global search (?item=&supplier=): minimal chrome; multiple matching lines still list in a grid. */
   const isFocusedProductView = Boolean(itemParam && supplierParam)
 
+  /** Browsing one supplier's full inventory (?supplier=…) — hide Global Search; use in-supplier UI only. */
+  const isBrowsingSupplierInventory = Boolean(supplierParam?.trim()) && !itemParam
+
+  /** Title, main query box, location/sector bar, and global-result hints — not when already scoped to a supplier. */
+  const showGlobalSearchUI = !isFocusedProductView && !isBrowsingSupplierInventory
+
   const focusedSupplierLabel =
     selectedShop?.supplier_name ?? supplierNameParam ?? supplierParam ?? ""
 
@@ -1176,13 +1228,18 @@ export default function SearchPage() {
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
-      <main className="container mx-auto flex-1 px-4 py-8">
-        {!isFocusedProductView ? (
+      <main
+        className={cn(
+          "container mx-auto flex-1 px-3 py-5 sm:px-4 sm:py-6",
+          isBrowsingSupplierInventory && "bg-gradient-to-b from-slate-100/50 via-slate-50/40 to-white",
+        )}
+      >
+        {showGlobalSearchUI ? (
           <div className="flex items-center justify-between mb-4">
             <h1 className="text-2xl font-semibold">Global Search</h1>
             <LocationBadge />
           </div>
-        ) : (
+        ) : isFocusedProductView ? (
           <div className="mb-6 w-full max-w-5xl mx-auto">
             {loadingProducts ? (
               <div className="space-y-3">
@@ -1211,7 +1268,7 @@ export default function SearchPage() {
               </div>
             )}
           </div>
-        )}
+        ) : null}
 
         {/* Table Context Indicator */}
         {tableCommand && (
@@ -1241,7 +1298,7 @@ export default function SearchPage() {
           </div>
         )}
 
-        {!isFocusedProductView && (
+        {showGlobalSearchUI && (
           <>
         {/* Search Row — quick search: backend hit after 200ms debounce */}
         <div className="flex gap-2 items-center mb-3">
@@ -1391,14 +1448,14 @@ export default function SearchPage() {
         )}
 
         {/* When item is not in NIKI (Redis), backend returns DB results; show hint */}
-        {!isFocusedProductView && searchResult && (searchResult.products.length > 0 || searchResult.suppliersByName.length > 0 || searchResult.suppliersByProduct.length > 0) && (searchResult.source === "database" || searchResult.fromNiki === false) && (
+        {showGlobalSearchUI && searchResult && (searchResult.products.length > 0 || searchResult.suppliersByName.length > 0 || searchResult.suppliersByProduct.length > 0) && (searchResult.source === "database" || searchResult.fromNiki === false) && (
           <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-sm">
             Showing results from full catalog (not in NIKI cache).
           </div>
         )}
 
         {/* Location-Aware Search Indicator */}
-        {!isFocusedProductView && (() => {
+        {showGlobalSearchUI && (() => {
           const locationData = useLocationStoreEnhanced.getState().location
           if (locationData?.district) {
             return (
@@ -1426,11 +1483,18 @@ export default function SearchPage() {
           return null
         })()}
 
-        <div className={cn("mx-auto max-w-5xl", isFocusedProductView && "w-full")}>
+        <div
+          className={cn(
+            "mx-auto w-full",
+            isBrowsingSupplierInventory && "max-w-7xl",
+            isFocusedProductView && "max-w-5xl",
+            !isBrowsingSupplierInventory && !isFocusedProductView && "max-w-5xl",
+          )}
+        >
           {/* Main content (single column; no right sidebar) */}
           <div className="space-y-6">
             {/* Sector Spotlight */}
-            {sectorParam && !isFocusedProductView && (
+            {sectorParam && showGlobalSearchUI && (
               <section className="bg-white rounded-xl border p-4">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-3">
@@ -1521,54 +1585,114 @@ export default function SearchPage() {
               </section>
             )}
 
-            {/* Supplier products in main area when supplier selected */}
+            {/* Supplier products — catalog layout when browsing a seller; spotlight layout when item deep-linked */}
             {selectedShop && (
               <section
                 className={cn(
-                  "rounded-xl border bg-white p-4 sm:p-6",
-                  itemParam && "border-0 bg-transparent p-0 shadow-none",
+                  itemParam
+                    ? "border-0 bg-transparent p-0 shadow-none"
+                    : "overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-900/5",
                 )}
               >
                 {!itemParam ? (
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-                    <div className="space-y-1">
-                      <h2 className="font-semibold text-lg">
-                        Products from <span className="text-blue-700">{selectedShop.supplier_name}</span>
-                      </h2>
-                    </div>
-                    <div className="flex items-center gap-2 flex-1 sm:max-w-xs">
-                      <input
-                        value={supplierSearch}
-                        onChange={(e) => setSupplierSearch(e.target.value)}
-                        placeholder={`Search in ${selectedShop.supplier_name}...`}
-                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        aria-label="Search products from this supplier"
-                      />
-                      {(loadingSupplierSearch || (supplierSearch.trim() && supplierSearch.trim() !== debouncedSupplierSearch)) && (
-                        <span className="text-xs text-gray-500 animate-pulse whitespace-nowrap">Searching…</span>
-                      )}
+                  <div className="border-b border-slate-100 bg-white">
+                    <div className="px-2 py-2 sm:px-4 sm:py-2.5">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                            <span className="hidden text-[9px] font-bold uppercase tracking-wide text-slate-400 sm:inline">
+                              Catalog
+                            </span>
+                            <h2 className="text-balance text-base font-bold leading-tight text-slate-900 sm:text-[17px]">
+                              <span className="font-medium text-slate-600">Products from </span>
+                              <span className="text-blue-700">{selectedShop.supplier_name}</span>
+                            </h2>
+                          </div>
+                          <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0 text-[11px] text-slate-500">
+                            {selectedShop.supplier_location ? (
+                              <span className="inline-flex items-center gap-0.5">
+                                <MapPin className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
+                                {selectedShop.supplier_location}
+                              </span>
+                            ) : null}
+                            <Button
+                              type="button"
+                              variant="link"
+                              className="h-auto p-0 text-[11px] text-blue-700 underline-offset-2"
+                              onClick={startNewSearch}
+                            >
+                              All suppliers
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="w-full shrink-0 sm:max-w-[min(100%,280px)] md:max-w-[320px]">
+                          <label className="sr-only" htmlFor="supplier-catalog-search">
+                            Search in {selectedShop.supplier_name}
+                          </label>
+                          <div className="relative">
+                            <Search
+                              className="pointer-events-none absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-slate-400"
+                              aria-hidden
+                            />
+                            <input
+                              id="supplier-catalog-search"
+                              value={supplierSearch}
+                              onChange={(e) => setSupplierSearch(e.target.value)}
+                              placeholder={`Search in ${selectedShop.supplier_name}…`}
+                              className="w-full rounded-md border border-slate-200 bg-slate-50/80 py-1.5 pl-8 pr-2 text-xs shadow-none outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-1 focus:ring-blue-100"
+                              aria-label="Search products from this supplier"
+                            />
+                            {(loadingSupplierSearch ||
+                              (supplierSearch.trim() && supplierSearch.trim() !== debouncedSupplierSearch)) && (
+                              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-medium text-blue-600 animate-pulse">
+                                …
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 ) : null}
                 {loadingProducts ? (
-                  <div className="py-8 text-center text-gray-500 text-sm">Loading products…</div>
+                  <div className={cn("py-10 text-center text-slate-500", !itemParam && "px-3 sm:px-5")}>
+                    <div className="mx-auto mb-2 h-6 w-6 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600" />
+                    <p className="text-xs font-medium">Loading products…</p>
+                  </div>
                 ) : loadingSupplierSearch && debouncedSupplierSearch.trim() ? (
-                  <div className="py-8 text-center text-gray-500 text-sm">Searching…</div>
+                  <div className={cn("py-10 text-center text-slate-500", !itemParam && "px-3 sm:px-5")}>
+                    <p className="text-xs font-medium">Searching…</p>
+                  </div>
                 ) : displayedSupplierProducts.length > 0 ? (
                   <>
                     {!itemParam ? (
-                      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                        <p className="text-sm text-gray-500">
-                          Showing {supplierRangeStart}–{supplierRangeEnd} of {displayedSupplierProducts.length} product
-                          {displayedSupplierProducts.length !== 1 ? "s" : ""}
-                          {debouncedSupplierSearch.trim() ? ` matching "${debouncedSupplierSearch.trim()}"` : ""}
+                      <div className="flex flex-col gap-1.5 border-b border-slate-100 bg-slate-50/80 px-2 py-1.5 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+                        <p className="text-[11px] text-slate-600">
+                          <span className="font-medium text-slate-900">
+                            {supplierRangeStart}–{supplierRangeEnd}
+                          </span>
+                          <span className="text-slate-500"> of </span>
+                          <span className="font-medium text-slate-900">{displayedSupplierProducts.length}</span>
+                          <span className="text-slate-500">
+                            {" "}
+                            product{displayedSupplierProducts.length !== 1 ? "s" : ""}
+                          </span>
+                          {debouncedSupplierSearch.trim() ? (
+                            <span className="text-slate-500">
+                              {" "}
+                              matching &quot;{debouncedSupplierSearch.trim()}&quot;
+                            </span>
+                          ) : null}
                         </p>
-                        <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex flex-wrap items-center gap-1.5">
                           <Select
                             value={String(supplierProductsPerPage)}
                             onValueChange={(v) => setSupplierProductsPerPage(Number(v))}
                           >
-                            <SelectTrigger className="w-[120px] h-9" aria-label="Products per page">
+                            <SelectTrigger
+                              className="h-8 w-[118px] rounded-full border-slate-200 bg-white text-[11px]"
+                              aria-label="Products per page"
+                            >
                               <SelectValue placeholder="Per page" />
                             </SelectTrigger>
                             <SelectContent>
@@ -1577,8 +1701,13 @@ export default function SearchPage() {
                               <SelectItem value="60">60 / page</SelectItem>
                             </SelectContent>
                           </Select>
-                          <Select value={supplierProductSort} onValueChange={(v: "relevance" | "price-asc" | "price-desc") => setSupplierProductSort(v)}>
-                            <SelectTrigger className="w-[140px] h-9">
+                          <Select
+                            value={supplierProductSort}
+                            onValueChange={(v: "relevance" | "price-asc" | "price-desc") =>
+                              setSupplierProductSort(v)
+                            }
+                          >
+                            <SelectTrigger className="h-8 w-[148px] rounded-full border-slate-200 bg-white text-[11px]">
                               <SelectValue placeholder="Sort by" />
                             </SelectTrigger>
                             <SelectContent>
@@ -1590,8 +1719,8 @@ export default function SearchPage() {
                         </div>
                       </div>
                     ) : supplierTotalPages > 1 ? (
-                      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                        <p className="text-sm text-gray-500">
+                      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-4 sm:px-6">
+                        <p className="text-sm text-slate-500">
                           Showing {supplierRangeStart}–{supplierRangeEnd} of {displayedSupplierProducts.length} product
                           {displayedSupplierProducts.length !== 1 ? "s" : ""}
                         </p>
@@ -1599,7 +1728,7 @@ export default function SearchPage() {
                           value={String(supplierProductsPerPage)}
                           onValueChange={(v) => setSupplierProductsPerPage(Number(v))}
                         >
-                          <SelectTrigger className="w-[120px] h-9" aria-label="Products per page">
+                          <SelectTrigger className="h-9 w-[120px]" aria-label="Products per page">
                             <SelectValue placeholder="Per page" />
                           </SelectTrigger>
                           <SelectContent>
@@ -1612,11 +1741,11 @@ export default function SearchPage() {
                     ) : null}
                     <div
                       className={cn(
-                        "grid gap-4",
-                        /* item+supplier deep link: spotlight cards are w-[280px]; auto-fill adds columns when width allows */
+                        "grid w-full",
                         itemParam
-                          ? "grid-cols-[repeat(auto-fill,minmax(280px,1fr))] justify-items-start"
-                          : "grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4",
+                          ? "grid-cols-[repeat(auto-fill,minmax(280px,1fr))] justify-items-start gap-4"
+                          : // Narrow fixed-width columns (~storefront card): caps width so Buy/Watch wrap like the reference
+                            "justify-center gap-x-3 gap-y-4 px-2 pb-3 pt-2 sm:justify-start sm:px-4 [grid-template-columns:repeat(auto-fill,minmax(180px,220px))]",
                       )}
                     >
                       {paginatedSupplierProducts.map((p, index) =>
@@ -1635,20 +1764,24 @@ export default function SearchPage() {
                             />
                           </div>
                         ) : (
-                          <div key={`${p.item_code}-${p.supplier_account || ""}-${index}`} className="relative">
+                          <div
+                            key={`${p.item_code}-${p.supplier_account || ""}-${index}`}
+                            className="group relative"
+                          >
                             <div
                               role="button"
                               tabIndex={0}
                               onClick={() => addProductToCart(p)}
                               onKeyDown={(e) => onTileKey(e, p)}
                               title="Click to add to cart"
+                              className="rounded-md transition duration-200 group-hover:ring-1 group-hover:ring-blue-200/90"
                             >
-                              <ProductCard product={toCardProduct(p)} />
+                              <ProductCard product={toCardProduct(p)} layout="compact" />
                             </div>
                             <Button
                               size="sm"
-                              variant="outline"
-                              className="absolute bottom-2 right-2 z-10 text-xs"
+                              variant="secondary"
+                              className="absolute bottom-1 right-1 z-10 h-6 px-1.5 text-[9px] opacity-90 shadow-sm transition group-hover:opacity-100"
                               onClick={(e) => {
                                 e.stopPropagation()
                                 setQuickViewProduct(p)
@@ -1662,7 +1795,9 @@ export default function SearchPage() {
                       )}
                     </div>
                     {supplierTotalPages > 1 ? (
-                      <Pagination className="mt-6">
+                      <Pagination
+                        className={cn("border-t border-slate-100 bg-slate-50/40 py-3", !itemParam && "px-3 sm:px-5")}
+                      >
                         <PaginationContent className="flex-wrap justify-center gap-1">
                           <PaginationItem>
                             <PaginationPrevious
@@ -1698,7 +1833,9 @@ export default function SearchPage() {
                           <PaginationItem>
                             <PaginationNext
                               href="#"
-                              className={supplierPageSafe >= supplierTotalPages ? "pointer-events-none opacity-40" : undefined}
+                              className={
+                                supplierPageSafe >= supplierTotalPages ? "pointer-events-none opacity-40" : undefined
+                              }
                               onClick={(e) => {
                                 e.preventDefault()
                                 setSupplierProductPage((p) => Math.min(supplierTotalPages, p + 1))
@@ -1708,19 +1845,26 @@ export default function SearchPage() {
                         </PaginationContent>
                       </Pagination>
                     ) : null}
-                  </> 
+                  </>
                 ) : (
-                  <div className="text-center py-6 text-gray-500">
-                    {debouncedSupplierSearch.trim()
-                      ? `No products matching "${debouncedSupplierSearch.trim()}"`
-                      : "No products available from this supplier"}
+                  <div
+                    className={cn(
+                      "py-10 text-center text-slate-600",
+                      !itemParam && "border-t border-slate-100 bg-slate-50/30 px-3 sm:px-5",
+                    )}
+                  >
+                    <p className="text-xs font-medium">
+                      {debouncedSupplierSearch.trim()
+                        ? `No products matching "${debouncedSupplierSearch.trim()}"`
+                        : "No products available from this supplier"}
+                    </p>
                   </div>
                 )}
               </section>
             )}
 
             {/* Products matching query — hidden when a supplier is selected (products from that supplier show above) */}
-            {!selectedShop && searchResult && searchProductsWithPrice.length > 0 && (
+            {!selectedShop && !shouldPickSupplierFirst && searchResult && searchProductsWithPrice.length > 0 && (
               <section className="bg-white rounded-xl border p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                   <h2 className="font-semibold text-lg">

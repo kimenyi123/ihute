@@ -3,7 +3,7 @@
 import Link from "next/link"
 import Image from "next/image"
 import { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { Star } from "lucide-react"
 import { ScrollText } from "lucide-react"
 import {
@@ -41,10 +41,17 @@ import { useTranslation } from "@/hooks/use-translation"
 import { TableCommandBanner } from "@/components/table-command-banner"
 import { LocationBadge } from "@/components/location-badge"
 import { BarcodeAddToCart } from "@/components/barcode-add-to-cart"
+import { cn } from "@/lib/utils"
 
 export function Header() {
   const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
   const { t } = useTranslation()
+
+  /** Hide top "Search products…" when already scoped to a supplier on /search (catalog or item deep link). */
+  const hideHeaderGlobalSearch =
+    pathname === "/search" && Boolean(searchParams.get("supplier")?.trim())
 
   const totalItems = useCartStore((s) => s.getTotalItems())
   const favoritesCount = useFavoritesStore((s) => s.favorites.length)
@@ -109,9 +116,16 @@ export function Header() {
             />
           </Link>
 
-          {/* Global Search - Desktop (flex-1 + wide max so the field can grow into middle space) */}
-          <div className="hidden lg:flex min-w-0 flex-1 max-w-3xl relative items-center gap-2">
-            <GlobalSearch placeholder={t("searchPlaceholder")} className="w-full min-w-0" />
+          {/* Global Search - Desktop (hidden when viewing a supplier-scoped /search?supplier=…) */}
+          <div
+            className={cn(
+              "hidden lg:flex min-w-0 flex-1 max-w-3xl relative items-center gap-2",
+              hideHeaderGlobalSearch && "justify-end",
+            )}
+          >
+            {!hideHeaderGlobalSearch && (
+              <GlobalSearch placeholder={t("searchPlaceholder")} className="w-full min-w-0" />
+            )}
             <LocationBadge />
           </div>
 
@@ -290,10 +304,12 @@ export function Header() {
         </div>
 
         {/* Mobile Search + Location */}
-        <div className="pb-3 space-y-2 lg:hidden">
-          <div className="relative w-full">
-            <GlobalSearch placeholder={t("searchPlaceholder")} className="w-full" />
-          </div>
+        <div className={cn("pb-3 space-y-2 lg:hidden", hideHeaderGlobalSearch && "pb-2")}>
+          {!hideHeaderGlobalSearch && (
+            <div className="relative w-full">
+              <GlobalSearch placeholder={t("searchPlaceholder")} className="w-full" />
+            </div>
+          )}
           <div className="flex items-center justify-center">
             <LocationBadge />
           </div>
