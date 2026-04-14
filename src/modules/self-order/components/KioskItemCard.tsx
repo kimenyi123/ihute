@@ -35,7 +35,7 @@ export function KioskItemCard({ item, onSelect }: Props) {
         )}
         {mainBadge && (
           <span className="absolute top-2 left-2 rounded-full bg-emerald-500/90 text-emerald-950 text-[11px] font-semibold px-2 py-0.5">
-            Main ingredient
+            
           </span>
         )}
         {!mainBadge && contains && (

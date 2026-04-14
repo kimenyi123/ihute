@@ -69,12 +69,14 @@ export function ProductCard({
   /**
    * `spotlight` = single-product style: same vertical card as the grid, but larger and centered
    * (image on top, title/price/seller, Buy + Watch price, optional Quick view below).
+   * `compact` = denser grid tiles: shorter image (4:3), smaller type and buttons (e.g. supplier catalog).
    */
-  layout?: "card" | "spotlight"
+  layout?: "card" | "spotlight" | "compact"
   /** When set, renders a full-width “Quick view” button under the main actions (typical for spotlight). */
   onQuickView?: () => void
 }) {
   const isSpotlight = layout === "spotlight"
+  const isCompact = layout === "compact"
   const router = useRouter()
   const addOrInc = useCartStore((s) => s.addOrInc ?? s.addItem)
   const cartItems = useCartStore((s) => s.items)
@@ -226,7 +228,9 @@ export function ProductCard({
         "group overflow-hidden transition-all",
         isSpotlight
           ? "flex h-[560px] w-[280px] shrink-0 flex-col gap-0 rounded-[14px] border border-gray-200 bg-white py-0 shadow-[0_4px_14px_rgba(15,23,42,0.08)]"
-          : "h-full hover:shadow-lg",
+          : isCompact
+            ? "h-full border-slate-200/90 shadow-sm hover:shadow-md"
+            : "h-full hover:shadow-lg",
       )}
     >
       <div
@@ -235,7 +239,9 @@ export function ProductCard({
           /* Reference: ~58% of card height ≈ 325px; green accent on top + sides */
           isSpotlight
             ? "h-[325px] shrink-0 border-l-2 border-r-2 border-t-2 border-[#00a676]"
-            : "aspect-square",
+            : isCompact
+              ? "aspect-[4/3] max-h-[132px] sm:max-h-[140px]"
+              : "aspect-square",
           !isSpotlight && cartQty > 0 && "ring-2 ring-emerald-500 ring-inset",
         )}
       >
@@ -244,7 +250,10 @@ export function ProductCard({
             key={resolvedUrl}
             src={src}
             alt={name}
-            className="absolute inset-0 h-full w-full object-contain"
+            className={cn(
+              "absolute inset-0 h-full w-full",
+              src === NO_IMAGE_URL ? "object-contain p-2" : "object-cover"
+            )}
             loading="lazy"
             decoding="async"
             referrerPolicy="no-referrer"
@@ -273,7 +282,9 @@ export function ProductCard({
             fill
             src={src}
             alt={name}
-            className="object-contain"
+            className={cn(
+              src === NO_IMAGE_URL ? "object-contain p-2" : "object-cover"
+            )}
             onError={() => {
               console.log("[ProductCard] Next.js Image failed to load:", {
                 name: name,
@@ -303,11 +314,16 @@ export function ProductCard({
               "absolute bottom-2 left-2 z-10 flex items-center gap-1 rounded-full font-bold text-white shadow-md",
               isSpotlight
                 ? "bg-[#00a676] px-2.5 py-1.5 text-xs"
-                : "bg-emerald-600 px-2 py-1 text-[10px]",
+                : isCompact
+                  ? "bg-emerald-600 px-1.5 py-0.5 text-[9px]"
+                  : "bg-emerald-600 px-2 py-1 text-[10px]",
             )}
             aria-label={`In cart, quantity ${cartQty}`}
           >
-            <ShoppingCart className={cn("shrink-0", isSpotlight ? "h-4 w-4" : "h-3.5 w-3.5")} aria-hidden />
+            <ShoppingCart
+              className={cn("shrink-0", isSpotlight ? "h-4 w-4" : isCompact ? "h-3 w-3" : "h-3.5 w-3.5")}
+              aria-hidden
+            />
             <span>{cartQty}</span>
           </div>
         )}
@@ -339,12 +355,21 @@ export function ProductCard({
           }}
           className={cn(
             "absolute right-2 top-2 inline-flex items-center justify-center rounded-full border bg-white shadow-sm transition hover:bg-white",
-            isSpotlight ? "h-9 w-9 border-gray-300" : "h-8 w-8 border-transparent bg-white/90 backdrop-blur",
+            isSpotlight
+              ? "h-9 w-9 border-gray-300"
+              : isCompact
+                ? "right-1 top-1 h-6 w-6 border-transparent bg-white/95 p-0 shadow backdrop-blur"
+                : "h-8 w-8 border-transparent bg-white/90 backdrop-blur",
             fav ? "text-red-600" : "text-muted-foreground",
           )}
           title={fav ? "Remove from favorites" : "Add to favorites"}
         >
-          <Heart className={cn(isSpotlight ? "h-5 w-5" : "h-4 w-4", fav && "fill-current")} />
+          <Heart
+            className={cn(
+              isSpotlight ? "h-5 w-5" : isCompact ? "h-3 w-3" : "h-4 w-4",
+              fav && "fill-current",
+            )}
+          />
         </button>
       </div>
 
@@ -353,7 +378,9 @@ export function ProductCard({
           "flex flex-col",
           isSpotlight
             ? "min-h-0 flex-1 justify-between gap-2 px-5 pb-5 pt-4"
-            : "gap-2 p-3",
+            : isCompact
+              ? "gap-1 p-2 pt-1.5"
+              : "gap-2 p-3",
         )}
       >
         {isSpotlight ? (
@@ -365,7 +392,7 @@ export function ProductCard({
               <div className="flex flex-wrap gap-1">
                 {searchPriority === "direct" && (
                   <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800">
-                    Main Ingredient
+                    {/* Main Ingredient */}
                   </span>
                 )}
                 {containsIngredient && searchPriority !== "direct" && (
@@ -400,13 +427,20 @@ export function ProductCard({
           </div>
         ) : (
           <>
-            <div className="min-h-[38px]">
-              <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-foreground">{name}</h3>
+            <div className={cn(isCompact ? "min-h-0" : "min-h-[38px]")}>
+              <h3
+                className={cn(
+                  "line-clamp-2 font-semibold leading-snug text-foreground",
+                  isCompact ? "text-[11px] leading-tight" : "text-sm",
+                )}
+              >
+                {name}
+              </h3>
               {(searchPriority === "direct" || containsIngredient) && (
                 <div className="mt-1 flex flex-wrap gap-1">
                   {searchPriority === "direct" && (
                     <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
-                      Main Ingredient
+                      {/* Main Ingredient */}
                     </span>
                   )}
                   {containsIngredient && searchPriority !== "direct" && (
@@ -418,22 +452,47 @@ export function ProductCard({
               )}
             </div>
             {description && description !== id && (
-              <p className="line-clamp-2 text-xs text-muted-foreground">{description}</p>
+              <p
+                className={cn(
+                  "line-clamp-2 text-muted-foreground",
+                  isCompact ? "text-[10px] leading-snug" : "text-xs",
+                )}
+              >
+                {description}
+              </p>
             )}
-            <div className="text-sm">
+            <div className={cn(isCompact ? "text-[11px]" : "text-sm")}>
               <div className="font-semibold tabular-nums text-foreground">
                 {displayPrice.toLocaleString()} {currency}
                 {unitMeaningfulForDisplay(unit) ? (
-                  <span className="text-sm font-normal text-muted-foreground"> / {unit}</span>
+                  <span
+                    className={cn(
+                      "font-normal text-muted-foreground",
+                      isCompact ? "text-[10px]" : "text-sm",
+                    )}
+                  >
+                    {" "}
+                    / {unit}
+                  </span>
                 ) : null}
               </div>
               {product.expiryLabel ? (
-                <div className="text-[11px] text-amber-800/90 mt-0.5">
+                <div
+                  className={cn(
+                    "text-amber-800/90 mt-0.5",
+                    isCompact ? "text-[9px] leading-tight" : "text-[11px]",
+                  )}
+                >
                   Expiry: {product.expiryLabel}
                 </div>
               ) : null}
               {supplierName && (
-                <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                <div
+                  className={cn(
+                    "uppercase tracking-wide text-muted-foreground",
+                    isCompact ? "line-clamp-1 text-[9px]" : "text-xs",
+                  )}
+                >
                   <span className="text-foreground/90">{supplierName}</span>
                   {supplierLocation ? ` — ${supplierLocation}` : ""}
                 </div>
@@ -446,15 +505,24 @@ export function ProductCard({
           className={cn(
             "flex shrink-0 flex-col gap-2",
             isSpotlight ? "mt-2" : "",
+            isCompact && "gap-1",
           )}
         >
-        <div className={cn("flex flex-wrap gap-2", !isSpotlight && "mt-1 gap-1")}>
+        <div
+          className={cn(
+            "flex gap-2",
+            !isSpotlight && !isCompact && "mt-1 flex-wrap gap-1",
+            isCompact && "mt-0 w-full flex-col gap-1",
+          )}
+        >
         <Button
           size={isSpotlight ? "default" : "sm"}
           className={cn(
             isSpotlight
               ? "h-9 w-[40%] shrink-0 rounded-md border-0 bg-[#1a3d5f] px-2 text-sm text-white hover:bg-[#153550]"
-              : "min-w-0 flex-1",
+              : isCompact
+                ? "h-8 w-full px-2 text-[11px] font-semibold"
+                : "min-w-0 flex-1",
           )}
           onClick={(e) => {
             e.stopPropagation()
@@ -508,7 +576,9 @@ export function ProductCard({
           className={
             isSpotlight
               ? "h-9 min-w-0 flex-1 rounded-md border-gray-300 text-sm text-foreground"
-              : undefined
+              : isCompact
+                ? "h-8 w-full px-2 text-[10px] leading-tight [&_svg]:mr-1 [&_svg]:h-3 [&_svg]:w-3"
+                : undefined
           }
         />
         </div>

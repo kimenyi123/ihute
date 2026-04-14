@@ -1289,7 +1289,7 @@ function ProductCard({
             <div className="mt-1 flex flex-wrap gap-1">
               {(p.search_priority as string) === "direct" && (
                 <span className="inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
-                  Main Ingredient
+                  {/* Main Ingredient */}
                 </span>
               )}
               {(p.contains_ingredient as string) && (p.search_priority as string) !== "direct" && (
