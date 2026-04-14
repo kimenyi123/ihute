@@ -23,7 +23,7 @@ export function getBackendBase(): string {
     process.env.BACKEND_URL ||
       process.env.JAVA_BACKEND_BASE ||
       process.env.NEXT_PUBLIC_API_URL ||
-      "https://ihute.rw/Trading"
+      "https://ihute.rw/trading_ai"
   )
 
   // Some local/dev env values point only to the Tomcat host (e.g. http://localhost:8080)
