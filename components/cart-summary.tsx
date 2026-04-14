@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Label } from "@/components/ui/label"
 import { formatPaymentMethod } from "@/lib/payment-utils"
+import { useToast } from "@/components/ui/use-toast"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog"
@@ -120,6 +121,7 @@ export function CartSummary() {
 function CartSummaryBody() {
   const router = useRouter()
   const { isAuthenticated, user } = useAuthStore()
+  const { toast } = useToast()
   const getGroupsBySeller = useCartStore((s) => s.getGroupsBySeller)
   const getGrandTotal    = useCartStore((s) => s.getGrandTotal)
   const clear            = useCartStore((s) => s.clear)
@@ -143,7 +145,7 @@ function CartSummaryBody() {
   const [anonymousName, setAnonymousName] = useState("")
 
   // Table command mode
-  const { isInTableCommand, activeSession, lockTableCommand, canCloseTable, closeTableCommand, createTableCommand, updateTableShareData } = useTableCommandStore()
+  const { isInTableCommand, activeSession, leaveTableCommand, lockTableCommand, canCloseTable, closeTableCommand, createTableCommand, updateTableShareData } = useTableCommandStore()
 
   // Do NOT pre-fill "Your Name" for table orders — table name is already shown in "Table Order - ... - Table X".
   // User must enter their own name so supplier sees who ordered (not the table name as buyer).
@@ -567,8 +569,24 @@ function CartSummaryBody() {
           pollPayment(orderId, g.supplierId)
         }
 
-        // Lock table command if in table mode: clear cart but stay on page so user can add more items
-        if (isInTableCommand() && activeSession?.isCreator) {
+        const currentOrderIsBarTable =
+          g.isBarResto === true ||
+          isBarOrRestaurant(g.supplierName) ||
+          isBarOrRestaurant(g.supplierLocation || "")
+
+        // If a stale table session exists while ordering a non-table seller, leave immediately.
+        if (isInTableCommand() && !currentOrderIsBarTable) {
+          leaveTableCommand()
+          toast({
+            title: "Left table session automatically",
+            description: "This order is processed as an individual order.",
+            duration: 1800,
+          })
+        }
+
+        // Lock table command if in table mode for bar/resto flow:
+        // clear cart but stay on page so user can add more items.
+        if (isInTableCommand() && activeSession?.isCreator && currentOrderIsBarTable) {
           clear()
           alert(`Order #${orderId} added to table "${activeSession.tableName}". Add more items or send the complete table order.`)
           return
@@ -1469,6 +1487,15 @@ function CartSummaryBody() {
             }
           }}
           onIndividualOrder={() => {
+            // User chose individual ordering -> immediately leave any active table session.
+            if (isInTableCommand()) {
+              leaveTableCommand()
+              toast({
+                title: "Table session ended",
+                description: "You are now ordering as an individual user.",
+                duration: 1800,
+              })
+            }
             // User chose individual ordering - proceed with regular checkout flow
             if (tableCommandSeller) {
               const g = groups.find(x => x.supplierId === tableCommandSeller.id)
