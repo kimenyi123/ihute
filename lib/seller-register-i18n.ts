@@ -33,6 +33,9 @@ export const L = {
   village: { en: "Village (umudugudu)", rw: "Umudugudu", fr: "Village" },
   street: { en: "Street / details", rw: "Umuhanda/Andi makuru", fr: "Rue / détails" },
   logo: { en: "Shop logo (optional)", rw: "Ikirango cy'iduka", fr: "Logo (optionnel)" },
+  email: { en: "Email (login)", rw: "Imeri", fr: "E-mail (connexion)" },
+  password: { en: "Password", rw: "Ijambo ry'ibanga", fr: "Mot de passe" },
+  tin: { en: "TIN / tax ID", rw: "TIN", fr: "N° contribuable (TIN)" },
 } satisfies Record<string, Tri>
 
 /** Buyer registration at `/register/buyer` (location labels reuse `L` where applicable). */
@@ -145,6 +148,11 @@ export const UMURIRO_UI = {
     rw: "Nduka kuri",
     fr: "J’achète chez",
   },
+  phoneOptional: {
+    en: "Phone (optional)",
+    rw: "Telefoni (biteganyijwe)",
+    fr: "Téléphone (optionnel)",
+  },
   shopCategory: {
     en: "Shop category",
     rw: "Ubwoko bw'iduka",
@@ -175,6 +183,16 @@ export const UMURIRO_UI = {
   quantity: { en: "Quantity", rw: "Umubare", fr: "Quantité" },
   totalLabel: { en: "Total to pay (RWF)", rw: "Amafaranga yose", fr: "Total (RWF)" },
   ussdLabel: { en: "MTN MoMo USSD", rw: "Kode USSD ya MTN MoMo", fr: "USSD MTN MoMo" },
+  sellerSmsPreview: {
+    en: "Message to seller (SMS preview)",
+    rw: "Ubutumwa kuri mucuruzi (SMS)",
+    fr: "Message au vendeur (aperçu SMS)",
+  },
+  sellerSmsPreviewHint: {
+    en: "Add a valid Rwandan shop phone and an item name to preview. After save, the link uses your request id.",
+    rw: "Shyiraho telefoni y’u Rwanda n’izina ry’igicuruzwa kugira ngo ubone ubutumwa. Nyuma yo kubika, link ikoresha indangamuntu.",
+    fr: "Ajoutez un mobile rwandais et un article pour l’aperçu. Après enregistrement, le lien utilise votre id.",
+  },
   copyUssd: { en: "Copy code", rw: "Kopiya", fr: "Copier" },
   saveAndPay: {
     en: "Save and pay",
@@ -289,6 +307,21 @@ export const ERR = {
     en: "Enter a phone number.",
     rw: "Andika nimero ya telefoni.",
     fr: "Indiquez un numéro de téléphone.",
+  },
+  missingEmail: {
+    en: "Enter a valid email for your seller account.",
+    rw: "Andika imeri y'ukoresha.",
+    fr: "Indiquez un e-mail pour le compte vendeur.",
+  },
+  missingPassword: {
+    en: "Choose a password (min. 6 characters).",
+    rw: "Hitamo ijambo ry'ibanga.",
+    fr: "Choisissez un mot de passe (min. 6 caractères).",
+  },
+  missingTin: {
+    en: "Enter your TIN (tax identification number).",
+    rw: "Andika TIN yawe.",
+    fr: "Indiquez votre numéro TIN.",
   },
   missingOwner: {
     en: "Enter the owner’s full name.",

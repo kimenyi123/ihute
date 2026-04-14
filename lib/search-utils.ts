@@ -84,8 +84,75 @@ export function calculateRelevanceScore(
 /**
  * Escape special regex characters
  */
-function escapeRegex(str: string): string {
+export function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * Split query on spaces into tokens for AND matching.
+ * - Pure digits: keep from length 1 (e.g. "500")
+ * - Text: min length 2 (drops stray single letters)
+ */
+export function tokenizeSearchQueryForAnd(query: string): string[] {
+  const raw = query
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+  return raw.filter((t) => {
+    if (/^\d+$/.test(t)) return t.length >= 1
+    return t.length >= 2
+  })
+}
+
+/** Combined text used to test whether each token matches a product */
+export function getProductSearchBlob<T extends {
+  item_commercial_name?: string
+  item_key_words?: string
+  item_code?: string
+  supplier_name?: string
+  item_packet?: string
+  item_emballage?: string
+}>(product: T): string {
+  return [
+    product.item_commercial_name,
+    product.item_key_words,
+    product.item_code,
+    product.supplier_name,
+    product.item_packet,
+    product.item_emballage,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+}
+
+/**
+ * One token must appear in the blob. Numeric tokens use digit boundaries so
+ * "500" matches "500ml" but not "1500".
+ */
+export function tokenMatchesInSearchBlob(token: string, blob: string): boolean {
+  const t = token.toLowerCase()
+  if (!t || !blob) return false
+  if (/^\d+$/.test(t)) {
+    const re = new RegExp(`(?<!\\d)${escapeRegex(t)}(?!\\d)`, "i")
+    return re.test(blob)
+  }
+  return blob.includes(t)
+}
+
+/** Every token must match somewhere in the blob (logical AND across tokens). */
+export function productMatchesAllSearchTokens<T extends {
+  item_commercial_name?: string
+  item_key_words?: string
+  item_code?: string
+  supplier_name?: string
+  item_packet?: string
+  item_emballage?: string
+}>(product: T, tokens: string[]): boolean {
+  if (tokens.length === 0) return true
+  const blob = getProductSearchBlob(product)
+  return tokens.every((tok) => tokenMatchesInSearchBlob(tok, blob))
 }
 
 /**
@@ -157,11 +224,31 @@ export function filterProductsByRelevance<T extends {
   if (!searchQuery.trim()) return products.map(p => ({ ...p, finalScore: 0 }))
 
   const query = searchQuery.trim().toLowerCase()
-  const terms = query.split(/\s+/).filter(t => t.length >= 2)
+  const andTokens = tokenizeSearchQueryForAnd(searchQuery)
 
-  console.log(`[ProductFilter] Filtering ${products.length} products with ${terms.length} terms for query: "${searchQuery}"`)
+  /** When the user typed 2+ tokens (e.g. "inya 500"), every token must match (AND). */
+  const productsInput =
+    andTokens.length > 1
+      ? products.filter((p) => productMatchesAllSearchTokens(p, andTokens))
+      : products
 
-  const scoredProducts = products.map(product => {
+  if (productsInput.length === 0) {
+    console.log("[ProductFilter] No products left after AND token filter")
+    return []
+  }
+
+  const terms =
+    andTokens.length > 0
+      ? andTokens
+      : query.split(/\s+/).filter((t) => t.length >= 2)
+
+  const effectiveMinScore = andTokens.length > 1 ? 0 : minScore
+
+  console.log(
+    `[ProductFilter] Filtering ${productsInput.length}/${products.length} products, ${terms.length} term(s), AND=${andTokens.length > 1}, query: "${searchQuery}"`
+  )
+
+  const scoredProducts = productsInput.map((product) => {
     // Start with backend score if available
     let baseScore = (product.match_score || product.relevance_score || 0)
 
@@ -197,11 +284,12 @@ export function filterProductsByRelevance<T extends {
     return { ...product, finalScore }
   })
 
-  // Filter out low-scoring results - only keep word boundary matches or better
-  const filtered = scoredProducts.filter(item => item.finalScore >= minScore)
+  const filtered = scoredProducts.filter((item) => item.finalScore >= effectiveMinScore)
   const sorted = filtered.sort((a, b) => b.finalScore - a.finalScore)
 
-  console.log(`[ProductFilter] Kept ${sorted.length}/${products.length} products with score >= ${minScore}`)
+  console.log(
+    `[ProductFilter] Kept ${sorted.length}/${productsInput.length} products with score >= ${effectiveMinScore}`
+  )
   if (sorted.length > 0) {
     console.log(`[ProductFilter] Top 3 scores:`, sorted.slice(0, 3).map(p => ({
       name: p.item_commercial_name,

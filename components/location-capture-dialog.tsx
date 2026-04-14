@@ -20,18 +20,11 @@ import {
 import { MapPin, Loader2, X } from "lucide-react"
 import { useLocationStoreEnhanced, reverseGeocodeToDistrict, type LocationData } from "@/lib/location-store-enhanced"
 import { RWANDA_DISTRICTS } from "@/lib/constants"
+import { DISTRICT_CELLS } from "@/lib/rwanda-district-cells"
 
 interface LocationCaptureDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-}
-
-// Common cells per district (simplified - in production, fetch from API)
-const DISTRICT_CELLS: Record<string, string[]> = {
-  Kicukiro: ["Kagarama", "Gikondo", "Niboye", "Kanombe", "Gatenga", "Kinyinya"],
-  Gasabo: ["Kimisagara", "Remera", "Kimironko", "Kacyiru", "Gisozi", "Jali"],
-  Nyarugenge: ["Nyamirambo", "Kimisagara", "Gitega", "Rwezamenyo", "Muhima"],
-  // Add more as needed
 }
 
 export function LocationCaptureDialog({ open, onOpenChange }: LocationCaptureDialogProps) {
