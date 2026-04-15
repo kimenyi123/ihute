@@ -3,6 +3,13 @@ import { getOrdersUrl } from "@/lib/backend-config"
 import { DEFAULT_GUEST_ISHYIGA_ACCOUNT } from "@/lib/guest-checkout"
 import { orderErrorMessageWithProductNames } from "@/lib/order-error-display"
 
+/** Java createOrder can be slow on cold Tomcat; default 60s (override with ORDER_CREATE_JAVA_TIMEOUT_MS). */
+const ORDER_CREATE_JAVA_TIMEOUT_MS = (() => {
+  const raw = process.env.ORDER_CREATE_JAVA_TIMEOUT_MS
+  const n = raw ? Number.parseInt(raw, 10) : 60_000
+  return Number.isFinite(n) && n >= 5_000 ? n : 60_000
+})()
+
 function describeConnectFailure(raw?: string): string {
   if (!raw?.trim()) {
     return "Could not connect to order processing service"
@@ -264,7 +271,7 @@ export async function POST(req: Request) {
         if (shared.buyerAccount) form.set("buyerAccount", shared.buyerAccount)
 
         const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 15000)
+        const timeoutId = setTimeout(() => controller.abort(), ORDER_CREATE_JAVA_TIMEOUT_MS)
         res = await fetch(url, {
           method: "POST",
           headers: {
@@ -296,7 +303,7 @@ export async function POST(req: Request) {
           const jsonUrl = new URL(url)
           jsonUrl.searchParams.set("action", "createOrder")
           const c2 = new AbortController()
-          const t2 = setTimeout(() => c2.abort(), 15000)
+          const t2 = setTimeout(() => c2.abort(), ORDER_CREATE_JAVA_TIMEOUT_MS)
           try {
             res = await fetch(jsonUrl.toString(), {
               method: "POST",

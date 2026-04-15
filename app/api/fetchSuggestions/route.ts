@@ -232,7 +232,7 @@ async function forward(req: NextRequest) {
         suppliersByProduct: [],
         products: [],
         query: incoming.searchParams.get('globalSearch') || '',
-        warning: "Search took too long, please try again with more specific terms"
+        // warning: "Search took too long, please try again with more specific terms"
       }), {
         status: 200,
         headers: {

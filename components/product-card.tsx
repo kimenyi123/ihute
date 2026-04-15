@@ -23,6 +23,17 @@ import {
 import { unitMeaningfulForDisplay } from "@/lib/product-unit-display"
 import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price"
 
+function formatPcsFromItemEmballage(raw: unknown): string | null {
+  if (raw == null) return null
+  const cleaned = String(raw).trim()
+  if (!cleaned) return null
+  const numeric = Number(cleaned.replace(",", "."))
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return Number.isInteger(numeric) ? `${numeric} pcs` : `${numeric.toString()} pcs`
+  }
+  return `${cleaned} pcs`
+}
+
 type Product = {
   id: string
   name: string
@@ -123,6 +134,12 @@ export function ProductCard({
     () => normalizeItemEmballageForCart(itemEmballage ?? (product as { ITEM_EMBALLAGE?: unknown }).ITEM_EMBALLAGE),
     [itemEmballage, product]
   )
+  const displayUnitLabel = useMemo(() => {
+    const pcs = formatPcsFromItemEmballage(itemEmballage ?? (product as { ITEM_EMBALLAGE?: unknown }).ITEM_EMBALLAGE)
+    if (pcs) return pcs
+    if (unitMeaningfulForDisplay(unit)) return String(unit).trim()
+    return null
+  }, [itemEmballage, product, unit])
 
   const fav = isFavorite(id)
   const checkPriceDrop = usePriceWatchStore((s) => s.checkPriceDrop)
@@ -408,8 +425,8 @@ export function ProductCard({
             <div className="mt-auto space-y-1 pt-1">
               <div className="text-base font-semibold tabular-nums text-black">
                 {displayPrice.toLocaleString()} {currency}
-                {unitMeaningfulForDisplay(unit) ? (
-                  <span className="text-sm font-normal text-muted-foreground"> / {unit}</span>
+                {displayUnitLabel ? (
+                  <span className="text-sm font-normal text-muted-foreground"> / {displayUnitLabel}</span>
                 ) : null}
               </div>
               {product.expiryLabel ? (
@@ -464,7 +481,7 @@ export function ProductCard({
             <div className={cn(isCompact ? "text-[11px]" : "text-sm")}>
               <div className="font-semibold tabular-nums text-foreground">
                 {displayPrice.toLocaleString()} {currency}
-                {unitMeaningfulForDisplay(unit) ? (
+                {displayUnitLabel ? (
                   <span
                     className={cn(
                       "font-normal text-muted-foreground",
@@ -472,7 +489,7 @@ export function ProductCard({
                     )}
                   >
                     {" "}
-                    / {unit}
+                    / {displayUnitLabel}
                   </span>
                 ) : null}
               </div>

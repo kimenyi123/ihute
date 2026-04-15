@@ -196,6 +196,7 @@ export function CartAlsoBuy({ cartItems }: { cartItems: CartItem[] }) {
     return () => { cancelled = true }
   }, [firstSupplierName, cartItems.map((i) => i.id).sort().join(",")])
 
+  // Cart upsell: "You can also buy" — bordered card + sparkles heading; spinner until recommendations load.
   if (loading) {
     return (
       <section className="rounded-lg border bg-card p-4">
@@ -210,8 +211,10 @@ export function CartAlsoBuy({ cartItems }: { cartItems: CartItem[] }) {
     )
   }
 
+  // Nothing to show — omit the section so the cart stays clean.
   if (products.length === 0) return null
 
+  // Recommendations: responsive grid of cards (see ProductCard for actions).
   return (
     <section className="rounded-lg border bg-card p-4">
       <h2 className="text-lg font-semibold text-foreground flex items-center gap-2 mb-4">

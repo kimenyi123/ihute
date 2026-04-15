@@ -631,12 +631,22 @@ function CartSummaryBody() {
           typeof json?.ordersUrl === "string" && json.ordersUrl.trim()
             ? `\n\nBackend URL: ${json.ordersUrl.trim()}`
             : ""
-        alert(`Failed to create order: ${errMsg}${target}${hint}`)
+        toast({
+          variant: "destructive",
+          title: "Failed to create order",
+          description: `${errMsg}${target}${hint}`.trim(),
+          duration: 20_000,
+        })
       }
     } catch (error) {
       console.error("Order creation error:", error)
       setPaymentStatus(g.supplierId, "failed")
-      alert("Failed to create order. Please try again.")
+      toast({
+        variant: "destructive",
+        title: "Failed to create order",
+        description: "Please try again. If it keeps failing, check that Tomcat is running and JAVA_BACKEND_BASE matches your port.",
+        duration: 12_000,
+      })
     } finally {
       setBusy(null)
     }
