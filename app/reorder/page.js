@@ -157,23 +157,23 @@ function OrderCard({ order, onReorder, isReordering }) {
   return (
     <div className="bg-white rounded-xl shadow-sm hover:shadow-md transition-all border border-gray-100">
       <div className="p-6">
-        <div className="flex justify-between items-start mb-4">
-          <div className="flex-1">
-            <div className="flex items-center gap-3 mb-2">
-              <h3 className="text-lg font-bold text-gray-900">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4 mb-4">
+          <div className="flex-1 min-w-0">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-2">
+              <h3 className="text-base sm:text-lg font-bold text-gray-900">
                 Order #{order.order_number}
               </h3>
-              <span className="px-2.5 py-0.5 bg-blue-100 text-blue-700 text-xs font-medium rounded-full">
+              <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-medium rounded-full">
                 Completed
               </span>
             </div>
-            <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600">
+            <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-xs sm:text-sm text-gray-600">
               <span className="flex items-center gap-1.5">
-                <Calendar className="h-4 w-4" />
+                <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                 {order.order_time}
               </span>
               <span className="flex items-center gap-1.5">
-                <Clock className="h-4 w-4" />
+                <Clock className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                 {order.products?.length || 0} items
               </span>
             </div>
@@ -182,7 +182,7 @@ function OrderCard({ order, onReorder, isReordering }) {
           <button
             onClick={() => onReorder(order)}
             disabled={isReordering}
-            className="bg-blue-600 text-white px-5 py-2.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 font-medium transition-colors"
+            className="bg-blue-600 text-white px-4 sm:px-5 py-2 sm:py-2.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-medium transition-colors w-full sm:w-auto"
           >
             {isReordering ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -193,13 +193,13 @@ function OrderCard({ order, onReorder, isReordering }) {
           </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 p-4 bg-gray-50 rounded-lg">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-4 p-3 sm:p-4 bg-gray-50 rounded-lg">
           <div>
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Seller</p>
-            <p className="font-semibold text-gray-900">{order.seller?.name}</p>
-            <p className="text-sm text-gray-600 mt-0.5">{order.seller?.phone}</p>
+            <p className="font-semibold text-gray-900 text-sm sm:text-base">{order.seller?.name}</p>
+            <p className="text-xs sm:text-sm text-gray-600 mt-0.5">{order.seller?.phone}</p>
             {order.seller?.momo && order.seller.momo !== "null" && (
-              <p className="text-sm text-blue-600 flex items-center gap-1 mt-1">
+              <p className="text-xs sm:text-sm text-blue-600 flex items-center gap-1 mt-1">
                 <Wallet className="h-3 w-3" />
                 MoMo Available
               </p>
@@ -207,22 +207,22 @@ function OrderCard({ order, onReorder, isReordering }) {
           </div>
           <div>
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Delivery</p>
-            <p className="font-medium text-gray-900 flex items-start gap-1">
-              <MapPin className="h-4 w-4 flex-shrink-0 mt-0.5 text-gray-400" />
-              <span>{formatDeliveryLocation(order.delivery?.location)}</span>
+            <p className="font-medium text-gray-900 text-sm sm:text-base flex items-start gap-1">
+              <MapPin className="h-3.5 w-3.5 sm:h-4 sm:w-4 flex-shrink-0 mt-0.5 text-gray-400" />
+              <span className="break-words">{formatDeliveryLocation(order.delivery?.location)}</span>
             </p>
           </div>
-          <div>
+          <div className="sm:col-span-2 lg:col-span-1">
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Total Amount</p>
-            <p className="font-bold text-2xl text-blue-600">
-              {formatMoney(order.total_amount)} <span className="text-lg">RWF</span>
+            <p className="font-bold text-xl sm:text-2xl text-blue-600">
+              {formatMoney(order.total_amount)} <span className="text-sm sm:text-lg">RWF</span>
             </p>
           </div>
         </div>
 
         <button
           onClick={() => setExpanded(!expanded)}
-          className="w-full text-left py-2 flex items-center justify-between text-sm font-medium text-gray-700 hover:text-gray-900"
+          className="w-full text-left py-2 flex items-center justify-between text-sm font-medium text-gray-700 hover:text-gray-900 tap-target"
         >
           <span className="flex items-center gap-2">
             <ShoppingCart className="h-4 w-4" />
@@ -267,8 +267,8 @@ function PaymentMethodDialog({ order, onClose, onContinue }) {
   const sellerHasMomo = order?.seller?.momo && order.seller.momo !== "null";
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-      <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl animate-scale-in">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4 animate-fade-in">
+      <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl animate-scale-in">
         <div className="p-6 border-b border-gray-100">
           <div className="flex justify-between items-center">
             <h2 className="text-2xl font-bold text-gray-900">Choose Payment Method</h2>
@@ -363,7 +363,7 @@ function CODDialog({ order, onClose, onSubmit, isSubmitting, buyerName, whatsApp
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4 animate-fade-in">
       <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl animate-scale-in max-h-[90vh] overflow-y-auto">
         <div className="p-6 border-b border-gray-100 sticky top-0 bg-white">
           <div className="flex justify-between items-center">
@@ -401,10 +401,10 @@ function CODDialog({ order, onClose, onSubmit, isSubmitting, buyerName, whatsApp
                 return (
                   <div key={i} className="text-sm">
                     <p className="font-medium">{p.name}</p>
-                    <div className="grid grid-cols-2 gap-2 text-gray-600 mt-1">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 sm:gap-2 text-gray-600 mt-1 text-xs sm:text-sm">
                       <span>Qty: {qty}</span>
-                      <span>Unit price: {formatMoney(unit)} RWF</span>
-                      <span>Total: {formatMoney(lineTotal)} RWF</span>
+                      <span>Unit: {formatMoney(unit)} RWF</span>
+                      <span className="sm:col-span-2">Total: {formatMoney(lineTotal)} RWF</span>
                     </div>
                   </div>
                 );
@@ -501,7 +501,7 @@ function MoMoDialog({ order, onClose, onConfirm, isSubmitting, whatsAppData }) {
   const telHref = `tel:${encodeURIComponent(payload)}`;
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4 animate-fade-in">
       <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl animate-scale-in max-h-[90vh] overflow-y-auto">
         <div className="p-6 border-b border-gray-100">
           <div className="flex justify-between items-center">
@@ -543,11 +543,10 @@ function MoMoDialog({ order, onClose, onConfirm, isSubmitting, whatsAppData }) {
                 return (
                   <div key={i} className="text-sm">
                     <p className="font-medium">{p.name}</p>
-                    <div className="grid grid-cols-2 gap-2 text-gray-600 mt-1">
-
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 sm:gap-2 text-gray-600 mt-1 text-xs sm:text-sm">
                       <span>Qty: {qty}</span>
                       <span>Unit: {formatMoney(unit)} RWF</span>
-                      <span>Total: {formatMoney(lineTotal)} RWF</span>
+                      <span className="sm:col-span-2">Total: {formatMoney(lineTotal)} RWF</span>
                     </div>
                   </div>
                 );
@@ -813,12 +812,14 @@ export default function ReorderPage() {
 
   if (!buyerAccount) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="min-h-screen flex flex-col bg-gray-50">
         <Header />
-        <div className="text-center">
-          <User className="h-16 w-16 mx-auto text-gray-300 mb-4" />
-          <p className="text-gray-600 text-lg">Please log in to view your orders</p>
-        </div>
+        <main className="flex-1 flex items-center justify-center px-4 py-12">
+          <div className="text-center">
+            <User className="h-16 w-16 mx-auto text-gray-300 mb-4" />
+            <p className="text-gray-600 text-lg">Please log in to view your orders</p>
+          </div>
+        </main>
         <Footer />
       </div>
     );
@@ -826,14 +827,14 @@ export default function ReorderPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen flex flex-col bg-gray-50">
         <Header />
-        <div className="flex items-center justify-center py-20">
+        <main className="flex-1 flex items-center justify-center px-4 py-12">
           <div className="text-center">
             <Loader2 className="h-12 w-12 animate-spin mx-auto text-blue-600 mb-4" />
             <p className="text-gray-600">Loading your orders...</p>
           </div>
-        </div>
+        </main>
         <Footer />
       </div>
     );
@@ -842,7 +843,7 @@ export default function ReorderPage() {
   const whatsAppData = getWhatsAppData();
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+    <div className="min-h-screen flex flex-col bg-gradient-to-br from-gray-50 to-gray-100">
       <Header />
 
       {toast && (
@@ -853,31 +854,33 @@ export default function ReorderPage() {
         />
       )}
 
-      <div className="max-w-6xl mx-auto p-6">
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">Reorder Items</h1>
-          <p className="text-gray-600">Quickly reorder from your previous purchases</p>
-        </div>
+      <main className="flex-1 w-full">
+        <div className="max-w-6xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+          <div className="mb-6 sm:mb-8">
+            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-gray-900 mb-2">Reorder Items</h1>
+            <p className="text-gray-600 text-sm sm:text-base">Quickly reorder from your previous purchases</p>
+          </div>
 
-        {orders.length === 0 ? (
-          <div className="bg-white rounded-2xl shadow-sm p-16 text-center">
-            <Package className="h-20 w-20 mx-auto text-gray-300 mb-4" />
-            <h3 className="text-2xl font-semibold text-gray-700 mb-2">No Recent Orders</h3>
-            <p className="text-gray-500">Your previous orders will appear here</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {orders.map((order) => (
-              <OrderCard
-                key={order.order_id}
-                order={order}
-                onReorder={openPaymentDialog}
-                isReordering={reordering === order.order_id}
-              />
-            ))}
-          </div>
-        )}
-      </div>
+          {orders.length === 0 ? (
+            <div className="bg-white rounded-2xl shadow-sm p-8 sm:p-12 lg:p-16 text-center">
+              <Package className="h-16 w-16 sm:h-20 sm:w-20 mx-auto text-gray-300 mb-4" />
+              <h3 className="text-xl sm:text-2xl font-semibold text-gray-700 mb-2">No Recent Orders</h3>
+              <p className="text-gray-500 text-sm sm:text-base">Your previous orders will appear here</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {orders.map((order) => (
+                <OrderCard
+                  key={order.order_id}
+                  order={order}
+                  onReorder={openPaymentDialog}
+                  isReordering={reordering === order.order_id}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </main>
 
       {showPaymentDialog && selectedOrder && (
         <PaymentMethodDialog

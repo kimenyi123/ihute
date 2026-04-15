@@ -9,6 +9,7 @@ import { getSmartRecommendations } from "@/lib/recommendation-service"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { ArrowLeft } from "lucide-react"
+import { Header } from "@/components/header"
 
 const BURROWS_NICKNAME = "burrows"
 const BURROWS_DISPLAY_NAME = "PANGOLIN'S BURROWS"
@@ -331,6 +332,7 @@ export default function DiscoverPage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-background">
+        <Header />
         <div className="container mx-auto px-4 py-8">
           <div className="text-center text-muted-foreground">Loading recommendations...</div>
         </div>
@@ -340,8 +342,11 @@ export default function DiscoverPage() {
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Header with hamburger menu */}
+      <Header />
+      
       <div className="container mx-auto px-4 py-6">
-        {/* Header */}
+        {/* Page Header */}
         <div className="mb-6">
           <div className="flex items-start justify-between mb-4">
             <Link href="/">

@@ -4,7 +4,7 @@ import Link from "next/link"
 import Image from "next/image"
 import { useEffect, useState } from "react"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
-import { Star } from "lucide-react"
+import { Star, Menu, X } from "lucide-react"
 import { ScrollText } from "lucide-react"
 import {
   ShoppingCart,
@@ -28,6 +28,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu"
+import { Sheet, SheetContent, SheetTrigger, SheetClose, SheetTitle } from "@/components/ui/sheet"
 
 import { LanguageSelector } from "@/components/language-selector"
 import { GlobalSearch } from "@/components/global-search"
@@ -63,6 +64,7 @@ export function Header() {
   const pendingCount = useOrdersStore((s) => s.getPendingCount())
   const [sellerCount, setSellerCount] = useState<number>(0)
   const [barcodeOpen, setBarcodeOpen] = useState(false)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   useEffect(() => {
     let ignore = false
@@ -147,11 +149,11 @@ export function Header() {
                     >
                       <button
                         type="button"
-                        className="inline-flex h-9 min-w-[120px] items-center gap-2 rounded-md px-3 text-sm font-medium hover:bg-accent hover:text-accent-foreground cursor-pointer"
+                        className="inline-flex h-9 min-w-0 md:min-w-[120px] items-center gap-1 md:gap-2 rounded-md px-2 md:px-3 text-sm font-medium hover:bg-accent hover:text-accent-foreground cursor-pointer"
                         aria-label="Open account menu"
                       >
                         <User className="h-4 w-4 shrink-0" />
-                        <span className="max-w-[120px] truncate">{user?.name}</span>
+                        <span className="hidden sm:inline max-w-[80px] md:max-w-[120px] truncate">{user?.name}</span>
                       </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-56 z-[100]" sideOffset={4}>
@@ -191,58 +193,61 @@ export function Header() {
                 </DropdownMenu>
                 </div>
 
-                {/* Supplier Orders */}
-                {user?.role === "supplier" && (
-                  <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Orders (Seller)">
-                    <Link href="/supplier/orders">
-                      <PackageSearch className="h-5 w-5" />
-                      {sellerCount > 0 && (
-                        <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-amber-600 text-xs font-bold text-white">
-                          {sellerCount}
-                        </span>
-                      )}
-                    </Link>
-                  </Button>
-                )}
-
-                {/* Customer Orders */}
-            {(user?.role !== "supplier" || user?.dualPharmacyRetail) && (
-                  <>
-                    <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Orders">
-                      <Link href="/buyer/orders">
-                        <ScrollText className="h-5 w-5" />
-                        {pendingCount > 0 && (
-                          <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">
-                            {pendingCount}
+                {/* Order icons - hidden on mobile, visible on desktop */}
+                <div className="hidden md:flex items-center gap-1">
+                  {/* Supplier Orders */}
+                  {user?.role === "supplier" && (
+                    <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Orders (Seller)">
+                      <Link href="/supplier/orders">
+                        <PackageSearch className="h-5 w-5" />
+                        {sellerCount > 0 && (
+                          <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-amber-600 text-xs font-bold text-white">
+                            {sellerCount}
                           </span>
                         )}
                       </Link>
                     </Button>
+                  )}
 
-                    {/* Deliveries */}
-                    <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Deliveries">
-                      <Link href="/deliveries">
-                        <PackageCheck className="h-5 w-5" />
+                  {/* Customer Orders */}
+                  {(user?.role !== "supplier" || user?.dualPharmacyRetail) && (
+                    <>
+                      <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Orders">
+                        <Link href="/buyer/orders">
+                          <ScrollText className="h-5 w-5" />
+                          {pendingCount > 0 && (
+                            <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">
+                              {pendingCount}
+                            </span>
+                          )}
+                        </Link>
+                      </Button>
+
+                      {/* Deliveries */}
+                      <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Deliveries">
+                        <Link href="/deliveries">
+                          <PackageCheck className="h-5 w-5" />
+                        </Link>
+                      </Button>
+
+                      {/* Table Commands */}
+                      <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Table Commands">
+                        <Link href="/tables">
+                          <Users className="h-5 w-5" />
+                        </Link>
+                      </Button>
+                    </>
+                  )}
+
+                  {/* Payment Dashboard - Admin/Staff only */}
+                  {(user?.role === "admin" || user?.role === "staff") && (
+                    <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Payment Dashboard">
+                      <Link href="/payment/dashboard">
+                        <BarChart3 className="h-5 w-5" />
                       </Link>
                     </Button>
-
-                    {/* Table Commands */}
-                    <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Table Commands">
-                      <Link href="/tables">
-                        <Users className="h-5 w-5" />
-                      </Link>
-                    </Button>
-                  </>
-                )}
-
-                {/* Payment Dashboard - Admin/Staff only */}
-                {(user?.role === "admin" || user?.role === "staff") && (
-                  <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Payment Dashboard">
-                    <Link href="/payment/dashboard">
-                      <BarChart3 className="h-5 w-5" />
-                    </Link>
-                  </Button>
-                )}
+                  )}
+                </div>
               </>
             ) : (
               <Button asChild variant="ghost" size="sm" className="h-9">
@@ -253,37 +258,38 @@ export function Header() {
               </Button>
             )}
 
-            {/* Favorites */}
-            <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Favorites">
-              <Link href="/favorites">
-                <Heart className="h-5 w-5" />
-                {favoritesCount > 0 && (
-                  <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs font-bold text-white">
-                    {favoritesCount}
-                  </span>
-                )}
-              </Link>
-            </Button>
-            {/* Watched prices */}
-            <Button asChild variant="ghost" size="icon" className="h-9 w-9" title="Watched prices">
-              <Link href="/price-watch">
-                <Eye className="h-5 w-5" />
-              </Link>
-            </Button>
-            {/* Reorder (use orders-style icon) */}
-            <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Reorder Items">
-              <Link href="/reorder">
-                <PackageSearch className="h-5 w-5" />
-              </Link>
-            </Button>
-
-
-            {/* Ratings */}
-            <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Ratings">
-              <Link href="/ratings">
-                <Star className="h-5 w-5" />
-              </Link>
-            </Button>
+            {/* Desktop-only icons - hidden on mobile */}
+            <div className="hidden md:flex items-center gap-1">
+              {/* Favorites */}
+              <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Favorites">
+                <Link href="/favorites">
+                  <Heart className="h-5 w-5" />
+                  {favoritesCount > 0 && (
+                    <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs font-bold text-white">
+                      {favoritesCount}
+                    </span>
+                  )}
+                </Link>
+              </Button>
+              {/* Watched prices */}
+              <Button asChild variant="ghost" size="icon" className="h-9 w-9" title="Watched prices">
+                <Link href="/price-watch">
+                  <Eye className="h-5 w-5" />
+                </Link>
+              </Button>
+              {/* Reorder (use orders-style icon) */}
+              <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Reorder Items">
+                <Link href="/reorder">
+                  <PackageSearch className="h-5 w-5" />
+                </Link>
+              </Button>
+              {/* Ratings */}
+              <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Ratings">
+                <Link href="/ratings">
+                  <Star className="h-5 w-5" />
+                </Link>
+              </Button>
+            </div>
 
             {/* Barcode add to cart */}
             {/*<Button variant="ghost" size="icon" className="h-9 w-9" title="Add by barcode" onClick={() => setBarcodeOpen(true)}>
@@ -300,6 +306,197 @@ export function Header() {
                 )}
               </Link>
             </Button>
+
+            {/* Mobile Menu Button - shows Menu or X depending on state */}
+            <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+              <SheetTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-9 w-9 md:hidden" title={mobileMenuOpen ? "Close menu" : "Menu"}>
+                  {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="right" className="w-[280px] sm:w-[350px] p-0">
+                <SheetTitle className="sr-only">Navigation Menu</SheetTitle>
+                <div className="flex flex-col h-full">
+                  {/* Mobile Menu Header */}
+                  <div className="p-4 border-b">
+                    <span className="font-semibold text-lg">Menu</span>
+                  </div>
+
+                  {/* Mobile Menu Content */}
+                  <div className="flex-1 overflow-y-auto py-2">
+                    {/* Main Navigation */}
+                    <div className="px-2 py-2">
+                      <p className="px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                        Quick Links
+                      </p>
+
+                      {/* Favorites */}
+                      <SheetClose asChild>
+                        <Link
+                          href="/favorites"
+                          className="flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-accent transition-colors"
+                        >
+                          <Heart className="h-5 w-5" />
+                          <span>Favorites</span>
+                          {favoritesCount > 0 && (
+                            <span className="ml-auto bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">
+                              {favoritesCount}
+                            </span>
+                          )}
+                        </Link>
+                      </SheetClose>
+
+                      {/* Price Watch */}
+                      <SheetClose asChild>
+                        <Link
+                          href="/price-watch"
+                          className="flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-accent transition-colors"
+                        >
+                          <Eye className="h-5 w-5" />
+                          <span>Price Watch</span>
+                        </Link>
+                      </SheetClose>
+
+                      {/* Reorder */}
+                      <SheetClose asChild>
+                        <Link
+                          href="/reorder"
+                          className="flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-accent transition-colors"
+                        >
+                          <PackageSearch className="h-5 w-5" />
+                          <span>Reorder Items</span>
+                        </Link>
+                      </SheetClose>
+
+                      {/* Ratings */}
+                      <SheetClose asChild>
+                        <Link
+                          href="/ratings"
+                          className="flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-accent transition-colors"
+                        >
+                          <Star className="h-5 w-5" />
+                          <span>My Ratings</span>
+                        </Link>
+                      </SheetClose>
+                    </div>
+
+                    {/* Orders Section */}
+                    <div className="px-2 py-2 border-t">
+                      <p className="px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                        Orders
+                      </p>
+
+                      {isAuthenticated ? (
+                        <>
+                          {/* My Orders */}
+                          <SheetClose asChild>
+                            <Link
+                              href={user?.role === "supplier" ? "/supplier/orders" : "/buyer/orders"}
+                              className="flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-accent transition-colors"
+                            >
+                              <ScrollText className="h-5 w-5" />
+                              <span>{user?.role === "supplier" ? "Seller Orders" : "My Orders"}</span>
+                              {(user?.role === "supplier" ? sellerCount : pendingCount) > 0 && (
+                                <span className={`ml-auto text-white text-xs px-2 py-0.5 rounded-full ${
+                                  user?.role === "supplier" ? "bg-amber-600" : "bg-blue-600"
+                                }`}>
+                                  {user?.role === "supplier" ? sellerCount : pendingCount}
+                                </span>
+                              )}
+                            </Link>
+                          </SheetClose>
+
+                          {/* Deliveries */}
+                          {(user?.role !== "supplier" || user?.dualPharmacyRetail) && (
+                            <SheetClose asChild>
+                              <Link
+                                href="/deliveries"
+                                className="flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-accent transition-colors"
+                              >
+                                <PackageCheck className="h-5 w-5" />
+                                <span>My Deliveries</span>
+                              </Link>
+                            </SheetClose>
+                          )}
+
+                          {/* Table Commands */}
+                          {(user?.role !== "supplier" || user?.dualPharmacyRetail) && (
+                            <SheetClose asChild>
+                              <Link
+                                href="/tables"
+                                className="flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-accent transition-colors"
+                              >
+                                <Users className="h-5 w-5" />
+                                <span>Table Commands</span>
+                              </Link>
+                            </SheetClose>
+                          )}
+                        </>
+                      ) : (
+                        <SheetClose asChild>
+                          <Link
+                            href="/login"
+                            className="flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-accent transition-colors"
+                          >
+                            <User className="h-5 w-5" />
+                            <span>Login to view orders</span>
+                          </Link>
+                        </SheetClose>
+                      )}
+                    </div>
+
+                    {/* Account Section */}
+                    {isAuthenticated && (
+                      <div className="px-2 py-2 border-t">
+                        <p className="px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                          Account
+                        </p>
+
+                        <SheetClose asChild>
+                          <Link
+                            href={user?.role === "supplier" ? "/supplier/dashboard" : "/buyer/dashboard"}
+                            className="flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-accent transition-colors"
+                          >
+                            <User className="h-5 w-5" />
+                            <span>My Dashboard</span>
+                          </Link>
+                        </SheetClose>
+
+                        {user?.role === "supplier" && (
+                          <SheetClose asChild>
+                            <Link
+                              href="/account"
+                              className="flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-accent transition-colors"
+                            >
+                              <BarChart3 className="h-5 w-5" />
+                              <span>Analytics</span>
+                            </Link>
+                          </SheetClose>
+                        )}
+
+                        <button
+                          onClick={() => {
+                            handleLogout()
+                            setMobileMenuOpen(false)
+                          }}
+                          className="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-red-50 text-red-600 transition-colors text-left"
+                        >
+                          <LogOut className="h-5 w-5" />
+                          <span>Logout</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Mobile Menu Footer */}
+                  <div className="p-4 border-t">
+                    <p className="text-xs text-muted-foreground text-center">
+                      © 2026 Ishyiga Software. All rights reserved.
+                    </p>
+                  </div>
+                </div>
+              </SheetContent>
+            </Sheet>
           </div>
         </div>
 
