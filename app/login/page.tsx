@@ -1,51 +1,46 @@
 "use client"
 
-import { useRouter, useSearchParams } from "next/navigation"
+import { Suspense } from "react"
 import Link from "next/link"
-import { Button } from "@/components/ui/button"
-import { ArrowLeft } from "lucide-react"
-import { useAuthStore, type User } from "@/lib/auth-store"
-import { IshyigaLoginCard } from "@/components/ishyiga-login-card"
+import { useSearchParams } from "next/navigation"
+import { GrandmaLoginForm } from "@/components/grandma-login-form"
+import { GRANDMA_PATHS } from "@/lib/grandma-urls"
 
-const shell = "min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50/50 to-slate-100 p-4"
-
-export default function LoginPage() {
-  const router = useRouter()
+function GrandmaLoginInner() {
   const searchParams = useSearchParams()
-  const redirectTo = searchParams?.get("redirect")
-  const login = useAuthStore((s) => s.login)
-
-  const handleSuccess = async (user: User) => {
-    login(user)
-
-    const decoded = redirectTo ? decodeURIComponent(redirectTo) : ""
-    const safeRedirect = decoded.startsWith("/") && !decoded.startsWith("//")
-    if (safeRedirect && decoded.length > 0) {
-      router.push(decoded)
-      return
-    }
-
-    if (user.role === "admin") {
-      router.push("/admin/dashboard")
-    } else if (user.role === "supplier") {
-      router.push("/supplier/dashboard")
-    } else {
-      router.push("/")
-    }
-  }
+  const redirectRaw = searchParams.get("redirect")
+  const redirectTo =
+    redirectRaw && redirectRaw.startsWith("/") && !redirectRaw.startsWith("//")
+      ? redirectRaw
+      : GRANDMA_PATHS.appRoot
+  const phone = searchParams.get("phone") ?? ""
 
   return (
-    <div className={shell}>
-      <div className="w-full max-w-md space-y-4">
-        <Link href="/">
-          <Button variant="ghost" size="sm" className="gap-2 text-[#17324d]">
-            <ArrowLeft className="h-4 w-4" />
-            Back to Home
-          </Button>
+    <div className="grandma-login-page min-h-screen bg-[#f5f1ea] text-[#2c2620]">
+      <div className="mx-auto flex min-h-screen max-w-md flex-col px-4 py-10">
+        <Link
+          href={GRANDMA_PATHS.appRoot}
+          className="grandma-login-back mb-6 text-sm font-semibold text-[#5c4f42] hover:text-[#3d342c]"
+        >
+          ← Back to Ihute
         </Link>
-
-        <IshyigaLoginCard onSuccess={handleSuccess} />
+        <GrandmaLoginForm redirectTo={redirectTo} defaultPhoneOrEmail={phone} />
       </div>
     </div>
+  )
+}
+
+/** Seller login for the Ihute market flow (`/grandma` routes). Warm styling, not the default `/login` page. */
+export default function GrandmaLoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="grandma-login-page flex min-h-screen items-center justify-center bg-[#f5f1ea] text-[#6b5e52]">
+          Loading…
+        </div>
+      }
+    >
+      <GrandmaLoginInner />
+    </Suspense>
   )
 }
