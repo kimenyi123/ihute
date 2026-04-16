@@ -9,6 +9,7 @@ import { getSmartRecommendations } from "@/lib/recommendation-service"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { ArrowLeft } from "lucide-react"
+import { generalSellingPrice } from "@/lib/package-price"
 
 const BURROWS_NICKNAME = "burrows"
 const BURROWS_DISPLAY_NAME = "PANGOLIN'S BURROWS"
@@ -123,13 +124,14 @@ export default function DiscoverPage() {
           seen.add(code)
           const base = parsePrice(p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? p.price ?? "0")
           const embRaw = p.item_emballage ?? p.ITEM_EMBALLAGE
-          if (base <= 0) continue
+          const linePrice = generalSellingPrice(base, embRaw)
+          if (linePrice <= 0) continue
           const img = p.image_url ?? p.item_image_url ?? p.image ?? p.IMAGE_URL
           products.push({
             id: code || `burrows-${products.length}`,
             name: p.item_commercial_name ?? p.ITEM_NAME ?? p.item_name ?? "Product",
             description: undefined,
-            price: base,
+            price: linePrice,
             itemEmballage:
               embRaw != null && String(embRaw).trim() !== "" ? String(embRaw).trim() : undefined,
             unit: p.item_packet ?? p.UNIT ?? "",
@@ -272,13 +274,17 @@ export default function DiscoverPage() {
               )
             )
             const embRaw = p.item_emballage ?? p.ITEM_EMBALLAGE
+            const linePrice = generalSellingPrice(
+              Number.isFinite(base) && !isNaN(base) ? base : 0,
+              embRaw
+            )
             const rawCategory = p.FAMILLE || p.famille || p.category || ""
 
             allProducts.push({
               id: productId,
               name: p.ITEM_NAME || p.item_commercial_name || p.name || productName,
               description: p.DESCRIPTION_KEYWORD || p.item_key_words || "",
-              price: Number.isFinite(base) && !isNaN(base) ? base : 0,
+              price: linePrice,
               itemEmballage:
                 embRaw != null && String(embRaw).trim() !== "" ? String(embRaw).trim() : undefined,
               unit: p.UNIT || p.item_packet || "",

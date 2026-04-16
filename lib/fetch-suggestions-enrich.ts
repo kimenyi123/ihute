@@ -1,4 +1,4 @@
-import { generalSellingPrice } from "@/lib/package-price"
+import { generalSellingPrice, resolveItemEmballageRaw } from "@/lib/package-price"
 
 function extractNumericPrice(value: unknown): number {
   if (typeof value === "number" && Number.isFinite(value)) return value
@@ -39,7 +39,7 @@ export function enrichFetchSuggestionsProducts<T extends { products?: unknown[] 
       extractNumericPrice(p.price) ||
       extractNumericPrice(p.UNITY_PRICE) ||
       0
-    const emb = p.item_emballage ?? p.ITEM_EMBALLAGE
+    const emb = resolveItemEmballageRaw(p)
     p.final_selling_price = generalSellingPrice(base, emb)
   }
   return parsed

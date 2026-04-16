@@ -7,6 +7,7 @@ import { TrendingUp, ArrowRight, Store } from "lucide-react"
 import { useAuthStore } from "@/lib/auth-store"
 import { getSmartRecommendations, shuffle } from "@/lib/recommendation-service"
 import Link from "next/link"
+import { generalSellingPrice } from "@/lib/package-price"
 
 const BURROWS_NICKNAME = "burrows"
 const BURROWS_DISPLAY_NAME = "PANGOLIN'S BURROWS"
@@ -32,6 +33,7 @@ interface Product {
   category?: string
   inStock?: boolean
   rating?: number
+  itemEmballage?: string
 }
 
 interface PersonalizedSection {
@@ -115,15 +117,15 @@ export function PersonalizedSections() {
           const code = p.item_code || p.ITEM_CODE || p.item_commercial_name || ""
           if (seen.has(code)) continue
           seen.add(code)
-          // Match shop-with-me price extraction so Burrows always gets a numeric price
           const rawPrice =
             p.selling_price ??
             p.price ??
-            p.item_emballage ??
             p.SALE_PRICE_INCLUSIVE ??
-            (p as any).SALE_PRICE_EXCLUSIVE ??
-            (p as any).PRICE
-          const price = extractNumericPrice(rawPrice)
+            (p as { SALE_PRICE_EXCLUSIVE?: unknown }).SALE_PRICE_EXCLUSIVE ??
+            (p as { PRICE?: unknown }).PRICE
+          const base = extractNumericPrice(rawPrice)
+          const embRaw = p.item_emballage ?? (p as { ITEM_EMBALLAGE?: unknown }).ITEM_EMBALLAGE
+          const price = generalSellingPrice(base, embRaw)
           if (price <= 0) continue
           const img = p.image_url ?? p.item_image_url ?? p.image ?? p.IMAGE_URL
           products.push({
@@ -131,6 +133,8 @@ export function PersonalizedSections() {
             name: p.item_commercial_name ?? p.ITEM_NAME ?? p.item_name ?? "Product",
             description: undefined,
             price,
+            itemEmballage:
+              embRaw != null && String(embRaw).trim() !== "" ? String(embRaw).trim() : undefined,
             unit: p.item_packet ?? p.UNIT ?? "",
             image: typeof img === "string" ? img : undefined,
             image_url: p.image_url,
@@ -311,14 +315,20 @@ export function PersonalizedSections() {
             if (seenIds.has(productId)) continue
             seenIds.add(productId)
             
-            const price = parseFloat(p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? p.price ?? "0")
+            const base = parseFloat(
+              String(p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? p.price ?? "0").replace(/[^\d.-]/g, "")
+            )
+            const embRaw = p.item_emballage ?? p.ITEM_EMBALLAGE
+            const price = generalSellingPrice(isNaN(base) ? 0 : base, embRaw)
             const rawCategory = p.FAMILLE || p.famille || p.category || ""
             
             allProducts.push({
               id: productId,
               name: p.ITEM_NAME || p.item_commercial_name || p.name || productName,
               description: undefined, // hide code from UI
-              price: isNaN(price) ? 0 : price,
+              price,
+              itemEmballage:
+                embRaw != null && String(embRaw).trim() !== "" ? String(embRaw).trim() : undefined,
               unit: p.UNIT || p.item_packet || "",
               image: p.image_url ?? p.item_image_url ?? p.IMAGE_URL ?? p.image ?? undefined,
               image_url: p.image_url,

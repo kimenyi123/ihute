@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { ProductCard } from "@/components/product-card"
 import type { CartItem } from "@/lib/cart-store"
+import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price"
 import { Sparkles, Loader2 } from "lucide-react"
 
 type Product = {
@@ -26,6 +27,7 @@ type Product = {
   supplierLocation?: string
   momo?: string
   inStock?: boolean
+  itemEmballage?: string | number
 }
 
 const MAX_PRODUCTS = 8
@@ -65,7 +67,10 @@ export function CartAlsoBuy({ cartItems }: { cartItems: CartItem[] }) {
       if (!name) return null
       const key = (code || fallbackId).toLowerCase()
       const id = code || key
-      const price = parsePrice(p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? p.price)
+      const base = parsePrice(p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? p.price)
+      const embRaw = p.item_emballage ?? p.ITEM_EMBALLAGE
+      const price = generalSellingPrice(base, embRaw)
+      const itemEmballage = normalizeItemEmballageForCart(embRaw)
       const supplierIdRaw = (p.SELLER_ISHYIGA_ACCOUNT ?? p.item_seller_account ?? "").toString().trim()
       const supplierNameRaw = (p.SELLER_NAMES ?? p.supplier_name ?? "").toString().trim()
       return {
@@ -87,6 +92,7 @@ export function CartAlsoBuy({ cartItems }: { cartItems: CartItem[] }) {
         supplierLocation: p.LOCATION ?? p.supplier_location,
         momo: p.momo,
         inStock: true,
+        ...(itemEmballage ? { itemEmballage } : {}),
       }
     }
 

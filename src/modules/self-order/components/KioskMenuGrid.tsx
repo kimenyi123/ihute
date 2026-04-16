@@ -11,6 +11,7 @@ import type {
 } from "@/src/modules/self-order/types"
 import { useCartStore } from "@/lib/cart-store"
 import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price"
+import { itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
 
 interface Props {
   items: KioskMenuItem[]
@@ -323,6 +324,14 @@ function formatPrice(n: number) {
   return n.toLocaleString("en") + " RWF"
 }
 
+function kioskEmballageSuffix(item: KioskMenuItem): string | null {
+  const raw =
+    item.item_emballage == null || String(item.item_emballage).trim() === ""
+      ? "1"
+      : String(item.item_emballage)
+  return itemEmballageDisplaySuffix(raw)
+}
+
 function getItemTab(item: KioskMenuItem): string {
   const raw = item.item_department || item.category || ""
   const isBlank = !raw || raw.toLowerCase() === "null" || raw.toLowerCase() === "na"
@@ -356,6 +365,7 @@ function ItemExpandPanel({
   const [qty, setQty] = useState(1)
   const [selectedOptions, setSelectedOptions] = useState<Record<string, KioskModifierOption>>({})
 
+  const embSuffix = kioskEmballageSuffix(item)
   const baseUnit = Number(item.selling_price || 0)
   const basePrice = generalSellingPrice(baseUnit, item.item_emballage)
   const groups = getOptionGroupsForItem(item)
@@ -400,7 +410,12 @@ function ItemExpandPanel({
           {description && (
             <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{description}</p>
           )}
-          <p className="text-red-600 font-bold text-lg mt-1">{formatPrice(unitPrice)}</p>
+          <p className="text-red-600 font-bold text-lg mt-1">
+            <span>{formatPrice(unitPrice)}</span>
+            {embSuffix ? (
+              <span className="font-normal text-gray-500"> ({embSuffix})</span>
+            ) : null}
+          </p>
         </div>
         <button
           type="button"
@@ -495,6 +510,7 @@ function ItemCard({
   onToggle: () => void
 }) {
   const price = generalSellingPrice(Number(item.selling_price || 0), item.item_emballage)
+  const embSuffix = kioskEmballageSuffix(item)
   // Show multilingual description if different from name
   const description = item.item_name && item.item_name !== item.item_commercial_name
     ? item.item_name
@@ -534,7 +550,12 @@ function ItemCard({
         {description && (
           <p className="text-[11px] text-gray-400 line-clamp-1 mt-0.5">{description}</p>
         )}
-        <p className="text-red-600 font-bold text-sm mt-1">{formatPrice(price)}</p>
+        <p className="text-red-600 font-bold text-sm mt-1">
+          <span>{formatPrice(price)}</span>
+          {embSuffix ? (
+            <span className="font-normal text-gray-500"> ({embSuffix})</span>
+          ) : null}
+        </p>
       </div>
 
       {/* +/– toggle */}

@@ -5,14 +5,16 @@
  * Backend (fetchSuggestions, etc.) must always search Redis first; when no data, search DB.
  *
  * Redis value format (used across search, dashboard, cart, shop-with-me):
+ *   - **Sellable stock** (one row) = `item_packet / item_emballage` (emballage missing or invalid → treat as 1).
+ *   - **Line price** (customer) = `selling_price × item_emballage` (base × pack multiplier).
  *   {
  *     "key": "supplier_<account>",   // e.g. "supplier_ALGG0000187"
  *     "data": [
  *       {
  *         "item_commercial_name": string,
- *         "item_packet": string,
- *         "item_emballage": string,  // pass through as-is; empty "" allowed
- *         "selling_price": string,   // use for price (not item_emballage)
+ *         "item_packet": string,     // raw inventory qty (smallest units on this line)
+ *         "item_emballage": string,  // units per sellable pack; pass through as-is; empty "" allowed
+ *         "selling_price": string,   // base unit price; `price` may alias same value (not item_emballage)
  *         "cost_price": string,
  *         "item_key_words": string,
  *         "item_state": string,     // e.g. expiry date; can be ""

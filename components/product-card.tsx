@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { useCartStore } from "@/lib/cart-store"
 import { useFavoritesStore } from "@/lib/favorites-store"
 import { trackProductView, trackClick } from "@/lib/interaction-tracker"
-import { Heart, ShoppingCart } from "lucide-react"
+import { Heart, ScanSearch, ShoppingCart } from "lucide-react"
 import { usePriceWatchStore } from "@/lib/price-watch-store"
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
@@ -22,16 +22,16 @@ import {
 } from "@/lib/image-utils"
 import { unitMeaningfulForDisplay } from "@/lib/product-unit-display"
 import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price"
+import { itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
+import { isExpiryMeaningfulForCustomerDisplay } from "@/lib/item-state-display"
 
+/** Suffix after price: `N pcs` from `item_emballage` (pack size), not currency — default N=1 when omitted. */
 function formatPcsFromItemEmballage(raw: unknown): string | null {
-  if (raw == null) return null
-  const cleaned = String(raw).trim()
-  if (!cleaned) return null
-  const numeric = Number(cleaned.replace(",", "."))
-  if (Number.isFinite(numeric) && numeric > 0) {
-    return Number.isInteger(numeric) ? `${numeric} pcs` : `${numeric.toString()} pcs`
-  }
-  return `${cleaned} pcs`
+  const s =
+    raw == null || String(raw).trim() === ""
+      ? "1"
+      : String(raw)
+  return itemEmballageDisplaySuffix(s)
 }
 
 type Product = {
@@ -73,6 +73,7 @@ export function ProductCard({
   navigateAfterAdd = false,
   layout = "card",
   onQuickView,
+  quickViewReplacesWatchPrice = false,
 }: {
   product: Product
   /** If true, "Buy" navigates to /cart after adding. If false, only adds to cart and shows a toast so user can keep adding. */
@@ -83,8 +84,13 @@ export function ProductCard({
    * `compact` = denser grid tiles: shorter image (4:3), smaller type and buttons (e.g. supplier catalog).
    */
   layout?: "card" | "spotlight" | "compact"
-  /** When set, renders a full-width “Quick view” button under the main actions (typical for spotlight). */
+  /** When set, opens the quick-view dialog (see `quickViewReplacesWatchPrice`). */
   onQuickView?: () => void
+  /**
+   * When true with `onQuickView`, the secondary action is “Quick view” in the same slot as “Watch price”
+   * (category grid). When false (default), keeps “Watch price” and optionally a third “Quick view” row.
+   */
+  quickViewReplacesWatchPrice?: boolean
 }) {
   const isSpotlight = layout === "spotlight"
   const isCompact = layout === "compact"
@@ -117,14 +123,6 @@ export function ProductCard({
   } = product
 
   const displayPrice = useMemo(() => {
-    const fp = (product as { final_selling_price?: unknown }).final_selling_price
-    if (fp != null && fp !== "") {
-      const n =
-        typeof fp === "number"
-          ? fp
-          : parseFloat(String(fp).replace(/[^\d.,-]/g, "").replace(",", "."))
-      if (Number.isFinite(n) && n >= 0) return n
-    }
     return generalSellingPrice(
       price,
       itemEmballage ?? (product as { ITEM_EMBALLAGE?: unknown }).ITEM_EMBALLAGE,
@@ -426,10 +424,10 @@ export function ProductCard({
               <div className="text-base font-semibold tabular-nums text-black">
                 {displayPrice.toLocaleString()} {currency}
                 {displayUnitLabel ? (
-                  <span className="text-sm font-normal text-muted-foreground"> / {displayUnitLabel}</span>
+                  <span className="text-sm font-normal text-muted-foreground"> ({displayUnitLabel})</span>
                 ) : null}
               </div>
-              {product.expiryLabel ? (
+              {isExpiryMeaningfulForCustomerDisplay(product.expiryLabel) ? (
                 <div className="text-[11px] font-medium text-amber-800/90">
                   Expiry: {product.expiryLabel}
                 </div>
@@ -489,11 +487,11 @@ export function ProductCard({
                     )}
                   >
                     {" "}
-                    / {displayUnitLabel}
+                    ({displayUnitLabel})
                   </span>
                 ) : null}
               </div>
-              {product.expiryLabel ? (
+              {isExpiryMeaningfulForCustomerDisplay(product.expiryLabel) ? (
                 <div
                   className={cn(
                     "text-amber-800/90 mt-0.5",
@@ -581,25 +579,48 @@ export function ProductCard({
         >
           Buy
         </Button>
-        <PriceWatchButton
-          productId={(itemCode ?? id).toString().trim()}
-          supplierId={(supplierId || "unknown").toString().trim()}
-          name={name}
-          currentPrice={displayPrice}
-          supplierName={supplierName}
-          image={imageUrlForCart}
-          size={isSpotlight ? "default" : "sm"}
-          variant="outline"
-          className={
-            isSpotlight
-              ? "h-9 min-w-0 flex-1 rounded-md border-gray-300 text-sm text-foreground"
-              : isCompact
-                ? "h-8 w-full px-2 text-[10px] leading-tight [&_svg]:mr-1 [&_svg]:h-3 [&_svg]:w-3"
-                : undefined
-          }
-        />
+        {onQuickView && quickViewReplacesWatchPrice ? (
+          <Button
+            type="button"
+            variant="outline"
+            size={isSpotlight ? "default" : "sm"}
+            className={
+              isSpotlight
+                ? "h-9 min-w-0 flex-1 rounded-md border-gray-300 text-sm text-foreground"
+                : isCompact
+                  ? "h-8 w-full px-2 text-[10px] leading-tight [&_svg]:mr-1 [&_svg]:h-3 [&_svg]:w-3"
+                  : "min-w-0 flex-1"
+            }
+            onClick={(e) => {
+              e.stopPropagation()
+              onQuickView()
+            }}
+            title="Quick view"
+          >
+            <ScanSearch className="h-4 w-4 mr-1 shrink-0" />
+            Quick view
+          </Button>
+        ) : (
+          <PriceWatchButton
+            productId={(itemCode ?? id).toString().trim()}
+            supplierId={(supplierId || "unknown").toString().trim()}
+            name={name}
+            currentPrice={displayPrice}
+            supplierName={supplierName}
+            image={imageUrlForCart}
+            size={isSpotlight ? "default" : "sm"}
+            variant="outline"
+            className={
+              isSpotlight
+                ? "h-9 min-w-0 flex-1 rounded-md border-gray-300 text-sm text-foreground"
+                : isCompact
+                  ? "h-8 w-full px-2 text-[10px] leading-tight [&_svg]:mr-1 [&_svg]:h-3 [&_svg]:w-3"
+                  : undefined
+            }
+          />
+        )}
         </div>
-        {onQuickView && (
+        {onQuickView && !quickViewReplacesWatchPrice && (
           <Button
             type="button"
             variant="outline"
