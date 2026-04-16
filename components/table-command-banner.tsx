@@ -3,7 +3,7 @@
 import { useTableCommandStore } from "@/lib/table-command-store"
 import { Button } from "@/components/ui/button"
 import { Beer, X, Lock, CheckCircle, Send } from "lucide-react"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { TableCommandShareModal } from "@/components/table-command-share-modal"
 import {
   AlertDialog,
@@ -34,12 +34,26 @@ export function TableCommandBanner() {
   const [sendSuccess, setSendSuccess] = useState<any>(null)
   const [isSending, setIsSending] = useState(false)
 
-  if (!activeSession) return null
-
-  const isActive = activeSession.status === "ACTIVE"
-  const isSent = activeSession.status === "SENT"
-  const isClosed = activeSession.status === "CLOSED"
+  // Calculate status flags (before early return so useEffect can use them)
+  const isActive = activeSession?.status === "ACTIVE"
+  const isSent = activeSession?.status === "SENT"
+  const isClosed = activeSession?.status === "CLOSED"
   const userCanClose = canCloseTable()
+
+  // ✅ Auto-leave table when it's closed (removes banner automatically)
+  useEffect(() => {
+    if (isClosed && activeSession) {
+      console.log("🚪 Table is closed, auto-leaving in 3 seconds...")
+      const timer = setTimeout(() => {
+        leaveTableCommand()
+        console.log("✅ Auto-left closed table:", activeSession?.tableName)
+      }, 3000)
+
+      return () => clearTimeout(timer)
+    }
+  }, [isClosed, leaveTableCommand, activeSession])
+
+  if (!activeSession) return null
 
   // background color based on status
   const bgClass = isClosed
@@ -168,16 +182,19 @@ export function TableCommandBanner() {
                 </div>
               )}
 
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowLeaveDialog(true)}
-                className="text-white hover:bg-white/20 hover:text-white gap-1 sm:gap-1.5 h-7 sm:h-9 px-2 sm:px-3 text-xs sm:text-sm"
-              >
-                <X className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                <span className="hidden sm:inline">Leave Table</span>
-                <span className="sm:hidden">Leave</span>
-              </Button>
+              {/* Leave Table button - hidden when table is closed (auto-leaves) */}
+              {!isClosed && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowLeaveDialog(true)}
+                  className="text-white hover:bg-white/20 hover:text-white gap-1 sm:gap-1.5 h-7 sm:h-9 px-2 sm:px-3 text-xs sm:text-sm"
+                >
+                  <X className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                  <span className="hidden sm:inline">Leave Table</span>
+                  <span className="sm:hidden">Leave</span>
+                </Button>
+              )}
             </div>
           </div>
         </div>

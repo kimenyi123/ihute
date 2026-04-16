@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useCartStore } from "@/lib/cart-store"
+import { getOrCreateGuestName, useTableCommandStore } from "@/lib/table-command-store"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -63,8 +64,30 @@ export function CheckoutForm() {
 
   const paymentMethod = watch("paymentMethod")
 
-  // ✅ IMPROVED: Pre-fill form with table info
+  // ✅ Get table session reactively from store
+  const tableSession = useTableCommandStore((state) => state.activeSession)
+
+  // ✅ IMPROVED: Pre-fill form with table info and guest name
   useEffect(() => {
+    // Get guest name from localStorage (set during table creation/join)
+    const guestName = getOrCreateGuestName()
+    
+    console.log('🔍 Checkout pre-fill - guestName:', guestName)
+    console.log('🔍 Checkout pre-fill - tableSession:', tableSession)
+    console.log('🔍 Checkout pre-fill - tableInfo:', tableInfo)
+    
+    // Priority: 1. Table session userName, 2. Stored guest name, 3. Table info
+    const userName = tableSession?.userName || guestName
+    
+    console.log('🔍 Checkout pre-fill - resolved userName:', userName)
+    
+    // ✅ Pre-fill name from guest name / table session (works for both table and non-table orders)
+    if (userName && userName !== "Guest") {
+      console.log('🔍 Setting fullName to:', userName)
+      setValue("fullName", userName)
+    }
+    
+    // ✅ Pre-fill address from table info (only for table orders)
     if (tableInfo?.tableNumber) {
       const tableNum = tableInfo.tableNumber.trim()
 
@@ -72,13 +95,11 @@ export function CheckoutForm() {
       if (tableNum.includes("|")) {
         const parts = tableNum.split("|").map(p => p.trim())
         if (parts.length >= 2) {
-          const [name, address] = parts
-          setValue("fullName", name)
+          const [, address] = parts
           setValue("address", address)
         }
       } else {
-        // If it's just a table number, use it for both name and address
-        setValue("fullName", tableNum)
+        // If it's just a table number, use it for address
         setValue("address", tableNum)
       }
 
@@ -87,7 +108,7 @@ export function CheckoutForm() {
         setValue("city", tableInfo.shopName)
       }
     }
-  }, [tableInfo, setValue])
+  }, [tableInfo?.tableNumber, tableInfo?.shopName, tableSession?.userName, setValue])
 
   if (items.length === 0) {
     return (

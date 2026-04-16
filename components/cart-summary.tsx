@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/dialog"
 import { Copy, PhoneCall, CheckCircle2, RotateCcw, MessageCircle, Truck, CreditCard, Wallet, Users, Lock, MapPin } from "lucide-react"
 import { isBarOrRestaurant } from "@/lib/constants"
-import { useTableCommandStore } from "@/lib/table-command-store"
+import { useTableCommandStore, getOrCreateGuestName } from "@/lib/table-command-store"
 import { GUEST_POOL_EMAIL, getGuestBuyerAccount, ensureGuestPoolBuyerAccount } from "@/lib/guest-checkout"
 import { getSavedAddresses, saveAddress, type SavedAddress } from "@/lib/saved-addresses"
 import {
@@ -147,8 +147,33 @@ function CartSummaryBody() {
   // Table command mode
   const { isInTableCommand, activeSession, leaveTableCommand, lockTableCommand, canCloseTable, closeTableCommand, createTableCommand, updateTableShareData } = useTableCommandStore()
 
-  // Do NOT pre-fill "Your Name" for table orders — table name is already shown in "Table Order - ... - Table X".
-  // User must enter their own name so supplier sees who ordered (not the table name as buyer).
+  // ✅ Track if we've pre-filled the name (to avoid overwriting user edits)
+  const hasPrefilledName = useRef(false)
+  const lastTableSession = useRef<string | null>(null)
+
+  // ✅ Pre-fill "Your Name" from saved guest name or table session
+  useEffect(() => {
+    // Reset prefill flag when table session changes (new table created/joined)
+    const currentSessionId = activeSession ? `${activeSession.tableName}-${activeSession.createdAt}` : null
+    if (currentSessionId !== lastTableSession.current) {
+      hasPrefilledName.current = false
+      lastTableSession.current = currentSessionId
+    }
+    
+    if (!hasPrefilledName.current && checkoutMode === "anonymous") {
+      // Priority: 1. Table session userName, 2. localStorage guest name
+      const guestName = getOrCreateGuestName()
+      const tableUserName = activeSession?.userName
+      const finalName = tableUserName && tableUserName !== "Guest" ? tableUserName : guestName
+      
+      if (finalName && finalName !== "Guest") {
+        console.log('💾 Pre-filling anonymousName with:', finalName)
+        setAnonymousName(finalName)
+        hasPrefilledName.current = true
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkoutMode, activeSession])
 
   // Pre-fill from tableInfo only when NOT a table order (e.g. delivery from shop-with-me)
   useEffect(() => {

@@ -6,9 +6,11 @@ import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { CheckCircle, MessageCircle, Copy, ArrowRight } from "lucide-react"
-import { formatPaymentMethod } from "@/lib/payment-utils" // ✅ IMPORTED
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { CheckCircle, MessageCircle, Copy, ArrowRight, Users, Link2, X } from "lucide-react"
+import { formatPaymentMethod } from "@/lib/payment-utils"
 import { RatingModal } from "@/components/RatingModal"
+import { useTableCommandStore } from "@/lib/table-command-store"
 
 function normalizePhone(raw?: string | null): string {
   const v = (raw || "").replace(/\s|-/g, "")
@@ -42,6 +44,47 @@ export default function OrderSuccessPage() {
   const [showRatingModal, setShowRatingModal] = useState(false)
   const [ratingItems, setRatingItems] = useState<Array<{ code: string, name: string }>>([])
   const [hasCheckedRating, setHasCheckedRating] = useState(false)
+  
+  // ✅ Table shareable link alert for table creators
+  const [showTableLinkAlert, setShowTableLinkAlert] = useState(false)
+  const [tableShareLink, setTableShareLink] = useState<string>("")
+  const [tableName, setTableName] = useState<string>("")
+  
+  // Check if user is table creator and show shareable link
+  useEffect(() => {
+    const tableSession = useTableCommandStore.getState().activeSession
+    if (tableSession) {
+      // User is in a table command session
+      const isCreator = tableSession.userEmail === tableSession.createdBy
+      if (isCreator && tableSession.tableName && tableSession.locationId) {
+        // Generate shareable link (same format as backend)
+        const tokenData = `${tableSession.tableName}|${tableSession.locationId}|${Date.now()}`
+        const token = btoa(tokenData).replace(/\+/g, '-').replace(/\//g, '_')
+        const shareLink = `${window.location.origin}/join-table?token=${token}`
+        
+        setTableShareLink(shareLink)
+        setTableName(tableSession.tableName)
+        setShowTableLinkAlert(true)
+        
+        // Auto-hide after 8 seconds
+        const timer = setTimeout(() => {
+          setShowTableLinkAlert(false)
+        }, 8000)
+        
+        return () => clearTimeout(timer)
+      }
+    }
+  }, [])
+  
+  const copyTableLink = async () => {
+    try {
+      await navigator.clipboard.writeText(tableShareLink)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch (err) {
+      console.error("Failed to copy table link:", err)
+    }
+  }
 
   useEffect(() => {
     if (!orderId) {
@@ -200,6 +243,43 @@ export default function OrderSuccessPage() {
       <Header />
       <main className="container mx-auto px-4 py-12">
         <div className="max-w-2xl mx-auto space-y-6">
+          {/* Table Shareable Link Alert - Only for table creators */}
+          {showTableLinkAlert && (
+            <Alert className="border-2 border-blue-200 bg-blue-50 relative">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="absolute top-2 right-2 h-6 w-6 p-0"
+                onClick={() => setShowTableLinkAlert(false)}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+              <Users className="h-5 w-5 text-blue-600" />
+              <AlertTitle className="text-blue-900">Share Your Table!</AlertTitle>
+              <AlertDescription className="text-blue-800 space-y-3">
+                <p>
+                  You created table <strong>{tableName}</strong>. Share this link so others can join and add their orders:
+                </p>
+                <div className="flex gap-2">
+                  <code className="flex-1 bg-white px-3 py-2 rounded text-sm break-all border border-blue-200">
+                    {tableShareLink}
+                  </code>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={copyTableLink}
+                    className="shrink-0"
+                  >
+                    {copied ? <CheckCircle className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                  </Button>
+                </div>
+                <p className="text-xs text-blue-600">
+                  This alert will auto-hide in 8 seconds
+                </p>
+              </AlertDescription>
+            </Alert>
+          )}
+
           {/* Success Message */}
           <Card className="border-2 border-green-200 bg-green-50">
             <CardHeader className="text-center pb-4">
