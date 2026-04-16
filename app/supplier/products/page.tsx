@@ -19,7 +19,8 @@ import {
   AlertCircle,
 } from "lucide-react"
 import Link from "next/link"
-import { parsePackageMultiplier } from "@/lib/package-price"
+import { generalSellingPrice, parsePackageMultiplier, resolveItemEmballageRaw } from "@/lib/package-price"
+import { formatItemEmballageMultiplierOnly, itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
 
 type ProductStatus = "active" | "inactive" | "out-of-stock"
 
@@ -102,12 +103,11 @@ export default function MyProductsPage() {
   let status: ProductStatus = "active"
   if (stock === 0) status = "out-of-stock"
 
+  const embRaw = resolveItemEmballageRaw(p)
   const emb =
-    p.item_emballage != null && String(p.item_emballage).trim() !== ""
-      ? String(p.item_emballage).trim()
-      : p.ITEM_EMBALLAGE != null && String(p.ITEM_EMBALLAGE).trim() !== ""
-        ? String(p.ITEM_EMBALLAGE).trim()
-        : undefined
+    embRaw != null && String(embRaw).trim() !== ""
+      ? String(embRaw).trim()
+      : undefined
 
   const packMult = parsePackageMultiplier(emb)
 
@@ -352,9 +352,16 @@ export default function MyProductsPage() {
                   </thead>
                   <tbody>
                     {filteredProducts.map((product) => {
-                      const packMult = parsePackageMultiplier(product.itemEmballage)
-                      const displaySelling = product.price * packMult
-                      const displayCost = product.costPrice * packMult
+                      const displaySelling = generalSellingPrice(
+                        product.price,
+                        product.itemEmballage
+                      )
+                      const displayCost = generalSellingPrice(
+                        product.costPrice,
+                        product.itemEmballage
+                      )
+                      const sellingSuffix =
+                        itemEmballageDisplaySuffix(product.itemEmballage ?? "1") ?? "1 pcs"
                       return (
                       <tr key={product.id} className="border-b hover:bg-muted/50 transition-colors">
                         <td className="p-3">
@@ -372,9 +379,18 @@ export default function MyProductsPage() {
                         </td>
                         {/* <td className="p-3 text-sm">{product.category}</td> */}
                         <td className="p-3 text-right font-semibold text-sm">
-                          {product.price > 0
-                            ? `${displaySelling.toLocaleString()} ${product.currency || "RWF"}`
-                            : "—"}
+                          {product.price > 0 ? (
+                            <span>
+                              {displaySelling.toLocaleString()}{" "}
+                              {product.currency || "RWF"}
+                              <span className="text-xs font-normal text-muted-foreground">
+                                {" "}
+                                ({sellingSuffix})
+                              </span>
+                            </span>
+                          ) : (
+                            "—"
+                          )}
                         </td>
                         <td className="p-3 text-right font-semibold text-sm text-muted-foreground">
                           {`${displayCost.toLocaleString(undefined, {
@@ -384,9 +400,7 @@ export default function MyProductsPage() {
                         </td>
                         <td className="p-3 text-sm text-muted-foreground max-w-[160px]">
                           <span className="break-words">
-                            {String(product.itemEmballage ?? "").trim() !== ""
-                              ? product.itemEmballage
-                              : "1"}
+                            {formatItemEmballageMultiplierOnly(product.itemEmballage)}
                           </span>
                         </td>
                         <td className="p-3 text-right">

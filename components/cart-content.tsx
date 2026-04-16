@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ShoppingBag, ArrowLeft, Search } from "lucide-react"
 import Link from "next/link"
-import { CartAlsoBuy } from "@/components/cart-also-buy"
 import { BarcodeScanner } from "@/components/barcode-scanner"
 import { useToast } from "@/components/ui/use-toast"
 import { usePriceDropToasts } from "@/lib/use-price-drop-toasts"
@@ -156,7 +155,6 @@ export function CartContent() {
               No products found matching “{searchQuery}”
             </div>
           )}
-          <CartAlsoBuy cartItems={items} />
         </div>
 
         <div className="lg:col-span-1">

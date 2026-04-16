@@ -24,15 +24,26 @@ function rawToSuggestion(
   const name = String(p.ITEM_NAME ?? p.item_commercial_name ?? p.name ?? p.item_name ?? "").trim()
   if (!name) return null
   const productId = id || fallbackId
-  const price = parsePrice(p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? p.item_emballage ?? p.price)
+  // Base catalog unit only — never use item_emballage as a price field.
+  const price = parsePrice(p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? p.price)
   if (price <= 0) return null
+  const emb = p.item_emballage ?? p.ITEM_EMBALLAGE
   const img = (p.image_url ?? p.item_image_url ?? p.IMAGE_URL ?? p.image) as string | undefined
   const supplierId = String(p.supplier_account ?? p.seller_account ?? p.SELLER_ISHYIGA_ACCOUNT ?? "").trim() || (fallbackSupplierId ?? "")
+  const itemKeyWords = String(p.item_key_words ?? p.ITEM_CODE ?? p.item_code ?? id ?? "").trim()
   return {
     product_id: productId,
     name,
     price,
+    ...(emb != null && String(emb).trim() !== ""
+      ? { item_emballage: emb, ITEM_EMBALLAGE: emb }
+      : {}),
     image_url: img && String(img).trim() ? String(img).trim() : undefined,
+    // Helps getProductImageSrc build KAOS URLs when image_url is missing
+    item_key_words: itemKeyWords,
+    famille: p.famille ?? p.FAMILLE,
+    FAMILLE: p.FAMILLE,
+    item_commercial_name: name,
     reason,
     confidence: 0.85,
     supplier_id: supplierId,

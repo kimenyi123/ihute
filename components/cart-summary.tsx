@@ -35,7 +35,7 @@ import {
 import { TableCommandDialog } from "@/components/table-command-dialog"
 import { TableCommandShareModal } from "@/components/table-command-share-modal"
 import { CartSuggestionsPopup } from "@/components/cart-suggestions-popup"
-import { displayUnitForPrice } from "@/lib/cart-display-utils"
+import { itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
 import { orderErrorMessageWithProductNames } from "@/lib/order-error-display"
 import { kaosCatalogBaseUnitPrice } from "@/lib/kaos-catalog-price"
 import {
@@ -631,12 +631,22 @@ function CartSummaryBody() {
           typeof json?.ordersUrl === "string" && json.ordersUrl.trim()
             ? `\n\nBackend URL: ${json.ordersUrl.trim()}`
             : ""
-        alert(`Failed to create order: ${errMsg}${target}${hint}`)
+        toast({
+          variant: "destructive",
+          title: "Failed to create order",
+          description: `${errMsg}${target}${hint}`.trim(),
+          duration: 20_000,
+        })
       }
     } catch (error) {
       console.error("Order creation error:", error)
       setPaymentStatus(g.supplierId, "failed")
-      alert("Failed to create order. Please try again.")
+      toast({
+        variant: "destructive",
+        title: "Failed to create order",
+        description: "Please try again. If it keeps failing, check that Tomcat is running and JAVA_BACKEND_BASE matches your port.",
+        duration: 12_000,
+      })
     } finally {
       setBusy(null)
     }
@@ -737,7 +747,9 @@ function CartSummaryBody() {
               <CardContent className="space-y-3">
                 <div className="flex items-center justify-between text-sm">
                   <span>Items</span>
-                  <span className="font-medium">{g.items.reduce((n, it) => n + it.qty, 0)} pcs</span>
+                  <span className="font-medium">
+                    {g.items.reduce((n, it) => n + it.qty, 0)}
+                  </span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span>Subtotal</span>
@@ -1153,7 +1165,9 @@ function CartSummaryBody() {
                   </div>
                   <div className="max-h-60 overflow-y-auto">
                     {g.items.map((item, index) => {
-                      const unitLine = displayUnitForPrice(item.unit ?? item.selectedUnit)
+                      const unitLine = itemEmballageDisplaySuffix(
+                        item.itemEmballage ?? item.unit ?? item.selectedUnit,
+                      )
                       return (
                       <div key={index} className="flex justify-between items-center p-3 border-b last:border-b-0">
                         <div className="flex-1">

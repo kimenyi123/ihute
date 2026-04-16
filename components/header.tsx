@@ -63,6 +63,11 @@ export function Header() {
   const pendingCount = useOrdersStore((s) => s.getPendingCount())
   const [sellerCount, setSellerCount] = useState<number>(0)
   const [barcodeOpen, setBarcodeOpen] = useState(false)
+  const [hasHydrated, setHasHydrated] = useState(false)
+
+  useEffect(() => {
+    setHasHydrated(true)
+  }, [])
 
   useEffect(() => {
     let ignore = false
@@ -257,7 +262,7 @@ export function Header() {
             <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Favorites">
               <Link href="/favorites">
                 <Heart className="h-5 w-5" />
-                {favoritesCount > 0 && (
+                {hasHydrated && favoritesCount > 0 && (
                   <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs font-bold text-white">
                     {favoritesCount}
                   </span>
@@ -293,7 +298,7 @@ export function Header() {
             <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Cart">
               <Link href="/cart">
                 <ShoppingCart className="h-5 w-5" />
-                {totalItems > 0 && (
+                {hasHydrated && totalItems > 0 && (
                   <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-green-600 text-xs font-bold text-white">
                     {totalItems}
                   </span>
