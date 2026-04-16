@@ -41,7 +41,7 @@ export function KioskCartPage() {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       {/* Header */}
-      <header className="sticky top-0 z-20 bg-red-600 text-white shadow-md">
+      <header className="sticky top-0 z-20 bg-slate-900 text-white shadow-md">
         <div className="flex items-center gap-3 px-4 py-3 max-w-3xl mx-auto">
           <button
             type="button"
@@ -73,7 +73,7 @@ export function KioskCartPage() {
             <button
               type="button"
               onClick={() => router.push(backHref)}
-              className="mt-4 text-red-600 text-sm font-semibold underline underline-offset-2"
+              className="mt-4 text-slate-700 hover:text-slate-900 text-sm font-semibold underline underline-offset-2 transition"
             >
               Go back to menu
             </button>
@@ -107,7 +107,7 @@ export function KioskCartPage() {
               {line.supplierName && (
                 <p className="text-[11px] text-gray-400 mt-0.5 truncate">{line.supplierName}</p>
               )}
-              <p className="mt-1 text-sm font-bold text-red-600">
+              <p className="mt-1 text-sm font-bold text-emerald-600">
                 {(line.price * line.qty).toLocaleString("en")} RWF
               </p>
             </div>
@@ -136,7 +136,7 @@ export function KioskCartPage() {
               <button
                 type="button"
                 onClick={() => remove(line.id, line.selectedUnit)}
-                className="text-[11px] text-gray-400 hover:text-red-500 flex items-center gap-0.5 transition"
+                className="text-[11px] text-gray-400 hover:text-slate-700 flex items-center gap-0.5 transition"
               >
                 <Trash2 className="w-3 h-3" />
                 Remove
@@ -155,7 +155,7 @@ export function KioskCartPage() {
                 {items.length} item{items.length !== 1 ? "s" : ""}
               </span>
               <span className="text-lg font-bold text-gray-900">
-                Total: <span className="text-red-600">{total.toLocaleString("en")} RWF</span>
+                Total: <span className="text-emerald-600">{total.toLocaleString("en")} RWF</span>
               </span>
             </div>
             <div className="flex gap-3">
@@ -169,7 +169,7 @@ export function KioskCartPage() {
               <button
                 type="button"
                 onClick={() => router.push(checkoutHref)}
-                className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl py-3 text-base transition shadow-lg flex items-center justify-center gap-2"
+                className="flex-1 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl py-3 text-base transition shadow-lg flex items-center justify-center gap-2"
               >
                 <ShoppingCart className="w-5 h-5" />
                 Proceed to checkout

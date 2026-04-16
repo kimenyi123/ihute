@@ -5,6 +5,7 @@ import dynamic from "next/dynamic"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useCartStore } from "@/lib/cart-store"
 import { kaosCatalogBaseUnitPrice } from "@/lib/kaos-catalog-price"
+import { GUEST_POOL_EMAIL, ensureGuestPoolBuyerAccount } from "@/lib/guest-checkout"
 import { ChevronLeft, CreditCard, Banknote, Smartphone, Copy, CheckCircle2 } from "lucide-react"
 import type { KioskCategory, KioskOrderLine, KioskOrderPayload } from "@/src/modules/self-order/types"
 
@@ -158,6 +159,12 @@ export function KioskCheckoutPage() {
     setSubmitting(true)
     setError(null)
     try {
+      const ensuredBuyerAccount = await ensureGuestPoolBuyerAccount()
+      if (!ensuredBuyerAccount) {
+        setError("Could not prepare buyer account for this order")
+        return
+      }
+
       const lines: KioskOrderLine[] = items.map((it) => {
         const lineUnit = it.price
         const catalogBase = kaosCatalogBaseUnitPrice(lineUnit, it.itemEmballage)
@@ -174,7 +181,8 @@ export function KioskCheckoutPage() {
       })
 
       const payload: KioskOrderPayload = {
-        buyer_account: undefined,
+        buyer_account: ensuredBuyerAccount,
+        buyer_email: GUEST_POOL_EMAIL,
         table_number: kioskTableInfo?.tableNumber,
         customer_name: kioskTableInfo?.customerName,
         order_type: kioskTableInfo?.orderType ?? "dine-in",
@@ -211,6 +219,10 @@ export function KioskCheckoutPage() {
 
   // If cart line doesn't have momo, fetch it from supplier profile (same idea as cart-summary)
   useEffect(() => {
+    void ensureGuestPoolBuyerAccount()
+  }, [])
+
+  useEffect(() => {
     if (payment !== "MOMO") return
     if (!items.length) return
     if (sellerMomoFromCart.trim()) return
@@ -238,7 +250,7 @@ export function KioskCheckoutPage() {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       {/* Header */}
-      <header className="sticky top-0 z-20 bg-red-600 text-white shadow-md">
+      <header className="sticky top-0 z-20 bg-slate-900 text-white shadow-md">
         <div className="flex items-center gap-3 px-4 py-3 max-w-4xl mx-auto">
           <button
             type="button"
@@ -268,7 +280,15 @@ export function KioskCheckoutPage() {
         <div className="space-y-3">
           <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Order items</h2>
           {items.length === 0 && (
-            <p className="text-sm text-slate-400">No items. <button className="text-red-600 underline" onClick={() => router.push(cartHref)}>Go back</button></p>
+            <p className="text-sm text-slate-400">
+              No items.{" "}
+              <button
+                className="text-slate-700 hover:text-slate-900 underline transition"
+                onClick={() => router.push(cartHref)}
+              >
+                Go back
+              </button>
+            </p>
           )}
           {items.map((line) => (
             <div
@@ -291,7 +311,7 @@ export function KioskCheckoutPage() {
                 <p className="text-sm font-semibold text-gray-900 line-clamp-1">{line.name}</p>
                 <p className="text-xs text-gray-400">{line.qty} × {line.price.toLocaleString("en")} RWF</p>
               </div>
-              <p className="text-sm font-bold text-red-600 flex-shrink-0">
+              <p className="text-sm font-bold text-emerald-600 flex-shrink-0">
                 {(line.price * line.qty).toLocaleString("en")} RWF
               </p>
             </div>
@@ -346,8 +366,8 @@ export function KioskCheckoutPage() {
                     onClick={() => setPayment(id)}
                     className={`flex flex-col items-center gap-1 py-2.5 rounded-xl border-2 text-xs font-semibold transition ${
                       payment === id
-                        ? "border-red-500 bg-red-50 text-red-600"
-                        : "border-gray-200 bg-white text-slate-600 hover:border-red-200"
+                        ? "border-slate-900 bg-slate-50 text-slate-900"
+                        : "border-gray-200 bg-white text-slate-600 hover:border-slate-300"
                     }`}
                   >
                     <Icon className="w-4 h-4" />
@@ -360,7 +380,7 @@ export function KioskCheckoutPage() {
             {/* Total */}
             <div className="flex items-center justify-between text-base font-bold border-t pt-3">
               <span className="text-slate-700">Total</span>
-              <span className="text-red-600">{total.toLocaleString("en")} RWF</span>
+              <span className="text-emerald-600">{total.toLocaleString("en")} RWF</span>
             </div>
           </div>
 
@@ -377,7 +397,7 @@ export function KioskCheckoutPage() {
           {payment === "CASH" && <CashPaymentBlock amount={total} />}
 
           {error && (
-            <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-600">
+            <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
               {error}
             </div>
           )}
@@ -387,7 +407,7 @@ export function KioskCheckoutPage() {
             type="button"
             disabled={!items.length || submitting}
             onClick={handleConfirm}
-            className="w-full h-12 text-base font-bold bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded-2xl shadow-lg flex items-center justify-center gap-2 transition"
+            className="w-full h-12 text-base font-bold bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white rounded-2xl shadow-lg flex items-center justify-center gap-2 transition"
           >
             {submitting ? (
               <>
@@ -403,7 +423,7 @@ export function KioskCheckoutPage() {
           <button
             type="button"
             onClick={() => router.push(cartHref)}
-            className="w-full text-sm text-slate-500 hover:text-red-600 transition text-center py-1"
+            className="w-full text-sm text-slate-500 hover:text-slate-900 transition text-center py-1"
           >
             ← Back to cart
           </button>

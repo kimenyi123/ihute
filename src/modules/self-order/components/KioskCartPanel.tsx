@@ -82,7 +82,7 @@ export function KioskCartPanel({ open, onOpenChange }: Props) {
                   <button
                     type="button"
                     onClick={() => remove(line.id, line.selectedUnit)}
-                    className="text-[11px] text-slate-400 hover:text-red-400"
+                    className="text-[11px] text-slate-400 hover:text-slate-200 transition"
                   >
                     Remove
                   </button>

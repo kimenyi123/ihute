@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { ShoppingCart, Search, ChevronLeft, X, Plus, Minus, Trash2, ChevronRight } from "lucide-react"
+import { ShoppingCart, Search, ChevronLeft, X, Trash2, ChevronRight, Moon, Sun } from "lucide-react"
 import type {
   KioskCategory,
   KioskMenuItem,
@@ -11,6 +11,7 @@ import type {
 } from "@/src/modules/self-order/types"
 import { useCartStore } from "@/lib/cart-store"
 import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price"
+import { Input } from "@/components/ui/input"
 
 interface Props {
   items: KioskMenuItem[]
@@ -22,6 +23,65 @@ interface Props {
 
 /** Stable reference — category row for shop share links (nickname + BAR/RESTRO) */
 const UNIFIED_SHOP_MENU_TAB_LIST: string[] = ["All", "Other", "Drinks", "Food"]
+
+type MenuLang = "en" | "fr" | "rw"
+
+const MENU_I18N: Record<
+  MenuLang,
+  {
+    search: string
+    cart: string
+    yourOrder: string
+    cartEmpty: string
+    placeOrder: string
+    addToCart: string
+    total: string
+    previous: string
+    next: string
+    of: string
+    noItems: string
+  }
+> = {
+  en: {
+    search: "Search menu…",
+    cart: "Cart",
+    yourOrder: "Your Order",
+    cartEmpty: "Your cart is empty. Tap an item to add it.",
+    placeOrder: "Place Order",
+    addToCart: "Add to Cart",
+    total: "Total",
+    previous: "Previous",
+    next: "Next",
+    of: "of",
+    noItems: "No items found.",
+  },
+  fr: {
+    search: "Rechercher menu…",
+    cart: "Panier",
+    yourOrder: "Votre commande",
+    cartEmpty: "Votre panier est vide. Touchez un article pour l'ajouter.",
+    placeOrder: "Passer la commande",
+    addToCart: "Ajouter au panier",
+    total: "Total",
+    previous: "Précédent",
+    next: "Suivant",
+    of: "sur",
+    noItems: "Aucun article trouvé.",
+  },
+  rw: {
+    search: "Shakisha menu…",
+    cart: "Igitebo",
+    yourOrder: "Ibyo watumije",
+    cartEmpty: "Igitebo kirimo ubusa. Kanda ku kintu ukongeremo.",
+    placeOrder: "Komeza gutumiza",
+    addToCart: "Shyira mu gitebo",
+    total: "Igiteranyo",
+    previous: "Ibibanza",
+    next: "Ibikurikira",
+    of: "kuri",
+    noItems: "Nta bintu byabonetse.",
+  },
+}
 
 // ─── Family emoji map ─────────────────────────────────────────────────────────
 const FAMILY_EMOJI: Record<string, string> = {
@@ -348,10 +408,12 @@ function ItemExpandPanel({
   item,
   onClose,
   onAdd,
+  t,
 }: {
   item: KioskMenuItem
   onClose: () => void
   onAdd: (item: KioskMenuItem, qty: number, selected: Record<string, KioskModifierOption>) => void
+  t: (key: keyof (typeof MENU_I18N)["en"]) => string
 }) {
   const [qty, setQty] = useState(1)
   const [selectedOptions, setSelectedOptions] = useState<Record<string, KioskModifierOption>>({})
@@ -378,7 +440,7 @@ function ItemExpandPanel({
   }
 
   return (
-    <div className="col-span-full rounded-2xl border-2 border-red-500 bg-white shadow-xl overflow-hidden mb-3">
+    <div className="col-span-full rounded-2xl border-2 border-slate-200 bg-white shadow-xl overflow-hidden mb-3">
       {/* Header row */}
       <div className="flex items-start gap-4 p-4 pb-3">
         {item.image_url ? (
@@ -400,15 +462,15 @@ function ItemExpandPanel({
           {description && (
             <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{description}</p>
           )}
-          <p className="text-red-600 font-bold text-lg mt-1">{formatPrice(unitPrice)}</p>
+          <p className="text-emerald-600 font-extrabold text-lg mt-1 tracking-tight">⭐ ⭐ ⭐ {formatPrice(unitPrice)}</p>
         </div>
         <button
           type="button"
           onClick={onClose}
-          className="p-1.5 rounded-full text-red-500 bg-red-50 hover:bg-red-100 transition ml-1 flex-shrink-0"
+          className="p-1.5 rounded-full text-slate-600 bg-slate-100 hover:bg-slate-200 transition ml-1 flex-shrink-0"
           aria-label="Close"
         >
-          <Minus className="w-4 h-4" />
+          <X className="w-4 h-4" />
         </button>
       </div>
 
@@ -431,8 +493,8 @@ function ItemExpandPanel({
                       onClick={() => handleSelect(group, opt)}
                       className={`px-4 py-1.5 rounded-full text-sm font-semibold border-2 transition ${
                         active
-                          ? "border-red-500 bg-red-500 text-white shadow"
-                          : "border-gray-200 bg-white text-slate-700 hover:border-red-300"
+                          ? "border-slate-900 bg-slate-900 text-white shadow"
+                          : "border-gray-200 bg-white text-slate-700 hover:border-slate-300"
                       }`}
                     >
                       {opt.label}
@@ -452,32 +514,30 @@ function ItemExpandPanel({
 
       {/* Qty + Add to Cart */}
       <div className="flex items-center gap-3 px-4 pb-4 pt-3 border-t border-gray-100">
-        <div className="flex items-center border-2 border-gray-200 rounded-xl overflow-hidden">
-          <button
-            type="button"
-            className="w-10 h-10 flex items-center justify-center text-gray-700 hover:bg-gray-50 font-bold text-xl"
-            onClick={() => setQty((q) => Math.max(1, q - 1))}
-          >
-            −
-          </button>
-          <span className="px-4 font-bold text-gray-900 min-w-[3rem] text-center text-lg">
-            {qty}
-          </span>
-          <button
-            type="button"
-            className="w-10 h-10 flex items-center justify-center text-gray-700 hover:bg-gray-50 font-bold text-xl"
-            onClick={() => setQty((q) => q + 1)}
-          >
-            +
-          </button>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-slate-600">Qty</span>
+          <Input
+            type="number"
+            inputMode="numeric"
+            min={1}
+            step={1}
+            value={qty}
+            onChange={(e) => {
+              const n = Number.parseInt(e.target.value, 10)
+              if (Number.isFinite(n)) setQty(Math.max(1, n))
+            }}
+            onBlur={() => setQty((q) => Math.max(1, Math.floor(q || 1)))}
+            className="h-10 w-24 rounded-xl"
+            aria-label="Quantity"
+          />
         </div>
         <button
           type="button"
-          className="flex-1 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl py-3 text-base transition shadow-lg"
+          className="flex-1 flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl py-3 text-base transition shadow-lg"
           onClick={() => { onAdd(item, qty, selectedOptions); onClose() }}
         >
           <ShoppingCart className="w-5 h-5" />
-          Add to Cart · {formatPrice(unitPrice * qty)}
+          {t("addToCart")} · {formatPrice(unitPrice * qty)}
         </button>
       </div>
     </div>
@@ -489,10 +549,14 @@ function ItemCard({
   item,
   isExpanded,
   onToggle,
+  itemQty,
+  onQuickSetQty,
 }: {
   item: KioskMenuItem
   isExpanded: boolean
   onToggle: () => void
+  itemQty: number
+  onQuickSetQty: (qty: number) => void
 }) {
   const price = generalSellingPrice(Number(item.selling_price || 0), item.item_emballage)
   // Show multilingual description if different from name
@@ -501,13 +565,11 @@ function ItemCard({
     : null
 
   return (
-    <button
-      type="button"
-      onClick={onToggle}
+    <div
       className={`w-full text-left bg-white rounded-2xl border-2 transition overflow-hidden flex flex-row items-center gap-3 p-3 pr-4 shadow-sm hover:shadow-md ${
         isExpanded
-          ? "border-red-500 shadow-md"
-          : "border-transparent hover:border-red-200"
+          ? "border-slate-700 shadow-md"
+          : "border-transparent hover:border-slate-200"
       }`}
     >
       {/* Image */}
@@ -534,20 +596,42 @@ function ItemCard({
         {description && (
           <p className="text-[11px] text-gray-400 line-clamp-1 mt-0.5">{description}</p>
         )}
-        <p className="text-red-600 font-bold text-sm mt-1">{formatPrice(price)}</p>
+        <p className="text-emerald-600 font-extrabold text-sm mt-1 tracking-tight">⭐ ⭐ ⭐ {formatPrice(price)}</p>
       </div>
 
-      {/* +/– toggle */}
-      <div
-        className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 border-2 transition ${
-          isExpanded
-            ? "bg-red-600 border-red-600 text-white"
-            : "border-gray-300 text-gray-500 hover:border-red-400 hover:text-red-500"
-        }`}
-      >
-        {isExpanded ? <Minus className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex flex-col items-end gap-1">
+          <span className="text-[10px] font-semibold text-slate-500">Qty</span>
+          <Input
+            type="number"
+            inputMode="numeric"
+            min={0}
+            step={1}
+            value={itemQty}
+            onChange={(e) => {
+              const n = Number.parseInt(e.target.value, 10)
+              if (!Number.isFinite(n)) return
+              onQuickSetQty(Math.max(0, n))
+            }}
+            className="h-9 w-20"
+            aria-label="Quantity"
+          />
+        </div>
+
+        <button
+          type="button"
+          onClick={onToggle}
+          className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition ${
+            isExpanded
+              ? "bg-slate-900 border-slate-900 text-white"
+              : "border-gray-300 text-gray-500 hover:border-slate-400 hover:text-slate-600"
+          }`}
+          aria-label="Customize"
+        >
+          <ChevronRight className={`w-4 h-4 transition-transform ${isExpanded ? "rotate-90" : ""}`} />
+        </button>
       </div>
-    </button>
+    </div>
   )
 }
 
@@ -556,13 +640,15 @@ function CartSidebar({
   open,
   onClose,
   cartHref,
+  t,
 }: {
   open: boolean
   onClose: () => void
   cartHref: string
+  t: (key: keyof (typeof MENU_I18N)["en"]) => string
 }) {
   const router = useRouter()
-  const { items, remove, inc, dec } = useCartStore()
+  const { items, remove, setQty } = useCartStore()
   const total = items.reduce((s, i) => s + i.price * (i.qty ?? 0), 0)
 
   return (
@@ -578,8 +664,8 @@ function CartSidebar({
       >
         <div className="flex items-center justify-between px-5 py-4 border-b">
           <div className="flex items-center gap-2 font-bold text-lg text-gray-900">
-            <ShoppingCart className="w-5 h-5 text-red-600" />
-            Your Order
+            <ShoppingCart className="w-5 h-5 text-slate-700" />
+            {t("yourOrder")}
           </div>
           <button type="button" onClick={onClose} className="p-1 rounded-full hover:bg-gray-100">
             <X className="w-5 h-5 text-gray-500" />
@@ -589,7 +675,7 @@ function CartSidebar({
         <div className="flex-1 overflow-y-auto px-5 py-3 space-y-4">
           {items.length === 0 && (
             <p className="text-center text-gray-400 mt-8 text-sm">
-              Your cart is empty. Tap an item to add it.
+              {t("cartEmpty")}
             </p>
           )}
           {items.map((ci) => (
@@ -602,29 +688,27 @@ function CartSidebar({
               )}
               <div className="flex-1 min-w-0">
                 <p className="font-semibold text-sm text-gray-900 line-clamp-2">{ci.name}</p>
-                <p className="text-red-600 font-bold text-sm mt-0.5">{formatPrice(ci.price)}</p>
+                <p className="text-emerald-600 font-extrabold text-sm mt-0.5 tracking-tight">⭐ ⭐ ⭐ {formatPrice(ci.price)}</p>
                 <div className="flex items-center gap-2 mt-2">
-                  <button
-                    type="button"
-                    className="w-7 h-7 rounded-full border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50"
-                    onClick={() => dec(ci.id, ci.selectedUnit)}
-                  >
-                    <Minus className="w-3 h-3" />
-                  </button>
-                  <span className="text-sm font-semibold min-w-[1.5rem] text-center">{ci.qty}</span>
-                  <button
-                    type="button"
-                    className="w-7 h-7 rounded-full border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50"
-                    onClick={() => inc(ci.id, ci.selectedUnit)}
-                  >
-                    <Plus className="w-3 h-3" />
-                  </button>
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    step={1}
+                    value={ci.qty}
+                    onChange={(e) => {
+                      const n = Number.parseInt(e.target.value, 10)
+                      if (Number.isFinite(n)) setQty(ci.id, ci.selectedUnit, Math.max(1, n))
+                    }}
+                    className="h-8 w-20"
+                    aria-label="Quantity"
+                  />
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => remove(ci.id, ci.selectedUnit)}
-                className="p-1 text-gray-400 hover:text-red-500 transition"
+                className="p-1 text-gray-400 hover:text-slate-600 transition"
               >
                 <Trash2 className="w-4 h-4" />
               </button>
@@ -636,14 +720,14 @@ function CartSidebar({
           <div className="px-5 py-4 border-t space-y-3">
             <div className="flex items-center justify-between font-bold text-gray-900">
               <span>Total</span>
-              <span className="text-red-600">{formatPrice(total)}</span>
+              <span className="text-emerald-600 font-extrabold tracking-tight">⭐ ⭐ ⭐ {formatPrice(total)}</span>
             </div>
             <button
               type="button"
-              className="w-full bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl py-3 transition shadow"
+              className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl py-3 transition shadow"
               onClick={() => { onClose(); router.push(cartHref) }}
             >
-              Place Order
+              {t("placeOrder")}
             </button>
           </div>
         )}
@@ -658,9 +742,15 @@ const COLS = 3
 function ItemsGrid({
   items,
   onAdd,
+  getItemQty,
+  onQuickSetQty,
+  t,
 }: {
   items: KioskMenuItem[]
   onAdd: (item: KioskMenuItem, qty: number, selected: Record<string, KioskModifierOption>) => void
+  getItemQty: (item: KioskMenuItem) => number
+  onQuickSetQty: (item: KioskMenuItem, qty: number) => void
+  t: (key: keyof (typeof MENU_I18N)["en"]) => string
 }) {
   const [expandedCode, setExpandedCode] = useState<string | null>(null)
 
@@ -676,7 +766,7 @@ function ItemsGrid({
     : null
 
   if (items.length === 0) {
-    return <p className="text-center text-gray-400 mt-20 text-sm">No items found.</p>
+    return <p className="text-center text-gray-400 mt-20 text-sm">{t("noItems")}</p>
   }
 
   return (
@@ -693,6 +783,8 @@ function ItemsGrid({
                 item={item}
                 isExpanded={expandedCode === item.item_code}
                 onToggle={() => setExpandedCode((prev) => prev === item.item_code ? null : item.item_code)}
+                itemQty={getItemQty(item)}
+                onQuickSetQty={(qty) => onQuickSetQty(item, qty)}
               />
             ))}
             {Array.from({ length: COLS - row.length }).map((_, i) => (
@@ -710,6 +802,7 @@ function ItemsGrid({
                 item={expandedItem}
                 onClose={() => setExpandedCode(null)}
                 onAdd={onAdd}
+                t={t}
               />
             </div>
           )}
@@ -762,7 +855,7 @@ function TabBar({
             onClick={() => onSelect(tab)}
             className={`flex-shrink-0 flex items-center gap-1.5 px-4 py-3 text-sm font-medium transition border-b-2 whitespace-nowrap ${
               activeTab === tab
-                ? "border-red-600 text-red-600"
+                ? "border-slate-700 text-slate-700"
                 : "border-transparent text-gray-500 hover:text-gray-800"
             }`}
           >
@@ -776,15 +869,6 @@ function TabBar({
         ))}
       </div>
 
-      {/* Right arrow */}
-      <button
-        type="button"
-        onClick={() => scroll("right")}
-        className="flex-shrink-0 px-1 py-2 text-gray-400 hover:text-gray-700 transition"
-        aria-label="Scroll right"
-      >
-        <ChevronRight className="w-4 h-4" />
-      </button>
     </div>
   )
 }
@@ -798,7 +882,7 @@ export function KioskMenuGrid({
   shopNickname,
 }: Props) {
   const router = useRouter()
-  const { addItem, items: cartItems } = useCartStore()
+  const { addItem, items: cartItems, remove, setQty } = useCartStore()
 
   const [items, setItems] = useState<KioskMenuItem[]>(initialItems)
   const [activeTab, setActiveTab] = useState("All")
@@ -806,9 +890,12 @@ export function KioskMenuGrid({
   const [loading, setLoading] = useState(false)
   const [cartOpen, setCartOpen] = useState(false)
   const [page, setPage] = useState(1)
+  const [lang, setLang] = useState<MenuLang>("en")
+  const [darkMode, setDarkMode] = useState(false)
   const PAGE_SIZE = 30
 
   const cartCount = cartItems.reduce((s, i) => s + (i.qty ?? 0), 0)
+  const t = (key: keyof (typeof MENU_I18N)["en"]) => MENU_I18N[lang][key]
 
   /** Shop share links (?nickname=…&kioskCategory=BAR|RESTRO): show full catalog + All / Other / Drinks / Food */
   const useUnifiedShopTabs =
@@ -960,21 +1047,13 @@ export function KioskMenuGrid({
       return () => { if (timerRef.current) clearTimeout(timerRef.current) }
     }
 
+    // For the regular kiosk menu, search against the menu that is already loaded.
+    // This is more reliable than replacing the menu with backend search results.
     if (timerRef.current) clearTimeout(timerRef.current)
-    const trimmed = query.trim()
-    if (!trimmed) { setItems(initialItems); return }
-    timerRef.current = setTimeout(async () => {
-      try {
-        setLoading(true)
-        const res = await fetch(
-          `/api/kiosk/search?query=${encodeURIComponent(trimmed)}&category=${encodeURIComponent(category)}`,
-        )
-        const data = await res.json()
-        setItems(Array.isArray(data.items) ? data.items : initialItems)
-      } finally { setLoading(false) }
-    }, 350)
-    return () => { if (timerRef.current) clearTimeout(timerRef.current) }
-  }, [query, category, shopNickname])
+    setItems(initialItems)
+    setLoading(false)
+    return
+  }, [query, category, shopNickname, initialItems])
 
   function handleAdd(item: KioskMenuItem, qty: number, _selected: Record<string, KioskModifierOption> = {}) {
     const base = Number(item.selling_price || 0)
@@ -1000,10 +1079,62 @@ export function KioskMenuGrid({
     )
   }
 
+  function matchesQuickTarget(ci: { itemCode?: string; id: string; supplierId: string; name: string; price: number }, item: KioskMenuItem): boolean {
+    const targetCode = String(item.item_code || "").trim()
+    const cartCode = String(ci.itemCode ?? ci.id).trim()
+    const sameSupplier = String(ci.supplierId || "").trim() === String(item.supplier_account || "").trim()
+    if (!sameSupplier) return false
+
+    // Use strict code match when a real item code exists.
+    if (targetCode) return cartCode === targetCode
+
+    // Fallback for items with missing code: match by name + price + supplier.
+    const targetName = String(item.item_commercial_name || item.item_name || "").trim().toLowerCase()
+    const cartName = String(ci.name || "").trim().toLowerCase()
+    const targetPrice = generalSellingPrice(Number(item.selling_price || 0), item.item_emballage)
+    return cartName === targetName && Number(ci.price || 0) === Number(targetPrice || 0)
+  }
+
+  function getItemQty(item: KioskMenuItem): number {
+    return cartItems
+      .filter((ci) => matchesQuickTarget(ci, item))
+      .reduce((sum, ci) => sum + (ci.qty ?? 0), 0)
+  }
+
+  function quickInc(item: KioskMenuItem) {
+    const target = cartItems.find((ci) => matchesQuickTarget(ci, item))
+    if (!target) return
+    setQty(target.id, target.selectedUnit, (target.qty ?? 0) + 1)
+  }
+
+  function quickDec(item: KioskMenuItem) {
+    const target = cartItems.find((ci) => matchesQuickTarget(ci, item))
+    if (!target) return
+    if ((target.qty ?? 0) <= 1) {
+      remove(target.id, target.selectedUnit)
+      return
+    }
+    setQty(target.id, target.selectedUnit, (target.qty ?? 0) - 1)
+  }
+
+  function quickSetQty(item: KioskMenuItem, qty: number) {
+    const target = cartItems.find((ci) => matchesQuickTarget(ci, item))
+    if (!target) {
+      if (qty <= 0) return
+      handleAdd(item, qty, {})
+      return
+    }
+    if (qty <= 0) {
+      remove(target.id, target.selectedUnit)
+      return
+    }
+    setQty(target.id, target.selectedUnit, qty)
+  }
+
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className={`min-h-screen flex flex-col ${darkMode ? "bg-slate-900 text-slate-100" : "bg-gray-50"}`}>
       {/* HEADER */}
-      <header className="sticky top-0 z-30 bg-red-600 shadow-md">
+      <header className="sticky top-0 z-30 bg-slate-900 shadow-md">
         <div className="flex items-center gap-3 px-4 py-3">
           <button
             type="button"
@@ -1038,19 +1169,39 @@ export function KioskMenuGrid({
             <input
               value={query}
               onChange={(e) => { setQuery(e.target.value); setPage(1) }}
-              placeholder="Search in English, Français or Kinyarwanda…"
+              placeholder={t("search")}
               className="w-full pl-9 pr-3 py-2 rounded-full bg-white text-sm text-gray-900 placeholder-gray-400 outline-none"
             />
           </div>
+
+          <select
+            value={lang}
+            onChange={(e) => setLang(e.target.value as MenuLang)}
+            className="hidden sm:block rounded-full px-2 py-1.5 text-xs font-semibold text-gray-800"
+            aria-label="Language selector"
+          >
+            <option value="en">EN</option>
+            <option value="fr">FR</option>
+            <option value="rw">RW</option>
+          </select>
+
+          <button
+            type="button"
+            onClick={() => setDarkMode((d) => !d)}
+            className="hidden sm:flex items-center justify-center w-9 h-9 rounded-full bg-white text-slate-700 hover:bg-gray-100 transition"
+            aria-label="Toggle dark mode"
+          >
+            {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+          </button>
 
           {/* Cart */}
           <button
             type="button"
             onClick={() => setCartOpen(true)}
-            className="relative flex items-center gap-2 bg-white rounded-full px-3 py-1.5 text-red-600 font-bold text-sm hover:bg-gray-50 transition shadow"
+            className="relative flex items-center gap-2 bg-white rounded-full px-3 py-1.5 text-slate-700 font-bold text-sm hover:bg-gray-50 transition shadow"
           >
             <ShoppingCart className="w-4 h-4" />
-            <span className="hidden sm:inline">Cart</span>
+            <span className="hidden sm:inline">{t("cart")}</span>
             {cartCount > 0 && (
               <span className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-yellow-400 text-gray-900 text-[11px] font-bold flex items-center justify-center">
                 {cartCount}
@@ -1060,15 +1211,35 @@ export function KioskMenuGrid({
         </div>
 
         {/* Search mobile */}
-        <div className="px-4 pb-3 sm:hidden">
+        <div className="px-4 pb-3 sm:hidden space-y-2">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
             <input
               value={query}
               onChange={(e) => { setQuery(e.target.value); setPage(1) }}
-              placeholder="Search menu…"
+              placeholder={t("search")}
               className="w-full pl-9 pr-3 py-2 rounded-full bg-white text-sm text-gray-900 placeholder-gray-400 outline-none"
             />
+          </div>
+          <div className="flex items-center gap-2">
+            <select
+              value={lang}
+              onChange={(e) => setLang(e.target.value as MenuLang)}
+              className="rounded-full px-3 py-1.5 text-xs font-semibold text-gray-800"
+              aria-label="Language selector"
+            >
+              <option value="en">EN</option>
+              <option value="fr">FR</option>
+              <option value="rw">RW</option>
+            </select>
+            <button
+              type="button"
+              onClick={() => setDarkMode((d) => !d)}
+              className="flex items-center justify-center w-9 h-9 rounded-full bg-white text-slate-700 hover:bg-gray-100 transition"
+              aria-label="Toggle dark mode"
+            >
+              {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
           </div>
         </div>
 
@@ -1109,12 +1280,20 @@ export function KioskMenuGrid({
           </div>
         )}
 
-        {!loading && <ItemsGrid items={pageItems} onAdd={handleAdd} />}
+        {!loading && (
+          <ItemsGrid
+            items={pageItems}
+            onAdd={handleAdd}
+            getItemQty={getItemQty}
+            onQuickSetQty={quickSetQty}
+            t={t}
+          />
+        )}
 
         {!loading && totalItems > PAGE_SIZE && (
           <div className="flex items-center justify-between gap-3 mt-6 border-t border-gray-200 pt-4">
             <span className="text-xs text-gray-500">
-              {startIndex + 1}–{Math.min(startIndex + PAGE_SIZE, totalItems)} of {totalItems}
+              {startIndex + 1}–{Math.min(startIndex + PAGE_SIZE, totalItems)} {t("of")} {totalItems}
             </span>
             <div className="flex items-center gap-2">
               <button
@@ -1123,7 +1302,7 @@ export function KioskMenuGrid({
                 disabled={currentPage <= 1}
                 className="px-4 py-1.5 rounded-full border border-gray-300 text-sm text-gray-700 disabled:opacity-40 bg-white hover:bg-gray-50"
               >
-                Previous
+                {t("previous")}
               </button>
               <span className="text-sm text-gray-600">{currentPage} / {totalPages}</span>
               <button
@@ -1132,7 +1311,7 @@ export function KioskMenuGrid({
                 disabled={currentPage >= totalPages}
                 className="px-4 py-1.5 rounded-full border border-gray-300 text-sm text-gray-700 disabled:opacity-40 bg-white hover:bg-gray-50"
               >
-                Next
+                {t("next")}
               </button>
             </div>
           </div>
@@ -1140,7 +1319,7 @@ export function KioskMenuGrid({
       </main>
 
       {/* CART SIDEBAR */}
-      <CartSidebar open={cartOpen} onClose={() => setCartOpen(false)} cartHref={cartHref} />
+      <CartSidebar open={cartOpen} onClose={() => setCartOpen(false)} cartHref={cartHref} t={t} />
     </div>
   )
 }
