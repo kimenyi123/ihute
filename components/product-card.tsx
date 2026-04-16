@@ -227,7 +227,7 @@ export function ProductCard({
       className={cn(
         "group overflow-hidden transition-all",
         isSpotlight
-          ? "flex h-[560px] w-[280px] shrink-0 flex-col gap-0 rounded-[14px] border border-gray-200 bg-white py-0 shadow-[0_4px_14px_rgba(15,23,42,0.08)]"
+          ? "flex w-full max-w-[360px] shrink-0 flex-col gap-0 rounded-[14px] border border-gray-200 bg-white py-0 shadow-[0_4px_14px_rgba(15,23,42,0.08)] sm:max-w-[420px]"
           : isCompact
             ? "h-full border-slate-200/90 shadow-sm hover:shadow-md"
             : "h-full hover:shadow-lg",
@@ -238,7 +238,7 @@ export function ProductCard({
           "relative w-full bg-muted",
           /* Reference: ~58% of card height ≈ 325px; green accent on top + sides */
           isSpotlight
-            ? "h-[325px] shrink-0 border-l-2 border-r-2 border-t-2 border-[#00a676]"
+            ? "aspect-[4/3] max-h-[360px] shrink-0 border-l-2 border-r-2 border-t-2 border-[#00a676]"
             : isCompact
               ? "aspect-[4/3] max-h-[132px] sm:max-h-[140px]"
               : "aspect-square",

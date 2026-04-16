@@ -35,9 +35,9 @@ export function CartSyncEffect() {
       .catch(() => {})
   }, [userId, replaceItemsFromSync])
 
-  // Save when items change (debounced)
+  // Save when items change (debounced), including empty carts after checkout.
   useEffect(() => {
-    if (!userId || items.length === 0) return
+    if (!userId) return
     if (saveTimeout.current) clearTimeout(saveTimeout.current)
     saveTimeout.current = setTimeout(() => {
       saveTimeout.current = null

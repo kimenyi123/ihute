@@ -30,6 +30,11 @@ export default function SellerOrdersPage() {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
 
+  const totalSales = orders.reduce((sum, order) => sum + Number(order.AMOUNT || 0), 0)
+  const deliveredOrders = orders.filter((order) =>
+    String(order.STATUS || order.ORDER_STATUS || "").toLowerCase().includes("delivered")
+  ).length
+
   useEffect(() => {
     if (!isAuthenticated) router.push("/login")
   }, [isAuthenticated, router])
@@ -80,6 +85,35 @@ export default function SellerOrdersPage() {
   return (
     <div className="max-w-5xl mx-auto p-4">
       <h1 className="text-2xl font-semibold mb-6">My Orders</h1>
+      <div className="grid gap-4 md:grid-cols-3 mb-6">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-slate-600">Total Sales</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{totalSales.toLocaleString()} RWF</div>
+            <p className="text-xs text-slate-500 mt-1">From loaded seller orders</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-slate-600">Orders</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{orders.length}</div>
+            <p className="text-xs text-slate-500 mt-1">Visible in this seller view</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-slate-600">Delivered</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{deliveredOrders}</div>
+            <p className="text-xs text-slate-500 mt-1">Completed orders</p>
+          </CardContent>
+        </Card>
+      </div>
       <div className="grid gap-4">
         {orders.map((o) => (
           <Card key={o.ID_ORDER} className="shadow-sm border border-slate-200">

@@ -14,7 +14,6 @@ import {
   MapPin,
   Mail,
   Heart,
-  ShoppingCart,
   ChevronDown,
   ChevronUp,
   ChevronLeft,

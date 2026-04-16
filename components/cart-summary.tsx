@@ -172,7 +172,6 @@ function CartSummaryBody() {
         hasPrefilledName.current = true
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [checkoutMode, activeSession])
 
   // Pre-fill from tableInfo only when NOT a table order (e.g. delivery from shop-with-me)

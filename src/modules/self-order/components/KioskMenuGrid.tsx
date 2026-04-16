@@ -652,8 +652,21 @@ function CartSidebar({
   )
 }
 
-// ─── Items grid with row-level inline expand ──────────────────────────────────
-const COLS = 3
+// ─── Responsive grid columns (2 on phones, 3+ on larger) ─────────────────────
+function useKioskGridCols() {
+  const [cols, setCols] = useState(2)
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const mql = window.matchMedia("(min-width: 640px)")
+    const apply = () => setCols(mql.matches ? 3 : 2)
+    apply()
+    mql.addEventListener("change", apply)
+    return () => mql.removeEventListener("change", apply)
+  }, [])
+
+  return cols
+}
 
 function ItemsGrid({
   items,
@@ -663,12 +676,13 @@ function ItemsGrid({
   onAdd: (item: KioskMenuItem, qty: number, selected: Record<string, KioskModifierOption>) => void
 }) {
   const [expandedCode, setExpandedCode] = useState<string | null>(null)
+  const cols = useKioskGridCols()
 
   const rows: KioskMenuItem[][] = []
-  for (let i = 0; i < items.length; i += COLS) rows.push(items.slice(i, i + COLS))
+  for (let i = 0; i < items.length; i += cols) rows.push(items.slice(i, i + cols))
 
   const expandedRowIndex = expandedCode
-    ? Math.floor(items.findIndex((i) => i.item_code === expandedCode) / COLS)
+    ? Math.floor(items.findIndex((i) => i.item_code === expandedCode) / cols)
     : -1
 
   const expandedItem = expandedCode
@@ -685,7 +699,7 @@ function ItemsGrid({
         <div key={rowIdx}>
           <div
             className="grid gap-3 py-1.5"
-            style={{ gridTemplateColumns: `repeat(${COLS}, minmax(0,1fr))` }}
+            style={{ gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}
           >
             {row.map((item) => (
               <ItemCard
@@ -695,7 +709,7 @@ function ItemsGrid({
                 onToggle={() => setExpandedCode((prev) => prev === item.item_code ? null : item.item_code)}
               />
             ))}
-            {Array.from({ length: COLS - row.length }).map((_, i) => (
+            {Array.from({ length: Math.max(0, cols - row.length) }).map((_, i) => (
               <div key={`empty-${i}`} />
             ))}
           </div>
@@ -704,7 +718,7 @@ function ItemsGrid({
           {expandedRowIndex === rowIdx && expandedItem && (
             <div
               className="grid gap-3"
-              style={{ gridTemplateColumns: `repeat(${COLS}, minmax(0,1fr))` }}
+              style={{ gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}
             >
               <ItemExpandPanel
                 item={expandedItem}
@@ -799,6 +813,7 @@ export function KioskMenuGrid({
 }: Props) {
   const router = useRouter()
   const { addItem, items: cartItems } = useCartStore()
+  const cols = useKioskGridCols()
 
   const [items, setItems] = useState<KioskMenuItem[]>(initialItems)
   const [activeTab, setActiveTab] = useState("All")
@@ -1102,7 +1117,7 @@ export function KioskMenuGrid({
         )}
 
         {loading && (
-          <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${COLS}, minmax(0,1fr))` }}>
+          <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
             {Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className="h-24 rounded-2xl bg-gray-200 animate-pulse" />
             ))}

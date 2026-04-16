@@ -44,6 +44,7 @@ import { isRestoBarPreferredCategories } from "@/lib/supplier-sector";
 import { parsePackageMultiplier } from "@/lib/package-price";
 import { parseItemStateBatchExpiry } from "@/lib/item-state-display";
 import { SupplierProductTableImage } from "@/components/supplier-product-table-image";
+import { ResponsiveTable } from "@/components/ui/responsive-table";
 
 /** Redis / API may send last_sync_time, LAST_SYNC_TIME, or lastSyncTime */
 function parseSupplierProductLastSyncMs(p: Record<string, unknown>): number | null {
@@ -512,19 +513,19 @@ function SupplierDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
+    <div className="min-h-0 bg-gradient-to-br from-slate-50 to-slate-100">
       {/* Header */}
-      <header className="bg-white border-b shadow-sm sticky top-0 z-10">
-        <div className="container mx-auto px-6 py-4 flex items-center justify-between">
-          <div>
+      <header className="bg-white border-b shadow-sm">
+        <div className="container mx-auto px-4 sm:px-6 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0 hidden lg:block">
             <h1 className="text-2xl font-bold text-slate-900">
               {user?.businessName || "Supplier Dashboard"}
             </h1>
-            <p className="text-sm text-slate-600">
+            <p className="text-sm text-slate-600 break-words">
               {user?.businessCategory || "Supplier Panel"} • Account: {user?.ishyigaAccount}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button variant="ghost" asChild className="gap-2">
               <Link href="/account">
                 <User className="h-4 w-4" />
@@ -547,7 +548,7 @@ function SupplierDashboard() {
         </div>
       </header>
 
-      <div className="container mx-auto px-6 py-8">
+      <div className="container mx-auto px-4 sm:px-6 py-6 sm:py-8">
 
 
         {/* Stats Section */}
@@ -930,7 +931,7 @@ function SupplierDashboard() {
               </div>
             ) : (
               <>
-                <div className="overflow-x-auto rounded-lg border border-slate-200">
+                <ResponsiveTable className="rounded-lg border border-slate-200" minWidth="1100px">
                   <table className="w-full">
                     <thead className="bg-slate-100 border-b border-slate-200">
                       <tr>
@@ -1171,7 +1172,7 @@ function SupplierDashboard() {
                       })}
                     </tbody>
                   </table>
-                </div>
+                </ResponsiveTable>
 
                 {/* Pagination */}
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-6">

@@ -81,6 +81,16 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
     setSidebarOpen(false);
   }, []);
 
+  // Keep supplier navigation reachable on all devices:
+  // desktop starts open, smaller screens start closed.
+  useEffect(() => {
+    const mql = window.matchMedia("(min-width: 1024px)");
+    const syncSidebar = () => setSidebarOpen(mql.matches);
+    syncSidebar();
+    mql.addEventListener("change", syncSidebar);
+    return () => mql.removeEventListener("change", syncSidebar);
+  }, []);
+
   // Close sidebar with Escape key when open
   useEffect(() => {
     if (!sidebarOpen) return;
@@ -163,8 +173,10 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Mobile Header */}
-      <div className="lg:hidden bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between">
-        <h1 className="text-xl font-bold text-slate-900">Supplier Panel</h1>
+      <div className="sticky top-0 z-40 bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between">
+        <h1 className="text-lg font-bold text-slate-900 truncate pr-2">
+          {user?.businessName || "Supplier Panel"}
+        </h1>
         <button
           onClick={() => setSidebarOpen((open) => !open)}
           className="p-2 rounded-md text-slate-600 hover:bg-slate-100"
@@ -181,8 +193,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
             fixed inset-y-0 left-0 z-50
             w-64 bg-white border-r border-slate-200
             transform transition-transform duration-300 ease-in-out
-            ${sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
-            lg:translate-x-0
+            ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}
           `}
         >
           <div className="h-full flex flex-col">
@@ -245,7 +256,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
         )}
 
         {/* Main Content */}
-        <main className="flex-1 lg:ml-64 lg:overflow-y-auto">
+        <main className={cn("flex-1 min-w-0 lg:overflow-y-auto transition-[padding] duration-300", sidebarOpen && "lg:pl-64")}>
           <div className="p-4 lg:p-8">
             {children}
           </div>

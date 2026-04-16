@@ -67,7 +67,7 @@ function buildStatusHistory(
     let note = ""
     switch (status) {
       case "processing":
-        note = paymentStatus === "paid" ? "Payment confirmed, preparing order" : "Order being prepared"
+        note = paymentStatus === "paid" ? "Payment received, preparing order" : "Order being prepared"
         break
       case "invoice":
         note = "Invoice generated"

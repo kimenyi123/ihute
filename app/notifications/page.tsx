@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Bell, ArrowLeft, ExternalLink } from 'lucide-react';
+import { Bell, ExternalLink } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/lib/auth-store';
 import { Header } from '@/components/header';
@@ -14,6 +14,22 @@ interface Notification {
   type: string;
   createdAt: number;
   isRead: boolean;
+}
+
+async function trackNotificationOpened(notificationId: number, userId: string) {
+  try {
+    await fetch('/api/notifications', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'markOpened',
+        notificationId,
+        userId,
+      }),
+    });
+  } catch (error) {
+    console.error('Failed to track notification open:', error);
+  }
 }
 
 export default function NotificationsPage() {
@@ -57,6 +73,7 @@ export default function NotificationsPage() {
       const userEmail = user?.email || user?.ishyigaAccount;
       if (!userEmail) return;
 
+      await trackNotificationOpened(id, userEmail);
       await fetch(`/api/notifications/${id}/read?userId=${encodeURIComponent(userEmail)}`, { 
         method: 'POST' 
       });

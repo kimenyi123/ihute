@@ -9,6 +9,7 @@ import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
 import { useOrdersStore, type Order } from "@/lib/orders-store"
 import { mapBackendOrderStatusToStore } from "@/lib/order-status-map"
+import { ResponsiveTable } from "@/components/ui/responsive-table"
 
 type RawTxn = {
   ID_ORDER?: string
@@ -234,8 +235,8 @@ export default function OrdersPage() {
         {err && <p className="text-red-600">{err}</p>}
 
         {!loading && filteredOrders.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="min-w-full border border-gray-300 shadow-sm bg-white rounded-lg">
+          <ResponsiveTable minWidth="860px">
+            <table className="w-full border border-gray-300 shadow-sm bg-white rounded-lg">
               <thead className="bg-gray-200 text-gray-700">
                 <tr>
                   <th className="px-4 py-3 border">Order ID</th>
@@ -267,7 +268,8 @@ export default function OrdersPage() {
                     <td className="px-4 py-3 border">
                       {new Date(o.createdAt).toLocaleString()}
                     </td>
-                    <td className="px-4 py-3 border flex gap-2">
+                    <td className="px-4 py-3 border">
+                      <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
                       <Button
                         size="sm"
                         variant="default"
@@ -288,12 +290,13 @@ export default function OrdersPage() {
                       >
                         Financing
                       </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </div>
+          </ResponsiveTable>
         )}
 
         {/* PAGINATION */}
