@@ -93,6 +93,21 @@ export function getFetchSuggestionsUrl(): string {
   return process.env.JAVA_FETCH_SUGGESTIONS_URL || `${getBackendBase()}/Kaos/fetchSuggestions`
 }
 
+/** Sector-only AND-token search (shops vs items); separate servlet from fetchSuggestions globalSearch. */
+export function getSectorScopedSearchUrl(): string {
+  return process.env.JAVA_SECTOR_SCOPED_SEARCH_URL || `${getBackendBase()}/Kaos/sectorScopedSearch`
+}
+
+/** Sector shop grid JSON (sellers + sample products) — isolated from {@link getFetchSuggestionsUrl} for analysis. */
+export function getSectorListSuppliersUrl(): string {
+  return process.env.JAVA_SECTOR_LIST_SUPPLIERS_URL || `${getBackendBase()}/Kaos/sectorListSuppliers`
+}
+
+/** Same servlet: GET ?sectorStats=pharmacy → JSON { ok, sector, shops, items } (full DB counts). */
+export function getSectorStatsQuery(sectorSlug: string): string {
+  return `sectorStats=${encodeURIComponent(sectorSlug.trim())}`
+}
+
 export function getShopWithMeUrl(): string {
   return process.env.JAVA_SHOP_WITH_ME_URL || `${getBackendBase()}/shop_with_me`
 }
@@ -156,7 +171,7 @@ export function getGrandmaSellerTempItemApiUrl(): string {
 }
 
 /**
- * Redis-first sector browse (same payload as `fetchSuggestions?listSuppliersWithProducts`).
+ * Redis-first sector browse (same payload as `GET …/Kaos/sectorListSuppliers` / legacy `listSuppliersWithProducts`).
  * Short path `/grandma/suppliers/browse`; long `/Api/grandma/suppliers/browse`.
  */
 export function getGrandmaListSuppliersBrowseUrl(): string {

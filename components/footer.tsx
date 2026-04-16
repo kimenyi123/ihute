@@ -1,31 +1,19 @@
 import Link from "next/link"
-import Image from "next/image"
 import { Facebook, Twitter, Instagram, Mail, Phone, MapPin } from "lucide-react"
 
-export function Footer() {
+type FooterProps = {
+  /** Category AI landing: tagline sits above copyright in the bottom bar (merged, not duplicated at top). */
+  showIshyigaIntelligenceTagline?: boolean
+}
+
+export function Footer({ showIshyigaIntelligenceTagline = false }: FooterProps) {
   return (
     <footer className="border-t bg-muted/30">
       <div className="container mx-auto px-4 py-12">
         <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-4">
-          {/* Brand Section */}
+          {/* Social */}
           <div className="space-y-4">
-            <div className="flex items-center gap-3">
-              <Image
-                src="/images/ishyiga-logo.png"
-                alt="Ishyiga Software"
-                width={40}
-                height={40}
-                className="h-10 w-auto"
-              />
-              <div>
-                <h3 className="text-lg font-bold text-foreground">ihute.rw</h3>
-                <p className="text-xs text-muted-foreground">by Ishyiga Software</p>
-              </div>
-            </div>
-            <p className="text-sm text-muted-foreground">
-              Your trusted marketplace connecting businesses and customers across Rwanda. Shop from local businesses and
-              get products delivered to your door.
-            </p>
+            <h4 className="text-sm font-semibold text-foreground">Follow us</h4>
             <div className="flex gap-3">
               <Link href="#" className="text-muted-foreground hover:text-primary transition-colors">
                 <Facebook className="h-5 w-5" />
@@ -127,9 +115,25 @@ export function Footer() {
           </div>
         </div>
 
-        {/* Bottom Bar */}
-        <div className="mt-12 border-t pt-8 text-center text-sm text-muted-foreground">
-          <p>&copy; {new Date().getFullYear()} ihute.rw by Ishyiga Software. All rights reserved.</p>
+        {/* Bottom Bar — optional Category AI tagline merged with copyright */}
+        <div
+          className={`mt-12 border-t pt-8 text-center text-sm text-muted-foreground ${showIshyigaIntelligenceTagline ? "space-y-4" : ""}`}
+        >
+          {showIshyigaIntelligenceTagline ? (
+            <div className="space-y-1.5">
+              <p className="font-medium text-foreground/90">Find anything. Anywhere. Instantly.</p>
+              <p className="text-xs text-muted-foreground">Powered by Ishyiga Intelligence</p>
+            </div>
+          ) : null}
+          <p
+            className={
+              showIshyigaIntelligenceTagline
+                ? "border-t border-border/40 pt-4 max-w-lg mx-auto"
+                : ""
+            }
+          >
+            &copy; {new Date().getFullYear()} ihute.rw by Ishyiga Software. All rights reserved.
+          </p>
         </div>
       </div>
     </footer>

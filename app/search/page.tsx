@@ -892,7 +892,7 @@ export default function SearchPage() {
       }
       setLoadingSector(true)
       try {
-        const url = `/api/fetchSuggestions?listSuppliersWithProducts=${encodeURIComponent(
+        const url = `/api/sector-list-suppliers?sector=${encodeURIComponent(
           sectorParam,
         )}&Currency=RWF`
         const res = await fetch(url, { cache: "no-store" })

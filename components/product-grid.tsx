@@ -130,6 +130,28 @@ function normalizeProduct(
   };
 }
 
+/** Same merge as loadAllSectorProducts — one listSuppliers JSON payload → flat grid rows. */
+function flattenListSuppliersPayloadToProducts(sellers: unknown[]): ServerProduct[] {
+  const products: ServerProduct[] = [];
+  for (const s of sellers) {
+    if (s == null || typeof s !== "object") continue;
+    const row = s as Record<string, unknown>;
+    const sellerAccount =
+      (row.seller_account as string) ??
+      (row.SELLER_ISHYIGA_ACCOUNT as string) ??
+      (row.seller_ishyiga_account as string) ??
+      "";
+    const sellerName = (row.seller_name as string) ?? (row.SELLER_NAMES as string) ?? "";
+    const sellerLoc = (row.seller_location as string) ?? (row.LOCATION as string) ?? "";
+    const plist = row.products;
+    if (!Array.isArray(plist)) continue;
+    for (const p of plist) {
+      products.push(normalizeProduct(p, { account: sellerAccount, sellerName, sellerLoc }));
+    }
+  }
+  return products;
+}
+
 export function ProductGrid({
   categoryId,
   categoryName,
@@ -139,6 +161,8 @@ export function ProductGrid({
   browseMode,
   /** When true, hide the in-page search box (use header search). Sort + family filters stay. */
   hideInlineSearch = false,
+  /** Parent’s single listSuppliersWithProducts response — avoids duplicate fetch + mismatched RAND() sample. */
+  preloadedSectorListSuppliers,
 }: {
   categoryId: string;
   categoryName: string;
@@ -146,14 +170,18 @@ export function ProductGrid({
   selectedSupplierName?: string;
   browseMode?: "item";
   hideInlineSearch?: boolean;
+  preloadedSectorListSuppliers?: unknown[] | null;
 }) {
   const { t } = useTranslation();
   const searchParams = useSearchParams();
+  const urlSq = (searchParams.get("sq") ?? "").trim();
   const [searchQuery, setSearchQuery] = useState("");
+  /** category_ai item mode: header search writes `?sq=` — grid filters from URL. */
+  const effectiveSearchQuery = hideInlineSearch ? urlSq : searchQuery;
   /** Non–category-item pages: sort is local state. Category "Choose an item" uses `?sort=` (filter sheet). */
   const [sortByPage, setSortByPage] = useState("featured");
   const sortBy =
-    browseMode === "item" ? (searchParams.get("sort") || "trending") : sortByPage;
+    browseMode === "item" ? (searchParams.get("sort") || "price-low") : sortByPage;
   const setSortBy = setSortByPage;
   const [displayCount, setDisplayCount] = useState(12);
   const [familleFilter, setFamilleFilter] = useState<string | null>(null);
@@ -183,7 +211,7 @@ export function ProductGrid({
 
   // Global search with debounce - searches both PRODUCTS and SUPPLIERS in this category
   useEffect(() => {
-    if (!searchQuery.trim()) {
+    if (!effectiveSearchQuery.trim()) {
       setGlobalSearchResults([]);
       setSearching(false);
       return;
@@ -193,7 +221,7 @@ export function ProductGrid({
     const timeoutId = setTimeout(async () => {
       try {
         const params = new URLSearchParams({
-          globalSearch: searchQuery.trim(),
+          globalSearch: effectiveSearchQuery.trim(),
           sector: categoryId, // Filter to current category only
           limit: "100",
           Currency: "RWF",
@@ -210,7 +238,7 @@ export function ProductGrid({
         // Get products from the search
         const products = json.products || [];
 
-        console.log(`[ProductGrid Search] Query: "${searchQuery}" in ${categoryId}`);
+        console.log(`[ProductGrid Search] Query: "${effectiveSearchQuery}" in ${categoryId}`);
         console.log(`[ProductGrid Search] Received ${products.length} products from backend`);
         if (products.length > 0) {
           console.log(`[ProductGrid Search] Sample product:`, {
@@ -246,7 +274,7 @@ export function ProductGrid({
         // Filter suppliers by relevance (backend should have already filtered by sector)
         const filteredSuppliers = filterSuppliersByRelevance(
           uniqueSuppliers.filter(s => s.supplier_name),
-          searchQuery.trim(),
+          effectiveSearchQuery.trim(),
           8 // Lower threshold for more results
         );
 
@@ -256,7 +284,7 @@ export function ProductGrid({
         const allProducts: any[] = [];
 
         // Add direct product matches (already category-filtered)
-        const filteredProducts = filterProductsByRelevance(categoryFilteredProducts, searchQuery.trim(), 10);
+        const filteredProducts = filterProductsByRelevance(categoryFilteredProducts, effectiveSearchQuery.trim(), 10);
         allProducts.push(...filteredProducts);
 
         // Fetch products from matching suppliers
@@ -310,17 +338,49 @@ export function ProductGrid({
     }, 300); // 300ms debounce
 
     return () => clearTimeout(timeoutId);
-  }, [searchQuery, categoryId]);
+  }, [effectiveSearchQuery, categoryId]);
+
+  /** category_ai: sector list + badges come from parent — do not re-fetch listSuppliersWithProducts. */
+  useEffect(() => {
+    if (browseMode !== "item" || selectedSupplier !== "all") return;
+    if (preloadedSectorListSuppliers === undefined) return;
+    let cancelled = false;
+    if (preloadedSectorListSuppliers === null) {
+      setLoading(true);
+      setError(null);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const products = flattenListSuppliersPayloadToProducts(preloadedSectorListSuppliers);
+      if (!cancelled) setServerProducts(products);
+    } catch (e: any) {
+      if (!cancelled) setError(e?.message || "Failed to load products");
+    } finally {
+      if (!cancelled) setLoading(false);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [browseMode, selectedSupplier, preloadedSectorListSuppliers, categoryId]);
 
   useEffect(() => {
     let isMounted = true;
 
     async function run() {
+      if (
+        browseMode === "item" &&
+        selectedSupplier === "all" &&
+        preloadedSectorListSuppliers !== undefined
+      ) {
+        return;
+      }
       setLoading(true);
       setError(null);
       try {
         const base = getApiBase();
-        const sectorListUrl = `${base}/api/fetchSuggestions?listSuppliersWithProducts=${encodeURIComponent(categoryId)}&Currency=RWF&limit=${LIST_SECTOR_SUPPLIERS_LIMIT}`;
+        const sectorListUrl = `${base}/api/sector-list-suppliers?sector=${encodeURIComponent(categoryId)}&Currency=RWF&limit=${LIST_SECTOR_SUPPLIERS_LIMIT}`;
 
         const loadAllSectorProducts = async (shuffle: boolean) => {
           const res = await fetch(sectorListUrl, { cache: "no-store" });
@@ -371,11 +431,11 @@ export function ProductGrid({
     return () => {
       isMounted = false;
     };
-  }, [categoryId, selectedSupplier, selectedSupplierName, browseMode]);
+  }, [categoryId, selectedSupplier, selectedSupplierName, browseMode, preloadedSectorListSuppliers]);
 
   const allProducts = useMemo(() => {
     // Use global search results if searching, otherwise use server products
-    const sourceProducts = searchQuery.trim() ? globalSearchResults : serverProducts;
+    const sourceProducts = effectiveSearchQuery.trim() ? globalSearchResults : serverProducts;
 
     return (sourceProducts || []).map((p, idx) => {
       const firstCategoryHint =
@@ -410,7 +470,7 @@ export function ProductGrid({
         famille: p.famille || "",
       };
     });
-  }, [serverProducts, globalSearchResults, searchQuery, categoryId]);
+  }, [serverProducts, globalSearchResults, effectiveSearchQuery, categoryId]);
 
   const suppliers = useMemo(() => {
     const uniq = new Map<string, { id: string; name: string; location?: string }>();
@@ -491,7 +551,6 @@ export function ProductGrid({
                   <span className="font-semibold text-foreground">{filteredProducts.length}</span>{" "}
                   product{filteredProducts.length !== 1 ? "s" : ""}
                 </p>
-                <p className="text-xs text-muted-foreground">{t("categoryBrowseTrendingHint" as TranslationKey)}</p>
                 {hideInlineSearch && (
                   <p className="text-xs text-muted-foreground pt-1 border-t border-border/60 mt-2">
                     {t("categoryBrowseUseHeaderSearchProducts" as TranslationKey)}
@@ -541,7 +600,7 @@ export function ProductGrid({
           </div>
         )}
 
-            {browseMode === "item" && !searchQuery.trim() && familleOptions.length > 0 && (
+            {browseMode === "item" && !effectiveSearchQuery.trim() && familleOptions.length > 0 && (
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs font-medium text-muted-foreground shrink-0">
                   {t("categoryBrowseFamily" as TranslationKey)}:
@@ -605,7 +664,9 @@ export function ProductGrid({
           {filteredProducts.length === 0 && (
             <div className="text-center py-12">
               <p className="text-muted-foreground">
-                {searchQuery ? `No products found matching "${searchQuery}"` : "No products available"}
+                {effectiveSearchQuery
+                  ? `No products found matching "${effectiveSearchQuery}"`
+                  : "No products available"}
               </p>
             </div>
           )}

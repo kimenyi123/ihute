@@ -4,7 +4,7 @@ async function testShopAPI() {
     console.log('Testing shop API...')
     
     // Test with the correct endpoint we're using
-    const url = `/api/fetchSuggestions?listSuppliersWithProducts=boutique&Currency=RWF&limit=500`
+    const url = `/api/sector-list-suppliers?sector=boutique&Currency=RWF&limit=500`
     console.log('Fetching:', url)
     
     const res = await fetch(url, { cache: "no-store" })
@@ -41,7 +41,7 @@ async function testPharmacyAPI() {
     console.log('Testing Pharmacy API...')
     
     // Test pharmacy endpoint
-    const url = `/api/fetchSuggestions?listSuppliersWithProducts=pharmacy&Currency=RWF&limit=500`
+    const url = `/api/sector-list-suppliers?sector=pharmacy&Currency=RWF&limit=500`
     console.log('Fetching:', url)
     
     const res = await fetch(url, { cache: "no-store" })
@@ -67,7 +67,7 @@ async function testAllCategories() {
   
   for (const category of categories) {
     try {
-      const url = `/api/fetchSuggestions?listSuppliersWithProducts=${category}&Currency=RWF&limit=500`
+      const url = `/api/sector-list-suppliers?sector=${category}&Currency=RWF&limit=500`
       const res = await fetch(url, { cache: "no-store" })
       
       if (res.ok) {

@@ -28,11 +28,11 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // Reuse existing fetchSuggestions → listSuppliersWithProducts flow,
+    // Sector shop list via Next proxy → Kaos sectorListSuppliers (same JSON as legacy fetchSuggestions),
     // which already selects sellers based on preferredCategories from account_signup.
     const origin = req.nextUrl.origin
-    const url = new URL("/api/fetchSuggestions", origin)
-    url.searchParams.set("listSuppliersWithProducts", homepageCategoryId)
+    const url = new URL("/api/sector-list-suppliers", origin)
+    url.searchParams.set("sector", homepageCategoryId)
     url.searchParams.set("Currency", currency)
 
     const resp = await fetch(url.toString(), {

@@ -308,7 +308,7 @@ export function BuyerRegisterForm() {
     const sectorSlug = shopCategoryToSectorSlug(shopSector)
     let cancelled = false
     setShopsLoading(true)
-    const url = `/api/fetchSuggestions?listSuppliersWithProducts=${encodeURIComponent(sectorSlug)}&Currency=RWF&limit=100`
+    const url = `/api/sector-list-suppliers?sector=${encodeURIComponent(sectorSlug)}&Currency=RWF&limit=100`
     fetch(url, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : []))
       .then((raw: unknown) => {

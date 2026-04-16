@@ -60,9 +60,9 @@ interface ProductFiltersSheetProps {
 }
 
 const CATEGORY_ITEM_SORT: { value: string; labelKey: TranslationKey }[] = [
-  { value: "trending", labelKey: "categoryBrowseTrendingSort" },
-  { value: "featured", labelKey: "filterSortFeatured" },
   { value: "price-low", labelKey: "filterSortPriceLow" },
+  { value: "featured", labelKey: "filterSortFeatured" },
+  { value: "trending", labelKey: "categoryBrowseTrendingSort" },
   { value: "price-high", labelKey: "filterSortPriceHigh" },
   { value: "newest", labelKey: "filterSortNewest" },
   { value: "rating", labelKey: "filterSortRating" },
@@ -78,7 +78,7 @@ export function ProductFiltersSheet({ open, onOpenChange }: ProductFiltersSheetP
   const isCategoryItemBrowse =
     pathname.startsWith("/category_ai/") && searchParams.get("browse") === "item"
 
-  const currentSort = searchParams.get("sort") || "trending"
+  const currentSort = searchParams.get("sort") || "price-low"
 
   const setCategoryItemSort = (sort: string) => {
     const p = new URLSearchParams(searchParams.toString())

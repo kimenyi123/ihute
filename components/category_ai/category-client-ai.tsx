@@ -10,6 +10,11 @@ import {
   mapListSuppliersWithProductsToShops,
   type ShopInfo,
 } from "@/components/category_ai/shops-by-sector";
+import {
+  fetchSectorStatsFromApi,
+  normalizeListSuppliersPayload,
+  sumProductsInListSuppliersPayload,
+} from "@/lib/fetch-suggestions-helpers";
 import { usePrefsStore } from "@/lib/prefs-store";
 import { useTranslation } from "@/hooks/use-translation";
 import type { TranslationKey } from "@/lib/translations";
@@ -30,17 +35,29 @@ export function CategoryClientAI({
   const searchParams = useSearchParams();
   const { t } = useTranslation();
   const setSector = usePrefsStore((s) => s.setSector);
+  const setCategoryBrowseMode = usePrefsStore((s) => s.setCategoryBrowseMode);
   const [sectorStats, setSectorStats] = useState<{ shops: number; items: number } | null>(null);
   const [sectorShops, setSectorShops] = useState<ShopInfo[]>([]);
   const [sectorShopsLoading, setSectorShopsLoading] = useState(true);
+  /** Single listSuppliersWithProducts payload for badges + shop grid + item grid (avoids two RAND() samples from the servlet). */
+  const [sectorListPayload, setSectorListPayload] = useState<unknown[] | null>(null);
 
   const browseMode: CategoryBrowseMode =
     searchParams.get("browse") === "item" ? "item" : "shop";
 
+  const headerSearchSq = (searchParams.get("sq") ?? "").trim();
+
   useEffect(() => {
     setSector(categoryId || null);
-    return () => setSector(null);
-  }, [categoryId, setSector]);
+    return () => {
+      setSector(null);
+      setCategoryBrowseMode("shop");
+    };
+  }, [categoryId, setSector, setCategoryBrowseMode]);
+
+  useEffect(() => {
+    setCategoryBrowseMode(browseMode === "item" ? "item" : "shop");
+  }, [browseMode, setCategoryBrowseMode]);
 
   /** One listSuppliersWithProducts call: badges (N / I) + shop grid data (no second fetch for cards). */
   useEffect(() => {
@@ -51,23 +68,34 @@ export function CategoryClientAI({
       if (!sid) {
         setSectorShops([]);
         setSectorStats({ shops: 0, items: 0 });
+        setSectorListPayload([]);
         setSectorShopsLoading(false);
         return;
       }
+      setSectorListPayload(null);
       try {
-        const url = `/api/fetchSuggestions?listSuppliersWithProducts=${encodeURIComponent(sid)}&Currency=RWF&limit=${LIST_SECTOR_SUPPLIERS_LIMIT}`;
-        const r = await fetch(url, { cache: "no-store" });
-        const raw: unknown = r.ok ? await r.json() : [];
-        const arr = Array.isArray(raw) ? raw : [];
+        const listUrl = `/api/sector-list-suppliers?sector=${encodeURIComponent(sid)}&Currency=RWF&limit=${LIST_SECTOR_SUPPLIERS_LIMIT}`;
+        const [stats, listRes] = await Promise.all([
+          fetchSectorStatsFromApi(sid),
+          fetch(listUrl, { cache: "no-store" }),
+        ]);
+        const raw: unknown = listRes.ok ? await listRes.json() : [];
+        const arr = normalizeListSuppliersPayload(raw);
         const mapped = mapListSuppliersWithProductsToShops(arr);
         if (cancelled) return;
+        setSectorListPayload(arr);
         setSectorShops(mapped);
-        const itemsSum = mapped.reduce((acc, s) => acc + (s.stockLineCount ?? 0), 0);
-        setSectorStats({ shops: mapped.length, items: itemsSum });
+        const itemsSum = sumProductsInListSuppliersPayload(arr);
+        setSectorStats(
+          stats
+            ? { shops: stats.shops, items: stats.items }
+            : { shops: mapped.length, items: itemsSum }
+        );
       } catch {
         if (!cancelled) {
           setSectorShops([]);
           setSectorStats({ shops: 0, items: 0 });
+          setSectorListPayload([]);
         }
       } finally {
         if (!cancelled) setSectorShopsLoading(false);
@@ -91,17 +119,17 @@ export function CategoryClientAI({
       if (mode === "item") {
         p.delete("supplier");
         p.delete("supplierName");
-        if (!p.get("sort")) p.set("sort", "trending");
+        if (!p.get("sort")) p.set("sort", "price-low");
       }
     });
   };
 
-  /** Default sort for item browse (filter sheet + ProductGrid read `?sort=`). */
+  /** Default sort for item browse: stable DB-friendly ordering (not “trending” placeholder). */
   useEffect(() => {
     if (browseMode !== "item") return;
     if (searchParams.get("sort")) return;
     replaceQuery((p) => {
-      p.set("sort", "trending");
+      p.set("sort", "price-low");
     });
   }, [browseMode, categoryId, searchParams]);
 
@@ -165,10 +193,12 @@ export function CategoryClientAI({
         </div>
       </div>
 
+      <div id="category-ai-grid-section" className="space-y-4">
       {browseMode === "shop" && (
         <ShopsForSingleSector
           shops={sectorShops}
           loading={sectorShopsLoading}
+          filterQuery={headerSearchSq}
           className="mb-4"
         />
       )}
@@ -182,9 +212,11 @@ export function CategoryClientAI({
             selectedSupplierName="All Suppliers"
             browseMode="item"
             hideInlineSearch
+            preloadedSectorListSuppliers={sectorListPayload}
           />
         </section>
       )}
+      </div>
     </>
   );
 }
