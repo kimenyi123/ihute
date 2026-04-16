@@ -128,11 +128,11 @@ function buildTracking(status: OrderStatus) {
   // Get friendly name for current status
   const statusLabels: Record<OrderStatus, string> = {
     "open": "Order Placed",
-    "pending": "Awaiting Confirmation",
-    "processing": "Being Prepared",
+    "pending": "Order Placed",
+    "processing": "Processing",
     "invoice": "Invoice",
     "in-transit": "Out for Delivery",
-    "delivered": "Delivered Successfully"
+    "delivered": "Delivered"
   }
 
   const currentStatusLabel = statusLabels[status] || status

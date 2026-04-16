@@ -115,7 +115,11 @@ function InlineStatusPicker({ order, orders, setOrders }: { order: Order, orders
       const res = await fetch(ORDER_STATUS_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId: Number(order.id), status: next })
+        body: JSON.stringify({
+          orderId: Number(order.id),
+          status: next,
+          publicSiteUrl: typeof window !== "undefined" ? window.location.origin : undefined,
+        }),
       })
 
       const json = await res.json()
