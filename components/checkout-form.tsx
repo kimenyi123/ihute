@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useCartStore } from "@/lib/cart-store"
+import { useAuthStore } from "@/lib/auth-store"
+import { GUEST_POOL_EMAIL, ensureGuestPoolBuyerAccount } from "@/lib/guest-checkout"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -40,6 +42,7 @@ type CheckoutFormData = z.infer<typeof checkoutSchema>
 export function CheckoutForm() {
   const router = useRouter()
   const { items, getTotalPrice, clearCart, tableInfo } = useCartStore()
+  const { user, isAuthenticated } = useAuthStore()
   const [isProcessing, setIsProcessing] = useState(false)
   const [showReview, setShowReview] = useState(false)
   const [showMap, setShowMap] = useState(false)
@@ -89,6 +92,18 @@ export function CheckoutForm() {
     }
   }, [tableInfo, setValue])
 
+  // Prefill checkout fields for authenticated buyers.
+  useEffect(() => {
+    if (!isAuthenticated || !user) return
+    setValue("fullName", user.name || "")
+    setValue("email", user.email || "")
+    setValue("phone", user.phone || "")
+    if (user.location) {
+      setValue("address", user.location)
+      setValue("city", user.location)
+    }
+  }, [isAuthenticated, user, setValue])
+
   if (items.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -122,6 +137,24 @@ export function CheckoutForm() {
 
     setIsProcessing(true)
     try {
+      let buyerEmail = ""
+      let buyerAccount = ""
+      let isGuestCheckout = false
+
+      if (isAuthenticated && user?.email) {
+        buyerEmail = user.email
+        buyerAccount = String(user.ishyigaAccount ?? "").trim()
+      } else {
+        // For anonymous checkout, always attach the shared guest buyer identity.
+        buyerEmail = GUEST_POOL_EMAIL
+        buyerAccount = await ensureGuestPoolBuyerAccount()
+        isGuestCheckout = true
+      }
+
+      if (!buyerEmail.trim()) {
+        throw new Error("Buyer account is missing. Please sign in or retry.")
+      }
+
       const sellerAccount = items[0]?.supplierId || ""
       if (sellerAccount) {
         const stockItems = items.map((it) => {
@@ -163,7 +196,9 @@ export function CheckoutForm() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          buyerEmail: data.email || "",
+          buyerEmail,
+          ...(buyerAccount ? { buyerAccount } : {}),
+          ...(isGuestCheckout ? { isGuestCheckout: true } : {}),
           buyerName: data.fullName,
           buyerPhone: data.phone,
           buyerLocation: data.city ? `${data.address}, ${data.city}` : data.address,

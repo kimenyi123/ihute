@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getFetchSuggestionsUrl } from "@/lib/backend-config"
 import { dedupeSearchProductsByItemCodeAndSellingPrice } from "@/lib/dedupe-search-products"
 import type {
   KioskCategory,
@@ -43,9 +42,12 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const target = new URL(getFetchSuggestionsUrl())
+    // Reuse our Next proxy so kiosk search gets the same enrichment/cache behavior
+    // as the main search flow, and pass `sector` instead of `category`.
+    const target = new URL("/api/fetchSuggestions", req.nextUrl.origin)
     target.searchParams.set("globalSearch", query)
-    target.searchParams.set("category", sector)
+    target.searchParams.set("sector", sector)
+    target.searchParams.set("Currency", "RWF")
     if (supplier) target.searchParams.set("supplier", supplier)
     if (location) target.searchParams.set("location", location)
 
@@ -80,24 +82,25 @@ export async function GET(req: NextRequest) {
         (p.TOPPINGS as KioskModifierGroup[] | undefined)
 
       return {
-        item_code: String(p.item_code ?? ""),
+        item_code: String(p.item_code ?? p.ITEM_CODE ?? p.item_key_words ?? ""),
         item_commercial_name: String(
-          p.item_commercial_name ?? p.item_name ?? "",
+          p.item_commercial_name ?? p.ITEM_NAME ?? p.item_name ?? "",
         ),
-        item_name: p.item_name,
+        item_name: p.item_name ?? p.ITEM_NAME,
         selling_price: Number(p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? 0),
-        unit: String(p.unit ?? ""),
-        image_url: p.image_url ?? p.item_image_url,
-        supplier_account: String(p.supplier_account ?? ""),
-        supplier_name: String(p.supplier_name ?? ""),
-        supplier_location: p.supplier_location,
+        unit: String(p.unit ?? p.UNIT ?? ""),
+        image_url: p.image_url ?? p.item_image_url ?? p.image ?? p.IMAGE_URL,
+        supplier_account: String(p.supplier_account ?? p.seller_account ?? ""),
+        supplier_name: String(p.supplier_name ?? p.seller_name ?? ""),
+        supplier_location: p.supplier_location ?? p.seller_location,
         search_priority: typeof p.search_priority === "number"
           ? p.search_priority
           : undefined,
         contains_ingredient: p.contains_ingredient,
-        category: p.category,
-        sector: p.sector,
-        keywords: p.item_key_words,
+        category: p.category ?? p.CATEGORY,
+        sector: p.sector ?? p.SECTOR,
+        item_department: p.item_department ?? p.famille ?? p.FAMILLE ?? p.category ?? p.CATEGORY,
+        keywords: p.keywords ?? p.item_key_words ?? "",
         sizes,
         modifiers,
         toppings,

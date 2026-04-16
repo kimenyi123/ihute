@@ -1,0 +1,6 @@
+type,prompt_en,linked_task,notes
+prompt,"Identify the root cause for the ticket 'Create new buyer (missing flow)'.","Investigate 'Create new buyer (missing flow)' issue","Searched codebase for buyer/guest/account flows; reviewed registration and guest-pool logic; traced likely identity gap in table-command guest flow."
+prompt,"Confirm whether you had already found the issue causing the problem.","Verify finding","Confirmed a likely missing buyer/identity preparation step specifically for table-command checkout (table send uses userEmail but does not ensure guest-pool buyer identity row)."
+prompt,"Request: 'Save the prompts used in this session to selfevaluation.csv; show every Cursor AI prompt in this session; include linked task; list new features built; list bugs resolved in last 72 hours.'","Self-evaluation logging request","Logged only what is visible in this chat; cannot access Cursor internal prompt logs beyond what is exchanged here."
+summary,"","New Features or Functionality Built","None. This session performed analysis/triage only."
+summary,"","Bugs Resolved in the last 72 hours","None. No code changes were shipped as a bug fix in this session."

@@ -64,6 +64,7 @@ export interface KioskCartItem {
 // Matches Kaos order creation payload (post_orders / KioskController)
 export interface KioskOrderPayload {
   buyer_account?: string
+  buyer_email?: string
   table_number?: string
   customer_name?: string
   order_type: "dine-in" | "takeaway"

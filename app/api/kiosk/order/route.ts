@@ -61,8 +61,14 @@ export async function POST(req: NextRequest) {
     form.set("action", "createKioskOrder")
     form.set("sellerAccount", sellerAccount)
     form.set("items", JSON.stringify(items))
+    if (body.buyer_account) form.set("buyerAccount", body.buyer_account)
+    if (body.buyer_email) form.set("buyerEmail", body.buyer_email)
     if (body.table_number) form.set("tableNumber", body.table_number)
     if (body.customer_name) form.set("customerName", body.customer_name)
+    // Backend may rely on buyerName for identification even when buyerEmail/buyerAccount are present.
+    // Use customer_name when available; otherwise fallback to "Guest".
+    const buyerName = String(body.customer_name ?? "").trim() || "Guest"
+    form.set("buyerName", buyerName)
     form.set("kioskCategory", body.kiosk_category)
     form.set("paymentName", paymentName)
     form.set("currency", body.currency || "RWF")

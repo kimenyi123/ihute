@@ -908,13 +908,9 @@ export default function SearchPage() {
     } else {
       raw = supplierSearchResults ?? []
     }
-    const filtered = raw.filter((p) => {
-      const base =
-        extractNumericPrice(p.selling_price) ||
-        extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) ||
-        extractNumericPrice((p as any).price)
-      return base > 0
-    })
+    // Some backend responses provide only `final_selling_price` (enriched by `/api/fetchSuggestions`).
+    // Filter using `productLinePrice()` so valid products are not dropped.
+    const filtered = raw.filter((p) => productLinePrice(p) > 0)
     // Same as `/api/fetchSuggestions` keyword path: one card per supplier + item code + base selling price (multi-lot → merged).
     const deduped = dedupeSearchProductsByItemCodeAndSellingPrice(filtered) as Product[]
     // Supplier search uses backend `globalSearch`, which is keyword/fuzzy — similar SKUs (e.g. N-22 vs N-23) can both match.
@@ -987,13 +983,8 @@ export default function SearchPage() {
   // Main search products (global): exclude 0 price, then sort
   const searchProductsWithPrice = useMemo(() => {
     const list = searchResult?.products ?? []
-    const filtered = list.filter((p) => {
-      const base =
-        extractNumericPrice(p.selling_price) ||
-        extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) ||
-        extractNumericPrice((p as any).price)
-      return base > 0
-    })
+    // Same as supplier-scoped: prefer `final_selling_price` when backend provides it.
+    const filtered = list.filter((p) => productLinePrice(p) > 0)
     let ordered: Product[]
     if (productSort === "price-asc")
       ordered = [...filtered].sort((a, b) => productLinePrice(a) - productLinePrice(b))

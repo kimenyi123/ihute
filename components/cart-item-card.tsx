@@ -3,17 +3,18 @@
 import { useState, useEffect } from "react"
 import Image from "next/image"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { useCartStore, CartItem } from "@/lib/cart-store"
-import { Minus, Plus, Trash2 } from "lucide-react"
+import { Trash2 } from "lucide-react"
 import { getProductImageCandidates, isValidImageUrl, NO_IMAGE_URL } from "@/lib/image-utils"
 import { DEFAULT_CART_CURRENCY, displayUnitForPrice } from "@/lib/cart-display-utils"
 
 const PLACEHOLDER = "/placeholder.svg?height=64&width=64"
 
 export function CartItemCard({ item }: { item: CartItem }) {
-  const inc = useCartStore((s) => s.inc)
-  const dec = useCartStore((s) => s.dec)
+  const setQty = useCartStore((s) => s.setQty)
   const remove = useCartStore((s) => s.remove)
+  const [qtyText, setQtyText] = useState(String(item.qty))
 
   const imageCandidates = ((): string[] => {
     // Try same ordered fallback chain we use everywhere else:
@@ -36,6 +37,10 @@ export function CartItemCard({ item }: { item: CartItem }) {
   useEffect(() => {
     setCandidateIdx(0)
   }, [candidatesSignature, item.id, item.selectedUnit])
+
+  useEffect(() => {
+    setQtyText(String(item.qty))
+  }, [item.qty])
 
   const unitLabel = displayUnitForPrice(item.unit ?? item.selectedUnit)
 
@@ -108,25 +113,29 @@ export function CartItemCard({ item }: { item: CartItem }) {
 
       <div className="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
         <div className="flex items-center gap-2">
-          <Button
-            size="icon"
-            variant="outline"
-            onClick={() => dec(item.id, item.selectedUnit)}
-            aria-label="Decrease"
-            className="h-8 w-8"
-          >
-            <Minus className="h-4 w-4" />
-          </Button>
-          <span className="w-8 text-center font-medium">{item.qty}</span>
-          <Button
-            size="icon"
-            variant="outline"
-            onClick={() => inc(item.id, item.selectedUnit)}
-            aria-label="Increase"
-            className="h-8 w-8"
-          >
-            <Plus className="h-4 w-4" />
-          </Button>
+          <Input
+            type="number"
+            inputMode="numeric"
+            min={1}
+            step={1}
+            value={qtyText}
+            onChange={(e) => {
+              const v = e.target.value
+              setQtyText(v)
+              const n = Number.parseInt(v, 10)
+              if (Number.isFinite(n) && n >= 1) {
+                setQty(item.id, item.selectedUnit, n)
+              }
+            }}
+            onBlur={() => {
+              const n = Number.parseInt(qtyText, 10)
+              const clamped = Number.isFinite(n) && n >= 1 ? n : 1
+              setQtyText(String(clamped))
+              setQty(item.id, item.selectedUnit, clamped)
+            }}
+            aria-label="Quantity"
+            className="h-8 w-20"
+          />
         </div>
 
         <div className="flex items-center gap-2">
