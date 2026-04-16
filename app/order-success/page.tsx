@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useMemo } from "react"
+import { useEffect, useState, useMemo, useRef } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
@@ -45,17 +45,25 @@ export default function OrderSuccessPage() {
   const [ratingItems, setRatingItems] = useState<Array<{ code: string, name: string }>>([])
   const [hasCheckedRating, setHasCheckedRating] = useState(false)
   
+  // ✅ Get table session reactively from store
+  const tableSession = useTableCommandStore((state) => state.activeSession)
+
   // ✅ Table shareable link alert for table creators
   const [showTableLinkAlert, setShowTableLinkAlert] = useState(false)
   const [tableShareLink, setTableShareLink] = useState<string>("")
   const [tableName, setTableName] = useState<string>("")
+  const hasShownAlert = useRef(false)
   
   // Check if user is table creator and show shareable link
   useEffect(() => {
-    const tableSession = useTableCommandStore.getState().activeSession
+    if (hasShownAlert.current) return // Only show once per session
+    
     if (tableSession) {
+      console.log('🔍 Order Success - Table session:', tableSession)
       // User is in a table command session
       const isCreator = tableSession.userEmail === tableSession.createdBy
+      console.log('🔍 Order Success - Is creator:', isCreator)
+      
       if (isCreator && tableSession.tableName && tableSession.locationId) {
         // Generate shareable link (same format as backend)
         const tokenData = `${tableSession.tableName}|${tableSession.locationId}|${Date.now()}`
@@ -65,6 +73,9 @@ export default function OrderSuccessPage() {
         setTableShareLink(shareLink)
         setTableName(tableSession.tableName)
         setShowTableLinkAlert(true)
+        hasShownAlert.current = true
+        
+        console.log('✅ Showing table share alert for:', tableSession.tableName)
         
         // Auto-hide after 8 seconds
         const timer = setTimeout(() => {
@@ -74,7 +85,7 @@ export default function OrderSuccessPage() {
         return () => clearTimeout(timer)
       }
     }
-  }, [])
+  }, [tableSession])
   
   const copyTableLink = async () => {
     try {

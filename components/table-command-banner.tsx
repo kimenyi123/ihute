@@ -2,7 +2,7 @@
 
 import { useTableCommandStore } from "@/lib/table-command-store"
 import { Button } from "@/components/ui/button"
-import { Beer, X, Lock, CheckCircle, Send } from "lucide-react"
+import { Beer, X, Lock, CheckCircle, Send, Link2 } from "lucide-react"
 import { useState, useEffect } from "react"
 import { TableCommandShareModal } from "@/components/table-command-share-modal"
 import {
@@ -160,6 +160,19 @@ export function TableCommandBanner() {
                   <Send className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                   <span className="hidden sm:inline">Send Complete Order</span>
                   <span className="sm:hidden">Send</span>
+                </Button>
+              )}
+
+              {/* SHARE TABLE LINK BUTTON (creators only) */}
+              {activeSession.isCreator && activeSession.shareableLink && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowShareModal(true)}
+                  className="text-white hover:bg-white/20 hover:text-white gap-1 sm:gap-1.5 bg-blue-600 hover:bg-blue-700 h-7 sm:h-9 px-2 sm:px-3 text-xs sm:text-sm"
+                >
+                  <Link2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                  <span className="hidden sm:inline">Share</span>
                 </Button>
               )}
 
