@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button"
 import { useCartStore, CartItem } from "@/lib/cart-store"
 import { Minus, Plus, Trash2 } from "lucide-react"
 import { getProductImageCandidates, isValidImageUrl, NO_IMAGE_URL } from "@/lib/image-utils"
-import { DEFAULT_CART_CURRENCY, displayUnitForPrice } from "@/lib/cart-display-utils"
+import { DEFAULT_CART_CURRENCY, itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
+import { isExpiryMeaningfulForCustomerDisplay } from "@/lib/item-state-display"
 
 const PLACEHOLDER = "/placeholder.svg?height=64&width=64"
 
@@ -37,7 +38,9 @@ export function CartItemCard({ item }: { item: CartItem }) {
     setCandidateIdx(0)
   }, [candidatesSignature, item.id, item.selectedUnit])
 
-  const unitLabel = displayUnitForPrice(item.unit ?? item.selectedUnit)
+  const unitLabel = itemEmballageDisplaySuffix(
+    item.itemEmballage ?? item.unit ?? item.selectedUnit,
+  )
 
   return (
     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4 rounded-lg border p-3">
@@ -89,15 +92,15 @@ export function CartItemCard({ item }: { item: CartItem }) {
               <>
                 <span className="font-medium">
                   {Number(item.price).toLocaleString()} {DEFAULT_CART_CURRENCY}
+                  {unitLabel ? (
+                    <span className="text-muted-foreground"> ({unitLabel})</span>
+                  ) : null}
                 </span>
-                {unitLabel ? (
-                  <span className="text-muted-foreground"> · {unitLabel}</span>
-                ) : null}
               </>
             ) : (
               "Price not available"
             )}
-            {item.expiryLabel ? (
+            {isExpiryMeaningfulForCustomerDisplay(item.expiryLabel) ? (
               <div className="text-xs text-amber-900/90 mt-1 font-medium">
                 Expiry: {item.expiryLabel}
               </div>

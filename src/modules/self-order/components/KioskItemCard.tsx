@@ -2,6 +2,8 @@
 
 import type { KioskMenuItem } from "@/src/modules/self-order/types"
 import { Button } from "@/components/ui/button"
+import { generalSellingPrice } from "@/lib/package-price"
+import { itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
 
 interface Props {
   item: KioskMenuItem
@@ -9,7 +11,12 @@ interface Props {
 }
 
 export function KioskItemCard({ item, onSelect }: Props) {
-  const price = Number(item.selling_price || 0)
+  const displayPrice = generalSellingPrice(Number(item.selling_price || 0), item.item_emballage)
+  const displayUnitLabel = itemEmballageDisplaySuffix(
+    item.item_emballage == null || String(item.item_emballage).trim() === ""
+      ? "1"
+      : String(item.item_emballage)
+  )
   const mainBadge =
     typeof item.search_priority === "number" && item.search_priority >= 2
   const contains = item.contains_ingredient
@@ -52,9 +59,11 @@ export function KioskItemCard({ item, onSelect }: Props) {
           {item.supplier_name}
         </div>
         <div className="mt-1 flex items-center justify-between">
-          <div className="text-sm font-semibold text-emerald-300">
-            {price.toLocaleString("en")} RWF{" "}
-            <span className="text-xs text-slate-400 ml-1">{item.unit}</span>
+          <div className="text-sm font-semibold text-emerald-300 tabular-nums">
+            {displayPrice.toLocaleString("en")} RWF
+            {displayUnitLabel ? (
+              <span className="text-xs font-normal text-slate-400 ml-1">({displayUnitLabel})</span>
+            ) : null}
           </div>
           <Button
             type="button"

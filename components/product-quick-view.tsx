@@ -13,22 +13,35 @@ import { ShoppingCart } from "lucide-react"
 import Image from "next/image"
 import { useMemo, useState, useEffect } from "react"
 import { usePriceDropToasts } from "@/lib/use-price-drop-toasts"
-import { getProductImageCandidates, getProductImageSrc, NO_IMAGE_URL, isValidImageUrl } from "@/lib/image-utils"
+import {
+  getProductImageCandidates,
+  getProductImageSrc,
+  type ProductImageSource,
+  NO_IMAGE_URL,
+  isValidImageUrl,
+} from "@/lib/image-utils"
 import { unitMeaningfulForDisplay } from "@/lib/product-unit-display"
 
-export type QuickViewProduct = {
+/**
+ * Same image fields as product cards / `getProductImageCandidates` (image_url, famille, item_key_words, …).
+ * Passing only a single resolved `image` URL skips backend URLs and KAOS fallbacks.
+ */
+export type QuickViewProduct = ProductImageSource & {
   id: string
   name: string
   description?: string
   price: number
   currency?: string
   unit?: string
-  image?: string
   itemCode?: string
   supplierId?: string
   supplierName?: string
   /** Package/packet multiplier — forwarded to cart / orders when adding from quick view. */
   itemEmballage?: string
+  famille?: string
+  FAMILLE?: string
+  item_key_words?: string
+  item_code?: string
 }
 
 type ProductQuickViewProps = {
@@ -57,7 +70,7 @@ export function ProductQuickView({ product, open, onOpenChange, onAddToCart }: P
   const candidates = useMemo(() => {
     if (!product) return [NO_IMAGE_URL]
     try {
-      return getProductImageCandidates(product as any)
+      return getProductImageCandidates(product as ProductImageSource & Record<string, unknown>)
     } catch {
       return [NO_IMAGE_URL]
     }
@@ -74,7 +87,7 @@ export function ProductQuickView({ product, open, onOpenChange, onAddToCart }: P
     product && isValidImageUrl(candidateSrc)
       ? candidateSrc
       : product
-        ? getProductImageSrc(product as any, placeholder)
+        ? getProductImageSrc(product as ProductImageSource, placeholder)
         : placeholder
 
   if (!product) return null

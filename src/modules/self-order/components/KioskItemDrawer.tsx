@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import type { KioskMenuItem } from "@/src/modules/self-order/types"
 import { useCartStore } from "@/lib/cart-store"
 import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price"
+import { itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
 
 interface KioskItemDrawerProps {
   item: KioskMenuItem | null
@@ -21,6 +22,11 @@ export function KioskItemDrawer({ item, open, onOpenChange }: KioskItemDrawerPro
 
   const price = generalSellingPrice(Number(item.selling_price || 0), item.item_emballage)
   const itemEmballage = normalizeItemEmballageForCart(item.item_emballage)
+  const displayUnitLabel = itemEmballageDisplaySuffix(
+    item.item_emballage == null || String(item.item_emballage).trim() === ""
+      ? "1"
+      : String(item.item_emballage)
+  )
 
   const handleAdd = () => {
     if (!item) return
@@ -69,8 +75,10 @@ export function KioskItemDrawer({ item, open, onOpenChange }: KioskItemDrawerPro
           <div className="flex-1 space-y-4">
             <div>
               <p className="text-lg font-semibold">
-                {price.toLocaleString("en")} RWF{" "}
-                <span className="text-sm text-slate-300 ml-1">{item.unit}</span>
+                {price.toLocaleString("en")} RWF
+                {displayUnitLabel ? (
+                  <span className="text-sm font-normal text-slate-300 ml-1">({displayUnitLabel})</span>
+                ) : null}
               </p>
               {item.keywords && (
                 <p className="text-sm text-slate-400 mt-1 line-clamp-2">

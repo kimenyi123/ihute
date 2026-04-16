@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import Image from "next/image";
 import { getProductImageCandidates, getProductImageSrc, NO_IMAGE_URL } from "@/lib/image-utils";
 import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price";
+import { itemEmballageDisplaySuffix } from "@/lib/cart-display-utils";
 
 type QuickProductItem = {
   item_emballage?: string;
@@ -138,14 +139,17 @@ export default function QuickProductCodePage() {
   /** Currency from account_signup (product.currency). */
   const getCurrency = (product: QuickProductItem) => product.currency || 'RWF';
 
-  /** Display: selling_price with currency concatenated (from account_signup). */
+  /** Final line price: `selling_price × item_emballage` (default mult 1); pack shown as `(50 pcs)` to avoid clashing with strengths in names (e.g. 50mg). */
   const formatPrice = (product: QuickProductItem) => {
-    const display = generalSellingPrice(
-      getPrice(product),
-      product.item_emballage ?? (product as { ITEM_EMBALLAGE?: string }).ITEM_EMBALLAGE
-    );
+    const embRaw = product.item_emballage ?? (product as { ITEM_EMBALLAGE?: string }).ITEM_EMBALLAGE;
+    const display = generalSellingPrice(getPrice(product), embRaw);
     const curr = getCurrency(product);
-    return display > 0 ? `${Number(display).toLocaleString()} ${curr}` : '—';
+    if (display <= 0) return "—";
+    const unit =
+      itemEmballageDisplaySuffix(
+        embRaw != null && String(embRaw).trim() !== "" ? String(embRaw) : "1"
+      ) ?? "1 pcs";
+    return `${Number(display).toLocaleString()} ${curr} (${unit})`;
   };
 
   const handleAddToCart = (product: QuickProductItem) => {
@@ -189,7 +193,8 @@ export default function QuickProductCodePage() {
     e.preventDefault();
     e.stopPropagation();
 
-    const price = getPrice(product);
+    const embRaw = product.item_emballage ?? (product as { ITEM_EMBALLAGE?: string }).ITEM_EMBALLAGE;
+    const price = generalSellingPrice(getPrice(product), embRaw);
     const productId = `${product.supplier_account ?? ""}_${product.item_code ?? ""}`;
     const wasFav = isFavorite(productId);
 

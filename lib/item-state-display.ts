@@ -54,6 +54,10 @@ export function parseItemStateBatchExpiry(itemState: unknown): ParsedItemStateDi
       if (v && !/^na$/i.test(v)) batch = v
     } else if (low.startsWith("ex:")) {
       const raw = t.slice(3).trim()
+      // Not applicable / missing expiry — do not show "Ex:NA" in customer UI
+      if (/^na$/i.test(raw)) {
+        continue
+      }
       if (raw.length === 6 && /^\d{6}$/.test(raw)) {
         exDdMmYyEncoded = raw
         expiryLabel = `${raw.slice(0, 2)}/${raw.slice(2, 4)}/${raw.slice(4, 6)}`
@@ -94,4 +98,15 @@ export function parseItemStateBatchExpiry(itemState: unknown): ParsedItemStateDi
     expiryRaw,
     exDdMmYyEncoded,
   }
+}
+
+/** Hide expiry line when catalog encodes missing expiry as NA / Ex:NA / N/A. */
+export function isExpiryMeaningfulForCustomerDisplay(label: string | null | undefined): boolean {
+  if (label == null) return false
+  const t = String(label).trim()
+  if (!t) return false
+  const compact = t.replace(/\s+/g, " ")
+  if (/^ex:\s*na$/i.test(compact)) return false
+  if (/^(na|n\/a)$/i.test(compact)) return false
+  return true
 }
