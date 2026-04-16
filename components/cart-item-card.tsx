@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import Image from "next/image"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { useCartStore, CartItem } from "@/lib/cart-store"
 import { Minus, Plus, Trash2 } from "lucide-react"
 import { getProductImageCandidates, isValidImageUrl, NO_IMAGE_URL } from "@/lib/image-utils"
@@ -13,7 +14,9 @@ const PLACEHOLDER = "/placeholder.svg?height=64&width=64"
 export function CartItemCard({ item }: { item: CartItem }) {
   const inc = useCartStore((s) => s.inc)
   const dec = useCartStore((s) => s.dec)
+  const setQty = useCartStore((s) => s.setQty)
   const remove = useCartStore((s) => s.remove)
+  const [inputValue, setInputValue] = useState(String(item.qty))
 
   const imageCandidates = ((): string[] => {
     // Try same ordered fallback chain we use everywhere else:
@@ -36,6 +39,11 @@ export function CartItemCard({ item }: { item: CartItem }) {
   useEffect(() => {
     setCandidateIdx(0)
   }, [candidatesSignature, item.id, item.selectedUnit])
+
+  // Sync input value when quantity changes externally
+  useEffect(() => {
+    setInputValue(String(item.qty))
+  }, [item.qty])
 
   const unitLabel = displayUnitForPrice(item.unit ?? item.selectedUnit)
 
@@ -111,17 +119,46 @@ export function CartItemCard({ item }: { item: CartItem }) {
           <Button
             size="icon"
             variant="outline"
-            onClick={() => dec(item.id, item.selectedUnit)}
+            onClick={() => {
+              dec(item.id, item.selectedUnit)
+              setInputValue(String(Math.max(1, item.qty - 1)))
+            }}
             aria-label="Decrease"
             className="h-8 w-8"
           >
             <Minus className="h-4 w-4" />
           </Button>
-          <span className="w-8 text-center font-medium">{item.qty}</span>
+          <Input
+            type="number"
+            min={1}
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onBlur={() => {
+              const newQty = parseInt(inputValue, 10)
+              if (!isNaN(newQty) && newQty >= 1) {
+                setQty(item.id, item.selectedUnit, newQty)
+              } else {
+                setInputValue(String(item.qty))
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                const newQty = parseInt(inputValue, 10)
+                if (!isNaN(newQty) && newQty >= 1) {
+                  setQty(item.id, item.selectedUnit, newQty)
+                }
+                e.currentTarget.blur()
+              }
+            }}
+            className="h-8 w-16 text-center font-medium px-1"
+          />
           <Button
             size="icon"
             variant="outline"
-            onClick={() => inc(item.id, item.selectedUnit)}
+            onClick={() => {
+              inc(item.id, item.selectedUnit)
+              setInputValue(String(item.qty + 1))
+            }}
             aria-label="Increase"
             className="h-8 w-8"
           >

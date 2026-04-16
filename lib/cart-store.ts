@@ -97,6 +97,7 @@ type CartState = {
   addOrInc: (item: Omit<CartItem, "qty">, qty?: number) => void
   inc: (id: string, selectedUnit?: string) => void
   dec: (id: string, selectedUnit?: string) => void
+  setQty: (id: string, selectedUnit: string | undefined, qty: number) => void
   remove: (id: string, selectedUnit?: string) => void
   clear: () => void
   clearCart: () => void
@@ -395,12 +396,19 @@ export const useCartStore = create<CartState>()(
           }),
         })),
 
+      setQty: (id, selectedUnit, qty) =>
+        set((s) => ({
+          items: s.items.map((x) =>
+            x.id === id && x.selectedUnit === selectedUnit ? { ...x, qty: Math.max(1, qty) } : x
+          ),
+        })),
+
       remove: (id, selectedUnit) =>
         set((s) => ({
           items: s.items.filter((x) => !(x.id === id && x.selectedUnit === selectedUnit)),
         })),
 
-      clear: () => set({ items: [], payment: {}, tableInfo: null }),  // ✅ Clear table info too
+      clear: () => set({ items: [], payment: {}, tableInfo: null }),  // Clear table info too
       replaceItemsFromSync: (items) => set({ items: Array.isArray(items) ? items : [] }),
 
       // ✅ Alias for clear() to match checkout form usage
