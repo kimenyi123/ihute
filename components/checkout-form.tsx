@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useCartStore } from "@/lib/cart-store"
+import { useAuthStore } from "@/lib/auth-store"
+import { flushCartToServer } from "@/lib/flush-cart-server"
 import { getOrCreateGuestName, useTableCommandStore } from "@/lib/table-command-store"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -40,6 +42,7 @@ type CheckoutFormData = z.infer<typeof checkoutSchema>
 
 export function CheckoutForm() {
   const router = useRouter()
+  const user = useAuthStore((s) => s.user)
   const { items, getTotalPrice, clearCart, tableInfo } = useCartStore()
   const [isProcessing, setIsProcessing] = useState(false)
   const [showReview, setShowReview] = useState(false)
@@ -242,6 +245,7 @@ export function CheckoutForm() {
       console.log("✅ Order created successfully:", json)
 
       clearCart()
+      await flushCartToServer(user?.email ?? "", [])
       router.push(`/track-order/${json.orderId}`)
 
     } catch (e: any) {

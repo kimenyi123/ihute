@@ -37,6 +37,7 @@ import { TableCommandShareModal } from "@/components/table-command-share-modal"
 import { CartSuggestionsPopup } from "@/components/cart-suggestions-popup"
 import { displayUnitForPrice } from "@/lib/cart-display-utils"
 import { orderErrorMessageWithProductNames } from "@/lib/order-error-display"
+import { flushCartToServer } from "@/lib/flush-cart-server"
 import { kaosCatalogBaseUnitPrice } from "@/lib/kaos-catalog-price"
 import {
   AlertDialog,
@@ -586,6 +587,7 @@ function CartSummaryBody() {
           })
           setShareModalOpen(true)
           clear()
+          await flushCartToServer(user?.email ?? "", [])
           return
         }
 
@@ -612,12 +614,14 @@ function CartSummaryBody() {
         // clear cart but stay on page so user can add more items.
         if (isInTableCommand() && activeSession?.isCreator && currentOrderIsBarTable) {
           clear()
+          await flushCartToServer(user?.email ?? "", [])
           alert(`Order #${orderId} added to table "${activeSession.tableName}". Add more items or send the complete table order.`)
           return
         }
 
         // Clear cart (but table session persists in its own store)
         clear()
+        await flushCartToServer(user?.email ?? "", [])
 
         // Redirect to order success page with WhatsApp details
         if (orderId) {
