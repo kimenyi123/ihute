@@ -472,7 +472,7 @@ export const useCartStore = create<CartState>()(
           items: s.items.filter((x) => !(x.id === id && x.selectedUnit === selectedUnit)),
         })),
 
-      clear: () => set({ items: [], payment: {}, tableInfo: null }),  // ✅ Clear table info too
+      clear: () => set({ items: [], payment: {}, tableInfo: null }),  // Clear table info too
       replaceItemsFromSync: (items) => set({ items: Array.isArray(items) ? items : [] }),
 
       // ✅ Alias for clear() to match checkout form usage

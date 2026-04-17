@@ -112,9 +112,14 @@ class OrderStatusMonitor {
       
       const data = await response.json()
       
-      if (data.ok && data.status) {
-        const raw = String(data.status).trim()
-        const newStatus = mapBackendOrderStatusToTrack(raw, undefined)
+      if (data.ok) {
+        // Prefer raw DB ORDER_STATUS so OPEN maps to "open" (supplier slug), not the servlet's legacy "pending" alias.
+        const rawOrder = String(data.ORDER_STATUS ?? "").trim()
+        const rawPayment = String(data.paymentStatus ?? data.payment_status ?? "").trim()
+        const newStatus = mapBackendOrderStatusToTrack(
+          rawOrder || String(data.status ?? "").trim() || undefined,
+          rawPayment || undefined
+        )
         const oldStatus = this.lastCheckedStatuses.get(orderId)
         
         if (oldStatus && oldStatus !== newStatus) {
@@ -124,7 +129,7 @@ class OrderStatusMonitor {
         this.lastCheckedStatuses.set(orderId, newStatus)
         return newStatus
       }
-      
+
       return null
     } catch (error) {
       console.error(`[OrderStatusMonitor] Error checking status for order ${orderId}:`, error)

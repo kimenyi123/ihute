@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/dialog"
 import { Copy, PhoneCall, CheckCircle2, RotateCcw, MessageCircle, Truck, CreditCard, Wallet, Users, Lock, MapPin } from "lucide-react"
 import { isBarOrRestaurant } from "@/lib/constants"
-import { useTableCommandStore } from "@/lib/table-command-store"
+import { useTableCommandStore, getOrCreateGuestName } from "@/lib/table-command-store"
 import { GUEST_POOL_EMAIL, getGuestBuyerAccount, ensureGuestPoolBuyerAccount } from "@/lib/guest-checkout"
 import { getSavedAddresses, saveAddress, type SavedAddress } from "@/lib/saved-addresses"
 import {
@@ -37,6 +37,7 @@ import { TableCommandShareModal } from "@/components/table-command-share-modal"
 import { CartSuggestionsPopup } from "@/components/cart-suggestions-popup"
 import { itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
 import { orderErrorMessageWithProductNames } from "@/lib/order-error-display"
+import { flushCartToServer } from "@/lib/flush-cart-server"
 import { kaosCatalogBaseUnitPrice } from "@/lib/kaos-catalog-price"
 import {
   AlertDialog,
@@ -147,8 +148,32 @@ function CartSummaryBody() {
   // Table command mode
   const { isInTableCommand, activeSession, leaveTableCommand, lockTableCommand, canCloseTable, closeTableCommand, createTableCommand, updateTableShareData } = useTableCommandStore()
 
-  // Do NOT pre-fill "Your Name" for table orders — table name is already shown in "Table Order - ... - Table X".
-  // User must enter their own name so supplier sees who ordered (not the table name as buyer).
+  // ✅ Track if we've pre-filled the name (to avoid overwriting user edits)
+  const hasPrefilledName = useRef(false)
+  const lastTableSession = useRef<string | null>(null)
+
+  // Pre-fill "Your Name" only for table-command guest flows (supplier must know who ordered).
+  // Do not pre-fill from localStorage for plain guest checkout: the payment UI often hides the
+  // name field, so a stale saved name would be sent as buyerName without the user seeing it.
+  useEffect(() => {
+    // Reset prefill flag when table session changes (new table created/joined)
+    const currentSessionId = activeSession ? `${activeSession.tableName}-${activeSession.createdAt}` : null
+    if (currentSessionId !== lastTableSession.current) {
+      hasPrefilledName.current = false
+      lastTableSession.current = currentSessionId
+    }
+
+    if (!hasPrefilledName.current && checkoutMode === "anonymous" && isInTableCommand()) {
+      const guestName = getOrCreateGuestName()
+      const tableUserName = activeSession?.userName
+      const finalName = tableUserName && tableUserName !== "Guest" ? tableUserName : guestName
+
+      if (finalName && finalName !== "Guest") {
+        setAnonymousName(finalName)
+        hasPrefilledName.current = true
+      }
+    }
+  }, [checkoutMode, activeSession])
 
   // Pre-fill from tableInfo only when NOT a table order (e.g. delivery from shop-with-me)
   useEffect(() => {
@@ -562,6 +587,7 @@ function CartSummaryBody() {
           })
           setShareModalOpen(true)
           clear()
+          await flushCartToServer(user?.email ?? "", [])
           return
         }
 
@@ -588,12 +614,14 @@ function CartSummaryBody() {
         // clear cart but stay on page so user can add more items.
         if (isInTableCommand() && activeSession?.isCreator && currentOrderIsBarTable) {
           clear()
+          await flushCartToServer(user?.email ?? "", [])
           alert(`Order #${orderId} added to table "${activeSession.tableName}". Add more items or send the complete table order.`)
           return
         }
 
         // Clear cart (but table session persists in its own store)
         clear()
+        await flushCartToServer(user?.email ?? "", [])
 
         // Redirect to order success page with WhatsApp details
         if (orderId) {
@@ -935,15 +963,41 @@ function CartSummaryBody() {
           {!isAuthenticated && (
             <div className="space-y-3 pb-4 border-b">
               <Label className="text-sm font-medium">Checkout as:</Label>
-              <RadioGroup value={checkoutMode} onValueChange={(v) => setCheckoutMode(v as "login" | "anonymous")}>
-                <div className="flex items-center space-x-3 border rounded-lg p-3 cursor-pointer hover:bg-accent" onClick={() => setCheckoutMode("login")}>
+              <RadioGroup
+                value={checkoutMode}
+                onValueChange={(v) => {
+                  const mode = v as "login" | "anonymous"
+                  setCheckoutMode(mode)
+                  // Plain guest checkout does not show a name field; clear any stale prefill so we
+                  // do not submit another user's saved guest name as buyerName.
+                  if (mode === "anonymous" && !isInTableCommand()) {
+                    setAnonymousName("")
+                    hasPrefilledName.current = false
+                  }
+                }}
+              >
+                <div
+                  className="flex items-center space-x-3 border rounded-lg p-3 cursor-pointer hover:bg-accent"
+                  onClick={() => {
+                    setCheckoutMode("login")
+                  }}
+                >
                   <RadioGroupItem value="login" id="checkout-login" />
                   <Label htmlFor="checkout-login" className="cursor-pointer flex-1">
                     <div className="font-medium">Sign in to checkout</div>
                     <div className="text-xs text-muted-foreground">Track your orders easily</div>
                   </Label>
                 </div>
-                <div className="flex items-center space-x-3 border rounded-lg p-3 cursor-pointer hover:bg-accent" onClick={() => setCheckoutMode("anonymous")}>
+                <div
+                  className="flex items-center space-x-3 border rounded-lg p-3 cursor-pointer hover:bg-accent"
+                  onClick={() => {
+                    setCheckoutMode("anonymous")
+                    if (!isInTableCommand()) {
+                      setAnonymousName("")
+                      hasPrefilledName.current = false
+                    }
+                  }}
+                >
                   <RadioGroupItem value="anonymous" id="checkout-anonymous" />
                   <Label htmlFor="checkout-anonymous" className="cursor-pointer flex-1">
                     <div className="font-medium">Continue as guest</div>

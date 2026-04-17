@@ -15,7 +15,9 @@ import {
   CheckCircle,
   XCircle,
   MessageCircle,
+  Truck,
 } from "lucide-react"
+import Link from "next/link"
 import { formatPaymentMethod } from "@/lib/payment-utils"
 import { useAuthStore } from "@/lib/auth-store"
 import { isInvoiceFinanced, canRequestInvoiceFinancing } from "@/lib/order-financing"
@@ -292,17 +294,25 @@ ${items}
               Placed on {formatDate(order.CREATED_AT || order.createdAt)}
             </p>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Your order — contact the seller below if needed
+              Track progress from placement to delivery, or contact the seller below if you need help.
             </p>
           </div>
         </div>
 
-        {order.SELLER_PHONE && (
-          <Button onClick={sendWhatsApp} className="bg-[#25D366] hover:bg-[#20b05a]" title="Open WhatsApp to contact the seller">
-            <MessageCircle className="h-4 w-4 mr-2" />
-            Contact Seller
+        <div className="flex flex-col sm:flex-row gap-2 shrink-0">
+          <Button variant="outline" asChild>
+            <Link href={`/track-order/${orderId}`}>
+              <Truck className="h-4 w-4 mr-2" />
+              Track order
+            </Link>
           </Button>
-        )}
+          {order.SELLER_PHONE && (
+            <Button onClick={sendWhatsApp} className="bg-[#25D366] hover:bg-[#20b05a]" title="Open WhatsApp to contact the seller">
+              <MessageCircle className="h-4 w-4 mr-2" />
+              Contact Seller
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Seller & buyer details */}

@@ -3,8 +3,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useAuthStore } from "@/lib/auth-store"
-import { Header } from "@/components/header"
-import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -14,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { ResponsiveTable } from "@/components/ui/responsive-table"
 import { useOrdersStore, type Order } from "@/lib/orders-store"
 import { isInvoiceFinanced, canRequestInvoiceFinancing } from "@/lib/order-financing"
 import { mapBackendOrderStatusToStore } from "@/lib/order-status-map"
@@ -419,10 +418,7 @@ export default function BuyerOrdersPage() {
   }
 
   return (
-    <div className="min-h-screen w-full flex flex-col bg-slate-50">
-      <Header />
-
-      <main className="flex-1 w-full max-w-7xl mx-auto p-6">
+    <main className="w-full max-w-7xl mx-auto p-6">
         <h1 className="text-2xl font-bold mb-4 text-slate-800">Order Reports</h1>
 
         <div className="mb-4 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2">
@@ -469,8 +465,8 @@ export default function BuyerOrdersPage() {
         {err && <p className="text-red-600">{err}</p>}
 
         {!loading && filteredOrders.length > 0 && (
-          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-            <table className="min-w-full">
+          <ResponsiveTable className="rounded-lg border border-slate-200 bg-white" minWidth="1200px">
+            <table className="w-full">
               <thead className="bg-slate-100 text-slate-700">
                 <tr>
                   <th className="px-4 py-3 text-left text-sm font-semibold">Order ID</th>
@@ -509,32 +505,34 @@ export default function BuyerOrdersPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3">{new Date(o.createdAt).toLocaleString()}</td>
-                    <td className="px-4 py-3 flex gap-2">
-                      <Button size="sm" variant="default" onClick={() => router.push(`/orders/${o.id}`)}>
-                        View
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => exportOrderRowCsv(o)}>
-                        Export
-                      </Button>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+                        <Button size="sm" variant="default" onClick={() => router.push(`/orders/${o.id}`)}>
+                          View
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => exportOrderRowCsv(o)}>
+                          Export
+                        </Button>
 
-                      <Button
-                        size="sm"
-                        className={
-                          !rowCanFinance(o)
-                            ? "opacity-50 cursor-not-allowed bg-blue-600 hover:bg-blue-600"
-                            : "bg-blue-600 hover:bg-blue-700"
-                        }
-                        onClick={() => requestLoan(o, upsertOrder)}
-                        disabled={!rowCanFinance(o)}
-                      >
-                        Financing
-                      </Button>
+                        <Button
+                          size="sm"
+                          className={
+                            !rowCanFinance(o)
+                              ? "opacity-50 cursor-not-allowed bg-blue-600 hover:bg-blue-600"
+                              : "bg-blue-600 hover:bg-blue-700"
+                          }
+                          onClick={() => requestLoan(o, upsertOrder)}
+                          disabled={!rowCanFinance(o)}
+                        >
+                          Financing
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </div>
+          </ResponsiveTable>
         )}
 
         {!loading && filteredOrders.length === 0 && !err && (
@@ -560,9 +558,6 @@ export default function BuyerOrdersPage() {
             Next
           </Button>
         </div>
-      </main>
-
-      <Footer />
-    </div>
+    </main>
   )
 }

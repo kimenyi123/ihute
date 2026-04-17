@@ -4,6 +4,8 @@ import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useCartStore } from "@/lib/cart-store"
 import { useAuthStore } from "@/lib/auth-store"
+import { flushCartToServer } from "@/lib/flush-cart-server"
+import { getOrCreateGuestName, useTableCommandStore } from "@/lib/table-command-store"
 import { GUEST_POOL_EMAIL, ensureGuestPoolBuyerAccount } from "@/lib/guest-checkout"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -66,35 +68,46 @@ export function CheckoutForm() {
 
   const paymentMethod = watch("paymentMethod")
 
-  // ✅ IMPROVED: Pre-fill form with table info
+  // ✅ Get table session reactively from store
+  const tableSession = useTableCommandStore((state) => state.activeSession)
+
+  // Pre-fill from table session / guest name and table-encoded address.
   useEffect(() => {
+    const guestName = getOrCreateGuestName()
+    const sessionOrGuest = (tableSession?.userName || guestName || "").trim()
+
+    if (sessionOrGuest && sessionOrGuest !== "Guest") {
+      setValue("fullName", sessionOrGuest)
+    }
+
     if (tableInfo?.tableNumber) {
       const tableNum = tableInfo.tableNumber.trim()
-
-      // Check if tableNumber contains "Name | Address" format
       if (tableNum.includes("|")) {
-        const parts = tableNum.split("|").map(p => p.trim())
+        const parts = tableNum.split("|").map((p) => p.trim())
         if (parts.length >= 2) {
-          const [name, address] = parts
-          setValue("fullName", name)
-          setValue("address", address)
+          const [namePart, addressPart] = parts
+          setValue("address", addressPart)
+          const resolvedName = (tableSession?.userName || guestName || namePart || "").trim()
+          if (resolvedName && resolvedName !== "Guest") {
+            setValue("fullName", resolvedName)
+          }
         }
       } else {
-        // If it's just a table number, use it for both name and address
-        setValue("fullName", tableNum)
         setValue("address", tableNum)
+        if (!sessionOrGuest || sessionOrGuest === "Guest") {
+          setValue("fullName", tableNum)
+        }
       }
-
-      // Set city to shop name for context
       if (tableInfo.shopName) {
         setValue("city", tableInfo.shopName)
       }
     }
-  }, [tableInfo, setValue])
+  }, [tableInfo, tableSession, setValue])
 
-  // Prefill checkout fields for authenticated buyers.
+  // Prefill checkout fields for authenticated buyers (skip when table flow owns the fields).
   useEffect(() => {
     if (!isAuthenticated || !user) return
+    if (isTableOrder) return
     setValue("fullName", user.name || "")
     setValue("email", user.email || "")
     setValue("phone", user.phone || "")
@@ -102,7 +115,7 @@ export function CheckoutForm() {
       setValue("address", user.location)
       setValue("city", user.location)
     }
-  }, [isAuthenticated, user, setValue])
+  }, [isAuthenticated, user, setValue, isTableOrder])
 
   if (items.length === 0) {
     return (
@@ -256,6 +269,7 @@ export function CheckoutForm() {
       console.log("✅ Order created successfully:", json)
 
       clearCart()
+      await flushCartToServer(user?.email ?? "", [])
       router.push(`/track-order/${json.orderId}`)
 
     } catch (e: any) {

@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Loader2, Search, Store, XCircle } from "lucide-react"
 import { useTableCommandStore } from "@/lib/table-command-store"
+import { Header } from "@/components/header"
 
 export default function JoinTablePage() {
   const searchParams = useSearchParams()
@@ -144,117 +145,126 @@ export default function JoinTablePage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-500 to-purple-700">
-        <Card className="w-full max-w-md">
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <Loader2 className="h-12 w-12 animate-spin text-purple-600 mb-4" />
-            <p className="text-muted-foreground">Loading table information...</p>
-          </CardContent>
-        </Card>
+      <div className="min-h-screen bg-gradient-to-br from-purple-500 to-purple-700">
+        <Header />
+        <div className="flex items-center justify-center pt-8">
+          <Card className="w-full max-w-md mx-4">
+            <CardContent className="flex flex-col items-center justify-center py-12">
+              <Loader2 className="h-12 w-12 animate-spin text-purple-600 mb-4" />
+              <p className="text-muted-foreground">Loading table information...</p>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     )
   }
 
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-500 to-purple-700">
-        <Card className="w-full max-w-md">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-destructive">
-              <XCircle className="h-5 w-5" />
-              Error
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-muted-foreground">{error}</p>
-            <div className="space-y-2">
-              <Button onClick={() => router.push("/")} className="w-full">
-                Go to Home
-              </Button>
-              <Button 
-                variant="outline" 
-                onClick={() => router.push("/search")}
-                className="w-full"
-              >
-                Browse All Sellers
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+      <div className="min-h-screen bg-gradient-to-br from-purple-500 to-purple-700">
+        <Header />
+        <div className="flex items-center justify-center pt-8">
+          <Card className="w-full max-w-md mx-4">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-destructive">
+                <XCircle className="h-5 w-5" />
+                Error
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-muted-foreground">{error}</p>
+              <div className="space-y-2">
+                <Button onClick={() => router.push("/")} className="w-full">
+                  Go to Home
+                </Button>
+                <Button 
+                  variant="outline" 
+                  onClick={() => router.push("/search")}
+                  className="w-full"
+                >
+                  Browse All Sellers
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-500 to-purple-700 p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="mx-auto mb-4 w-16 h-16 bg-green-100 rounded-full flex items-center justify-center">
-            <Store className="h-8 w-8 text-green-600" />
-          </div>
-          <CardTitle className="text-2xl">Join Table Order</CardTitle>
-          <p className="text-muted-foreground mt-2">
-            You've been invited to join a table order at{" "}
-            <span className="font-semibold">{tableInfo?.locationName}</span>
-          </p>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {tableInfo && (
-            <div className="bg-muted rounded-lg p-4 space-y-3">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Table Name:</span>
-                <span className="font-semibold">{tableInfo.tableName}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Seller:</span>
-                <span className="font-semibold">{tableInfo.locationName}</span>
-              </div>
-              {tableInfo.sellerInfo?.location && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Location:</span>
-                  <span className="font-medium">{tableInfo.sellerInfo.location}</span>
-                </div>
-              )}
+    <div className="min-h-screen bg-gradient-to-br from-purple-500 to-purple-700">
+      <Header />
+      <div className="flex items-center justify-center p-4 pt-8">
+        <Card className="w-full max-w-md">
+          <CardHeader className="text-center">
+            <div className="mx-auto mb-4 w-16 h-16 bg-green-100 rounded-full flex items-center justify-center">
+              <Store className="h-8 w-8 text-green-600" />
             </div>
-          )}
-
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground text-center">
-              Click below to browse {tableInfo?.locationName}'s products and add items to your table order
+            <CardTitle className="text-2xl">Join Table Order</CardTitle>
+            <p className="text-muted-foreground mt-2">
+              You've been invited to join a table order at{" "}
+              <span className="font-semibold">{tableInfo?.locationName}</span>
             </p>
-            
-            <div className="space-y-2">
-              <Button 
-                onClick={handleBrowseSellerProducts} 
-                className="w-full" 
-                size="lg"
-              >
-                <Search className="mr-2 h-4 w-4" />
-                Browse Seller's Products
-              </Button>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {tableInfo && (
+              <div className="bg-muted rounded-lg p-4 space-y-3">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Table Name:</span>
+                  <span className="font-semibold">{tableInfo.tableName}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Seller:</span>
+                  <span className="font-semibold">{tableInfo.locationName}</span>
+                </div>
+                {tableInfo.sellerInfo?.location && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Location:</span>
+                    <span className="font-medium">{tableInfo.sellerInfo.location}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground text-center">
+                Click below to browse {tableInfo?.locationName}'s products and add items to your table order
+              </p>
               
-              <Button
-                variant="ghost"
-                onClick={() => router.push("/")}
-                className="w-full"
-              >
-                Cancel
-              </Button>
+              <div className="space-y-2">
+                <Button 
+                  onClick={handleBrowseSellerProducts} 
+                  className="w-full" 
+                  size="lg"
+                >
+                  <Search className="mr-2 h-4 w-4" />
+                  Browse Seller's Products
+                </Button>
+                
+                <Button
+                  variant="ghost"
+                  onClick={() => router.push("/")}
+                  className="w-full"
+                >
+                  Cancel
+                </Button>
+              </div>
+              
+              <div className="mt-4 pt-4 border-t text-xs text-muted-foreground">
+                <p className="font-medium">How table orders work:</p>
+                <ul className="mt-1 space-y-1">
+                  <li>• Browse and add items from {tableInfo?.locationName}</li>
+                  <li>• Only you can see your own items in the cart</li>
+                  <li>• Your order will be grouped with others at the same table</li>
+                  <li>• The table creator will send all orders together</li>
+                  <li>• You'll pay for your own items individually</li>
+                </ul>
+              </div>
             </div>
-            
-            <div className="mt-4 pt-4 border-t text-xs text-muted-foreground">
-              <p className="font-medium">How table orders work:</p>
-              <ul className="mt-1 space-y-1">
-                <li>• Browse and add items from {tableInfo?.locationName}</li>
-                <li>• Only you can see your own items in the cart</li>
-                <li>• Your order will be grouped with others at the same table</li>
-                <li>• The table creator will send all orders together</li>
-                <li>• You'll pay for your own items individually</li>
-              </ul>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   )
 }

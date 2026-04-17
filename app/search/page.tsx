@@ -1327,7 +1327,7 @@ export default function SearchPage() {
             <div className="flex items-center gap-2 bg-gray-50 rounded-full px-3 py-1.5 border">
               <span className="text-sm">📍</span>
               <input
-                className="bg-transparent outline-none text-sm w-44"
+                className="bg-transparent outline-none text-sm w-full sm:w-44"
                 placeholder="Location (e.g., Kigali)"
                 value={locationDraft}
                 onChange={(e) => setLocationDraft(e.target.value)}
@@ -1354,7 +1354,7 @@ export default function SearchPage() {
                   <span className="text-sm">🗂️</span>
                   <select
                     aria-label="Select sector"
-                    className="bg-transparent outline-none text-sm w-48"
+                    className="bg-transparent outline-none text-sm w-full sm:w-48"
                     value={sectorDraft}
                     onChange={(e) => {
                       const val = e.target.value

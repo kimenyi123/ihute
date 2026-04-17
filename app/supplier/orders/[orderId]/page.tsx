@@ -8,7 +8,7 @@ import { Footer } from "@/components/footer"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, Phone, MapPin, User2, RotateCw, CreditCard } from "lucide-react"
+import { ArrowLeft, Phone, User2, RotateCw, CreditCard } from "lucide-react"
 import { useAuthStore } from "@/lib/auth-store"
 import dynamic from "next/dynamic"
 

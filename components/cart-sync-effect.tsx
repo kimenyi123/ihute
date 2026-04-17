@@ -29,15 +29,32 @@ export function CartSyncEffect() {
         const remote = Array.isArray(data?.items) ? data.items : []
         if (remote.length > 0) {
           const current = useCartStore.getState().items
-          if (current.length === 0) replaceItemsFromSync(remote)
+          if (current.length === 0) {
+            // Avoid restoring a stale server cart over an intentional empty cart: the initial
+            // GET can finish after checkout cleared local state while the debounced POST save
+            // has not updated the server yet.
+            try {
+              const raw = sessionStorage.getItem("cart-storage")
+              if (raw) {
+                const parsed = JSON.parse(raw) as { state?: { items?: unknown[] } }
+                const persisted = parsed?.state?.items
+                if (Array.isArray(persisted) && persisted.length === 0) {
+                  return
+                }
+              }
+            } catch {
+              // ignore parse errors; allow hydrate below
+            }
+            replaceItemsFromSync(remote)
+          }
         }
       })
       .catch(() => {})
   }, [userId, replaceItemsFromSync])
 
-  // Save when items change (debounced)
+  // Save when items change (debounced), including empty carts after checkout.
   useEffect(() => {
-    if (!userId || items.length === 0) return
+    if (!userId) return
     if (saveTimeout.current) clearTimeout(saveTimeout.current)
     saveTimeout.current = setTimeout(() => {
       saveTimeout.current = null

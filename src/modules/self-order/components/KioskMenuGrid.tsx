@@ -11,11 +11,8 @@ import type {
 } from "@/src/modules/self-order/types"
 import { useCartStore } from "@/lib/cart-store"
 import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price"
-<<<<<<< HEAD
 import { Input } from "@/components/ui/input"
-=======
 import { itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
->>>>>>> ac6105c3d198919cadda620ab6d015a02650c454
 
 interface Props {
   items: KioskMenuItem[]
@@ -475,16 +472,12 @@ function ItemExpandPanel({
           {description && (
             <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{description}</p>
           )}
-<<<<<<< HEAD
-          <p className="text-emerald-600 font-extrabold text-lg mt-1 tracking-tight">⭐ ⭐ ⭐ {formatPrice(unitPrice)}</p>
-=======
-          <p className="text-red-600 font-bold text-lg mt-1">
+          <p className="text-emerald-600 font-extrabold text-lg mt-1 tracking-tight">
             <span>{formatPrice(unitPrice)}</span>
             {embSuffix ? (
-              <span className="font-normal text-gray-500"> ({embSuffix})</span>
+              <span className="font-normal text-gray-600"> ({embSuffix})</span>
             ) : null}
           </p>
->>>>>>> ac6105c3d198919cadda620ab6d015a02650c454
         </div>
         <button
           type="button"
@@ -619,16 +612,12 @@ function ItemCard({
         {description && (
           <p className="text-[11px] text-gray-400 line-clamp-1 mt-0.5">{description}</p>
         )}
-<<<<<<< HEAD
-        <p className="text-emerald-600 font-extrabold text-sm mt-1 tracking-tight">⭐ ⭐ ⭐ {formatPrice(price)}</p>
-=======
-        <p className="text-red-600 font-bold text-sm mt-1">
+        <p className="text-emerald-600 font-extrabold text-sm mt-1 tracking-tight">
           <span>{formatPrice(price)}</span>
           {embSuffix ? (
-            <span className="font-normal text-gray-500"> ({embSuffix})</span>
+            <span className="font-normal text-gray-600"> ({embSuffix})</span>
           ) : null}
         </p>
->>>>>>> ac6105c3d198919cadda620ab6d015a02650c454
       </div>
 
       <div className="flex items-center gap-2 flex-shrink-0">
@@ -768,8 +757,21 @@ function CartSidebar({
   )
 }
 
-// ─── Items grid with row-level inline expand ──────────────────────────────────
-const COLS = 3
+// ─── Responsive grid columns (2 on phones, 3+ on larger) ─────────────────────
+function useKioskGridCols() {
+  const [cols, setCols] = useState(2)
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const mql = window.matchMedia("(min-width: 640px)")
+    const apply = () => setCols(mql.matches ? 3 : 2)
+    apply()
+    mql.addEventListener("change", apply)
+    return () => mql.removeEventListener("change", apply)
+  }, [])
+
+  return cols
+}
 
 function ItemsGrid({
   items,
@@ -785,12 +787,13 @@ function ItemsGrid({
   t: (key: keyof (typeof MENU_I18N)["en"]) => string
 }) {
   const [expandedCode, setExpandedCode] = useState<string | null>(null)
+  const cols = useKioskGridCols()
 
   const rows: KioskMenuItem[][] = []
-  for (let i = 0; i < items.length; i += COLS) rows.push(items.slice(i, i + COLS))
+  for (let i = 0; i < items.length; i += cols) rows.push(items.slice(i, i + cols))
 
   const expandedRowIndex = expandedCode
-    ? Math.floor(items.findIndex((i) => i.item_code === expandedCode) / COLS)
+    ? Math.floor(items.findIndex((i) => i.item_code === expandedCode) / cols)
     : -1
 
   const expandedItem = expandedCode
@@ -807,7 +810,7 @@ function ItemsGrid({
         <div key={rowIdx}>
           <div
             className="grid gap-3 py-1.5"
-            style={{ gridTemplateColumns: `repeat(${COLS}, minmax(0,1fr))` }}
+            style={{ gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}
           >
             {row.map((item) => (
               <ItemCard
@@ -819,7 +822,7 @@ function ItemsGrid({
                 onQuickSetQty={(qty) => onQuickSetQty(item, qty)}
               />
             ))}
-            {Array.from({ length: COLS - row.length }).map((_, i) => (
+            {Array.from({ length: Math.max(0, cols - row.length) }).map((_, i) => (
               <div key={`empty-${i}`} />
             ))}
           </div>
@@ -828,7 +831,7 @@ function ItemsGrid({
           {expandedRowIndex === rowIdx && expandedItem && (
             <div
               className="grid gap-3"
-              style={{ gridTemplateColumns: `repeat(${COLS}, minmax(0,1fr))` }}
+              style={{ gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}
             >
               <ItemExpandPanel
                 item={expandedItem}
@@ -914,6 +917,7 @@ export function KioskMenuGrid({
   shopNickname,
 }: Props) {
   const router = useRouter()
+  const cols = useKioskGridCols()
   const { addItem, items: cartItems, remove, setQty } = useCartStore()
 
   const [items, setItems] = useState<KioskMenuItem[]>(initialItems)
@@ -1305,7 +1309,7 @@ export function KioskMenuGrid({
         )}
 
         {loading && (
-          <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${COLS}, minmax(0,1fr))` }}>
+          <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
             {Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className="h-24 rounded-2xl bg-gray-200 animate-pulse" />
             ))}

@@ -5,17 +5,18 @@ import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useCartStore, CartItem } from "@/lib/cart-store"
-import { Trash2 } from "lucide-react"
+import { Minus, Plus, Trash2 } from "lucide-react"
 import { getProductImageCandidates, isValidImageUrl, NO_IMAGE_URL } from "@/lib/image-utils"
-import { DEFAULT_CART_CURRENCY, itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
-import { isExpiryMeaningfulForCustomerDisplay } from "@/lib/item-state-display"
+import { DEFAULT_CART_CURRENCY, displayUnitForPrice } from "@/lib/cart-display-utils"
 
 const PLACEHOLDER = "/placeholder.svg?height=64&width=64"
 
 export function CartItemCard({ item }: { item: CartItem }) {
+  const inc = useCartStore((s) => s.inc)
+  const dec = useCartStore((s) => s.dec)
   const setQty = useCartStore((s) => s.setQty)
   const remove = useCartStore((s) => s.remove)
-  const [qtyText, setQtyText] = useState(String(item.qty))
+  const [inputValue, setInputValue] = useState(String(item.qty))
 
   const imageCandidates = ((): string[] => {
     // Try same ordered fallback chain we use everywhere else:
@@ -39,17 +40,12 @@ export function CartItemCard({ item }: { item: CartItem }) {
     setCandidateIdx(0)
   }, [candidatesSignature, item.id, item.selectedUnit])
 
-<<<<<<< HEAD
+  // Sync input value when quantity changes externally
   useEffect(() => {
-    setQtyText(String(item.qty))
+    setInputValue(String(item.qty))
   }, [item.qty])
 
   const unitLabel = displayUnitForPrice(item.unit ?? item.selectedUnit)
-=======
-  const unitLabel = itemEmballageDisplaySuffix(
-    item.itemEmballage ?? item.unit ?? item.selectedUnit,
-  )
->>>>>>> ac6105c3d198919cadda620ab6d015a02650c454
 
   return (
     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4 rounded-lg border p-3">
@@ -101,15 +97,15 @@ export function CartItemCard({ item }: { item: CartItem }) {
               <>
                 <span className="font-medium">
                   {Number(item.price).toLocaleString()} {DEFAULT_CART_CURRENCY}
-                  {unitLabel ? (
-                    <span className="text-muted-foreground"> ({unitLabel})</span>
-                  ) : null}
                 </span>
+                {unitLabel ? (
+                  <span className="text-muted-foreground"> · {unitLabel}</span>
+                ) : null}
               </>
             ) : (
               "Price not available"
             )}
-            {isExpiryMeaningfulForCustomerDisplay(item.expiryLabel) ? (
+            {item.expiryLabel ? (
               <div className="text-xs text-amber-900/90 mt-1 font-medium">
                 Expiry: {item.expiryLabel}
               </div>
@@ -120,29 +116,54 @@ export function CartItemCard({ item }: { item: CartItem }) {
 
       <div className="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
         <div className="flex items-center gap-2">
+          <Button
+            size="icon"
+            variant="outline"
+            onClick={() => {
+              dec(item.id, item.selectedUnit)
+              setInputValue(String(Math.max(1, item.qty - 1)))
+            }}
+            aria-label="Decrease"
+            className="h-8 w-8"
+          >
+            <Minus className="h-4 w-4" />
+          </Button>
           <Input
             type="number"
-            inputMode="numeric"
             min={1}
-            step={1}
-            value={qtyText}
-            onChange={(e) => {
-              const v = e.target.value
-              setQtyText(v)
-              const n = Number.parseInt(v, 10)
-              if (Number.isFinite(n) && n >= 1) {
-                setQty(item.id, item.selectedUnit, n)
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onBlur={() => {
+              const newQty = parseInt(inputValue, 10)
+              if (!isNaN(newQty) && newQty >= 1) {
+                setQty(item.id, item.selectedUnit, newQty)
+              } else {
+                setInputValue(String(item.qty))
               }
             }}
-            onBlur={() => {
-              const n = Number.parseInt(qtyText, 10)
-              const clamped = Number.isFinite(n) && n >= 1 ? n : 1
-              setQtyText(String(clamped))
-              setQty(item.id, item.selectedUnit, clamped)
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                const newQty = parseInt(inputValue, 10)
+                if (!isNaN(newQty) && newQty >= 1) {
+                  setQty(item.id, item.selectedUnit, newQty)
+                }
+                e.currentTarget.blur()
+              }
             }}
-            aria-label="Quantity"
-            className="h-8 w-20"
+            className="h-8 w-16 text-center font-medium px-1"
           />
+          <Button
+            size="icon"
+            variant="outline"
+            onClick={() => {
+              inc(item.id, item.selectedUnit)
+              setInputValue(String(item.qty + 1))
+            }}
+            aria-label="Increase"
+            className="h-8 w-8"
+          >
+            <Plus className="h-4 w-4" />
+          </Button>
         </div>
 
         <div className="flex items-center gap-2">
