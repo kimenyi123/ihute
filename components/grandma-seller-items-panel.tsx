@@ -4,6 +4,15 @@ import { useCallback, useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  enqueueAdd,
+  enqueuePatch,
+  flushPendingOps,
+  isOffline,
+  loadCachedLines,
+  loadPendingOps,
+  saveCachedLines,
+} from "@/lib/grandma-offline-stock"
 import { shopCategoryToSectorSlug } from "@/lib/seller-category-sector"
 import { cn } from "@/lib/utils"
 
@@ -66,12 +75,36 @@ export function GrandmaSellerItemsPanel(props: {
   const [addSale, setAddSale] = useState("")
   const [addQty, setAddQty] = useState("1")
   const [addBusy, setAddBusy] = useState(false)
+  const [offlineNote, setOfflineNote] = useState<string | null>(null)
+  const [pendingCount, setPendingCount] = useState(0)
+  const [syncBusy, setSyncBusy] = useState(false)
+
+  const refreshPendingCount = useCallback(() => {
+    setPendingCount(loadPendingOps(sellerAccount).length)
+  }, [sellerAccount])
 
   const load = useCallback(async () => {
     if (!sellerAccount.trim()) return
     setLoading(true)
     setErr(null)
+    setOfflineNote(null)
     try {
+      if (isOffline()) {
+        const cached = loadCachedLines(sellerAccount)
+        if (cached && cached.length > 0) {
+          setLines(cached)
+          setOfflineNote("You're offline — showing saved stock. Quantity changes are queued to sync when you're back online.")
+        } else {
+          setLines([])
+          setErr(
+            "You're offline and have no cached stock yet. Open Items once while online to save a copy, then you can adjust quantities offline.",
+          )
+        }
+        setLoading(false)
+        refreshPendingCount()
+        return
+      }
+
       const u = new URLSearchParams({ sellerAccount: sellerAccount.trim() })
       const res = await fetch(`/api/grandma/sellers/inventory?${u}`, { cache: "no-store" })
       const json = (await res.json()) as {
@@ -85,27 +118,54 @@ export function GrandmaSellerItemsPanel(props: {
       }
       if (!res.ok || !json?.ok) throw new Error(inventoryErrorMessage(json, res.status))
       const raw = json.lines ?? []
-      setLines(
-        raw.map((r) => ({
-          id: r.id,
-          itemName: String(r.itemName ?? ""),
-          nikiCode: String(r.nikiCode ?? ""),
-          quantity: Number(r.quantity) || 0,
-          salePrice: Number(r.salePrice) || 0,
-          costPrice: Number(r.costPrice) || 0,
-        })),
-      )
+      const mapped = raw.map((r) => ({
+        id: r.id,
+        itemName: String(r.itemName ?? ""),
+        nikiCode: String(r.nikiCode ?? ""),
+        quantity: Number(r.quantity) || 0,
+        salePrice: Number(r.salePrice) || 0,
+        costPrice: Number(r.costPrice) || 0,
+      }))
+      setLines(mapped)
+      saveCachedLines(sellerAccount, mapped)
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "Load failed")
       setLines([])
     } finally {
       setLoading(false)
+      refreshPendingCount()
     }
-  }, [sellerAccount])
+  }, [sellerAccount, refreshPendingCount])
 
   useEffect(() => {
     load()
   }, [load])
+
+  useEffect(() => {
+    const onOnline = () => {
+      void (async () => {
+        if (!sellerAccount.trim()) return
+        setSyncBusy(true)
+        setOfflineNote(null)
+        try {
+          const r = await flushPendingOps(sellerAccount)
+          if (r.ok > 0 || r.fail > 0) {
+            setOfflineNote(
+              r.fail
+                ? `Sync: ${r.ok} ok, ${r.fail} failed${r.lastError ? ` (${r.lastError})` : ""}`
+                : `Synced ${r.ok} offline change(s).`,
+            )
+          }
+          await load()
+        } finally {
+          setSyncBusy(false)
+          refreshPendingCount()
+        }
+      })()
+    }
+    window.addEventListener("online", onOnline)
+    return () => window.removeEventListener("online", onOnline)
+  }, [sellerAccount, load, refreshPendingCount])
 
   const runSearch = useCallback(async () => {
     const q = searchQ.trim()
@@ -142,6 +202,17 @@ export function GrandmaSellerItemsPanel(props: {
 
   const patchQty = async (nikiCode: string, quantity: number) => {
     setErr(null)
+    if (isOffline()) {
+      setLines((prev) => {
+        const next = prev.map((p) => (p.nikiCode === nikiCode ? { ...p, quantity } : p))
+        saveCachedLines(sellerAccount, next)
+        return next
+      })
+      enqueuePatch(sellerAccount, nikiCode, quantity)
+      refreshPendingCount()
+      setOfflineNote("Offline: quantity saved on this device — will sync when you're back online.")
+      return
+    }
     try {
       const res = await fetch("/api/grandma/sellers/inventory", {
         method: "POST",
@@ -174,6 +245,26 @@ export function GrandmaSellerItemsPanel(props: {
     }
     setAddBusy(true)
     setErr(null)
+    if (isOffline()) {
+      enqueueAdd(sellerAccount, {
+        itemName: name,
+        sectorSlug,
+        costPrice: cost,
+        salePrice: sale,
+        quantity: qty,
+      })
+      setAddOpen(false)
+      setAddName("")
+      setAddCost("")
+      setAddSale("")
+      setAddQty("1")
+      setAddBusy(false)
+      refreshPendingCount()
+      setOfflineNote(
+        "Offline: new item is queued on this device. It will be created on the server when you're back online (open Items to sync).",
+      )
+      return
+    }
     try {
       const res = await fetch("/api/grandma/sellers/items/temp", {
         method: "POST",
@@ -222,6 +313,50 @@ export function GrandmaSellerItemsPanel(props: {
 
   return (
     <section className="seller-screen space-y-3 px-3 pb-8 pt-2">
+      {offlineNote ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">{offlineNote}</div>
+      ) : null}
+      {pendingCount > 0 ? (
+        <div className="rounded-xl border border-[#1897e0] bg-[#f0f8ff] px-3 py-2 text-sm text-[#17324d]">
+          {pendingCount} offline change(s) queued
+          {syncBusy ? " — syncing…" : ""}.
+          <button
+            type="button"
+            className="ml-2 font-bold text-[#127fc0] underline"
+            onClick={() => void load()}
+          >
+            Refresh
+          </button>
+          {!isOffline() ? (
+            <button
+              type="button"
+              className="ml-2 font-bold text-[#127fc0] underline"
+              onClick={() => {
+                void (async () => {
+                  setSyncBusy(true)
+                  setOfflineNote(null)
+                  try {
+                    const r = await flushPendingOps(sellerAccount)
+                    if (r.ok > 0 || r.fail > 0) {
+                      setOfflineNote(
+                        r.fail
+                          ? `Sync: ${r.ok} ok, ${r.fail} failed${r.lastError ? ` (${r.lastError})` : ""}`
+                          : `Synced ${r.ok} offline change(s).`,
+                      )
+                    }
+                    await load()
+                  } finally {
+                    setSyncBusy(false)
+                    refreshPendingCount()
+                  }
+                })()
+              }}
+            >
+              Sync now
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       <div className="rounded-2xl border border-[#dbe7f3] bg-white p-4 shadow-sm">
         <div className="text-xs font-bold uppercase tracking-wide text-[#6f8399]">Search Niki catalog</div>
         <Input

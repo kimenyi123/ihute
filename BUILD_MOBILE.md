@@ -1,6 +1,6 @@
 # Mobile builds (Android + Apple) — Capacitor
 
-This app uses **Capacitor** to wrap the **live website** in a native shell (WebView). The default URL is **`https://ihute.rw/grandma`**. Override with `CAPACITOR_SERVER_URL` before `npx cap sync`.
+This app uses **Capacitor** to wrap the **live website** in a native shell (WebView). The default URL is **`https://shop.ihute.rw/grandma`** (Grandma is deployed on the **shop** host; **`https://ihute.rw/grandma` may 404** until redirects are live). Override with `CAPACITOR_SERVER_URL` before `npx cap sync`.
 
 ## 1. Sync web config into native projects
 
@@ -53,12 +53,12 @@ Or: `npm run cap:sync`
 ## 4. Change the loaded URL
 
 ```bash
-# Example: full site root
-set CAPACITOR_SERVER_URL=https://ihute.rw/
+# Example: Grandma on production (preferred host)
+set CAPACITOR_SERVER_URL=https://shop.ihute.rw/grandma
 npx cap sync
 
 # Example: local dev on your LAN
-set CAPACITOR_SERVER_URL=http://192.168.1.10:3000
+set CAPACITOR_SERVER_URL=http://192.168.1.10:3000/grandma
 npx cap sync
 ```
 
@@ -74,3 +74,20 @@ On macOS/Linux use `export CAPACITOR_SERVER_URL=...` instead of `set`.
 | **iOS** | **macOS + Xcode only** | `.ipa` (via Archive) |
 
 Both use the same Capacitor project: run `npx cap sync` after changing `capacitor.config.ts` or env vars.
+
+## 6. APK opens to “404” (blank or Next error page)
+
+- **Cause:** `server.url` in `capacitor.config.ts` points at a host/path that does not serve the Grandma app (often **`https://ihute.rw/grandma`** before the apex redirect exists).
+- **Fix:** Use **`https://shop.ihute.rw/grandma`**, then `npx cap sync android`, rebuild the APK. Confirm the URL in a **phone browser** first.
+- **Check:** `echo %CAPACITOR_SERVER_URL%` (Windows) — unset means the default from `capacitor.config.ts` is used.
+
+## 7. Startup shell, errors, and `ihute_logs.txt`
+
+- **Default (no `CAPACITOR_SERVER_URL`):** the app loads **`public-capacitor/index.html`** first. It calls **`/api/ihute-bootstrap-health`** on **`https://shop.ihute.rw`**, then redirects to **`/grandma`**. If that fails, the screen shows the **full target URL**, **health URL**, and the error; you can **Download ihute_logs.txt** (built from **`localStorage`**, last ~200 lines).
+- To change shop URLs, edit **`public-capacitor/index.html`** (`TARGET` and `HEALTH`) and keep them in sync with production.
+
+## 8. Seller stock offline (Grandma → Items)
+
+- Open **Items** once **online** so stock is cached on the device.
+- **Offline:** you can change **quantities** (±) and **queue new items** (“Add it yourself”); changes sync when the device is **online** again (or use **Refresh** after reconnect).
+- This is a **best-effort** queue on one browser/device — not a full conflict-resolution system for multi-device edits.

@@ -1,23 +1,26 @@
 import type { CapacitorConfig } from "@capacitor/cli"
 
 /**
- * Android shell loads your live site in a WebView.
- * Override: CAPACITOR_SERVER_URL=http://192.168.x.x:3000/grandma npx cap sync
+ * Default: load `public-capacitor/index.html` first — it health-checks the site, logs to localStorage,
+ * offers `ihute_logs.txt` download on failure, then redirects to shop Grandma.
+ *
+ * Set CAPACITOR_SERVER_URL to skip the shell and open that URL directly (e.g. http://192.168.x.x:3000/grandma).
  */
-const serverUrl =
-  process.env.CAPACITOR_SERVER_URL ||
-  "https://shop.ihute.rw/grandma"
+const serverUrl = process.env.CAPACITOR_SERVER_URL?.trim()
 
 const config: CapacitorConfig = {
   appId: "rw.ihute.app",
   appName: "Ihute",
   webDir: "public-capacitor",
-  server: {
-    url: serverUrl,
-    androidScheme: "https",
-    // Allow http:// for local dev on device (set CAPACITOR_SERVER_URL=http://...)
-    cleartext: serverUrl.startsWith("http://"),
-  },
+  ...(serverUrl
+    ? {
+        server: {
+          url: serverUrl,
+          androidScheme: "https",
+          cleartext: serverUrl.startsWith("http://"),
+        },
+      }
+    : {}),
 }
 
 export default config

@@ -28,6 +28,7 @@ import { fetchSectorStatsFromApi } from "@/lib/fetch-suggestions-helpers"
 import { useAuthStore } from "@/lib/auth-store"
 import { userCanAccessSellerSpace } from "@/lib/auth-login-client"
 import { GrandmaSellerDashboard } from "@/components/grandma-seller-dashboard"
+import { GrandmaRequestStatsPanel } from "@/components/grandma-request-stats-panel"
 import { GrandmaSellerItemsPanel } from "@/components/grandma-seller-items-panel"
 import { digitsOnly, normalizePhoneDigitsForAuth, normalizeRwandaMobileE164 } from "@/lib/rwanda-phone"
 import { Input } from "@/components/ui/input"
@@ -248,6 +249,10 @@ const GRANDMA_LABELS: Record<
     reorderSplashTitle: string
     reorderSplashSub: string
     versionLabel: string
+    requestStatsTitle: string
+    requestStatsNone: string
+    requestStatsLine: string
+    requestStatsLastFail: string
   }
 > = {
   en: {
@@ -313,6 +318,10 @@ const GRANDMA_LABELS: Record<
     reorderSplashTitle: "Adding to your cart…",
     reorderSplashSub: "Loading this shop’s items.",
     versionLabel: "Version",
+    requestStatsTitle: "API requests (this session)",
+    requestStatsNone: "No requests to /api yet in this tab.",
+    requestStatsLine: "This session: {total} requests — {pct}% succeeded ({ok} ok, {fail} failed).",
+    requestStatsLastFail: "Last failed: HTTP {status} — {url}",
   },
   rw: {
     demoLocation: "Kacyiru, Gasabo — inyigo (shyiraho aderesi mu buryo)",
@@ -376,6 +385,10 @@ const GRANDMA_LABELS: Record<
     reorderSplashTitle: "Bishyiraho mu iduka…",
     reorderSplashSub: "Dukurikira ibintu by'iduka.",
     versionLabel: "Verisiyo",
+    requestStatsTitle: "Ibyifuzo kuri API (iki gice)",
+    requestStatsNone: "Nta bisubizo kuri /api muri iki tab.",
+    requestStatsLine: "Iki gice: ibisubizo {total} — {pct}% byagenze neza ({ok} byiza, {fail} bitari byiza).",
+    requestStatsLastFail: "Iheruka kutagenwa: HTTP {status} — {url}",
   },
   fr: {
     demoLocation: "Kacyiru, Gasabo — démo (définissez l'adresse dans les réglages)",
@@ -439,6 +452,10 @@ const GRANDMA_LABELS: Record<
     reorderSplashTitle: "Ajout au panier…",
     reorderSplashSub: "Chargement des articles du magasin.",
     versionLabel: "Version",
+    requestStatsTitle: "Requêtes API (cette session)",
+    requestStatsNone: "Aucune requête /api pour l’instant.",
+    requestStatsLine: "Session : {total} requêtes — {pct}% réussies ({ok} ok, {fail} échouées).",
+    requestStatsLastFail: "Dernier échec : HTTP {status} — {url}",
   },
 }
 
@@ -4574,6 +4591,15 @@ export default function GrandmaPage() {
             </p>
           </SheetHeader>
           <div className="space-y-6 px-4 py-4">
+            <GrandmaRequestStatsPanel
+              open={settingsOpen}
+              labels={{
+                title: settingsUi.requestStatsTitle,
+                none: settingsUi.requestStatsNone,
+                line: settingsUi.requestStatsLine,
+                lastFail: settingsUi.requestStatsLastFail,
+              }}
+            />
             <div>
               <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Mode</div>
               <div className="mt-2 grid grid-cols-2 gap-2">
