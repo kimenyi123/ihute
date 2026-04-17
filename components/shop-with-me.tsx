@@ -52,7 +52,12 @@ import {
   normalizeImageUrl,
   NO_IMAGE_URL,
 } from "@/lib/image-utils";
-import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price";
+import {
+  generalSellingPrice,
+  normalizeItemEmballageForCart,
+  resolveItemEmballageRaw,
+} from "@/lib/package-price";
+import { itemEmballageDisplaySuffix } from "@/lib/cart-display-utils";
 
 type ShopWithMeProduct = {
   item_name?: string;
@@ -1061,13 +1066,17 @@ function ProductCard({
 
   const itemCode = getItemCode(product);
   const p = product as Record<string, unknown>;
-  // API/Redis format: item_commercial_name, item_emballage (as-is), item_key_words, item_packet, image_url; price from selling_price
+  // Base unit price: `selling_price` from Redis/API; `price` is the same meaning when both are present.
   const productName = String(p.item_commercial_name ?? p.item_name ?? p.ITEM_NAME ?? p.ITEM_COMMERCIAL_NAME ?? "").trim() || "Product";
   const priceRaw = p.selling_price ?? p.price ?? p.UNITY_PRICE ?? p.SALE_PRICE_INCLUSIVE;
   const baseUnit = extractNumericPrice(priceRaw);
-  const embRaw = p.item_emballage ?? p.ITEM_EMBALLAGE;
+  const embRaw = resolveItemEmballageRaw(p);
   const price = generalSellingPrice(baseUnit, embRaw);
   const itemEmballageCart = normalizeItemEmballageForCart(embRaw);
+  const embStr =
+    embRaw != null && String(embRaw).trim() !== "" ? String(embRaw) : null;
+  /** Line total is in RWF; suffix is pack size (e.g. `1 pcs`), not a second currency. Default multiplier 1 when missing. */
+  const unitLabel = itemEmballageDisplaySuffix(embStr ?? "1") ?? "1 pcs";
 
   /** Try KAOS famille → flat NIKI → each backend URL → no_image (same order as getProductImageSrc, but advance on 404). */
   const imageCandidates = useMemo(
@@ -1265,8 +1274,9 @@ function ProductCard({
         <p className="text-xs text-muted-foreground">Quality product</p>
 
         <div className="space-y-0.5">
-          <div className="font-bold text-base">
+          <div className="font-bold text-base tabular-nums text-foreground">
             {price.toLocaleString()} {product.currency || "RWF"}
+            <span className="text-sm font-normal text-muted-foreground"> ({unitLabel})</span>
           </div>
         </div>
 

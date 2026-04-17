@@ -6,6 +6,7 @@ import { useCartStore } from "@/lib/cart-store"
 import { useAuthStore } from "@/lib/auth-store"
 import { flushCartToServer } from "@/lib/flush-cart-server"
 import { getOrCreateGuestName, useTableCommandStore } from "@/lib/table-command-store"
+import { GUEST_POOL_EMAIL, ensureGuestPoolBuyerAccount } from "@/lib/guest-checkout"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -42,8 +43,8 @@ type CheckoutFormData = z.infer<typeof checkoutSchema>
 
 export function CheckoutForm() {
   const router = useRouter()
-  const user = useAuthStore((s) => s.user)
   const { items, getTotalPrice, clearCart, tableInfo } = useCartStore()
+  const { user, isAuthenticated } = useAuthStore()
   const [isProcessing, setIsProcessing] = useState(false)
   const [showReview, setShowReview] = useState(false)
   const [showMap, setShowMap] = useState(false)
@@ -70,48 +71,51 @@ export function CheckoutForm() {
   // ✅ Get table session reactively from store
   const tableSession = useTableCommandStore((state) => state.activeSession)
 
-  // ✅ IMPROVED: Pre-fill form with table info and guest name
+  // Pre-fill from table session / guest name and table-encoded address.
   useEffect(() => {
-    // Get guest name from localStorage (set during table creation/join)
     const guestName = getOrCreateGuestName()
-    
-    console.log('🔍 Checkout pre-fill - guestName:', guestName)
-    console.log('🔍 Checkout pre-fill - tableSession:', tableSession)
-    console.log('🔍 Checkout pre-fill - tableInfo:', tableInfo)
-    
-    // Priority: 1. Table session userName, 2. Stored guest name, 3. Table info
-    const userName = tableSession?.userName || guestName
-    
-    console.log('🔍 Checkout pre-fill - resolved userName:', userName)
-    
-    // ✅ Pre-fill name from guest name / table session (works for both table and non-table orders)
-    if (userName && userName !== "Guest") {
-      console.log('🔍 Setting fullName to:', userName)
-      setValue("fullName", userName)
+    const sessionOrGuest = (tableSession?.userName || guestName || "").trim()
+
+    if (sessionOrGuest && sessionOrGuest !== "Guest") {
+      setValue("fullName", sessionOrGuest)
     }
-    
-    // ✅ Pre-fill address from table info (only for table orders)
+
     if (tableInfo?.tableNumber) {
       const tableNum = tableInfo.tableNumber.trim()
-
-      // Check if tableNumber contains "Name | Address" format
       if (tableNum.includes("|")) {
-        const parts = tableNum.split("|").map(p => p.trim())
+        const parts = tableNum.split("|").map((p) => p.trim())
         if (parts.length >= 2) {
-          const [, address] = parts
-          setValue("address", address)
+          const [namePart, addressPart] = parts
+          setValue("address", addressPart)
+          const resolvedName = (tableSession?.userName || guestName || namePart || "").trim()
+          if (resolvedName && resolvedName !== "Guest") {
+            setValue("fullName", resolvedName)
+          }
         }
       } else {
-        // If it's just a table number, use it for address
         setValue("address", tableNum)
+        if (!sessionOrGuest || sessionOrGuest === "Guest") {
+          setValue("fullName", tableNum)
+        }
       }
-
-      // Set city to shop name for context
       if (tableInfo.shopName) {
         setValue("city", tableInfo.shopName)
       }
     }
-  }, [tableInfo?.tableNumber, tableInfo?.shopName, tableSession?.userName, setValue])
+  }, [tableInfo, tableSession, setValue])
+
+  // Prefill checkout fields for authenticated buyers (skip when table flow owns the fields).
+  useEffect(() => {
+    if (!isAuthenticated || !user) return
+    if (isTableOrder) return
+    setValue("fullName", user.name || "")
+    setValue("email", user.email || "")
+    setValue("phone", user.phone || "")
+    if (user.location) {
+      setValue("address", user.location)
+      setValue("city", user.location)
+    }
+  }, [isAuthenticated, user, setValue, isTableOrder])
 
   if (items.length === 0) {
     return (
@@ -146,6 +150,24 @@ export function CheckoutForm() {
 
     setIsProcessing(true)
     try {
+      let buyerEmail = ""
+      let buyerAccount = ""
+      let isGuestCheckout = false
+
+      if (isAuthenticated && user?.email) {
+        buyerEmail = user.email
+        buyerAccount = String(user.ishyigaAccount ?? "").trim()
+      } else {
+        // For anonymous checkout, always attach the shared guest buyer identity.
+        buyerEmail = GUEST_POOL_EMAIL
+        buyerAccount = await ensureGuestPoolBuyerAccount()
+        isGuestCheckout = true
+      }
+
+      if (!buyerEmail.trim()) {
+        throw new Error("Buyer account is missing. Please sign in or retry.")
+      }
+
       const sellerAccount = items[0]?.supplierId || ""
       if (sellerAccount) {
         const stockItems = items.map((it) => {
@@ -187,7 +209,9 @@ export function CheckoutForm() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          buyerEmail: data.email || "",
+          buyerEmail,
+          ...(buyerAccount ? { buyerAccount } : {}),
+          ...(isGuestCheckout ? { isGuestCheckout: true } : {}),
           buyerName: data.fullName,
           buyerPhone: data.phone,
           buyerLocation: data.city ? `${data.address}, ${data.city}` : data.address,

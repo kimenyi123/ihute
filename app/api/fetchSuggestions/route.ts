@@ -61,18 +61,10 @@ async function forward(req: NextRequest) {
         },
       })
     } catch {
-      /* invalid JSON or parse error — return raw body */
+      // Corrupted/non-JSON cache entry (e.g. upstream HTML error page accidentally cached).
+      // Do not return raw cached content as JSON; treat as cache miss and fetch fresh data.
+      console.warn("[fetchSuggestions] Invalid JSON in Redis cache; bypassing cached value")
     }
-    return new Response(cached, {
-      status: 200,
-      headers: {
-        "content-type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        "X-Cache": "HIT",
-      },
-    })
   }
 
   // Cache miss: call backend (DB), then store in Redis
@@ -232,7 +224,7 @@ async function forward(req: NextRequest) {
         suppliersByProduct: [],
         products: [],
         query: incoming.searchParams.get('globalSearch') || '',
-        warning: "Search took too long, please try again with more specific terms"
+        // warning: "Search took too long, please try again with more specific terms"
       }), {
         status: 200,
         headers: {

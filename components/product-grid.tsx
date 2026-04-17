@@ -2,12 +2,20 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ProductCard } from "@/components/product-card";
+import { ProductQuickView, type QuickViewProduct } from "@/components/product-quick-view";
+import { useCartStore } from "@/lib/cart-store";
+import { getProductImageSrc } from "@/lib/image-utils";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Search, Store, Loader2 } from "lucide-react";
 import { filterProductsByRelevance, filterSuppliersByRelevance } from "@/lib/search-utils";
-import { generalSellingPrice } from "@/lib/package-price";
+import {
+  generalSellingPrice,
+  normalizeItemEmballageForCart,
+  resolveItemEmballageRaw,
+} from "@/lib/package-price";
+import { useToast } from "@/components/ui/use-toast";
 
 type ServerProduct = {
   item_commercial_name?: string;
@@ -116,6 +124,55 @@ function extractSuppliersWithProducts(payload: any): any[] {
   return [];
 }
 
+/** Card row for ProductCard / quick view (shape of `allProducts` items). */
+export type GridCardProduct = {
+  id: string;
+  name: string;
+  description?: string;
+  price: number;
+  itemEmballage?: string | number;
+  currency?: string;
+  unit?: string | number;
+  supplierId?: string;
+  supplierName?: string;
+  supplierLocation?: string;
+  item_code?: string;
+  item_key_words?: string;
+  image?: string;
+  image_url?: string;
+  item_image_url?: string;
+  IMAGE_URL?: string;
+  famille?: string;
+  FAMILLE?: string;
+  momo?: string;
+  item_state?: string;
+  expiryLabel?: string;
+  _routeCategory?: string;
+};
+
+function gridProductToQuickView(p: GridCardProduct): QuickViewProduct {
+  const line = generalSellingPrice(p.price, p.itemEmballage);
+  return {
+    id: (p.item_code ?? p.item_key_words ?? p.id).toString(),
+    name: p.name,
+    price: line,
+    currency: p.currency || "RWF",
+    unit: p.unit?.toString(),
+    itemCode: p.item_code ?? p.item_key_words,
+    supplierId: p.supplierId,
+    supplierName: p.supplierName,
+    itemEmballage: normalizeItemEmballageForCart(p.itemEmballage),
+    image: p.image,
+    image_url: p.image_url,
+    item_image_url: p.item_image_url,
+    IMAGE_URL: p.IMAGE_URL,
+    famille: p.famille ?? p.FAMILLE,
+    FAMILLE: p.FAMILLE,
+    item_key_words: p.item_key_words,
+    item_code: p.item_code ?? p.item_key_words,
+  };
+}
+
 export function ProductGrid({
   categoryId,
   categoryName,
@@ -135,6 +192,10 @@ export function ProductGrid({
   const [error, setError] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
   const [globalSearchResults, setGlobalSearchResults] = useState<ServerProduct[]>([]);
+  const [quickViewProduct, setQuickViewProduct] = useState<GridCardProduct | null>(null);
+  const [quickViewOpen, setQuickViewOpen] = useState(false);
+  const addOrInc = useCartStore((s) => s.addOrInc ?? s.addItem);
+  const { toast } = useToast();
 
   function getApiBase() {
     // Always use empty string to make relative calls to Next.js API routes
@@ -369,9 +430,12 @@ export function ProductGrid({
         toRouteCategoryId(p.sector) ||
         toRouteCategoryId(p.category);
 
-      const embRaw = p.item_emballage ?? (p as { ITEM_EMBALLAGE?: string }).ITEM_EMBALLAGE;
+      const embRaw = resolveItemEmballageRaw(p as Record<string, unknown>);
       const embStr =
         embRaw != null && String(embRaw).trim() !== "" ? String(embRaw).trim() : undefined;
+      // `selling_price` from Redis/API is the base catalog unit (same as supplier dashboard `product.price`).
+      // Customer line = base × item_emballage — applied once in ProductCard via `generalSellingPrice`.
+      // Do not pre-multiply here or prices become base × emballage² (e.g. 510×50 vs 10.2×50).
       return {
         id: `${categoryId}-${idx}`,
         name: p.item_commercial_name || "Product",
@@ -456,7 +520,39 @@ export function ProductGrid({
 
   const displayedProducts = filteredProducts.slice(0, displayCount);
 
+  function addGridProductToCart(p: GridCardProduct) {
+    const displayPrice = generalSellingPrice(p.price, p.itemEmballage);
+    const itemEmballageForCart = normalizeItemEmballageForCart(p.itemEmballage);
+    const imageUrlForCart = getProductImageSrc(
+      p as Record<string, unknown>,
+      "/placeholder.svg?height=300&width=300",
+    );
+    addOrInc(
+      {
+        id: p.id,
+        itemCode: (p.item_code ?? p.item_key_words ?? p.id).toString(),
+        name: p.name,
+        price: displayPrice,
+        unit: p.unit?.toString(),
+        image: imageUrlForCart,
+        image_url: p.image_url,
+        item_image_url: p.item_image_url,
+        IMAGE_URL: p.IMAGE_URL,
+        item_key_words: p.item_key_words,
+        famille: p.famille,
+        supplierId: (p.supplierId || "unknown").toString().trim(),
+        supplierName: p.supplierName || "Supplier",
+        supplierLocation: p.supplierLocation,
+        momo: p.momo,
+        selectedUnit: p.unit?.toString(),
+        ...(itemEmballageForCart ? { itemEmballage: itemEmballageForCart } : {}),
+      },
+      1,
+    );
+  }
+
   return (
+    <>
     <div className="space-y-6">
       <div className="flex flex-col gap-4">
         <div>
@@ -515,7 +611,15 @@ export function ProductGrid({
         <>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
             {displayedProducts.map((product) => (
-              <ProductCard key={product.id} product={product} />
+              <ProductCard
+                key={product.id}
+                product={product}
+                quickViewReplacesWatchPrice
+                onQuickView={() => {
+                  setQuickViewProduct(product);
+                  setQuickViewOpen(true);
+                }}
+              />
             ))}
           </div>
 
@@ -541,5 +645,17 @@ export function ProductGrid({
         </>
       )}
     </div>
+    <ProductQuickView
+      product={quickViewProduct ? gridProductToQuickView(quickViewProduct) : null}
+      open={quickViewOpen}
+      onOpenChange={setQuickViewOpen}
+      onAddToCart={() => {
+        if (!quickViewProduct) return;
+        addGridProductToCart(quickViewProduct);
+        toast({ title: "Added to cart", description: quickViewProduct.name, duration: 2000 });
+        setQuickViewOpen(false);
+      }}
+    />
+    </>
   );
 }

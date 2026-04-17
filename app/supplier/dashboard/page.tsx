@@ -41,7 +41,13 @@ import {
 import Link from "next/link";
 import AddProductModal, { ProductFormData } from "@/components/supplier/AddProductModal";
 import { isRestoBarPreferredCategories } from "@/lib/supplier-sector";
-import { parsePackageMultiplier } from "@/lib/package-price";
+import {
+  lineCostPriceFromProductRow,
+  lineSellingPriceFromProductRow,
+  resolveItemEmballageRaw,
+  sellableStockFromPacketEmballage,
+} from "@/lib/package-price";
+import { formatItemEmballageMultiplierOnly } from "@/lib/cart-display-utils";
 import { parseItemStateBatchExpiry } from "@/lib/item-state-display";
 import { SupplierProductTableImage } from "@/components/supplier-product-table-image";
 import { ResponsiveTable } from "@/components/ui/responsive-table";
@@ -216,17 +222,6 @@ function SupplierDashboard() {
           return 0;
         };
 
-        const parseNumeric = (value: any): number => {
-          if (typeof value === "number") return Number.isFinite(value) ? value : 0;
-          if (typeof value === "string") {
-            const cleaned = value.replace(/,/g, "").replace(/[^\d.\-]/g, "").trim();
-            if (!cleaned) return 0;
-            const parsed = parseFloat(cleaned);
-            return Number.isNaN(parsed) ? 0 : parsed;
-          }
-          return 0;
-        };
-
         // Map products - handle Redis format (your format)
         const mappedProducts = products.map((p: any, index: number) => {
           console.log(`Product ${index}:`, p);
@@ -237,10 +232,11 @@ function SupplierDashboard() {
           let mapped;
 
           if (isRedisFormat) {
-            // Handle Redis format: price only from selling_price; item_emballage passed through as-is (empty remains empty)
-            const packetQty = parseNumeric(p.item_packet);
-            const emballageQty = parseNumeric(p.item_emballage);
-            const stock = emballageQty > 0 ? packetQty / emballageQty : packetQty;
+            // Handle Redis format: price only from selling_price; stock = item_packet / item_emballage
+            const stock = sellableStockFromPacketEmballage(
+              p.item_packet,
+              resolveItemEmballageRaw(p)
+            );
             const price = p.selling_price != null ? parsePrice(String(p.selling_price)) : 0;
 
             mapped = {
@@ -273,9 +269,10 @@ function SupplierDashboard() {
             const price = parsePrice(
               p.selling_price ?? (p.price || p.UNITY_PRICE || p.SALE_PRICE_INCLUSIVE || 0)
             );
-            const packetQty = parseNumeric(p.item_packet ?? p.stock ?? p.STOCK ?? p.QUANTITY ?? 0);
-            const emballageQty = parseNumeric(p.item_emballage);
-            const stock = emballageQty > 0 ? packetQty / emballageQty : packetQty;
+            const stock = sellableStockFromPacketEmballage(
+              p.item_packet ?? p.stock ?? p.STOCK ?? p.QUANTITY ?? 0,
+              resolveItemEmballageRaw(p)
+            );
 
             mapped = {
               ...p, // Keep all original fields
@@ -403,11 +400,9 @@ function SupplierDashboard() {
   const lowStock = supplierProducts.filter((p) => p.stock <= 10 && p.stock > 0).length;
   const outOfStock = supplierProducts.filter((p) => p.stock === 0).length;
   const totalValue = supplierProducts.reduce((sum, p) => {
-    const raw =
-      p.item_emballage ?? p.ITEM_EMBALLAGE ?? p.itemEmballage ?? "";
-    const mult = parsePackageMultiplier(raw);
-    const baseCost = Number(p.costPrice ?? 0);
-    return sum + baseCost * mult * Number(p.stock ?? 0);
+    const pr = p as Record<string, unknown>;
+    const lineCost = lineCostPriceFromProductRow(pr);
+    return sum + lineCost * Number(p.stock ?? 0);
   }, 0);
 
   const latestInventorySyncLabel = (() => {
@@ -979,23 +974,13 @@ function SupplierDashboard() {
                         const displayName = p.ITEM_NAME || p.itemName || "Unknown";
                         const displayCode = p.ITEM_CODE || p.itemCode || "";
                         const uniqueKey = `${displayCode}-${startIndex + rowIndex}`;
-                        const emballageRaw =
-                          p.item_emballage ??
-                          p.ITEM_EMBALLAGE ??
-                          p.itemEmballage ??
-                          "";
-                        const packageMult = parsePackageMultiplier(emballageRaw);
-                        const baseSell = Number(p.price ?? 0);
-                        const baseCost = Number(p.costPrice ?? 0);
-                        const displaySelling = baseSell * packageMult;
-                        const displayCost = baseCost * packageMult;
+                        const pr = p as Record<string, unknown>;
+                        const emballageRaw = resolveItemEmballageRaw(pr);
+                        const displaySelling = lineSellingPriceFromProductRow(pr);
+                        const displayCost = lineCostPriceFromProductRow(pr);
                         const revenue = displayCost * Number(p.stock ?? 0);
                         const emballageDisplay =
-                          emballageRaw !== null &&
-                          emballageRaw !== undefined &&
-                          String(emballageRaw).trim() !== ""
-                            ? String(emballageRaw).trim()
-                            : "1";
+                          formatItemEmballageMultiplierOnly(emballageRaw);
 
                         const itemStateRaw =
                           p.item_state ?? p.batchInfo ?? p.DESCRIPTION ?? "";
@@ -1028,9 +1013,10 @@ function SupplierDashboard() {
                               </div>
                             </td>
                             <td className="px-4 py-4">
-                              {baseSell > 0 ? (
-                                <span className="font-medium text-slate-900">
-                                  {displaySelling.toLocaleString()} {p.currency ?? "RWF"}
+                              {displaySelling > 0 ? (
+                                <span className="font-medium text-slate-900 whitespace-nowrap">
+                                  {displaySelling.toLocaleString()}{" "}
+                                  {p.currency ?? "RWF"}
                                 </span>
                               ) : (
                                 <span className="text-slate-400 text-sm italic">

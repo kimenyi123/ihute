@@ -14,6 +14,7 @@ import { EyeOff, Store, TrendingDown, TrendingUp, RefreshCw, ChevronLeft, Chevro
 import Link from "next/link"
 import Image from "next/image"
 import { getProductImageUrl } from "@/lib/image-utils"
+import { generalSellingPrice } from "@/lib/package-price"
 
 function extractNumericPrice(value: unknown): number {
   if (typeof value === "number") return value
@@ -151,7 +152,13 @@ export default function PriceWatchPage() {
               return (wCode && code === wCode) || (wName && name && name.includes(wName) || wName.includes(name))
             })
             if (match) {
-              const price = extractNumericPrice(match.selling_price ?? match.item_emballage ?? match.SALE_PRICE_INCLUSIVE ?? match.price)
+              const base = extractNumericPrice(
+                match.selling_price ?? match.SALE_PRICE_INCLUSIVE ?? match.price
+              )
+              const price = generalSellingPrice(
+                base,
+                match.item_emballage ?? match.ITEM_EMBALLAGE
+              )
               if (price > 0) next[itemKey(w.productId, w.supplierId)] = price
             }
           }

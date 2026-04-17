@@ -18,7 +18,11 @@ import { ProductCard } from "@/components/product-card"
 import { ProductQuickView, type QuickViewProduct } from "@/components/product-quick-view"
 import { fetchSearchSuggestions } from "@/lib/search-suggestions"
 import { usePriceDropToasts } from "@/lib/use-price-drop-toasts"
-import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price"
+import {
+  generalSellingPrice,
+  normalizeItemEmballageForCart,
+  resolveItemEmballageRaw,
+} from "@/lib/package-price"
 import { dedupeSearchProductsByItemCodeAndSellingPrice } from "@/lib/dedupe-search-products"
 import { parseItemStateBatchExpiry } from "@/lib/item-state-display"
 import {
@@ -254,7 +258,7 @@ function coerceOptionalPositiveNumber(raw: unknown): number | undefined {
 }
 
 function productItemEmballageRaw(p: Product): unknown {
-  return p.item_emballage ?? (p as { ITEM_EMBALLAGE?: unknown }).ITEM_EMBALLAGE
+  return resolveItemEmballageRaw(p as Record<string, unknown>)
 }
 
 function productBaseSellingPrice(p: Product): number {
@@ -270,16 +274,8 @@ function productGeneralSellingPrice(p: Product): number {
   return generalSellingPrice(productBaseSellingPrice(p), productItemEmballageRaw(p))
 }
 
-/** Card / sort / cart line price: API final when present, else selling_price × item_emballage. */
+/** Line price shown in grid / cart: always `selling_price × item_emballage` (missing emballage → multiplier 1). */
 function productLinePrice(p: Product): number {
-  const fp = (p as { final_selling_price?: unknown }).final_selling_price
-  if (fp != null && fp !== "") {
-    const n =
-      typeof fp === "number"
-        ? fp
-        : parseFloat(String(fp).replace(/[^\d.,-]/g, "").replace(",", "."))
-    if (Number.isFinite(n) && n >= 0) return n
-  }
   return productGeneralSellingPrice(p)
 }
 
@@ -299,14 +295,6 @@ function toCardProduct(p: Product & { search_priority?: string; contains_ingredi
   const id = `${baseCode}__p${Math.round(linePrice * 100)}`
   const itemStateRaw = String((p as { item_state?: string }).item_state ?? "").trim()
   const { expiryLabel } = parseItemStateBatchExpiry(itemStateRaw || undefined)
-  const apiFinal = (p as { final_selling_price?: unknown }).final_selling_price
-  const finalNum =
-    apiFinal != null && apiFinal !== ""
-      ? typeof apiFinal === "number"
-        ? apiFinal
-        : parseFloat(String(apiFinal).replace(/[^\d.,-]/g, "").replace(",", "."))
-      : NaN
-  const hasApiFinal = Number.isFinite(finalNum) && finalNum >= 0
 
   return {
     id,
@@ -332,7 +320,6 @@ function toCardProduct(p: Product & { search_priority?: string; contains_ingredi
     searchPriority: (p.search_priority === "direct" || p.search_priority === "contains" ? p.search_priority : undefined) as "direct" | "contains" | undefined,
     containsIngredient: typeof p.contains_ingredient === "string" ? p.contains_ingredient : undefined,
     itemEmballage: productItemEmballageRaw(p) as string | number | undefined,
-    ...(hasApiFinal ? { final_selling_price: finalNum } : {}),
     ...(itemStateRaw ? { item_state: itemStateRaw } : {}),
     ...(expiryLabel ? { expiryLabel } : {}),
   }
@@ -530,17 +517,26 @@ export default function SearchPage() {
 
   function toQuickViewProduct(p: Product): QuickViewProduct {
     const emb = productItemEmballageRaw(p)
+    // Pass raw catalog image fields so Quick view uses the same chain as ProductCard:
+    // image_url / item_image_url / KAOS paths — not only one pre-resolved URL.
     return {
       id: p.item_code || p.item_key_words || "",
       name: p.item_commercial_name || "Product",
       price: productLinePrice(p),
       currency: p.currency || "RWF",
       unit: p.item_packet ?? "",
-      image: getProductImageSrc(p),
       itemCode: p.item_code || p.item_key_words,
       supplierId: p.supplier_account,
       supplierName: p.supplier_name,
       itemEmballage: normalizeItemEmballageForCart(emb),
+      image: p.image,
+      image_url: p.image_url,
+      item_image_url: p.item_image_url,
+      IMAGE_URL: p.IMAGE_URL,
+      famille: p.famille ?? p.FAMILLE,
+      FAMILLE: p.FAMILLE,
+      item_key_words: p.item_key_words,
+      item_code: p.item_code || p.item_key_words,
     }
   }
 
@@ -908,13 +904,9 @@ export default function SearchPage() {
     } else {
       raw = supplierSearchResults ?? []
     }
-    const filtered = raw.filter((p) => {
-      const base =
-        extractNumericPrice(p.selling_price) ||
-        extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) ||
-        extractNumericPrice((p as any).price)
-      return base > 0
-    })
+    // Some backend responses provide only `final_selling_price` (enriched by `/api/fetchSuggestions`).
+    // Filter using `productLinePrice()` so valid products are not dropped.
+    const filtered = raw.filter((p) => productLinePrice(p) > 0)
     // Same as `/api/fetchSuggestions` keyword path: one card per supplier + item code + base selling price (multi-lot → merged).
     const deduped = dedupeSearchProductsByItemCodeAndSellingPrice(filtered) as Product[]
     // Supplier search uses backend `globalSearch`, which is keyword/fuzzy — similar SKUs (e.g. N-22 vs N-23) can both match.
@@ -987,13 +979,8 @@ export default function SearchPage() {
   // Main search products (global): exclude 0 price, then sort
   const searchProductsWithPrice = useMemo(() => {
     const list = searchResult?.products ?? []
-    const filtered = list.filter((p) => {
-      const base =
-        extractNumericPrice(p.selling_price) ||
-        extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) ||
-        extractNumericPrice((p as any).price)
-      return base > 0
-    })
+    // Same as supplier-scoped: prefer `final_selling_price` when backend provides it.
+    const filtered = list.filter((p) => productLinePrice(p) > 0)
     let ordered: Product[]
     if (productSort === "price-asc")
       ordered = [...filtered].sort((a, b) => productLinePrice(a) - productLinePrice(b))

@@ -1,9 +1,11 @@
 "use client"
 
 import { useTableCommandStore } from "@/lib/table-command-store"
+import { useCartStore } from "@/lib/cart-store"
 import { Button } from "@/components/ui/button"
 import { Beer, X, Lock, CheckCircle, Send, Link2 } from "lucide-react"
-import { useState, useEffect } from "react"
+import { useEffect, useState } from "react"
+import { useToast } from "@/components/ui/use-toast"
 import { TableCommandShareModal } from "@/components/table-command-share-modal"
 import {
   AlertDialog,
@@ -24,6 +26,8 @@ export function TableCommandBanner() {
     closeTableCommand,
     sendTableOrder,
   } = useTableCommandStore()
+  const getGroupsBySeller = useCartStore((s) => s.getGroupsBySeller)
+  const { toast } = useToast()
 
   const [showLeaveDialog, setShowLeaveDialog] = useState(false)
   const [showCloseDialog, setShowCloseDialog] = useState(false)
@@ -34,21 +38,32 @@ export function TableCommandBanner() {
   const [sendSuccess, setSendSuccess] = useState<any>(null)
   const [isSending, setIsSending] = useState(false)
 
-  // Calculate status flags (before early return so useEffect can use them)
+  const sellerGroups = getGroupsBySeller()
+
+  // Auto-leave active table session when cart has no seller groups (individual order completed).
+  useEffect(() => {
+    if (!activeSession) return
+    if (activeSession.status !== "ACTIVE") return
+    if (sellerGroups.length > 0) return
+
+    leaveTableCommand()
+    toast({
+      title: "Table session ended",
+      description: "No cart items found, so table mode was closed automatically.",
+      duration: 1800,
+    })
+  }, [activeSession, sellerGroups.length, leaveTableCommand, toast])
+
   const isActive = activeSession?.status === "ACTIVE"
   const isSent = activeSession?.status === "SENT"
   const isClosed = activeSession?.status === "CLOSED"
   const userCanClose = canCloseTable()
 
-  // ✅ Auto-leave table when it's closed (removes banner automatically)
   useEffect(() => {
     if (isClosed && activeSession) {
-      console.log("🚪 Table is closed, auto-leaving in 3 seconds...")
       const timer = setTimeout(() => {
         leaveTableCommand()
-        console.log("✅ Auto-left closed table:", activeSession?.tableName)
       }, 3000)
-
       return () => clearTimeout(timer)
     }
   }, [isClosed, leaveTableCommand, activeSession])
