@@ -18,8 +18,20 @@ function paramsToRecord(searchParams: URLSearchParams): Record<string, string> {
   return out
 }
 
+/** Kaos `?sectorStats=pharmacy` returns `{ ok, sector, shops, items }` — must not be replaced by empty-search JSON. */
+function sectorStatsErrorBody(sectorSlug: string, warning: string): string {
+  return JSON.stringify({
+    ok: true,
+    sector: sectorSlug.trim(),
+    shops: 0,
+    items: 0,
+    warning,
+  })
+}
+
 async function forward(req: NextRequest) {
   const incoming = new URL(req.url)
+  const sectorStatsParam = incoming.searchParams.get("sectorStats")
   const target = new URL(getFetchSuggestionsUrl())
 
   // Copy query params. Backend must always search Redis first, then DB (see docs/backend-redis-search.md).
@@ -49,8 +61,11 @@ async function forward(req: NextRequest) {
 
   const method = req.method
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'Accept': 'application/json'
+    Accept: "application/json",
+  }
+  if (method !== "GET" && method !== "HEAD") {
+    const ct = req.headers.get("content-type")
+    headers["Content-Type"] = ct && ct.trim() ? ct : "application/json"
   }
 
   const body = method === "GET" || method === "HEAD" ? undefined : await req.text()
@@ -68,8 +83,22 @@ async function forward(req: NextRequest) {
     })
 
     if (!resp.ok) {
-      const outBody = await resp.text()
+      await resp.text()
       console.warn("[fetchSuggestions] Backend returned", resp.status, ", returning empty results")
+      if (sectorStatsParam) {
+        return new Response(
+          sectorStatsErrorBody(sectorStatsParam, "Sector stats unavailable (backend HTTP " + resp.status + ")"),
+          {
+            status: 200,
+            headers: {
+              "content-type": "application/json",
+              "Access-Control-Allow-Origin": "*",
+              "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+              "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            },
+          }
+        )
+      }
       return new Response(JSON.stringify({
         ok: true,
         suppliersByName: [],
@@ -96,6 +125,17 @@ async function forward(req: NextRequest) {
       parsed = JSON.parse(outBody)
     } catch (e) {
       console.error("Invalid JSON from backend:", outBody.substring(0, 200))
+      if (sectorStatsParam) {
+        return new Response(sectorStatsErrorBody(sectorStatsParam, "Invalid JSON from backend for sectorStats"), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+          },
+        })
+      }
       return new Response(JSON.stringify({ 
         ok: false, 
         error: "Invalid response format from backend",
@@ -146,6 +186,18 @@ async function forward(req: NextRequest) {
     
     // Return empty results instead of error for search timeouts
     if (err?.name === "AbortError") {
+      if (sectorStatsParam) {
+        return new Response(
+          sectorStatsErrorBody(sectorStatsParam, "Sector stats request timed out"),
+          {
+            status: 200,
+            headers: {
+              "content-type": "application/json",
+              "Access-Control-Allow-Origin": "*",
+            },
+          }
+        )
+      }
       return new Response(JSON.stringify({
         ok: true,
         suppliersByName: [],
@@ -160,6 +212,21 @@ async function forward(req: NextRequest) {
           "Access-Control-Allow-Origin": "*",
         },
       })
+    }
+
+    if (sectorStatsParam) {
+      return new Response(
+        sectorStatsErrorBody(sectorStatsParam, "Cannot reach backend for sectorStats: " + (err?.message || String(err))),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+          },
+        }
+      )
     }
 
     return new Response(JSON.stringify({

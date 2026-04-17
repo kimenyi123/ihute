@@ -1,185 +1,168 @@
 "use client"
 
-import type React from "react"
-import { useState } from "react"
+import { Suspense } from "react"
+<<<<<<< HEAD
+import Link from "next/link"
+import { useSearchParams } from "next/navigation"
+import { GrandmaLoginForm } from "@/components/grandma-login-form"
+import { GRANDMA_PATHS } from "@/lib/grandma-urls"
+
+function GrandmaLoginInner() {
+  const searchParams = useSearchParams()
+  const redirectRaw = searchParams.get("redirect")
+  const redirectTo =
+    redirectRaw && redirectRaw.startsWith("/") && !redirectRaw.startsWith("//")
+      ? redirectRaw
+      : GRANDMA_PATHS.appRoot
+  const phone = searchParams.get("phone") ?? ""
+
+  return (
+    <div className="grandma-login-page min-h-screen bg-[#f5f1ea] text-[#2c2620]">
+      <div className="mx-auto flex min-h-screen max-w-md flex-col px-4 py-10">
+        <Link
+          href={GRANDMA_PATHS.appRoot}
+          className="grandma-login-back mb-6 text-sm font-semibold text-[#5c4f42] hover:text-[#3d342c]"
+        >
+          ← Back to Ihute
+        </Link>
+        <GrandmaLoginForm redirectTo={redirectTo} defaultPhoneOrEmail={phone} />
+=======
+import Image from "next/image"
 import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
-import Image from "next/image"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ArrowLeft } from "lucide-react"
-import { useAuthStore } from "@/lib/auth-store"
-import type { User, UserRole } from "@/lib/auth-store"
+import { useAuthStore, type User } from "@/lib/auth-store"
+import { IshyigaLoginCard } from "@/components/ishyiga-login-card"
+import { userCanAccessSellerSpace } from "@/lib/auth-login-client"
+import { APP_VERSION_DISPLAY } from "@/lib/app-version"
+import { GRANDMA_PATHS } from "@/lib/grandma-urls"
 
-// --- LOGGING UTILITY (fully disabled to avoid leaking sensitive info) ---
-const isLoginDebugEnabled = false
-const log = (tag: string, msg: string, data?: any) => {
-  if (!isLoginDebugEnabled) return
-  const timestamp = new Date().toISOString().split("T")[1].slice(0, 8)
-  if (data !== undefined) {
-    console.log(`[${timestamp}] [${tag}] ${msg}`, data)
-  } else {
-    console.log(`[${timestamp}] [${tag}] ${msg}`)
-  }
-}
+const shell =
+  "min-h-screen bg-[#eef4fb] text-[#17324d] flex flex-col bg-gradient-to-b from-[#f7fbff] to-[#eef4fb]"
 
-type ApiLoginOK = {
-  ok: true
-  role: "BUYER" | "SELLER" | "ADMIN" | "DRIVER" | "FINANCIER"
-  ishyiga: string
-  user: { email: string; firstName: string; lastName: string; tel: string; location: string; owner: string }
-}
-
-function toUserRole(r?: string): UserRole {
-  const role = r?.toUpperCase()
-  if (role === "ADMIN") return "admin"
-  if (role === "SELLER") return "supplier"
-  return "customer"
-}
-
-function normalizeToStoreUser(payload: ApiLoginOK): User {
-  return {
-    id: payload.user.email,
-    email: payload.user.email,
-    name: [payload.user.firstName, payload.user.lastName].filter(Boolean).join(" ") || payload.user.owner || payload.user.email,
-    role: toUserRole(payload.role),
-    phone: payload.user.tel || "",
-    location: payload.user.location || "",
-    ishyigaAccount: payload.ishyiga || undefined,
-    businessName: payload.user.owner || undefined,
-  }
-}
-
-export default function LoginPage() {
+function LoginPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const redirectTo = searchParams?.get("redirect")
+  const phonePrefill = searchParams?.get("phone") ?? ""
   const login = useAuthStore((s) => s.login)
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-    setError(null)
-
-    const rid = crypto.randomUUID()
-    log("LOGIN", `START [RID ${rid}]`)
-    log("LOGIN", `Email: "${email}" (length=${email.length})`)
-    log("LOGIN", `Password length: ${password.length}`)
-
+  const backHomeHref = (() => {
+    if (!redirectTo) return "/"
     try {
-      log("LOGIN", `Sending to /api/auth/login`)
+      const decoded = decodeURIComponent(redirectTo)
+      if (decoded.startsWith("/grandma")) return GRANDMA_PATHS.appRoot
+    } catch {
+      /* ignore */
+    }
+    return "/"
+  })()
+  const backHomeLabel = backHomeHref === GRANDMA_PATHS.appRoot ? "Back to Grandma" : "Back to Home"
 
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      })
+  const handleSuccess = async (user: User) => {
+    const decoded = redirectTo ? decodeURIComponent(redirectTo) : ""
+    const safeRedirect = decoded.startsWith("/") && !decoded.startsWith("//") && decoded.length > 0
 
-      log("LOGIN", `HTTP Status: ${res.status}`)
+    login(user)
 
-      const json = await res.json().catch(async () => {
-        const text = await res.text()
-        log("LOGIN", `ERROR parsing JSON:`, text.substring(0, 300))
-        throw new Error("Bad JSON from auth server")
-      })
-
-      log("LOGIN", `Response:`, json)
-
-      if (!res.ok || !json?.ok) {
-        throw new Error(json?.error || `Login failed (${res.status})`)
+    // Grandma remembers buyer vs seller so /grandma opens the right space after sign-in.
+    if (safeRedirect && decoded.startsWith("/grandma") && typeof window !== "undefined") {
+      try {
+        localStorage.setItem(
+          "grandma:mode",
+          userCanAccessSellerSpace(user) ? "seller" : "buyer",
+        )
+      } catch {
+        /* ignore */
       }
+    }
 
-      const user: User = normalizeToStoreUser(json as ApiLoginOK)
-      log("LOGIN", `User normalized:`, user)
+    if (safeRedirect) {
+      router.push(decoded)
+      return
+    }
 
-      login(user)
-
-      // If they came from a link (e.g. "View my orders" QR), send them back after login
-      const decoded = redirectTo ? decodeURIComponent(redirectTo) : ""
-      const safeRedirect = decoded.startsWith("/") && !decoded.startsWith("//")
-      if (safeRedirect && decoded.length > 0) {
-        router.push(decoded)
-        return
-      }
-
-      // Otherwise redirect based on role
-      if (user.role === "admin") {
-        router.push("/admin/dashboard")
-      } else if (user.role === "supplier") {
-        router.push("/supplier/dashboard")
-      } else {
-        router.push("/")
-      }
-    } catch (err: any) {
-      const errorMsg = err?.message || "Network error"
-      log("LOGIN", `ERROR: ${errorMsg}`)
-      setError(errorMsg)
-    } finally {
-      setLoading(false)
-      log("LOGIN", `END`)
+    if (user.role === "admin") {
+      router.push("/admin/dashboard")
+    } else if (user.role === "supplier") {
+      router.push("/supplier/dashboard")
+    } else {
+      router.push("/")
     }
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 p-4">
-      <div className="w-full max-w-md space-y-4">
-        {/* Back to Home Button */}
-        <Link href="/">
-          <Button variant="ghost" size="sm" className="gap-2">
-            <ArrowLeft className="h-4 w-4" />
-            Back to Home
-          </Button>
+    <div className={shell}>
+      <header className="sticky top-0 z-30 bg-gradient-to-r from-[#1897e0] via-[#30acef] to-[#127fc0] text-white shadow-[0_8px_20px_rgba(0,0,0,.1)]">
+        <div className="mx-auto flex max-w-[430px] items-center gap-2 px-3 py-3.5">
+          <Link
+            href={backHomeHref}
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-white/15 text-lg text-white hover:bg-white/25"
+            aria-label={backHomeLabel}
+          >
+            ←
+          </Link>
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center overflow-hidden rounded-[10px] border border-white/35 bg-white">
+              <Image src="/images/ishyiga-logo.png" alt="" width={34} height={34} className="object-contain" />
+            </div>
+            <div className="min-w-0">
+              <div className="truncate text-lg font-bold leading-tight">Sign in</div>
+              <div className="truncate text-xs text-white/90">Ishyiga Ihute</div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div className="mx-auto flex w-full max-w-[430px] flex-1 flex-col px-3 py-6">
+        <Link
+          href={backHomeHref}
+          className="mb-4 inline-flex items-center gap-2 text-sm font-medium text-[#1897e0] hover:underline"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          {backHomeLabel}
         </Link>
 
-        <Card className="w-full">
-          <CardHeader className="space-y-4 text-center">
-            <div className="flex justify-center">
-              <Image src="/images/ishyiga-logo.png" alt="Ishyiga Software" width={200} height={60} className="h-12 w-auto" />
-            </div>
-            <CardTitle className="text-2xl">Welcome Back</CardTitle>
-            <CardDescription>Sign in to your account to continue</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleLogin} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                />
-              </div>
-              {error && <p className="text-sm text-destructive">{error}</p>}
-              <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? "Signing in..." : "Sign In"}
-              </Button>
-            </form>
-            <div className="mt-6 text-center space-y-2">
-              <p className="text-sm text-muted-foreground">
-                Don&apos;t have an account? <Link href="/register" className="text-primary hover:underline font-medium">Register here</Link>
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        <IshyigaLoginCard
+          onSuccess={handleSuccess}
+          defaultPhone={phonePrefill}
+          registerHref="/register/buyer"
+        />
+>>>>>>> origin/GRANDMA
       </div>
+
+      <footer className="mt-auto pb-6 pt-2 text-center text-xs font-medium tabular-nums text-[#6f8399]">
+        {APP_VERSION_DISPLAY}
+      </footer>
     </div>
+  )
+}
+
+<<<<<<< HEAD
+/** Seller login for the Ihute market flow (`/grandma` routes). Warm styling, not the default `/login` page. */
+export default function GrandmaLoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="grandma-login-page flex min-h-screen items-center justify-center bg-[#f5f1ea] text-[#6b5e52]">
+          Loading…
+        </div>
+      }
+    >
+      <GrandmaLoginInner />
+=======
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className={shell}>
+          <div className="flex flex-1 items-center justify-center px-4 text-sm text-[#6f8399]">Loading…</div>
+        </div>
+      }
+    >
+      <LoginPageInner />
+>>>>>>> origin/GRANDMA
+    </Suspense>
   )
 }

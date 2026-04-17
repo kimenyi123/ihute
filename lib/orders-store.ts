@@ -26,6 +26,9 @@ export type Order = {
   paymentStatus: "paid" | "pending" | "failed" | "unpaid"
   createdAt: string
 
+  /** True when this order originates from the self-order kiosk flow. */
+  isKioskOrder?: boolean
+
   // ✨ Supplier view fields
   buyerId?: string
   buyerName?: string
@@ -38,10 +41,18 @@ export type Order = {
   SUPPLIER_TIN?: string
   /** Raw order status from API (e.g. "open") for financing checks */
   orderStatus?: string
+  /** Raw PAYMENT_STATUS from backend (e.g. UMUSADA after financing) */
+  paymentStatusRaw?: string
+  rekisiStatus?: string
+  paymentName?: string
   /** Amount from API when subtotal is from a different source */
   amount?: number
   /** Seller display name (orders list page) */
   seller?: string
+  /** Seller sector / department hint from API (e.g. DEPARTMENT, PREFERRED_CATEGORIES) — used for Grandma reorder. */
+  sellerCategoryHint?: string
+  /** Opaque tracking token from `/api/orders/track` when available (preferred for `/track-order/...` links). */
+  publicToken?: string
 }
 
 type OrdersState = {

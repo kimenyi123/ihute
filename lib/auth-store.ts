@@ -10,6 +10,18 @@ export interface User {
   email: string
   name: string
   role: UserRole
+  /** Raw account_signup TYPE from backend (BUYER | SELLER | ...). */
+  dbRole?: string
+  /**
+   * True when PREFEREDCATEGORIES/DEPARTMENT indicates pharmacy or retail,
+   * so the user should be able to view both buyer and seller order views.
+   */
+  dualPharmacyRetail?: boolean
+  /**
+   * True when account sector is pharmacy (PREFEREDCATEGORIES/DEPARTMENT contains "pharmacy").
+   * Used to hide restaurant-only supplier features (e.g. self-ordering, tables).
+   */
+  pharmacySector?: boolean
   phone: string
   location: string
   businessName?: string
@@ -47,7 +59,8 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       isAuthenticated: false,
       loginTime: null,
-      sessionTimeout: 24 * 60 * 60 * 1000,
+      /** Default 30 days — “keep me signed in” for marketplace flows (was 24h). */
+      sessionTimeout: 30 * 24 * 60 * 60 * 1000,
       hasHydrated: false,
 
       login: (user) => {
@@ -67,11 +80,16 @@ export const useAuthStore = create<AuthState>()(
         if (typeof window !== "undefined") {
           localStorage.removeItem("auth-storage")
           localStorage.removeItem("cart-storage")
+          sessionStorage.removeItem("cart-storage")
           localStorage.removeItem("favorites-storage")
           localStorage.removeItem("orders-storage")
           localStorage.removeItem("prefs-storage")
           localStorage.removeItem("table-command-storage")
           sessionStorage.clear()
+          for (let i = localStorage.length - 1; i >= 0; i--) {
+            const k = localStorage.key(i)
+            if (k?.startsWith("grandma:")) localStorage.removeItem(k)
+          }
         }
       },
 
@@ -111,6 +129,10 @@ export const useAuthStore = create<AuthState>()(
       onRehydrateStorage: () => (state) => {
         if (state) {
           state.hasHydrated = true
+          const minSession = 30 * 24 * 60 * 60 * 1000
+          if (typeof state.sessionTimeout === "number" && state.sessionTimeout < minSession) {
+            state.sessionTimeout = minSession
+          }
         }
       },
     }

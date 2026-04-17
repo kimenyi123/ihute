@@ -18,7 +18,14 @@ import { ProductCard } from "@/components/product-card"
 import { ProductQuickView, type QuickViewProduct } from "@/components/product-quick-view"
 import { fetchSearchSuggestions } from "@/lib/search-suggestions"
 import { usePriceDropToasts } from "@/lib/use-price-drop-toasts"
-import { getProductImageUrl, getProductImageSrc, normalizeImageUrl } from "@/lib/image-utils"
+import {
+  getProductImageCandidates,
+  getProductImageUrl,
+  getProductImageSrc,
+  isValidImageUrl,
+  NO_IMAGE_URL,
+  normalizeImageUrl,
+} from "@/lib/image-utils"
 import {
   Select,
   SelectContent,
@@ -189,6 +196,48 @@ function toCardProduct(p: Product & { search_priority?: string; contains_ingredi
     containsIngredient: typeof p.contains_ingredient === "string" ? p.contains_ingredient : undefined,
     brand: (p as any).item_fabricant ?? (p as any).id_fabricant ?? (p as any).brand,
   }
+}
+
+function ProductThumb({ product, alt }: { product: Product; alt: string }) {
+  const imageCandidates = useMemo(
+    () =>
+      getProductImageCandidates(product as any),
+    [
+      product.item_code,
+      product.item_key_words,
+      (product as any).famille,
+      (product as any).FAMILLE,
+      product.image,
+      product.image_url,
+      product.item_image_url,
+      (product as any).IMAGE_URL,
+    ]
+  )
+  const signature = imageCandidates.join("\x1e")
+  const [candidateIdx, setCandidateIdx] = useState(0)
+  const src = imageCandidates[Math.min(candidateIdx, imageCandidates.length - 1)] ?? NO_IMAGE_URL
+
+  useEffect(() => {
+    setCandidateIdx(0)
+  }, [signature])
+
+  const show = isValidImageUrl(src) ? src : NO_IMAGE_URL
+
+  return (
+    <img
+      src={show}
+      alt={alt}
+      className="h-14 w-14 rounded-md object-cover bg-muted flex-none"
+      loading="lazy"
+      decoding="async"
+      referrerPolicy="no-referrer"
+      onError={() => {
+        if (candidateIdx + 1 < imageCandidates.length) {
+          setCandidateIdx((i) => i + 1)
+        }
+      }}
+    />
+  )
 }
 
 /** Normalize supplier products from API. Backend/Redis may return: object with "data" array (Redis: { key, data: [flat products] }), array (flat or with nested .items), or object with .sellers/.products. Flatten to Product[] so names and prices display. */
@@ -384,7 +433,12 @@ export default function SearchPage() {
       supplierId,
       supplierName,
       supplierLocation: p.supplier_location,
-      image: p.image || p.image_url || (p as any).IMAGE_URL || p.item_image_url || "/placeholder.svg?height=300&width=300",
+      image: getProductImageSrc(p as any, "/placeholder.svg?height=300&width=300"),
+      image_url: p.image_url,
+      item_image_url: p.item_image_url,
+      IMAGE_URL: (p as any).IMAGE_URL,
+      item_key_words: p.item_key_words,
+      famille: (p as any).famille ?? (p as any).FAMILLE,
       momo: p.momo || (p as any)?.seller_momo || "",
     }
 
@@ -838,7 +892,7 @@ export default function SearchPage() {
       }
       setLoadingSector(true)
       try {
-        const url = `/api/fetchSuggestions?listSuppliersWithProducts=${encodeURIComponent(
+        const url = `/api/sector-list-suppliers?sector=${encodeURIComponent(
           sectorParam,
         )}&Currency=RWF`
         const res = await fetch(url, { cache: "no-store" })
@@ -1392,10 +1446,20 @@ export default function SearchPage() {
                             key={`${product.item_code}-${product.supplier_account || ""}-${index}`}
                             className="rounded-lg border p-3 hover:border-blue-300 transition-colors group"
                           >
-                            <div className="font-medium text-gray-900 group-hover:text-blue-700">
-                              {product.item_commercial_name}
+                            <div className="flex gap-3">
+                              <ProductThumb
+                                product={product}
+                                alt={String(product.item_commercial_name ?? product.item_code ?? "Product")}
+                              />
+                              <div className="min-w-0 flex-1">
+                                <div className="font-medium text-gray-900 group-hover:text-blue-700 line-clamp-2">
+                                  {product.item_commercial_name}
+                                </div>
+                                <div className="text-sm text-gray-600 mt-1 line-clamp-1">
+                                  {product.item_packet || "No description"}
+                                </div>
+                              </div>
                             </div>
-                            <div className="text-sm text-gray-600 mt-1">{product.item_packet || "No description"}</div>
                             <div className="mt-2 text-base font-semibold text-green-600">
                               {product.selling_price != null ? `${Number(product.selling_price).toLocaleString()} ${product.currency || "RWF"}` : "Price not available"}
                             </div>

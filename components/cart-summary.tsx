@@ -32,6 +32,7 @@ import {
 import { TableCommandDialog } from "@/components/table-command-dialog"
 import { TableCommandShareModal } from "@/components/table-command-share-modal"
 import { CartSuggestionsPopup } from "@/components/cart-suggestions-popup"
+import { displayUnitForPrice } from "@/lib/cart-display-utils"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -661,7 +662,16 @@ function CartSummaryBody() {
         router.refresh()
       } else {
         setPaymentStatus(g.supplierId, "failed")
-        alert(`Failed to create order: ${json?.error || "Unknown error"}`)
+        const errMsg = json?.error || "Unknown error"
+        const hint =
+          typeof json?.hint === "string" && json.hint.trim()
+            ? `\n\n${json.hint.trim()}`
+            : ""
+        const target =
+          typeof json?.ordersUrl === "string" && json.ordersUrl.trim()
+            ? `\n\nBackend URL: ${json.ordersUrl.trim()}`
+            : ""
+        alert(`Failed to create order: ${errMsg}${target}${hint}`)
       }
     } catch (error) {
       console.error("Order creation error:", error)
@@ -1171,12 +1181,14 @@ function CartSummaryBody() {
                     <h4 className="font-medium text-sm">ORDER ITEMS</h4>
                   </div>
                   <div className="max-h-60 overflow-y-auto">
-                    {g.items.map((item, index) => (
+                    {g.items.map((item, index) => {
+                      const unitLine = displayUnitForPrice(item.unit ?? item.selectedUnit)
+                      return (
                       <div key={index} className="flex justify-between items-center p-3 border-b last:border-b-0">
                         <div className="flex-1">
                           <div className="font-medium text-sm">{item.name}</div>
-                          {item.unit && (
-                            <div className="text-xs text-muted-foreground">Unit: {item.unit}</div>
+                          {unitLine && (
+                            <div className="text-xs text-muted-foreground">Unit: {unitLine}</div>
                           )}
                           {(() => {
                             const erx = (item as CartItem).erx ?? parseErxFromNotes(item.notes ?? undefined)
@@ -1202,7 +1214,8 @@ function CartSummaryBody() {
                           </div>
                         </div>
                       </div>
-                    ))}
+                      )
+                    })}
                   </div>
                   <div className="bg-slate-50 border-t p-3">
                     <div className="flex justify-between items-center">

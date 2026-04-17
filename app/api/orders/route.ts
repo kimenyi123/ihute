@@ -26,7 +26,8 @@ function determineServlet(body: any): { url: string; payload: any; mode: string 
     console.log('🎯 Mode: LEGACY → fetchSuggestions')
     return {
       url: getFetchSuggestionsUrl(),
-      payload: { email }, // Only send email
+      // Forward full body so pagination and any extra flags reach Java; do not strip fields.
+      payload: body,
       mode: 'legacy'
     }
   }

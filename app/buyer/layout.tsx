@@ -3,15 +3,15 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { FileSpreadsheet, LayoutDashboard, ShoppingBag } from "lucide-react"
+import { LayoutDashboard, ShoppingBag } from "lucide-react"
 
 export default function BuyerLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
 
   const menu = [
     { name: "Dashboard", href: "/buyer/dashboard", icon: LayoutDashboard },
-    { name: "Order Reports", href: "/buyer/orders", icon: ShoppingBag },
-    { name: "Umusada Excel", href: "/buyer/umusada/upload", icon: FileSpreadsheet },
+    { name: "Orders", href: "/buyer/orders", icon: ShoppingBag },
+    // { name: "Umusada Excel", href: "/buyer/umusada/upload", icon: FileSpreadsheet },
   ]
 
   return (

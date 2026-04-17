@@ -1,6 +1,7 @@
 // app/api/seller-orders/route.ts
 import { NextResponse } from "next/server"
 import { getSellerOrdersUrl } from "@/lib/backend-config"
+import { lookupOrderMetaFromStore, readAllOrderClientMeta } from "@/lib/order-client-meta-store"
 function tryParseJson(raw: string) {
   try { return JSON.parse(raw) } catch {}
   let s = raw.replace(/\uFEFF/g, "").trim()
@@ -20,6 +21,30 @@ function normalizeOrders(input: any): any[] {
     SELLER_TIN: order.SELLER_TIN ?? order.sellerTin ?? "",
     BUYER_TIN: order.BUYER_TIN ?? order.buyerTin ?? "",
     BUYER_OWNER_NAME: order.BUYER_OWNER_NAME ?? order.buyerOwnerName ?? "",
+
+    /** Seller dashboard: show buyer name / phone / address (Java field names vary). */
+    BUYER_NAMES:
+      order.BUYER_NAMES ??
+      order.buyer_names ??
+      order.BUYER_NAME ??
+      order.BUYER_OWNER ??
+      order.BUYER_OWNER_NAME ??
+      order.buyerOwnerName ??
+      "",
+    BUYER_PHONE:
+      order.BUYER_PHONE ??
+      order.buyer_phone ??
+      order.BUYER_TEL ??
+      order.BUYER_TEL1 ??
+      order.PHONE ??
+      order.phone ??
+      "",
+    DELIVERY_LOCATION:
+      order.DELIVERY_LOCATION ??
+      order.delivery_location ??
+      order.BUYER_LOCATION ??
+      order.buyer_location ??
+      "",
 
     items: (Array.isArray(order?.items) ? order.items : []).map((item: any) => {
       const qty = Number(item.QUANTITY ?? item.qty ?? item.quantity ?? 0)
@@ -86,7 +111,24 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, orders: [], total: 0, page, pageSize }, { status: 200 })
     }
 
-    const orders = normalizeOrders(data)
+    const metaStore = readAllOrderClientMeta()
+    const orders = normalizeOrders(data).map((order: Record<string, unknown>) => {
+      const id = String(order.ID_ORDER ?? order.id_order ?? "").trim()
+      if (!id) return order
+      const m = lookupOrderMetaFromStore(metaStore, id)
+      if (!m) return order
+      const next = { ...order }
+      if (m.buyerDeliveryAddress) {
+        const addr = String(m.buyerDeliveryAddress).trim()
+        next.BUYER_LOCATION = addr
+        next.DELIVERY_LOCATION = addr
+        next._buyerAddressFromSync = true
+      }
+      if (m.sellerPaymentAck) {
+        next._sellerPaymentAck = m.sellerPaymentAck
+      }
+      return next
+    })
     const total = Number(data?.total ?? 0)
     console.log(`[${reqId}] ✅ 200 OK — orders=${orders.length} total=${total}`)
     return NextResponse.json({ ok: true, orders, total, page, pageSize }, { status: 200 })
@@ -137,7 +179,24 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: true, orders: [], total: 0, page, pageSize }, { status: 200 })
     }
 
-    const orders = normalizeOrders(data)
+    const metaStore = readAllOrderClientMeta()
+    const orders = normalizeOrders(data).map((order: Record<string, unknown>) => {
+      const id = String(order.ID_ORDER ?? order.id_order ?? "").trim()
+      if (!id) return order
+      const m = lookupOrderMetaFromStore(metaStore, id)
+      if (!m) return order
+      const next = { ...order }
+      if (m.buyerDeliveryAddress) {
+        const addr = String(m.buyerDeliveryAddress).trim()
+        next.BUYER_LOCATION = addr
+        next.DELIVERY_LOCATION = addr
+        next._buyerAddressFromSync = true
+      }
+      if (m.sellerPaymentAck) {
+        next._sellerPaymentAck = m.sellerPaymentAck
+      }
+      return next
+    })
     const total = Number(data?.total ?? 0)
     return NextResponse.json({ ok: true, orders, total, page, pageSize }, { status: 200 })
   } catch (e: any) {

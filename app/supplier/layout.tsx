@@ -1,12 +1,13 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Menu, X, LogOut } from "lucide-react";
+import { Menu, X, LogOut, Smartphone } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { UnifiedNotification } from "@/components/unified-notification";
 import { useAuthStore } from "@/lib/auth-store";
+import { isRestoBarPreferredCategories } from "@/lib/supplier-sector";
 
 export default function SupplierLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -18,18 +19,63 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
   const logout = useAuthStore((state) => state.logout);
   const login = useAuthStore((state) => state.login);
 
-  const menu = [
-    { name: "Dashboard", href: "/supplier/dashboard" },
-    // { name: "My Products", href: "/supplier/products" },
-    { name: "Orders", href: "/supplier/orders" },
-    { name: "Tables", href: "/supplier/tables" },
-    { name: "Ratings", href: "/supplier/ratings" },
-    { name: "Rekizisiyo / Kurangura byinshi", href: "/supplier/b2b" },
-    { name: "Expenses", href: "/supplier/expenses" },
-    { name: "Upload Stock", href: "/supplier/products/add" },
-    { name: "Scan Menu", href: "/supplier/scan-menu" },
-    { name: "Settings", href: "/supplier/settings/location" },
-  ];
+  /**
+   * Self Ordering + Tables are restaurant/bar features only (see PREFEREDCATEGORIES).
+   * Opt-in when profile looks like bar/restaurant; never show if auth flagged pharmacySector.
+   */
+  const [showRestoKioskNav, setShowRestoKioskNav] = useState(false);
+
+  useEffect(() => {
+    if (!hasHydrated || !isAuthenticated || !user?.ishyigaAccount || user.role !== "supplier") {
+      setShowRestoKioskNav(false);
+      return;
+    }
+
+    let cancelled = false;
+    fetch(`/api/supplier/profile?account=${encodeURIComponent(user.ishyigaAccount)}`, {
+      cache: "no-store",
+    })
+      .then((res) => res.json())
+      .then((data: { preferredCategories?: string }) => {
+        if (cancelled) return;
+        setShowRestoKioskNav(isRestoBarPreferredCategories(data?.preferredCategories));
+      })
+      .catch(() => {
+        if (!cancelled) setShowRestoKioskNav(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hasHydrated, isAuthenticated, user?.ishyigaAccount, user?.role]);
+
+  const menu = useMemo(() => {
+    const showDualPurchases = !!user?.dualPharmacyRetail;
+    const showRestoSupplierLinks = showRestoKioskNav && user?.pharmacySector !== true;
+
+    const items: { name: string; href: string }[] = [
+      { name: "Dashboard", href: "/supplier/dashboard" },
+      { name: "Orders", href: "/supplier/orders" },
+    ];
+    if (showDualPurchases) {
+      items.push({ name: "My purchases", href: "/buyer/orders" });
+    }
+    if (showRestoSupplierLinks) {
+      items.push(
+        { name: "Self Ordering", href: "/supplier/self-ordering" },
+        { name: "Tables", href: "/supplier/tables" },
+      );
+    }
+    items.push(
+      { name: "Ratings", href: "/supplier/ratings" },
+      { name: "Rekizisiyo / Kurangura byinshi", href: "/supplier/b2b" },
+      { name: "Expenses", href: "/supplier/expenses" },
+      { name: "Upload Stock", href: "/supplier/products/add" },
+      { name: "Scan Menu", href: "/supplier/scan-menu" },
+      { name: "Settings", href: "/supplier/settings/location" },
+    );
+    return items;
+  }, [user?.dualPharmacyRetail, user?.pharmacySector, showRestoKioskNav]);
 
   const closeSidebar = useCallback(() => {
     setSidebarOpen(false);
@@ -50,7 +96,9 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
   }, [sidebarOpen, closeSidebar]);
 
   // When on orders page with ?account=: ensure session reflects that account (auto-login + real seller name)
-  const isOrdersPageWithAccount = pathname === "/supplier/orders" && accountFromUrl.length > 0;
+  const isOrdersPageWithAccount =
+    (pathname === "/supplier/orders" || pathname === "/supplier/kiosk-orders") &&
+    accountFromUrl.length > 0;
   useEffect(() => {
     if (!hasHydrated || !isOrdersPageWithAccount) return;
 
@@ -106,6 +154,11 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
       router.replace("/login");
     }
   }, [hasHydrated, isAuthenticated, user, isOrdersPageWithAccount, router, logout]);
+
+  // ── Full-screen bypass for kiosk customer display ──────────────────────────
+  if (pathname.startsWith("/supplier/kiosk-orders")) {
+    return <div className="min-h-screen bg-slate-900">{children}</div>;
+  }
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -164,6 +217,33 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                 ))}
               </ul>
             </nav>
+
+            {/* Grandma marketplace (mobile-style app) */}
+            <div className="px-4 pb-2">
+              <Link
+                href="/grandma"
+                onClick={() => {
+                  try {
+                    if (typeof window !== "undefined") {
+                      window.localStorage.setItem("grandma:mode", "seller");
+                    }
+                  } catch {
+                    /* ignore */
+                  }
+                  closeSidebar();
+                }}
+                className={cn(
+                  "flex w-full items-center gap-3 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-semibold text-sky-950 shadow-sm transition-colors hover:bg-sky-100",
+                  pathname?.startsWith("/grandma") && "border-sky-400 bg-sky-100 ring-2 ring-sky-200",
+                )}
+              >
+                <Smartphone className="h-5 w-5 shrink-0 text-sky-700" aria-hidden />
+                <span className="leading-tight">Grandma app</span>
+              </Link>
+              <p className="mt-1.5 px-1 text-[11px] leading-snug text-slate-500">
+                Shop and orders in the Grandma experience
+              </p>
+            </div>
 
             {/* Footer / Logout */}
             <div className="p-4 border-t border-slate-200">

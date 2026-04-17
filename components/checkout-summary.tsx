@@ -5,7 +5,7 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/componen
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { useCartStore, type CartItem } from "@/lib/cart-store"
-import { getProductImageSrc, isValidImageUrl, NO_IMAGE_URL } from "@/lib/image-utils"
+import { getCartItemImageSrc, isValidImageUrl, NO_IMAGE_URL } from "@/lib/image-utils"
 import { Lock } from "lucide-react"
 import Image from "next/image"
 
@@ -13,7 +13,7 @@ const PLACEHOLDER = "/placeholder.svg?height=64&width=64"
 
 function CheckoutSummaryItemRow({ item, lineTotal }: { item: CartItem; lineTotal: number }) {
   const [imgError, setImgError] = useState(false)
-  const resolvedUrl = getProductImageSrc(item as Record<string, unknown>, PLACEHOLDER)
+  const resolvedUrl = getCartItemImageSrc(item as Record<string, unknown>, PLACEHOLDER)
   const hasValidUrl = resolvedUrl !== PLACEHOLDER && isValidImageUrl(resolvedUrl)
   const src = !imgError && hasValidUrl ? resolvedUrl : NO_IMAGE_URL
   const isRemote = /^https?:\/\//i.test(src)

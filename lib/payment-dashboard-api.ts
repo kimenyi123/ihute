@@ -5,25 +5,44 @@
 // Get base URL and normalize it (remove trailing slashes)
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_SITE_URL || "https://ihute.rw").trim().replace(/\/+$/, "");
 
-// Helper to build URL - ensures we don't double-add /Trading
+/**
+ * Build the URL(s) to try for a given endpoint.
+ *
+ * When running in the browser the Next.js `rewrites()` in next.config.mjs
+ * proxy `/api/payment/*` and `/api/analytics/*` to the Java backend, so we
+ * use a relative URL to avoid CORS entirely.
+ *
+ * When running on the server (SSR) we need the full absolute URL because
+ * there is no Next.js redirect layer – but server-to-server calls are never
+ * blocked by CORS anyway.
+ */
 function buildUrl(endpoint: string): string[] {
-  // Remove leading slash from endpoint if present
   const cleanEndpoint = endpoint.startsWith('/') ? endpoint : '/' + endpoint;
-  
-  // Check if API_BASE_URL already contains /Trading
+
+  // In the browser: use relative URLs for payment/analytics so Next.js
+  // rewrites proxy them (server-side) → no CORS.
+  if (typeof window !== 'undefined') {
+    const isProxiedPath =
+      cleanEndpoint.startsWith('/api/payment') ||
+      cleanEndpoint.startsWith('/api/analytics');
+
+    if (isProxiedPath) {
+      return [cleanEndpoint]; // e.g. /api/payment/reports/transactions?...
+    }
+  }
+
+  // Server-side (SSR) or non-proxied paths: use full absolute URLs.
   const hasTrading = API_BASE_URL.includes('/Trading');
-  
   if (hasTrading) {
-    // If /Trading is already in base URL, just use it directly
     return [`${API_BASE_URL}${cleanEndpoint}`];
   } else {
-    // Try with /Trading first, then without
     return [
       `${API_BASE_URL}/Trading${cleanEndpoint}`,
-      `${API_BASE_URL}${cleanEndpoint}`
+      `${API_BASE_URL}${cleanEndpoint}`,
     ];
   }
 }
+
 
 export interface Transaction {
   transaction_id: string;
@@ -46,6 +65,8 @@ export interface Transaction {
   subscription_period_months?: number | null;
   /** When this transaction was activated (Activate button); null if not yet activated. */
   activated_at?: string | null;
+  /** Activation validity date set by backend auto/manual activation. */
+  activated_until?: string | null;
 }
 
 export interface SummaryStats {
@@ -132,13 +153,21 @@ class PaymentDashboardApi {
             // If JSON parsing fails, use status text
           }
           
-          // If 404, try next URL
+          // If 404 but backend returned a meaningful JSON message (ex: "No active client found..."),
+          // we should NOT try alternative base URLs; we should surface the real reason.
           if (response.status === 404) {
-            console.warn(`⚠️ 404 at ${url}, trying alternative...`);
+            const msg = (errorMessage || "").toString();
+            const looksLikeEndpointMissing = !msg || msg.toLowerCase().includes("not found");
+            if (!looksLikeEndpointMissing) {
+              throw new Error(msg || `404 ${endpoint}`);
+            }
+
+            // Otherwise it might be wrong base path (/Trading prefix); try alternative URL.
+            console.warn(`⚠️ 404 at ${url} (likely wrong base path), trying alternative...`);
             lastError = new Error(`404: ${endpoint} not found at ${url}`);
-            continue; // Try next URL
+            continue;
           }
-          
+
           // For other errors, throw immediately
           throw new Error(errorMessage || `API error: ${response.status} ${response.statusText}`);
         }
@@ -252,6 +281,22 @@ class PaymentDashboardApi {
     return this.fetch('/api/payment/reconciliation/sync', {
       method: 'POST',
       body: JSON.stringify({ transaction_id: transactionId }),
+    });
+  }
+
+  /**
+   * Bulk-sync stale INITIATED/PENDING transactions against Urubuto.
+   */
+  async syncStaleTransactions(params?: {
+    age_minutes?: number;
+    limit?: number;
+  }): Promise<{ message: string; data: any; status: number }> {
+    return this.fetch('/api/payment/reconciliation/sync-stale', {
+      method: 'POST',
+      body: JSON.stringify({
+        age_minutes: params?.age_minutes ?? 30,
+        limit: params?.limit ?? 100,
+      }),
     });
   }
 

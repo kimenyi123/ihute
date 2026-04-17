@@ -70,7 +70,13 @@ import { useAuthStore } from "@/lib/auth-store";
 import { trackProductView, trackClick } from "@/lib/interaction-tracker";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/use-toast";
-import { getProductImageUrl, getProductImageSrc, normalizeImageUrl } from "@/lib/image-utils";
+import {
+  getProductImageUrl,
+  getProductImageSrc,
+  getProductImageCandidates,
+  normalizeImageUrl,
+  NO_IMAGE_URL,
+} from "@/lib/image-utils";
 import { LocationBadge } from "@/components/location-badge";
 
 /** Optional fields for production: plug in from DB when available. */
@@ -113,7 +119,10 @@ type ShopWithMeProduct = {
   famille?: string;
   item_key_words_french?: string;
   item_key_words_kinyarwanda?: string;
-} & Partial<ShopWithMeProductMeta>;
+} & Partial<ShopWithMeProductMeta> & {
+  ITEM_CODE?: string;
+  item_code?: string;
+};
 
 type ShopWithMeSeller = {
   ISHYIGA_ACCOUNT?: string;
@@ -533,6 +542,37 @@ function normalizeSellersProducts(sellers: ShopWithMeSeller[]): ShopWithMeSeller
   });
 }
 
+function sellerIsRestaurantOrBar(seller: ShopWithMeSeller): boolean {
+  const preferred = (seller.PREFERRED_CATEGORIES || "").toLowerCase();
+  const department = (seller.DEPARTMENT || "").toLowerCase();
+  const name = (seller.OWNER || seller.SELLER_NAMES || seller.NICKNAME || "").toLowerCase();
+  const nick = String(seller.NICKNAME || "").toLowerCase();
+  return (
+    nick.includes("burrows") ||
+    preferred.includes("bar") ||
+    preferred.includes("restaurant") ||
+    preferred.includes("resto") ||
+    preferred.includes("pub") ||
+    preferred.includes("cafe") ||
+    department.includes("bar") ||
+    department.includes("restaurant") ||
+    department.includes("resto") ||
+    department.includes("pub") ||
+    department.includes("cafe") ||
+    name.includes("restaurant") ||
+    name.includes("resto") ||
+    name.includes("pub") ||
+    name.includes("cafe")
+  );
+}
+
+function sellerIsPharmacy(seller: ShopWithMeSeller): boolean {
+  const preferred = (seller.PREFERRED_CATEGORIES || "").toLowerCase();
+  const department = (seller.DEPARTMENT || "").toLowerCase();
+  const name = (seller.OWNER || seller.SELLER_NAMES || seller.NICKNAME || "").toLowerCase();
+  return preferred.includes("pharmacy") || department.includes("pharmacy") || name.includes("phar");
+}
+
 // Function to categorize products based on keywords and item_state
 function categorizeProduct(product: ShopWithMeProduct): string {
   const keywords = (product.item_key_words || "").toLowerCase();
@@ -670,7 +710,13 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
         if (cancelled) return;
         if (!data.ok) throw new Error("Shop not found");
         if (data.sellers && data.sellers.length > 0) {
-          setSellers(normalizeSellersProducts(data.sellers));
+          let next = normalizeSellersProducts(data.sellers);
+          // Burrows: only Restaurant + Pharmacy use live data; pin Restaurant first for testing.
+          if (normalizedNickname === "burrows") {
+            next = next.filter((s) => sellerIsRestaurantOrBar(s) || sellerIsPharmacy(s));
+            next = [...next].sort((a, b) => Number(sellerIsRestaurantOrBar(b)) - Number(sellerIsRestaurantOrBar(a)));
+          }
+          setSellers(next);
           setNickname(normalizedNickname);
           if (data.sellers.length === 1) setSelectedSeller(data.sellers[0].ISHYIGA_ACCOUNT || null);
         } else {
@@ -794,7 +840,12 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
       }
 
       if (data.sellers && data.sellers.length > 0) {
-        setSellers(normalizeSellersProducts(data.sellers));
+        let next = normalizeSellersProducts(data.sellers);
+        if (normalizedNickname === "burrows") {
+          next = next.filter((s) => sellerIsRestaurantOrBar(s) || sellerIsPharmacy(s));
+          next = [...next].sort((a, b) => Number(sellerIsRestaurantOrBar(b)) - Number(sellerIsRestaurantOrBar(a)));
+        }
+        setSellers(next);
         setNickname(normalizedNickname);
         if (data.sellers.length === 1) {
           setSelectedSeller(data.sellers[0].ISHYIGA_ACCOUNT || null);
@@ -1933,13 +1984,32 @@ function ProductCard({
   const displayName = `${productName} - ${categoryLabel}`;
   const priceRaw = p.selling_price ?? p.price ?? p.UNITY_PRICE ?? p.SALE_PRICE_INCLUSIVE;
   const price = extractNumericPrice(priceRaw);
-  const imageUrl = getProductImageSrc(product as Record<string, unknown>);
   const moodMeta = moodMetaType ? getMoodMetaText(product, moodMetaType) : { text: null };
+
+  /** Try KAOS famille → flat NIKI → each backend URL → no_image (same order as getProductImageSrc, but advance on 404). */
+  const imageCandidates = useMemo(
+    () => getProductImageCandidates(product as Record<string, unknown>),
+    [
+      itemCode,
+      product.famille,
+      product.item_key_words,
+      product.image,
+      product.image_url,
+      product.item_image_url,
+      p.ITEM_CODE,
+      p.item_code,
+      p.IMAGE_URL,
+    ]
+  );
+  const candidatesSignature = imageCandidates.join("\x1e");
+  const [candidateIdx, setCandidateIdx] = useState(0);
+  const imageUrl = imageCandidates[Math.min(candidateIdx, imageCandidates.length - 1)] ?? NO_IMAGE_URL;
   const validImage =
     !!imageUrl &&
     imageUrl !== "/placeholder.svg?height=300&width=300" &&
     (imageUrl.startsWith("http://") || imageUrl.startsWith("https://") || imageUrl.startsWith("/"));
   const [imgError, setImgError] = useState(false);
+  const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
   const fav = isFavorite(itemCode);
   const [erxOpen, setErxOpen] = useState(false);
 
@@ -1959,8 +2029,9 @@ function ProductCard({
   };
 
   useEffect(() => {
+    setCandidateIdx(0);
     setImgError(false);
-  }, [imageUrl]);
+  }, [candidatesSignature, itemCode]);
 
   useEffect(() => {
     trackProductView(itemCode, productName, {
@@ -1999,7 +2070,10 @@ function ProductCard({
         name: productName,
         price: price,
         unit: "pcs",
-        image: validImage ? imageUrl : undefined,
+        image:
+          validImage && !imgError && imageUrl !== NO_IMAGE_URL
+            ? imageUrl
+            : getProductImageSrc(product as Record<string, unknown>),
         itemCode,
         supplierId: supplierId,
         supplierName: ownerName || "Supplier",
@@ -2034,7 +2108,10 @@ function ProductCard({
       name: productName,
       price: price,
       unit: "pcs",
-      image: validImage ? imageUrl : undefined,
+      image:
+        validImage && !imgError && imageUrl !== NO_IMAGE_URL
+          ? imageUrl
+          : getProductImageSrc(product as Record<string, unknown>),
       description: undefined,
       supplierId,
       supplierName: ownerName,
@@ -2051,24 +2128,54 @@ function ProductCard({
 
   return (
     <Card className="group h-full overflow-hidden transition-all hover:shadow-lg border rounded-lg">
-      <div className="relative w-full aspect-square bg-muted">
+      <div
+        className={cn("relative w-full aspect-square bg-muted", validImage && !imgError && "cursor-zoom-in")}
+        role={validImage && !imgError ? "button" : undefined}
+        tabIndex={validImage && !imgError ? 0 : undefined}
+        onClick={() => {
+          if (validImage && !imgError) setImagePreviewOpen(true);
+        }}
+        onKeyDown={(e) => {
+          if (!(validImage && !imgError)) return;
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setImagePreviewOpen(true);
+          }
+        }}
+        aria-label={validImage && !imgError ? "View product image" : undefined}
+      >
         {validImage && !imgError && /^https?:\/\//i.test(imageUrl) ? (
           <img
+            key={imageUrl}
             src={imageUrl}
             alt={productName}
             className="absolute inset-0 h-full w-full object-cover"
             loading="lazy"
             decoding="async"
             referrerPolicy="no-referrer"
-            onError={() => setImgError(true)}
+            onError={() => {
+              if (candidateIdx + 1 < imageCandidates.length) {
+                setCandidateIdx((i) => i + 1);
+              } else {
+                setImgError(true);
+              }
+            }}
           />
         ) : validImage && !imgError ? (
           <Image
+            key={imageUrl}
             fill
             src={imageUrl}
             alt={productName}
             className="object-cover"
-            onError={() => setImgError(true)}
+            onError={() => {
+              if (candidateIdx + 1 < imageCandidates.length) {
+                setCandidateIdx((i) => i + 1);
+              } else {
+                setImgError(true);
+              }
+            }}
+            unoptimized={imageUrl === NO_IMAGE_URL}
           />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">
@@ -2169,6 +2276,45 @@ function ProductCard({
         prefillSource={p as Record<string, unknown>}
         onConfirm={(erx) => pushToCart(1, erx)}
       />
+
+      <Dialog open={imagePreviewOpen} onOpenChange={setImagePreviewOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{productName}</DialogTitle>
+            <DialogDescription>{ownerName || "Shop"}</DialogDescription>
+          </DialogHeader>
+          <div className="relative w-full aspect-square bg-muted rounded-md overflow-hidden">
+            {validImage && !imgError && /^https?:\/\//i.test(imageUrl) ? (
+              <img
+                src={imageUrl}
+                alt={productName}
+                className="absolute inset-0 h-full w-full object-contain bg-white"
+                loading="lazy"
+                decoding="async"
+                referrerPolicy="no-referrer"
+                onError={() => setImgError(true)}
+              />
+            ) : validImage && !imgError ? (
+              <Image
+                fill
+                src={imageUrl}
+                alt={productName}
+                className="object-contain bg-white"
+                onError={() => setImgError(true)}
+              />
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">
+                <Store className="h-10 w-10 opacity-50" />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setImagePreviewOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

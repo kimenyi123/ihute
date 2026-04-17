@@ -21,6 +21,7 @@ import {
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { statusIndicatesDelivered } from "@/lib/order-status-map"
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -79,7 +80,7 @@ export function Header() {
         if (!ignore && res.ok && json?.ok) {
           const orders: any[] = json.orders || []
           const cnt = orders.filter(
-            (o) => String(o.ORDER_STATUS || "").toUpperCase() !== "DELIVERED"
+            (o) => !statusIndicatesDelivered(String(o.ORDER_STATUS || ""))
           ).length
           setSellerCount(cnt)
         }
@@ -105,14 +106,16 @@ export function Header() {
     <header className="sticky top-0 z-50 w-full border-b bg-white shadow-sm">
       <div className="container mx-auto px-4">
         <div className="flex h-16 items-center justify-between gap-2 md:gap-4">
-          {/* Logo */}
-          <Link href="/" className="flex items-center shrink-0">
+          {/* Logo — full Ishyiga Software wordmark (icon + ISHYIGA / SOFTWARE) */}
+          <Link href="/" className="flex items-center shrink-0 min-w-0">
             <Image
-              src="/images/ishyiga-logo.png"
+              src="/images/ishyiga-logo-brand.png"
               alt="Ishyiga Software"
-              width={100}
-              height={35}
-              className="h-8 w-auto md:h-10"
+              width={280}
+              height={93}
+              priority
+              sizes="(max-width: 768px) 38vw, 220px"
+              className="h-7 w-auto max-w-[min(38vw,200px)] md:h-9 md:max-w-[240px]"
             />
           </Link>
 
@@ -137,7 +140,7 @@ export function Header() {
             <LanguageSelector />
 
             {/* Notification Bell - Shows for buyers only (suppliers have unified notification) */}
-            {isAuthenticated && user?.role !== "supplier" && <NotificationBell />}
+            {isAuthenticated && (user?.role !== "supplier" || user?.dualPharmacyRetail) && <NotificationBell />}
 
             {isAuthenticated ? (
               <>
@@ -209,7 +212,7 @@ export function Header() {
                 )}
 
                 {/* Customer Orders */}
-                {user?.role !== "supplier" && (
+            {(user?.role !== "supplier" || user?.dualPharmacyRetail) && (
                   <>
                     <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Orders">
                       <Link href="/buyer/orders">

@@ -7,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { useTranslation } from "@/hooks/use-translation"
 import type { TranslationKey } from "@/lib/translations"
 import { cn } from "@/lib/utils"
+import { fetchSectorStatsFromApi, normalizeListSuppliersPayload } from "@/lib/fetch-suggestions-helpers"
 
 interface Category {
   id?: number
@@ -48,10 +49,12 @@ function pickSupplierItemCount(x: Record<string, unknown>): number {
 async function fetchSectorTotals(sectorId: string): Promise<SectorTotals> {
   const sid = sectorId.trim().toLowerCase()
   if (!sid) return { shops: 0, items: 0 }
-  const url = `/api/fetchSuggestions?listSuppliersWithProducts=${encodeURIComponent(sid)}&Currency=RWF&limit=${LIST_SUPPLIERS_LIMIT}`
+  const fromStats = await fetchSectorStatsFromApi(sid)
+  if (fromStats.shops > 0 || fromStats.items > 0) return fromStats
+  const url = `/api/sector-list-suppliers?sector=${encodeURIComponent(sid)}&Currency=RWF&limit=${LIST_SUPPLIERS_LIMIT}`
   const r = await fetch(url, { cache: "no-store" })
-  const raw = r.ok ? await r.json() : []
-  const list: any[] = Array.isArray(raw) ? raw : []
+  const parsed = r.ok ? await r.json().catch(() => []) : []
+  const list: any[] = normalizeListSuppliersPayload(parsed) as any[]
   let items = 0
   for (const row of list) {
     items += pickSupplierItemCount(row as Record<string, unknown>)
@@ -63,7 +66,6 @@ async function fetchSectorTotals(sectorId: string): Promise<SectorTotals> {
 export function CategoryGridAI({ showHeading = true }: { showHeading?: boolean }) {
   const { t } = useTranslation()
   const [categories, setCategories] = useState<Category[]>(defaultCategories)
-  const [loading, setLoading] = useState(true)
   const [sectorStats, setSectorStats] = useState<Record<string, SectorTotals>>({})
   const [statsLoading, setStatsLoading] = useState(true)
 
@@ -102,8 +104,6 @@ export function CategoryGridAI({ showHeading = true }: { showHeading?: boolean }
         }
       } catch (e) {
         if (isMounted) setCategories(defaultCategories)
-      } finally {
-        if (isMounted) setLoading(false)
       }
     }
     load()
@@ -142,14 +142,6 @@ export function CategoryGridAI({ showHeading = true }: { showHeading?: boolean }
       cancelled = true
     }
   }, [categoryIdsKey])
-
-  if (loading) {
-    return (
-      <section className="py-8 md:py-12 bg-slate-50/50">
-        <div className="container mx-auto px-4 text-center text-muted-foreground">Loading categories…</div>
-      </section>
-    )
-  }
 
   return (
     <section className="py-8 md:py-12 bg-slate-50/50">
