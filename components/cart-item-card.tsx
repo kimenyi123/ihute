@@ -3,18 +3,20 @@
 import { useState, useEffect } from "react"
 import Image from "next/image"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { useCartStore, CartItem } from "@/lib/cart-store"
 import { Minus, Plus, Trash2 } from "lucide-react"
 import { getProductImageCandidates, isValidImageUrl, NO_IMAGE_URL } from "@/lib/image-utils"
-import { DEFAULT_CART_CURRENCY, itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
-import { isExpiryMeaningfulForCustomerDisplay } from "@/lib/item-state-display"
+import { DEFAULT_CART_CURRENCY, displayUnitForPrice } from "@/lib/cart-display-utils"
 
 const PLACEHOLDER = "/placeholder.svg?height=64&width=64"
 
 export function CartItemCard({ item }: { item: CartItem }) {
   const inc = useCartStore((s) => s.inc)
   const dec = useCartStore((s) => s.dec)
+  const setQty = useCartStore((s) => s.setQty)
   const remove = useCartStore((s) => s.remove)
+  const [inputValue, setInputValue] = useState(String(item.qty))
 
   const imageCandidates = ((): string[] => {
     // Try same ordered fallback chain we use everywhere else:
@@ -38,14 +40,17 @@ export function CartItemCard({ item }: { item: CartItem }) {
     setCandidateIdx(0)
   }, [candidatesSignature, item.id, item.selectedUnit])
 
-  const unitLabel = itemEmballageDisplaySuffix(
-    item.itemEmballage ?? item.unit ?? item.selectedUnit,
-  )
+  // Sync input value when quantity changes externally
+  useEffect(() => {
+    setInputValue(String(item.qty))
+  }, [item.qty])
+
+  const unitLabel = displayUnitForPrice(item.unit ?? item.selectedUnit)
 
   return (
-    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4 rounded-lg border p-3">
+    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2.5 sm:gap-4 rounded-lg border p-2.5 sm:p-3">
       <div className="flex items-center gap-3 flex-1 w-full sm:w-auto">
-        <div className="relative h-[72px] w-[72px] flex-shrink-0 rounded bg-muted overflow-hidden">
+        <div className="relative h-[64px] w-[64px] sm:h-[72px] sm:w-[72px] flex-shrink-0 rounded bg-muted overflow-hidden">
           {isRemote ? (
             <img
               key={src}
@@ -82,25 +87,25 @@ export function CartItemCard({ item }: { item: CartItem }) {
         </div>
 
         <div className="flex-1 min-w-0">
-          <div className="font-medium truncate">{item.name}</div>
-          <div className="text-xs text-muted-foreground truncate">
+          <div className="font-medium text-sm sm:text-base truncate">{item.name}</div>
+          <div className="text-[11px] sm:text-xs text-muted-foreground truncate">
             {item.supplierName}
             {item.supplierLocation ? ` · ${item.supplierLocation}` : ""}
           </div>
-          <div className="text-sm mt-1">
+          <div className="text-xs sm:text-sm mt-1">
             {Number(item.price) > 0 ? (
               <>
                 <span className="font-medium">
                   {Number(item.price).toLocaleString()} {DEFAULT_CART_CURRENCY}
-                  {unitLabel ? (
-                    <span className="text-muted-foreground"> ({unitLabel})</span>
-                  ) : null}
                 </span>
+                {unitLabel ? (
+                  <span className="text-muted-foreground"> · {unitLabel}</span>
+                ) : null}
               </>
             ) : (
               "Price not available"
             )}
-            {isExpiryMeaningfulForCustomerDisplay(item.expiryLabel) ? (
+            {item.expiryLabel ? (
               <div className="text-xs text-amber-900/90 mt-1 font-medium">
                 Expiry: {item.expiryLabel}
               </div>
@@ -109,34 +114,63 @@ export function CartItemCard({ item }: { item: CartItem }) {
         </div>
       </div>
 
-      <div className="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
-        <div className="flex items-center gap-2">
+      <div className="w-full sm:w-auto flex flex-col gap-2 sm:gap-3">
+        <div className="flex w-full items-center justify-center sm:justify-start gap-1.5 sm:gap-2">
           <Button
             size="icon"
             variant="outline"
-            onClick={() => dec(item.id, item.selectedUnit)}
+            onClick={() => {
+              dec(item.id, item.selectedUnit)
+              setInputValue(String(Math.max(1, item.qty - 1)))
+            }}
             aria-label="Decrease"
-            className="h-8 w-8"
+            className="h-7 w-7 sm:h-8 sm:w-8"
           >
             <Minus className="h-4 w-4" />
           </Button>
-          <span className="w-8 text-center font-medium">{item.qty}</span>
+          <Input
+            type="number"
+            min={1}
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onBlur={() => {
+              const newQty = parseInt(inputValue, 10)
+              if (!isNaN(newQty) && newQty >= 1) {
+                setQty(item.id, item.selectedUnit, newQty)
+              } else {
+                setInputValue(String(item.qty))
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                const newQty = parseInt(inputValue, 10)
+                if (!isNaN(newQty) && newQty >= 1) {
+                  setQty(item.id, item.selectedUnit, newQty)
+                }
+                e.currentTarget.blur()
+              }
+            }}
+            className="h-7 sm:h-8 w-12 sm:w-16 text-center font-medium px-1"
+          />
           <Button
             size="icon"
             variant="outline"
-            onClick={() => inc(item.id, item.selectedUnit)}
+            onClick={() => {
+              inc(item.id, item.selectedUnit)
+              setInputValue(String(item.qty + 1))
+            }}
             aria-label="Increase"
-            className="h-8 w-8"
+            className="h-7 w-7 sm:h-8 sm:w-8"
           >
             <Plus className="h-4 w-4" />
           </Button>
         </div>
 
-        <div className="flex items-center gap-2">
-          <div className="w-24 sm:w-28 text-right font-semibold text-sm">
+        <div className="flex items-center justify-between sm:justify-end gap-2 pt-1">
+          <div className="min-w-0 text-right font-semibold text-xs sm:text-sm whitespace-nowrap">
             {Number(item.price) > 0
               ? `${(Number(item.price) * item.qty).toLocaleString()} ${DEFAULT_CART_CURRENCY}`
-              : "—"}
+              : "N/A"}
           </div>
 
           <Button

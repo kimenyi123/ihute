@@ -15,6 +15,26 @@ interface Notification {
   createdAt: number;
 }
 
+async function trackNotificationAction(
+  action: 'markOpened' | 'markIgnored',
+  notificationId: number,
+  userId: string
+) {
+  try {
+    await fetch('/api/notifications', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action,
+        notificationId,
+        userId,
+      }),
+    });
+  } catch (error) {
+    console.error(`Failed to ${action} for notification:`, error);
+  }
+}
+
 export function NotificationBell() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -65,6 +85,7 @@ export function NotificationBell() {
       const userEmail = user?.email || user?.ishyigaAccount;
       if (!userEmail) return;
 
+      await trackNotificationAction('markOpened', id, userEmail);
       await fetch(`/api/notifications/${id}/read?userId=${encodeURIComponent(userEmail)}`, { method: 'POST' });
       
       // Update local state

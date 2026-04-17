@@ -13,7 +13,7 @@ export async function GET() {
     endpoint: "/api/orders/update-status",
     backendUrl: ORDER_STATUS_URL,
     requiredFields: ["orderId", "status"],
-    validStatuses: ["pending", "processing", "invoice", "in-transit", "delivered"],
+    validStatuses: ["open", "pending", "processing", "invoice", "in-transit", "delivered"],
     example: {
       orderId: 400,
       status: "processing"
@@ -30,7 +30,8 @@ export async function POST(req: Request) {
       )
     }
 
-    const { orderId, status } = await req.json()
+    const body = await req.json()
+    const { orderId, status, publicSiteUrl: publicSiteUrlRaw } = body
 
     // Validation
     if (!orderId) {
@@ -47,7 +48,7 @@ export async function POST(req: Request) {
     }
 
     // Validate status value
-    const validStatuses = ["pending", "processing", "invoice", "in-transit", "delivered"]
+    const validStatuses = ["open", "pending", "processing", "invoice", "in-transit", "delivered"]
     if (!validStatuses.includes(status)) {
       return NextResponse.json(
         { ok: false, error: `Invalid status: ${status}. Must be one of: ${validStatuses.join(", ")}` },
@@ -58,16 +59,24 @@ export async function POST(req: Request) {
     console.log(`[UPDATE-STATUS] Updating order ${orderId} to status: ${status}`)
     console.log(`[UPDATE-STATUS] Backend URL: ${ORDER_STATUS_URL}`)
 
+    const publicSiteUrl =
+      (typeof publicSiteUrlRaw === "string" && publicSiteUrlRaw.trim()) ||
+      process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
+      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "")
+
+    const payload: Record<string, unknown> = {
+      orderId: Number(orderId),
+      status: String(status),
+    }
+    if (publicSiteUrl) payload.publicSiteUrl = publicSiteUrl
+
     const res = await fetch(ORDER_STATUS_URL, {
       method: "POST",
       headers: { 
         "Content-Type": "application/json",
         "Accept": "application/json"
       },
-      body: JSON.stringify({ 
-        orderId: Number(orderId), 
-        status: String(status) 
-      }),
+      body: JSON.stringify(payload),
       cache: "no-store",
     })
 

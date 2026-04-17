@@ -44,7 +44,13 @@ function tokenRank(t: string): number {
   )
     return 4
   if (x.includes("invoice") || x.includes("facture")) return 3
-  if (x.includes("processing") || x.includes("preparing") || x.includes("preparation")) return 2
+  if (
+    x.includes("processing") ||
+    x.includes("preparing") ||
+    x.includes("preparation") ||
+    x.includes("confirm")
+  )
+    return 2
   if (x === "open") return 1
   if (x.includes("pending") || x.includes("await")) return 0.5
   return 0
@@ -86,7 +92,7 @@ function legacyOrderStatusHints(orderStatus: string): TrackOrderStatus | null {
   )
     return "in-transit"
   if (s.includes("invoice") || s.includes("facture")) return "invoice"
-  if (s.includes("processing") || s.includes("preparing")) return "processing"
+  if (s.includes("processing") || s.includes("preparing") || s.includes("confirm")) return "processing"
   if (s.includes("open")) return "open"
   return null
 }

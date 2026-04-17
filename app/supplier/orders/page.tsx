@@ -5,8 +5,6 @@ import { useEffect, useMemo, useState, useCallback } from "react"
 import { useRouter, useSearchParams, usePathname } from "next/navigation"
 import { useAuthStore } from "@/lib/auth-store"
 import { useOrdersStore, type Order } from "@/lib/orders-store"
-import { Header } from "@/components/header"
-import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table"
@@ -118,7 +116,11 @@ function InlineStatusPicker({ order, orders, setOrders }: { order: Order, orders
       const res = await fetch(ORDER_STATUS_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId: Number(order.id), status: next })
+        body: JSON.stringify({
+          orderId: Number(order.id),
+          status: next,
+          publicSiteUrl: typeof window !== "undefined" ? window.location.origin : undefined,
+        }),
       })
 
       const json = await res.json()
@@ -500,10 +502,8 @@ export default function SupplierOrdersPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <Header />
-
-      <main className="container mx-auto px-4 py-8">
+    <div className="min-h-0 bg-slate-50">
+      <main className="w-full px-2 sm:px-4 py-4 sm:py-6">
         {isWrongSeller && (
           <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4 flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm text-amber-800">
@@ -528,9 +528,9 @@ export default function SupplierOrdersPage() {
         {err && <div className="mb-4 p-2 bg-red-50 border border-red-300 rounded text-sm">{err}</div>}
         {loading && <div className="mb-4 p-2 text-sm">Loading...</div>}
 
-        <div className="mb-4 flex flex-col gap-4 rounded-lg border bg-white p-4">
+        <div className="mb-4 flex flex-col gap-4 rounded-lg border bg-white p-3 sm:p-4">
           <div className="flex flex-wrap items-center gap-3">
-            <div className="relative flex-1 min-w-[200px] max-w-sm">
+            <div className="relative w-full sm:flex-1 sm:min-w-[200px] sm:max-w-sm">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 placeholder="Search by order #, customer, date, total, payment, status..."
@@ -547,7 +547,7 @@ export default function SupplierOrdersPage() {
                 aria-label="From date"
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
-                className="w-[140px]"
+                className="w-full sm:w-[140px]"
               />
               <span className="text-muted-foreground">–</span>
               <Input
@@ -555,7 +555,7 @@ export default function SupplierOrdersPage() {
                 aria-label="To date"
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
-                className="w-[140px]"
+                className="w-full sm:w-[140px]"
               />
               <Button
                 type="button"
@@ -597,7 +597,7 @@ export default function SupplierOrdersPage() {
               </Button>
             </div>
             <Select value={paymentFilter} onValueChange={(v) => setPaymentFilter(v as "all" | "paid" | "unpaid")}>
-              <SelectTrigger className="w-[130px]">
+              <SelectTrigger className="w-full sm:w-[130px]">
                 <SelectValue placeholder="Payment" />
               </SelectTrigger>
               <SelectContent>
@@ -607,7 +607,7 @@ export default function SupplierOrdersPage() {
               </SelectContent>
             </Select>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[130px]">
+              <SelectTrigger className="w-full sm:w-[130px]">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
@@ -620,7 +620,7 @@ export default function SupplierOrdersPage() {
               </SelectContent>
             </Select>
             <Select value={sourceFilter} onValueChange={(v) => setSourceFilter(v as "all" | "kiosk")}>
-              <SelectTrigger className="w-[170px]">
+              <SelectTrigger className="w-full sm:w-[170px]">
                 <SelectValue placeholder="Order source" />
               </SelectTrigger>
               <SelectContent>
@@ -635,7 +635,7 @@ export default function SupplierOrdersPage() {
                 setPage(1)
               }}
             >
-              <SelectTrigger className="w-[110px]">
+              <SelectTrigger className="w-full sm:w-[110px]">
                 <SelectValue placeholder="Per page" />
               </SelectTrigger>
               <SelectContent>
@@ -724,13 +724,15 @@ export default function SupplierOrdersPage() {
                     <TableCell>
                       <InlineStatusPicker order={order} orders={orders} setOrders={setOrders} />
                     </TableCell>
-                    <TableCell className="text-center flex gap-2 justify-center">
-                      <Button variant="outline" size="sm" onClick={() => router.push(supplierOrderLink(order.id))}>
-                        View
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => exportOrderRowCsv(order)}>
-                        Export
-                      </Button>
+                    <TableCell className="text-center">
+                      <div className="flex flex-col sm:flex-row gap-2 justify-center sm:items-center">
+                        <Button variant="outline" size="sm" onClick={() => router.push(supplierOrderLink(order.id))}>
+                          View
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => exportOrderRowCsv(order)}>
+                          Export
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))
@@ -740,14 +742,12 @@ export default function SupplierOrdersPage() {
         </div>
 
         {/* Pagination Controls */}
-        <div className="flex justify-between mt-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 mt-4">
           <Button disabled={page === 1} onClick={() => setPage(p => p - 1)}>Prev</Button>
           <span>Page {page} of {totalPages}</span>
           <Button disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>Next</Button>
         </div>
       </main>
-
-      <Footer />
     </div>
   )
 }

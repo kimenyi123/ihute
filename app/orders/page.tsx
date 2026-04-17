@@ -12,6 +12,7 @@ import { useOrdersStore, type Order } from "@/lib/orders-store"
 import { Loader2 } from "lucide-react"
 import { mapBackendOrderStatusToStore } from "@/lib/order-status-map"
 import { useAuthPersistHydrated } from "@/lib/use-auth-persist-hydrated"
+import { ResponsiveTable } from "@/components/ui/responsive-table"
 
 type RawTxn = {
   ID_ORDER?: string
@@ -264,8 +265,8 @@ export default function OrdersPage() {
         {err && <p className="text-red-600">{err}</p>}
 
         {!loading && filteredOrders.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="min-w-full border border-gray-300 shadow-sm bg-white rounded-lg">
+          <ResponsiveTable minWidth="860px">
+            <table className="w-full border border-gray-300 shadow-sm bg-white rounded-lg">
               <thead className="bg-gray-200 text-gray-700">
                 <tr>
                   <th className="px-4 py-3 border">Order ID</th>
@@ -327,7 +328,7 @@ export default function OrdersPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </ResponsiveTable>
         )}
 
         {/* PAGINATION */}

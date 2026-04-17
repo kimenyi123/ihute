@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useAutoGuest } from "@/hooks/use-auto-guest"
-import { User, Phone, MapPin, Loader2 } from "lucide-react"
+import { User, Phone, Loader2 } from "lucide-react"
 
 interface GuestCheckoutButtonProps {
   onGuestCreated?: (guestData: { ishyigaAccount: string; email: string }) => void

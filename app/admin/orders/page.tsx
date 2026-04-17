@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { Filter, Eye } from 'lucide-react'
 import Link from 'next/link'
+import { mapBackendOrderStatusToTrack, type TrackOrderStatus } from '@/lib/order-status-map'
 
 interface Order {
   id: number
@@ -15,6 +16,44 @@ interface Order {
   paymentName: string
   timestamp: string
   deliveryLocation: string
+}
+
+function getStatusLabel(status: TrackOrderStatus): string {
+  switch (status) {
+    case 'pending':
+      return 'Pending'
+    case 'open':
+      return 'Open'
+    case 'processing':
+      return 'Processing'
+    case 'invoice':
+      return 'Invoice'
+    case 'in-transit':
+      return 'Out for Delivery'
+    case 'delivered':
+      return 'Delivered'
+    default:
+      return 'Open'
+  }
+}
+
+function getStatusBadgeClass(status: TrackOrderStatus): string {
+  switch (status) {
+    case 'pending':
+      return 'bg-yellow-100 text-yellow-800'
+    case 'open':
+      return 'bg-blue-100 text-blue-800'
+    case 'processing':
+      return 'bg-purple-100 text-purple-800'
+    case 'invoice':
+      return 'bg-violet-100 text-violet-800'
+    case 'in-transit':
+      return 'bg-indigo-100 text-indigo-800'
+    case 'delivered':
+      return 'bg-green-100 text-green-800'
+    default:
+      return 'bg-gray-100 text-gray-800'
+  }
 }
 
 export default function OrdersPage() {
@@ -126,10 +165,11 @@ export default function OrdersPage() {
               className="w-full px-3 py-2 border border-gray-300 rounded-lg"
             >
               <option value="">All Statuses</option>
+              <option value="OPEN">Open</option>
               <option value="PENDING">Pending</option>
-              <option value="CONFIRMED">Confirmed</option>
               <option value="PROCESSING">Processing</option>
-              <option value="SHIPPED">Shipped</option>
+              <option value="INVOICE">Invoice</option>
+              <option value="IN-TRANSIT">Out for Delivery</option>
               <option value="DELIVERED">Delivered</option>
               <option value="CANCELLED">Cancelled</option>
             </select>
@@ -160,6 +200,9 @@ export default function OrdersPage() {
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {orders.map((order) => (
+                  (() => {
+                    const normalizedStatus = mapBackendOrderStatusToTrack(order.status, order.paymentStatus)
+                    return (
                   <tr key={order.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                       {order.orderNumber || `#${order.id}`}
@@ -174,15 +217,8 @@ export default function OrdersPage() {
                       {formatCurrency(order.amount)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        order.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' :
-                        order.status === 'CONFIRMED' ? 'bg-blue-100 text-blue-800' :
-                        order.status === 'PROCESSING' ? 'bg-purple-100 text-purple-800' :
-                        order.status === 'SHIPPED' ? 'bg-indigo-100 text-indigo-800' :
-                        order.status === 'DELIVERED' ? 'bg-green-100 text-green-800' :
-                        'bg-red-100 text-red-800'
-                      }`}>
-                        {order.status}
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(normalizedStatus)}`}>
+                        {getStatusLabel(normalizedStatus)}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -209,6 +245,8 @@ export default function OrdersPage() {
                       </Link>
                     </td>
                   </tr>
+                    )
+                  })()
                 ))}
               </tbody>
             </table>

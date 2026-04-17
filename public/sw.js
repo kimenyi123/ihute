@@ -97,13 +97,13 @@ self.addEventListener('notificationclick', (event) => {
   // Handle dismiss action
   if (action === 'dismiss') {
     // Mark as ignored (if we have notification tracking)
-    if (data.url && data.type) {
-      const apiUrl = '/api/NotificationServlet?action=markIgnored';
-      fetch(apiUrl, {
+    if (data.notificationId) {
+      fetch('/api/notifications', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          notificationId: data.notificationId || '',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'markIgnored',
+          notificationId: data.notificationId,
           userId: data.userId || '',
           sessionId: data.sessionId || '',
         }),
@@ -149,13 +149,15 @@ self.addEventListener('notificationclick', (event) => {
       })
       .then((client) => {
         // Mark notification as opened (if we have notification tracking)
-        if (data.notificationId || (data.url && data.type)) {
-          const apiUrl = '/api/NotificationServlet?action=markOpened';
-          fetch(apiUrl, {
+        if (data.notificationId) {
+          fetch('/api/notifications', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({
-              notificationId: data.notificationId || '',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'markOpened',
+              notificationId: data.notificationId,
+              userId: data.userId || '',
+              sessionId: data.sessionId || '',
             }),
           }).catch((err) => {
             console.error('[SW] Failed to mark notification as opened:', err);

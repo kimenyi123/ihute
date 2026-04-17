@@ -9,6 +9,10 @@ export type WatchedItem = {
   name: string
   priceWhenWatched: number
   addedAt: number
+  /** Target price - alert when current price hits this */
+  targetPrice?: number
+  /** Auto-remove after purchase */
+  autoRemoveAfterPurchase?: boolean
   /** Resolved image URL (same as search/shop-with-me: image_url from backend). */
   image?: string
   /** Backend image_url / item_image_url — same source as /search and shop-with-me. */
@@ -22,8 +26,12 @@ const notifiedPriceDropKeys = new Set<string>()
 
 type PriceWatchState = {
   watched: WatchedItem[]
+  /** Global setting: auto-remove items after purchase */
+  autoRemoveAfterPurchase: boolean
+  setAutoRemoveAfterPurchase: (value: boolean) => void
   addWatch: (item: Omit<WatchedItem, "addedAt">) => void
   removeWatch: (productId: string, supplierId: string) => void
+  updateWatch: (productId: string, supplierId: string, updates: Partial<WatchedItem>) => void
   isWatched: (productId: string, supplierId?: string) => boolean
   getWatched: () => WatchedItem[]
   /** Alias for getWatched (e.g. favorites page). */
@@ -35,19 +43,31 @@ type PriceWatchState = {
   markPriceDropNotified: (productId: string, supplierId: string) => void
   /** Whether we already showed a price-drop toast for this product this session. */
   wasPriceDropNotified: (productId: string, supplierId: string) => boolean
+  /** Remove all watched items (bulk action) */
+  removeAll: () => void
 }
 
 export const usePriceWatchStore = create<PriceWatchState>()(
   persist(
     (set, get) => ({
       watched: [],
+      autoRemoveAfterPurchase: false,
+
+      setAutoRemoveAfterPurchase: (value) =>
+        set((s) => ({ autoRemoveAfterPurchase: value })),
 
       addWatch: (item) =>
         set((s) => {
           const key = `${item.productId}|${item.supplierId}`
           if (s.watched.some((w) => `${w.productId}|${w.supplierId}` === key)) return s
+          // Apply global auto-remove setting to new items
+          const newItem = {
+            ...item,
+            addedAt: Date.now(),
+            autoRemoveAfterPurchase: s.autoRemoveAfterPurchase
+          }
           return {
-            watched: [...s.watched, { ...item, addedAt: Date.now() }],
+            watched: [...s.watched, newItem],
           }
         }),
 
@@ -55,6 +75,15 @@ export const usePriceWatchStore = create<PriceWatchState>()(
         set((s) => ({
           watched: s.watched.filter(
             (w) => !(w.productId === productId && (w.supplierId === supplierId || !supplierId))
+          ),
+        })),
+
+      updateWatch: (productId, supplierId, updates) =>
+        set((s) => ({
+          watched: s.watched.map((w) =>
+            w.productId === productId && w.supplierId === supplierId
+              ? { ...w, ...updates }
+              : w
           ),
         })),
 
@@ -92,7 +121,9 @@ export const usePriceWatchStore = create<PriceWatchState>()(
 
       wasPriceDropNotified: (productId, supplierId) =>
         notifiedPriceDropKeys.has(`${productId}|${supplierId}`),
+
+      removeAll: () => set({ watched: [] }),
     }),
-    { name: "ihute-price-watch", version: 1 }
+    { name: "ihute-price-watch", version: 2 }
   )
 )

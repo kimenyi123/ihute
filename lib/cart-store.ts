@@ -97,6 +97,8 @@ type CartState = {
   addOrInc: (item: Omit<CartItem, "qty">, qty?: number) => void
   inc: (id: string, selectedUnit?: string) => void
   dec: (id: string, selectedUnit?: string) => void
+  /** Set quantity directly (clamped to >= 1). */
+  setQty: (id: string, selectedUnit: string | undefined, qty: number) => void
   remove: (id: string, selectedUnit?: string) => void
   clear: () => void
   clearCart: () => void
@@ -132,6 +134,42 @@ function cartPriceCents(price: unknown): number {
   return Math.round(n * 100)
 }
 
+function buildCartLineId(input: {
+  supplierId?: string
+  itemCode?: string
+  id?: string
+  name?: string
+  selectedUnit?: string
+  unit?: string
+  price?: unknown
+}): string {
+  const sid = (input.supplierId ?? "").toString().trim() || "unknown-supplier"
+  const code =
+    (input.itemCode ?? "").toString().trim() ||
+    (input.id ?? "").toString().trim() ||
+    (input.name ?? "").toString().trim().toLowerCase() ||
+    "unknown-item"
+  const unit = ((input.selectedUnit ?? input.unit) ?? "").toString().trim()
+  const cents = cartPriceCents(input.price)
+  return `${sid}::${code}::${unit}::${cents}`
+}
+
+function normalizeCartLineIds(items: CartItem[]): CartItem[] {
+  if (!Array.isArray(items) || items.length === 0) return []
+  return items.map((it) => ({
+    ...it,
+    id: buildCartLineId({
+      supplierId: it.supplierId,
+      itemCode: it.itemCode,
+      id: it.id,
+      name: it.name,
+      selectedUnit: it.selectedUnit,
+      unit: it.unit,
+      price: it.price,
+    }),
+  }))
+}
+
 function pickBestCartImage(...candidates: (string | undefined)[]): string | undefined {
   for (const c of candidates) {
     const s = typeof c === "string" ? c.trim() : ""
@@ -159,6 +197,15 @@ export const useCartStore = create<CartState>()(
           const nameKey = (item.name ?? "").toString().trim().toLowerCase()
           const sid = (item.supplierId ?? "").toString().trim()
           const itemCents = cartPriceCents(item.price)
+          const cartLineId = buildCartLineId({
+            supplierId: sid,
+            itemCode: productCode,
+            id: item.id,
+            name: item.name,
+            selectedUnit,
+            unit: item.unit,
+            price: item.price,
+          })
 
           const matchExact = (x: CartItem) => {
             const xCode = (x.itemCode ?? x.id).toString().trim()
@@ -209,6 +256,15 @@ export const useCartStore = create<CartState>()(
             }, typeof first.price === "number" && Number.isFinite(first.price) ? first.price : 0)
             const mergedLine: CartItem = {
               ...first,
+              id: buildCartLineId({
+                supplierId: first.supplierId,
+                itemCode: (first.itemCode ?? productCode).toString().trim(),
+                id: first.id,
+                name: first.name,
+                selectedUnit: first.selectedUnit,
+                unit: first.unit,
+                price: bestPrice,
+              }),
               qty: totalQty,
               price: bestPrice,
               itemCode: (first.itemCode ?? item.itemCode ?? first.id ?? item.id).toString().trim() || first.itemCode,
@@ -247,7 +303,14 @@ export const useCartStore = create<CartState>()(
           // Ensure price is always a number (API may send string or omit)
           const rawPrice = item.price
           const priceNum = typeof rawPrice === "number" && Number.isFinite(rawPrice) ? rawPrice : Number(String(rawPrice ?? "").replace(/[^\d.-]/g, "")) || 0
-          const withCode = { ...item, price: priceNum, selectedUnit, qty, itemCode: (item.itemCode ?? item.id).toString().trim() || undefined }
+          const withCode: CartItem = {
+            ...item,
+            id: cartLineId,
+            price: priceNum,
+            selectedUnit,
+            qty,
+            itemCode: (item.itemCode ?? item.id).toString().trim() || undefined,
+          }
           return { items: [...state.items, withCode] }
         })
 
@@ -395,12 +458,21 @@ export const useCartStore = create<CartState>()(
           }),
         })),
 
+      setQty: (id, selectedUnit, qty) =>
+        set((s) => ({
+          items: s.items.map((x) => {
+            if (x.id !== id || x.selectedUnit !== selectedUnit) return x
+            const n = Number.isFinite(qty) ? Math.floor(qty) : NaN
+            return { ...x, qty: Math.max(1, Number.isFinite(n) ? n : x.qty) }
+          }),
+        })),
+
       remove: (id, selectedUnit) =>
         set((s) => ({
           items: s.items.filter((x) => !(x.id === id && x.selectedUnit === selectedUnit)),
         })),
 
-      clear: () => set({ items: [], payment: {}, tableInfo: null }),  // ✅ Clear table info too
+      clear: () => set({ items: [], payment: {}, tableInfo: null }),  // Clear table info too
       replaceItemsFromSync: (items) => set({ items: Array.isArray(items) ? items : [] }),
 
       // ✅ Alias for clear() to match checkout form usage
@@ -514,6 +586,15 @@ export const useCartStore = create<CartState>()(
       // Use sessionStorage so multiple self-order screens opened on the same
       // POS device (different tabs/windows) don't overwrite each other's cart.
       storage: createJSONStorage(() => sessionStorage),
+      onRehydrateStorage: () => (state) => {
+        try {
+          if (!state) return
+          const normalized = normalizeCartLineIds(state.items)
+          if (normalized.length) state.replaceItemsFromSync(normalized)
+        } catch {
+          // ignore
+        }
+      },
     }
   )
 )

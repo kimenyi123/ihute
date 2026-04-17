@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Users, Plus, LogIn, Beer, Utensils, User, Search, Loader2, AlertTriangle } from "lucide-react"
-import { useTableCommandStore, getOrCreateGuestEmail } from "@/lib/table-command-store"
+import { useTableCommandStore, getOrCreateGuestEmail, setGuestName } from "@/lib/table-command-store"
 import { useAuthStore } from "@/lib/auth-store"
 import { createTableCommandApi } from "@/lib/api/table-commands"
 
@@ -165,6 +165,12 @@ export function TableCommandDialog({
       const userEmail = isAuthenticated 
         ? (user?.email || user?.phone || getOrCreateGuestEmail()) 
         : getOrCreateGuestEmail() // Use persistent guest email
+      
+      // ✅ Save guest name to localStorage for checkout pre-fill
+      if (!isAuthenticated && userName.trim()) {
+        setGuestName(userName.trim())
+        console.log('💾 Saved guest name:', userName.trim())
+      }
       
       console.log('🎫 Using user email:', userEmail)
 

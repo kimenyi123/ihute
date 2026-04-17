@@ -114,10 +114,10 @@ export function CartContent() {
   )
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-2xl font-bold text-foreground">Shopping Cart</h1>
+      <div className="flex flex-col gap-3 sm:gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="text-xl sm:text-2xl font-bold text-foreground">Shopping Cart</h1>
         <div className="flex items-center gap-2">
           {/*<Button variant="outline" size="sm" className="gap-2" onClick={() => setBarcodeOpen(true)}>
             <ScanBarcode className="h-4 w-4" />
@@ -144,7 +144,7 @@ export function CartContent() {
       </div>
 
       {/* Cart items + Summary */}
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-4 sm:gap-6 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
           {filteredItems.length > 0 ? (
             filteredItems.map((item) => (

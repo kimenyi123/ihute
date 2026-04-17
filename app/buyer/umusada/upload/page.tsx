@@ -4,9 +4,6 @@ import type React from "react"
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useAuthStore } from "@/lib/auth-store"
-import { useAuthPersistHydrated } from "@/lib/use-auth-persist-hydrated"
-import { Header } from "@/components/header"
-import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Upload, FileSpreadsheet, Loader2 } from "lucide-react"
@@ -103,10 +100,7 @@ export default function UmusadaExcelUploadPage() {
   if (!isAuthenticated) return null
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50">
-      <Header />
-
-      <main className="flex-1 container mx-auto px-6 py-8 max-w-2xl">
+    <main className="container mx-auto px-6 py-8 max-w-2xl">
         <h1 className="text-2xl font-bold text-slate-900 mb-2">Umusada Excel Upload</h1>
         <p className="text-slate-600 mb-6">
           Upload Excel files to send Sales, Purchase, Financial, or Supplier data to Umusada.
@@ -198,9 +192,6 @@ export default function UmusadaExcelUploadPage() {
         <Button variant="ghost" className="mt-6" asChild>
           <Link href="/buyer/dashboard">← Back to Dashboard</Link>
         </Button>
-      </main>
-
-      <Footer />
-    </div>
+    </main>
   )
 }

@@ -12,6 +12,8 @@ import {
 } from 'lucide-react'
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { useAuthStore } from '@/lib/auth-store'
+import { mapBackendOrderStatusToTrack, type TrackOrderStatus } from '@/lib/order-status-map'
+import { ResponsiveTable } from '@/components/ui/responsive-table'
 
 interface DashboardKPIs {
   totalRevenue: number
@@ -26,6 +28,44 @@ interface SalesData {
   date: string
   revenue: number
   orderCount: number
+}
+
+function getStatusLabel(status: TrackOrderStatus): string {
+  switch (status) {
+    case 'pending':
+      return 'Pending'
+    case 'open':
+      return 'Open'
+    case 'processing':
+      return 'Processing'
+    case 'invoice':
+      return 'Invoice'
+    case 'in-transit':
+      return 'Out for Delivery'
+    case 'delivered':
+      return 'Delivered'
+    default:
+      return 'Open'
+  }
+}
+
+function getStatusBadgeClass(status: TrackOrderStatus): string {
+  switch (status) {
+    case 'pending':
+      return 'bg-yellow-100 text-yellow-800'
+    case 'open':
+      return 'bg-blue-100 text-blue-800'
+    case 'processing':
+      return 'bg-purple-100 text-purple-800'
+    case 'invoice':
+      return 'bg-violet-100 text-violet-800'
+    case 'in-transit':
+      return 'bg-indigo-100 text-indigo-800'
+    case 'delivered':
+      return 'bg-green-100 text-green-800'
+    default:
+      return 'bg-gray-100 text-gray-800'
+  }
 }
 
 export default function AdminDashboard() {
@@ -136,22 +176,25 @@ export default function AdminDashboard() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500">Loading dashboard...</div>
+      <div className="flex min-h-[16rem] items-center justify-center">
+        <div className="text-slate-500">Loading dashboard...</div>
       </div>
     )
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-        <p className="text-gray-600 mt-1">Overview of platform performance</p>
+    <div className="min-h-0 space-y-6">
+      <div className="min-w-0 hidden lg:block">
+        <h1 className="text-3xl font-bold text-slate-900">Dashboard</h1>
+        <p className="text-slate-600 mt-1">Overview of platform performance</p>
+      </div>
+      <div className="min-w-0 lg:hidden">
+        <p className="text-sm text-slate-600">Overview of platform performance</p>
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white rounded-lg shadow p-6">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-600">Total Revenue</p>
@@ -165,7 +208,7 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        <div className="bg-white rounded-lg shadow p-6">
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-600">Platform Commission</p>
@@ -180,7 +223,7 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        <div className="bg-white rounded-lg shadow p-6">
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-600">Total Orders</p>
@@ -194,7 +237,7 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        <div className="bg-white rounded-lg shadow p-6">
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-600">Active Sellers</p>
@@ -213,11 +256,12 @@ export default function AdminDashboard() {
       </div>
 
       {/* Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Sales & Revenue Graph */}
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Sales & Revenue (Last 30 Days)</h2>
-          <ResponsiveContainer width="100%" height={300}>
+        <div className="min-w-0 rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+          <h2 className="mb-4 text-lg font-semibold text-slate-900">Sales & Revenue (Last 30 Days)</h2>
+          <div className="h-[260px] w-full min-w-0 sm:h-[300px]">
+          <ResponsiveContainer width="100%" height="100%">
             <LineChart data={salesData}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="date" />
@@ -228,12 +272,14 @@ export default function AdminDashboard() {
               <Line type="monotone" dataKey="orderCount" stroke="#10b981" name="Orders" />
             </LineChart>
           </ResponsiveContainer>
+          </div>
         </div>
 
         {/* Trending Sectors */}
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Trending Sectors</h2>
-          <ResponsiveContainer width="100%" height={300}>
+        <div className="min-w-0 rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+          <h2 className="mb-4 text-lg font-semibold text-slate-900">Trending Sectors</h2>
+          <div className="h-[260px] w-full min-w-0 sm:h-[300px]">
+          <ResponsiveContainer width="100%" height="100%">
             <BarChart data={trendingSectors}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="name" />
@@ -243,13 +289,14 @@ export default function AdminDashboard() {
               <Bar dataKey="orderCount" fill="#3b82f6" name="Orders" />
             </BarChart>
           </ResponsiveContainer>
+          </div>
         </div>
       </div>
 
       {/* Alerts and Active Orders Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Low Inventory Alerts */}
-        <div className="bg-white rounded-lg shadow p-6">
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-gray-900">Low Inventory Alerts</h2>
             <AlertCircle className="text-orange-500" size={20} />
@@ -275,7 +322,7 @@ export default function AdminDashboard() {
         </div>
 
         {/* Compliance Alerts */}
-        <div className="bg-white rounded-lg shadow p-6">
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-gray-900">Compliance Alerts</h2>
             <FileText className="text-red-500" size={20} />
@@ -298,12 +345,12 @@ export default function AdminDashboard() {
       </div>
 
       {/* Active Orders Monitor */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">Active Orders Monitor</h2>
-          <Package className="text-blue-500" size={20} />
+      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-lg font-semibold text-slate-900">Active Orders Monitor</h2>
+          <Package className="text-blue-500 shrink-0" size={20} />
         </div>
-        <div className="overflow-x-auto">
+        <ResponsiveTable className="rounded-md border border-slate-100" minWidth="720px">
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-200">
@@ -324,6 +371,9 @@ export default function AdminDashboard() {
                 </tr>
               ) : (
                 activeOrders.map((order: any) => (
+                  (() => {
+                    const normalizedStatus = mapBackendOrderStatusToTrack(order.status, order.paymentStatus)
+                    return (
                   <tr key={order.id} className="border-b border-gray-100 hover:bg-gray-50">
                     <td className="py-3 px-4 text-sm text-gray-900">{order.orderNumber || `#${order.id}`}</td>
                     <td className="py-3 px-4 text-sm text-gray-700">{order.sellerName}</td>
@@ -332,38 +382,37 @@ export default function AdminDashboard() {
                       {formatCurrency(order.amount)}
                     </td>
                     <td className="py-3 px-4">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        order.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' :
-                        order.status === 'CONFIRMED' ? 'bg-blue-100 text-blue-800' :
-                        order.status === 'PROCESSING' ? 'bg-purple-100 text-purple-800' :
-                        'bg-green-100 text-green-800'
-                      }`}>
-                        {order.status}
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(normalizedStatus)}`}>
+                        {getStatusLabel(normalizedStatus)}
                       </span>
                     </td>
                     <td className="py-3 px-4 text-sm text-gray-500">
                       {new Date(order.timestamp).toLocaleString()}
                     </td>
                   </tr>
+                    )
+                  })()
                 ))
               )}
             </tbody>
           </table>
-        </div>
-        <div className="flex items-center justify-between mt-4 text-sm text-gray-600">
+        </ResponsiveTable>
+        <div className="mt-4 flex flex-col gap-3 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
           <div>
             Page {ordersPage} of {Math.max(1, Math.ceil(ordersTotal / pageSize))}
           </div>
-          <div className="space-x-2">
+          <div className="flex flex-wrap gap-2">
             <button
-              className="px-3 py-1 border rounded disabled:opacity-50"
+              type="button"
+              className="rounded border px-3 py-1 disabled:opacity-50"
               onClick={() => setOrdersPage((p) => Math.max(1, p - 1))}
               disabled={ordersPage === 1}
             >
               Previous
             </button>
             <button
-              className="px-3 py-1 border rounded disabled:opacity-50"
+              type="button"
+              className="rounded border px-3 py-1 disabled:opacity-50"
               onClick={() => {
                 const maxPage = Math.max(1, Math.ceil(ordersTotal / pageSize))
                 setOrdersPage((p) => (p < maxPage ? p + 1 : p))
