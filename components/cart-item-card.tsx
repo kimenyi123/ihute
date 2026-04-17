@@ -48,9 +48,9 @@ export function CartItemCard({ item }: { item: CartItem }) {
   const unitLabel = displayUnitForPrice(item.unit ?? item.selectedUnit)
 
   return (
-    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4 rounded-lg border p-3">
+    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2.5 sm:gap-4 rounded-lg border p-2.5 sm:p-3">
       <div className="flex items-center gap-3 flex-1 w-full sm:w-auto">
-        <div className="relative h-[72px] w-[72px] flex-shrink-0 rounded bg-muted overflow-hidden">
+        <div className="relative h-[64px] w-[64px] sm:h-[72px] sm:w-[72px] flex-shrink-0 rounded bg-muted overflow-hidden">
           {isRemote ? (
             <img
               key={src}
@@ -87,12 +87,12 @@ export function CartItemCard({ item }: { item: CartItem }) {
         </div>
 
         <div className="flex-1 min-w-0">
-          <div className="font-medium truncate">{item.name}</div>
-          <div className="text-xs text-muted-foreground truncate">
+          <div className="font-medium text-sm sm:text-base truncate">{item.name}</div>
+          <div className="text-[11px] sm:text-xs text-muted-foreground truncate">
             {item.supplierName}
             {item.supplierLocation ? ` · ${item.supplierLocation}` : ""}
           </div>
-          <div className="text-sm mt-1">
+          <div className="text-xs sm:text-sm mt-1">
             {Number(item.price) > 0 ? (
               <>
                 <span className="font-medium">
@@ -114,8 +114,8 @@ export function CartItemCard({ item }: { item: CartItem }) {
         </div>
       </div>
 
-      <div className="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
-        <div className="flex items-center gap-2">
+      <div className="w-full sm:w-auto flex flex-col gap-2 sm:gap-3">
+        <div className="flex w-full items-center justify-center sm:justify-start gap-1.5 sm:gap-2">
           <Button
             size="icon"
             variant="outline"
@@ -124,7 +124,7 @@ export function CartItemCard({ item }: { item: CartItem }) {
               setInputValue(String(Math.max(1, item.qty - 1)))
             }}
             aria-label="Decrease"
-            className="h-8 w-8"
+            className="h-7 w-7 sm:h-8 sm:w-8"
           >
             <Minus className="h-4 w-4" />
           </Button>
@@ -150,7 +150,7 @@ export function CartItemCard({ item }: { item: CartItem }) {
                 e.currentTarget.blur()
               }
             }}
-            className="h-8 w-16 text-center font-medium px-1"
+            className="h-7 sm:h-8 w-12 sm:w-16 text-center font-medium px-1"
           />
           <Button
             size="icon"
@@ -160,17 +160,17 @@ export function CartItemCard({ item }: { item: CartItem }) {
               setInputValue(String(item.qty + 1))
             }}
             aria-label="Increase"
-            className="h-8 w-8"
+            className="h-7 w-7 sm:h-8 sm:w-8"
           >
             <Plus className="h-4 w-4" />
           </Button>
         </div>
 
-        <div className="flex items-center gap-2">
-          <div className="w-24 sm:w-28 text-right font-semibold text-sm">
+        <div className="flex items-center justify-between sm:justify-end gap-2 pt-1">
+          <div className="min-w-0 text-right font-semibold text-xs sm:text-sm whitespace-nowrap">
             {Number(item.price) > 0
               ? `${(Number(item.price) * item.qty).toLocaleString()} ${DEFAULT_CART_CURRENCY}`
-              : "—"}
+              : "N/A"}
           </div>
 
           <Button

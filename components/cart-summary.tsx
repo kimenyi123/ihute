@@ -756,7 +756,7 @@ function CartSummaryBody() {
           return (
             <Card key={g.supplierId} className="border-2">
               <CardHeader className="pb-2 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-                <CardTitle className="text-base flex-1">
+                <CardTitle className="text-base flex-1 min-w-0 break-words">
                   {g.supplierName}
                   {g.supplierLocation ? (
                     <span className="text-muted-foreground font-normal block sm:inline"> — {g.supplierLocation}</span>
@@ -773,15 +773,15 @@ function CartSummaryBody() {
               </CardHeader>
 
               <CardContent className="space-y-3">
-                <div className="flex items-center justify-between text-sm">
+                <div className="flex items-center justify-between gap-3 text-sm">
                   <span>Items</span>
-                  <span className="font-medium">
+                  <span className="font-medium text-right whitespace-nowrap">
                     {g.items.reduce((n, it) => n + it.qty, 0)}
                   </span>
                 </div>
-                <div className="flex items-center justify-between text-sm">
+                <div className="flex items-center justify-between gap-3 text-sm">
                   <span>Subtotal</span>
-                  <span className="font-semibold">{g.subtotal.toLocaleString()} RWF</span>
+                  <span className="font-semibold text-right whitespace-nowrap">{g.subtotal.toLocaleString()} RWF</span>
                 </div>
                 <Separator />
 
@@ -879,7 +879,7 @@ function CartSummaryBody() {
               </>
             )}
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-1">
-              <div className="text-lg font-bold">{totalAfterDiscount.toLocaleString()} RWF</div>
+              <div className="text-base sm:text-lg font-bold break-words">{totalAfterDiscount.toLocaleString()} RWF</div>
               <Button variant="outline" onClick={clear} className="w-full sm:w-auto">Clear Cart</Button>
             </div>
           </CardContent>
