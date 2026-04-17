@@ -116,7 +116,17 @@ const initialBusiness: ShopBusinessDraft = {
   cellule: "",
   village: "",
   street: "",
+  shopNickname: "",
   logoDataUrl: null,
+}
+
+function normalizeShopNickname(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
 }
 
 function FieldLabel({ tri, lang }: { tri: Tri; lang: Language }) {
@@ -521,28 +531,40 @@ export function CrazyShoppingBoarding() {
       const [ownerFirst, ...ownerRest] = business.ownerName.trim().split(/\s+/)
       const ownerLast = ownerRest.join(" ")
 
+      const nickNorm = normalizeShopNickname(business.shopNickname)
+      const regBody: Record<string, unknown> = {
+        password: business.password,
+        firstName: ownerFirst || "Owner",
+        lastName: ownerLast,
+        companyName: business.companyName.trim(),
+        tel: business.phone.trim(),
+        phone: business.phone.trim(),
+        location: locationSummary,
+        sector: shopCategoryToSectorSlug(business.category),
+        delivery_mode: business.deliveryPref,
+        momo_code: business.momoCode.trim(),
+      }
+      if (nickNorm) {
+        regBody.nickname = nickNorm
+      }
       const regRes = await fetch("/api/grandma/sellers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          password: business.password,
-          firstName: ownerFirst || "Owner",
-          lastName: ownerLast,
-          companyName: business.companyName.trim(),
-          tel: business.phone.trim(),
-          phone: business.phone.trim(),
-          location: locationSummary,
-          sector: shopCategoryToSectorSlug(business.category),
-          delivery_mode: business.deliveryPref,
-          momo_code: business.momoCode.trim(),
-        }),
+        body: JSON.stringify(regBody),
       })
       const regJson = (await regRes.json().catch(() => ({}))) as {
         ok?: boolean
         error?: string
+        code?: string
         ishyigaAccount?: string
       }
       if (!regRes.ok || !regJson?.ok) {
+        if (regJson?.code === "NICKNAME_EXISTS") {
+          throw new Error(
+            regJson?.error ||
+              "This shop nickname is already taken. Choose another or leave it blank."
+          )
+        }
         throw new Error(regJson?.error || "Seller account registration failed")
       }
       const ishyiga = String(regJson.ishyigaAccount || "").trim()
@@ -766,6 +788,24 @@ export function CrazyShoppingBoarding() {
                   onChange={(e) => setBusiness((b) => ({ ...b, companyName: e.target.value }))}
                   placeholder="e.g. Cassa Blanca Liquor Ltd"
                 />
+              </div>
+              <div id="seller-field-shopNickname" className="sm:col-span-2 space-y-2 scroll-mt-24">
+                <FieldLabel lang={lang} tri={L.shopNickname} />
+                <Input
+                  id="shopNickname"
+                  value={business.shopNickname}
+                  onChange={(e) => setBusiness((b) => ({ ...b, shopNickname: e.target.value }))}
+                  onBlur={() =>
+                    setBusiness((b) => ({ ...b, shopNickname: normalizeShopNickname(b.shopNickname) }))
+                  }
+                  placeholder="e.g. cassablanca"
+                  className="font-mono"
+                  autoComplete="off"
+                />
+                <p className="text-xs text-[#6f8399]">
+                  Letters, numbers, hyphens only — used for Shop With Me links. Leave blank to set later in the
+                  dashboard.
+                </p>
               </div>
               <p className="sm:col-span-2 text-sm text-[#6f8399] rounded-xl border border-[#dbe7f3] bg-[#f7fbff] px-3 py-2">
                 Sign in with your <strong className="text-[#17324d]">phone number</strong> after registration — no email

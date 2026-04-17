@@ -89,32 +89,6 @@ export function ShopByMenu() {
               </button>
             ))}
           </div>
-
-          <div className="border-t" />
-
-          <div className="flex flex-wrap items-center gap-2 py-3">
-            <span className="text-sm font-medium text-muted-foreground mr-2 flex items-center gap-1.5">
-              <span className="text-base leading-none" aria-hidden>😎</span>
-              Cool search:
-            </span>
-            {COOL_SEARCH_TABS.map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => handleTabChange(tab.id)}
-                className={cn(
-                  "px-4 py-2 rounded-md text-sm font-medium transition-colors inline-flex items-center gap-2",
-                  activeTab === tab.id
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                )}
-                aria-pressed={activeTab === tab.id}
-              >
-                {tab.icon}
-                {tab.label}
-              </button>
-            ))}
-          </div>
         </div>
       </nav>
 
@@ -135,6 +109,33 @@ export function ShopByMenu() {
             <p className="mt-2 text-sm">Coming soon. Content will be wired when backend is ready.</p>
           </div>
         )}
+
+        <div
+          className="flex flex-wrap items-center gap-2 py-4 mt-6 border-t"
+          aria-label="Cool search"
+        >
+          <span className="text-sm font-medium text-muted-foreground mr-2 flex items-center gap-1.5">
+            <span className="text-base leading-none" aria-hidden>😎</span>
+            Cool search:
+          </span>
+          {COOL_SEARCH_TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => handleTabChange(tab.id)}
+              className={cn(
+                "px-4 py-2 rounded-md text-sm font-medium transition-colors inline-flex items-center gap-2",
+                activeTab === tab.id
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
+              )}
+              aria-pressed={activeTab === tab.id}
+            >
+              {tab.icon}
+              {tab.label}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   )

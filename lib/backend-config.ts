@@ -15,24 +15,35 @@ function noTrailingSlash(s: string): string {
  * Uses BACKEND_URL, JAVA_BACKEND_BASE, or NEXT_PUBLIC_API_URL from env.
  *
  * The path segment must match Tomcat’s **context path** (the `webapps/<Context>` name):
- * `Trading.war` → `/Trading`; `trading_ai.war` → `/trading_ai`. If `.env.local` still says
- * `…/trading_ai` but you only deployed `Trading.war`, Grandma APIs 404 at `/trading_ai/Api/…`.
+ * `Trading.war` → `/Trading`; `trading_ai.war` → `/trading_ai`.
+ *
+ * **Local `next dev`:** if nothing is set, defaults to `http://127.0.0.1:8080/trading_ai` (Kaos WAR name in this repo).
+ * If you only pass `http://localhost:8080` with no path, development appends `/trading_ai`, production appends `/Trading`.
  */
 export function getBackendBase(): string {
-  const raw = noTrailingSlash(
-    process.env.BACKEND_URL ||
-      process.env.JAVA_BACKEND_BASE ||
-      process.env.NEXT_PUBLIC_API_URL ||
-      "https://ihute.rw/trading_ai"
-  )
+  const explicit =
+    process.env.BACKEND_URL || process.env.JAVA_BACKEND_BASE || process.env.NEXT_PUBLIC_API_URL
 
-  // Some local/dev env values point only to the Tomcat host (e.g. http://localhost:8080)
-  // while the Java servlets live under the `/Trading` context path.
-  // If the base is missing `/Trading`, append it so `/api/kiosk/*` routes resolve.
-  if (!raw.toLowerCase().includes("/trading")) {
-    return `${raw}/Trading`
+  let raw: string
+  if (explicit && String(explicit).trim()) {
+    raw = noTrailingSlash(String(explicit).trim())
+  } else if (process.env.NODE_ENV === "development") {
+    raw = "http://127.0.0.1:8080/trading_ai"
+  } else {
+    raw = "https://ihute.rw/Trading"
   }
-  return raw
+
+  try {
+    const u = new URL(raw)
+    const path = u.pathname.replace(/\/+$/, "") || ""
+    if (path === "" || path === "/") {
+      u.pathname = process.env.NODE_ENV === "development" ? "/trading_ai" : "/Trading"
+      return noTrailingSlash(u.toString())
+    }
+    return raw
+  } catch {
+    return raw
+  }
 }
 
 /**
@@ -93,12 +104,23 @@ export function getFetchSuggestionsUrl(): string {
   return process.env.JAVA_FETCH_SUGGESTIONS_URL || `${getBackendBase()}/Kaos/fetchSuggestions`
 }
 
-export function getShopWithMeUrl(): string {
-  return process.env.JAVA_SHOP_WITH_ME_URL || `${getBackendBase()}/shop_with_me`
+/** Sector-only AND-token search (shops vs items); separate servlet from fetchSuggestions globalSearch. */
+export function getSectorScopedSearchUrl(): string {
+  return process.env.JAVA_SECTOR_SCOPED_SEARCH_URL || `${getBackendBase()}/Kaos/sectorScopedSearch`
 }
 
-export function getUmuriroPaymentUrl(): string {
-  return process.env.JAVA_UMURIRO_PAYMENT_URL || `${getBackendBase()}/Kaos/UmuriroPaymentServlet`
+/** Sector shop grid JSON (sellers + sample products) — isolated from {@link getFetchSuggestionsUrl} for analysis. */
+export function getSectorListSuppliersUrl(): string {
+  return process.env.JAVA_SECTOR_LIST_SUPPLIERS_URL || `${getBackendBase()}/Kaos/sectorListSuppliers`
+}
+
+/** Same servlet: GET ?sectorStats=pharmacy → JSON { ok, sector, shops, items } (full DB counts). */
+export function getSectorStatsQuery(sectorSlug: string): string {
+  return `sectorStats=${encodeURIComponent(sectorSlug.trim())}`
+}
+
+export function getShopWithMeUrl(): string {
+  return process.env.JAVA_SHOP_WITH_ME_URL || `${getBackendBase()}/shop_with_me`
 }
 
 export function getAuthUrl(): string {
@@ -160,7 +182,7 @@ export function getGrandmaSellerTempItemApiUrl(): string {
 }
 
 /**
- * Redis-first sector browse (same payload as `fetchSuggestions?listSuppliersWithProducts`).
+ * Redis-first sector browse (same payload as `GET …/Kaos/sectorListSuppliers` / legacy `listSuppliersWithProducts`).
  * Short path `/grandma/suppliers/browse`; long `/Api/grandma/suppliers/browse`.
  */
 export function getGrandmaListSuppliersBrowseUrl(): string {
@@ -214,5 +236,12 @@ export function getPublicSiteUrl(): string {
  * Same as backend base in most setups; override with NEXT_PUBLIC_API_URL if different.
  */
 export function getPublicApiUrl(): string {
-  return noTrailingSlash(process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw/Trading")
+  const explicit = process.env.NEXT_PUBLIC_API_URL
+  if (explicit && String(explicit).trim()) {
+    return noTrailingSlash(String(explicit).trim())
+  }
+  if (process.env.NODE_ENV === "development") {
+    return "http://127.0.0.1:8080/trading_ai"
+  }
+  return "https://ihute.rw/Trading"
 }

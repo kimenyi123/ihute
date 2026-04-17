@@ -6,7 +6,7 @@ async function debugPharmacy() {
   // Test different endpoints for pharmacy
   const endpoints = [
     '/api/fetchSuggestions?listSuppliersBySector=pharmacy',
-    '/api/fetchSuggestions?listSuppliersWithProducts=pharmacy&Currency=RWF&limit=500',
+    '/api/sector-list-suppliers?sector=pharmacy&Currency=RWF&limit=500',
     '/api/fetchSuggestions?listSuppliersBySector=pharmacy&cache=no'
   ]
   

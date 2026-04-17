@@ -86,6 +86,10 @@ export const useAuthStore = create<AuthState>()(
           localStorage.removeItem("prefs-storage")
           localStorage.removeItem("table-command-storage")
           sessionStorage.clear()
+          for (let i = localStorage.length - 1; i >= 0; i--) {
+            const k = localStorage.key(i)
+            if (k?.startsWith("grandma:")) localStorage.removeItem(k)
+          }
         }
       },
 

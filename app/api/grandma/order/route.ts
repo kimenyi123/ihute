@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getOrdersUrl, getProxyTimeoutMs } from "@/lib/backend-config"
+import { getOrCreatePublicTokenForOrderId } from "@/lib/order-tracking-token"
 
 export const runtime = "nodejs"
 
@@ -86,7 +87,17 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    return NextResponse.json({ ...data, rid })
+    let trackToken: string | undefined
+    const oid = data.orderId ?? data.id_order ?? (data as { ID_ORDER?: unknown }).ID_ORDER
+    if (oid != null && String(oid).trim() !== "") {
+      try {
+        trackToken = getOrCreatePublicTokenForOrderId(String(oid))
+      } catch {
+        /* ignore */
+      }
+    }
+
+    return NextResponse.json({ ...data, rid, ...(trackToken ? { trackToken } : {}) })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     return NextResponse.json({ ok: false, error: msg, rid }, { status: 500 })

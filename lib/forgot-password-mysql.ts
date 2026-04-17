@@ -89,6 +89,11 @@ export async function resetPasswordViaMysql(
       }
       const [res] = await conn.query(`UPDATE ${db}.account_seller SET pwd_hash=? WHERE tel=?`, [hash, np])
       if ((res as mysql.ResultSetHeader).affectedRows > 0) {
+        const digitsOnly = np.replace(/\D/g, "")
+        await conn.query(
+          `UPDATE ${db}.account_signup SET PWD=? WHERE REPLACE(REPLACE(REPLACE(REPLACE(TRIM(IFNULL(TEL,'')),' ',''),'+',''),'-',''),'(','') = ?`,
+          [hash, digitsOnly]
+        )
         return { ok: true }
       }
     }

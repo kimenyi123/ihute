@@ -1,46 +1,43 @@
 "use client"
 
-import { Suspense } from "react"
-import Link from "next/link"
-import { useSearchParams } from "next/navigation"
-import { GrandmaLoginForm } from "@/components/grandma-login-form"
-import { GRANDMA_PATHS } from "@/lib/grandma-urls"
+import { Suspense, useEffect } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 
-function GrandmaLoginInner() {
+/**
+ * Old URL: `/grandma/login` → one shared sign-in at `/login`.
+ * Preserves `?redirect=` and `?phone=` for bookmarks and onboarding links.
+ */
+function RedirectInner() {
+  const router = useRouter()
   const searchParams = useSearchParams()
-  const redirectRaw = searchParams.get("redirect")
-  const redirectTo =
-    redirectRaw && redirectRaw.startsWith("/") && !redirectRaw.startsWith("//")
-      ? redirectRaw
-      : GRANDMA_PATHS.appRoot
-  const phone = searchParams.get("phone") ?? ""
+
+  useEffect(() => {
+    const r = searchParams.get("redirect")
+    const p = searchParams.get("phone")
+    const qs = new URLSearchParams()
+    if (r) qs.set("redirect", r)
+    if (p) qs.set("phone", p)
+    const q = qs.toString()
+    router.replace(`/login${q ? `?${q}` : ""}`)
+  }, [router, searchParams])
 
   return (
-    <div className="grandma-login-page min-h-screen bg-[#f5f1ea] text-[#2c2620]">
-      <div className="mx-auto flex min-h-screen max-w-md flex-col px-4 py-10">
-        <Link
-          href={GRANDMA_PATHS.appRoot}
-          className="grandma-login-back mb-6 text-sm font-semibold text-[#5c4f42] hover:text-[#3d342c]"
-        >
-          ← Back to Ihute
-        </Link>
-        <GrandmaLoginForm redirectTo={redirectTo} defaultPhoneOrEmail={phone} />
-      </div>
+    <div className="flex min-h-screen items-center justify-center bg-[#f5f1ea] text-[#6b5e52] text-sm">
+      Redirecting to sign in…
     </div>
   )
 }
 
-/** Seller login for the Ihute market flow (`/grandma` routes). Warm styling, not the default `/login` page. */
-export default function GrandmaLoginPage() {
+export default function GrandmaLoginRedirectPage() {
   return (
     <Suspense
       fallback={
-        <div className="grandma-login-page flex min-h-screen items-center justify-center bg-[#f5f1ea] text-[#6b5e52]">
+        <div className="flex min-h-screen items-center justify-center bg-[#f5f1ea] text-[#6b5e52] text-sm">
           Loading…
         </div>
       }
     >
-      <GrandmaLoginInner />
+      <RedirectInner />
     </Suspense>
   )
 }

@@ -123,6 +123,23 @@ function pickStockLineCount(x: Record<string, unknown>): number | undefined {
 }
 
 /** Shared mapping for `listSuppliersWithProducts` JSON (one network round-trip for sector). */
+/** Space-separated AND tokens; each must appear in name, location, nickname, or account. */
+function matchesSectorShopFilter(shop: ShopInfo, raw: string): boolean {
+  const q = raw.trim().toLowerCase()
+  if (!q) return true
+  const tokens = q.split(/\s+/).filter(Boolean)
+  const hay = [
+    shop.seller_name,
+    shop.seller_location,
+    shop.officialNickname ?? "",
+    shop.seller_account,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+  return tokens.every((t) => hay.includes(t))
+}
+
 export function mapListSuppliersWithProductsToShops(arr: unknown[]): ShopInfo[] {
   return (arr || []).map((x: any) => {
     const rec = x as Record<string, unknown>
@@ -188,7 +205,7 @@ export function ShopsBySector() {
           const sid = (sector.categoryId || "").trim().toLowerCase()
           if (!sid) continue
           try {
-            const url = `/api/fetchSuggestions?listSuppliersWithProducts=${encodeURIComponent(sid)}&Currency=RWF&limit=${LIST_SUPPLIERS_LIMIT}`
+            const url = `/api/sector-list-suppliers?sector=${encodeURIComponent(sid)}&Currency=RWF&limit=${LIST_SUPPLIERS_LIMIT}`
             const r = await fetch(url, { cache: "no-store" })
             const raw: any = r.ok ? await r.json() : []
             const arr: any[] = Array.isArray(raw) ? raw : []
@@ -364,23 +381,33 @@ export function ShopsForSingleSector({
   shops,
   loading,
   className,
+  /** From header search on `/category_ai/*` (`?sq=`). */
+  filterQuery = "",
 }: {
   shops: ShopInfo[]
   loading: boolean
   className?: string
+  filterQuery?: string
 }) {
   const { t } = useTranslation()
   const locationPref = usePrefsStore((s) => s.location)
 
   const filteredShops = useMemo(() => {
+    let list = shops
     const pref = (locationPref || "").trim().toLowerCase()
-    if (!pref) return shops
-    return shops.filter((s) => {
-      const loc = (s.seller_location || "").toLowerCase()
-      const name = (s.seller_name || "").toLowerCase()
-      return loc.includes(pref) || name.includes(pref)
-    })
-  }, [shops, locationPref])
+    if (pref) {
+      list = list.filter((s) => {
+        const loc = (s.seller_location || "").toLowerCase()
+        const name = (s.seller_name || "").toLowerCase()
+        return loc.includes(pref) || name.includes(pref)
+      })
+    }
+    const fq = (filterQuery || "").trim()
+    if (fq) {
+      list = list.filter((s) => matchesSectorShopFilter(s, fq))
+    }
+    return list
+  }, [shops, locationPref, filterQuery])
 
   return (
     <div className={cn("space-y-4", className)}>

@@ -1,35 +1,29 @@
-"use client"
+import { redirect } from "next/navigation"
 
-import { Header } from "@/components/header"
-import { Footer } from "@/components/footer"
-import { ShopByMenu } from "@/components/category_ai/shop-by-menu"
+type SearchParamsInput =
+  | Record<string, string | string[] | undefined>
+  | Promise<Record<string, string | string[] | undefined>>
 
-/**
- * Landing page for the enhanced category experience.
- * Hero line + Shop by [Sector | Category | Brand | All items | Smart Picks | Top Manufacturers | High Margin | High Demand].
- * No separate Smart Strip — those concepts live in Shop by (High Demand, High Margin, Top Manufacturers).
- */
-export default function CategoryAILandingPage() {
-  return (
-    <div className="min-h-screen bg-background flex flex-col">
-      <Header />
-      <main className="flex-1">
-        {/* Hero line: one sharp line */}
-        <div className="border-b bg-muted/20 py-3">
-          <div className="container mx-auto px-4 text-center">
-            <p className="text-sm font-medium text-foreground/90">
-              Find anything. Anywhere. Instantly.
-            </p>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Powered by Ishyiga Intelligence
-            </p>
-          </div>
-        </div>
-        <div className="py-6">
-          <ShopByMenu />
-        </div>
-      </main>
-      <Footer />
-    </div>
-  )
+function buildQuery(sp: Record<string, string | string[] | undefined>): string {
+  const q = new URLSearchParams()
+  for (const [key, val] of Object.entries(sp)) {
+    if (val == null) continue
+    if (Array.isArray(val)) {
+      for (const v of val) q.append(key, v)
+    } else {
+      q.set(key, val)
+    }
+  }
+  return q.toString()
+}
+
+/** Legacy URL: /category_ai → home with same query (e.g. ?shopBy=sector). */
+export default async function CategoryAIRedirectPage({
+  searchParams,
+}: {
+  searchParams?: SearchParamsInput
+}) {
+  const sp = await Promise.resolve(searchParams ?? {})
+  const suffix = buildQuery(sp)
+  redirect(suffix ? `/?${suffix}` : "/")
 }

@@ -164,7 +164,8 @@ export function CheckoutForm() {
       console.log("✅ Order created successfully:", json)
 
       clearCart()
-      router.push(`/track-order/${json.orderId}`)
+      const slug = (json as { trackToken?: string }).trackToken || json.orderId
+      router.push(`/track-order/${encodeURIComponent(String(slug))}`)
 
     } catch (e: any) {
       console.error("❌ Order creation error:", e)

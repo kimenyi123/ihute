@@ -27,6 +27,8 @@ export type ShopBusinessDraft = {
   village: string
   /** Street name, building, etc. */
   street: string
+  /** Optional public shop nickname for Shop With Me (lowercase, a-z 0-9 -) */
+  shopNickname: string
   /** Optional image data URL (base64) for shop logo */
   logoDataUrl: string | null
   /**
