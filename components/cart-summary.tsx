@@ -152,7 +152,9 @@ function CartSummaryBody() {
   const hasPrefilledName = useRef(false)
   const lastTableSession = useRef<string | null>(null)
 
-  // ✅ Pre-fill "Your Name" from saved guest name or table session
+  // Pre-fill "Your Name" only for table-command guest flows (supplier must know who ordered).
+  // Do not pre-fill from localStorage for plain guest checkout: the payment UI often hides the
+  // name field, so a stale saved name would be sent as buyerName without the user seeing it.
   useEffect(() => {
     // Reset prefill flag when table session changes (new table created/joined)
     const currentSessionId = activeSession ? `${activeSession.tableName}-${activeSession.createdAt}` : null
@@ -160,15 +162,13 @@ function CartSummaryBody() {
       hasPrefilledName.current = false
       lastTableSession.current = currentSessionId
     }
-    
-    if (!hasPrefilledName.current && checkoutMode === "anonymous") {
-      // Priority: 1. Table session userName, 2. localStorage guest name
+
+    if (!hasPrefilledName.current && checkoutMode === "anonymous" && isInTableCommand()) {
       const guestName = getOrCreateGuestName()
       const tableUserName = activeSession?.userName
       const finalName = tableUserName && tableUserName !== "Guest" ? tableUserName : guestName
-      
+
       if (finalName && finalName !== "Guest") {
-        console.log('💾 Pre-filling anonymousName with:', finalName)
         setAnonymousName(finalName)
         hasPrefilledName.current = true
       }
@@ -963,15 +963,41 @@ function CartSummaryBody() {
           {!isAuthenticated && (
             <div className="space-y-3 pb-4 border-b">
               <Label className="text-sm font-medium">Checkout as:</Label>
-              <RadioGroup value={checkoutMode} onValueChange={(v) => setCheckoutMode(v as "login" | "anonymous")}>
-                <div className="flex items-center space-x-3 border rounded-lg p-3 cursor-pointer hover:bg-accent" onClick={() => setCheckoutMode("login")}>
+              <RadioGroup
+                value={checkoutMode}
+                onValueChange={(v) => {
+                  const mode = v as "login" | "anonymous"
+                  setCheckoutMode(mode)
+                  // Plain guest checkout does not show a name field; clear any stale prefill so we
+                  // do not submit another user's saved guest name as buyerName.
+                  if (mode === "anonymous" && !isInTableCommand()) {
+                    setAnonymousName("")
+                    hasPrefilledName.current = false
+                  }
+                }}
+              >
+                <div
+                  className="flex items-center space-x-3 border rounded-lg p-3 cursor-pointer hover:bg-accent"
+                  onClick={() => {
+                    setCheckoutMode("login")
+                  }}
+                >
                   <RadioGroupItem value="login" id="checkout-login" />
                   <Label htmlFor="checkout-login" className="cursor-pointer flex-1">
                     <div className="font-medium">Sign in to checkout</div>
                     <div className="text-xs text-muted-foreground">Track your orders easily</div>
                   </Label>
                 </div>
-                <div className="flex items-center space-x-3 border rounded-lg p-3 cursor-pointer hover:bg-accent" onClick={() => setCheckoutMode("anonymous")}>
+                <div
+                  className="flex items-center space-x-3 border rounded-lg p-3 cursor-pointer hover:bg-accent"
+                  onClick={() => {
+                    setCheckoutMode("anonymous")
+                    if (!isInTableCommand()) {
+                      setAnonymousName("")
+                      hasPrefilledName.current = false
+                    }
+                  }}
+                >
                   <RadioGroupItem value="anonymous" id="checkout-anonymous" />
                   <Label htmlFor="checkout-anonymous" className="cursor-pointer flex-1">
                     <div className="font-medium">Continue as guest</div>
