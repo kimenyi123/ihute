@@ -123,6 +123,11 @@ export function getShopWithMeUrl(): string {
   return process.env.JAVA_SHOP_WITH_ME_URL || `${getBackendBase()}/shop_with_me`
 }
 
+/** Umuriro payment servlet endpoint. */
+export function getUmuriroPaymentUrl(): string {
+  return process.env.JAVA_UMURIRO_PAYMENT_URL || `${getBackendBase()}/Kaos/UmuriroPaymentServlet`
+}
+
 export function getAuthUrl(): string {
   return process.env.JAVA_AUTH_URL || `${getBackendBase()}/Kaos/user-auth`
 }
