@@ -24,7 +24,7 @@ export function CTASection() {
                 Reach thousands of customers and grow your business with our platform
               </p>
               <Button className="w-full bg-orange-600 hover:bg-orange-700" size="lg" asChild>
-                <Link href="/register?type=supplier">
+                <Link href="/register/seller">
                   Register as Supplier
                 </Link>
               </Button>
@@ -41,7 +41,7 @@ export function CTASection() {
                 Shop from local businesses and get products delivered to your door
               </p>
               <Button className="w-full bg-green-600 hover:bg-green-700" size="lg" asChild>
-                <Link href="/register?type=customer">
+                <Link href="/register/buyer">
                   Register as Customer
                 </Link>
               </Button>

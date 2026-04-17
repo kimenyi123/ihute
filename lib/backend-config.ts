@@ -15,24 +15,35 @@ function noTrailingSlash(s: string): string {
  * Uses BACKEND_URL, JAVA_BACKEND_BASE, or NEXT_PUBLIC_API_URL from env.
  *
  * The path segment must match Tomcat’s **context path** (the `webapps/<Context>` name):
- * `Trading.war` → `/Trading`; `trading_ai.war` → `/trading_ai`. If `.env.local` still says
- * `…/trading_ai` but you only deployed `Trading.war`, Grandma APIs 404 at `/trading_ai/Api/…`.
+ * `Trading.war` → `/Trading`; `trading_ai.war` → `/trading_ai`.
+ *
+ * **Local `next dev`:** if nothing is set, defaults to `http://127.0.0.1:8080/trading_ai` (Kaos WAR name in this repo).
+ * If you only pass `http://localhost:8080` with no path, development appends `/trading_ai`, production appends `/Trading`.
  */
 export function getBackendBase(): string {
-  const raw = noTrailingSlash(
-    process.env.BACKEND_URL ||
-      process.env.JAVA_BACKEND_BASE ||
-      process.env.NEXT_PUBLIC_API_URL ||
-      "https://ihute.rw/Trading"
-  )
+  const explicit =
+    process.env.BACKEND_URL || process.env.JAVA_BACKEND_BASE || process.env.NEXT_PUBLIC_API_URL
 
-  // Some local/dev env values point only to the Tomcat host (e.g. http://localhost:8080)
-  // while the Java servlets live under the `/Trading` context path.
-  // If the base is missing `/Trading`, append it so `/api/kiosk/*` routes resolve.
-  if (!raw.toLowerCase().includes("/trading")) {
-    return `${raw}/Trading`
+  let raw: string
+  if (explicit && String(explicit).trim()) {
+    raw = noTrailingSlash(String(explicit).trim())
+  } else if (process.env.NODE_ENV === "development") {
+    raw = "http://127.0.0.1:8080/trading_ai"
+  } else {
+    raw = "https://ihute.rw/Trading"
   }
-  return raw
+
+  try {
+    const u = new URL(raw)
+    const path = u.pathname.replace(/\/+$/, "") || ""
+    if (path === "" || path === "/") {
+      u.pathname = process.env.NODE_ENV === "development" ? "/trading_ai" : "/Trading"
+      return noTrailingSlash(u.toString())
+    }
+    return raw
+  } catch {
+    return raw
+  }
 }
 
 /**
@@ -225,5 +236,12 @@ export function getPublicSiteUrl(): string {
  * Same as backend base in most setups; override with NEXT_PUBLIC_API_URL if different.
  */
 export function getPublicApiUrl(): string {
-  return noTrailingSlash(process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw/Trading")
+  const explicit = process.env.NEXT_PUBLIC_API_URL
+  if (explicit && String(explicit).trim()) {
+    return noTrailingSlash(String(explicit).trim())
+  }
+  if (process.env.NODE_ENV === "development") {
+    return "http://127.0.0.1:8080/trading_ai"
+  }
+  return "https://ihute.rw/Trading"
 }

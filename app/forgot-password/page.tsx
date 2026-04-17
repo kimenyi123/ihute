@@ -18,6 +18,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { ArrowLeft, Loader2 } from "lucide-react"
+import { PasswordInputWithToggle } from "@/components/password-input-with-toggle"
 import { cn } from "@/lib/utils"
 
 const cardClass =
@@ -173,7 +174,7 @@ export default function ForgotPasswordPage() {
               )}
 
               <div className="mt-6 flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs font-medium text-[#1897e0]">
-                <Link href="/register" className="hover:underline">
+                <Link href="/register/buyer" className="hover:underline">
                   Register
                 </Link>
                 <Link href="/login" className="hover:underline">
@@ -207,9 +208,8 @@ export default function ForgotPasswordPage() {
               <Label htmlFor="np" className="text-[#17324d]">
                 New password
               </Label>
-              <Input
+              <PasswordInputWithToggle
                 id="np"
-                type="password"
                 autoComplete="new-password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
@@ -220,9 +220,8 @@ export default function ForgotPasswordPage() {
               <Label htmlFor="npc" className="text-[#17324d]">
                 Confirm password
               </Label>
-              <Input
+              <PasswordInputWithToggle
                 id="npc"
-                type="password"
                 autoComplete="new-password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}

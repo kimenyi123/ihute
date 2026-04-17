@@ -10,6 +10,7 @@ export type TrackOrderStatus =
   | "invoice"
   | "in-transit"
   | "delivered"
+  | "cancelled"
 
 /** Aligns with `Order["status"]` in orders-store */
 export type StoreOrderStatus =
@@ -77,6 +78,7 @@ export function rankFromOrderStatusRaw(raw: string): number | null {
 
 function legacyOrderStatusHints(orderStatus: string): TrackOrderStatus | null {
   const s = orderStatus.toLowerCase()
+  if (/\b(cancel|canceled|reject|rejected|refused)\b/.test(s)) return "cancelled"
   if (/\bdelivered\b/.test(s) || s.includes("completed")) return "delivered"
   if (
     s.includes("transit") ||
@@ -99,8 +101,10 @@ export function mapBackendOrderStatusToTrack(
   paymentStatus?: string
 ): TrackOrderStatus {
   if (orderStatus) {
+    const hintFirst = legacyOrderStatusHints(orderStatus)
+    if (hintFirst === "cancelled") return "cancelled"
     const rank = rankFromOrderStatusRaw(orderStatus)
-    if (rank === -1) return "pending"
+    if (rank === -1) return "cancelled"
     if (rank != null) {
       if (rank >= 5) return "delivered"
       if (rank >= 4) return "in-transit"

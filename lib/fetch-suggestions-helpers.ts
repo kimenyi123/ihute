@@ -34,16 +34,21 @@ export function sumProductsInListSuppliersPayload(rows: unknown[]): number {
 }
 
 /** Kaos {@code GET .../fetchSuggestions?sectorStats=pharmacy} — full DB shop + stock-line counts (no servlet sample limit). */
-export async function fetchSectorStatsFromApi(sectorId: string): Promise<{ shops: number; items: number } | null> {
+export async function fetchSectorStatsFromApi(sectorId: string): Promise<{ shops: number; items: number }> {
   const sid = sectorId.trim().toLowerCase()
   if (!sid) return { shops: 0, items: 0 }
   const url = `/api/fetchSuggestions?sectorStats=${encodeURIComponent(sid)}`
   const r = await fetch(url, { cache: "no-store" })
-  if (!r.ok) return null
   const j = (await r.json().catch(() => null)) as Record<string, unknown> | null
-  if (!j || typeof j !== "object") return null
+  if (!j || typeof j !== "object") {
+    return { shops: 0, items: 0 }
+  }
   const shops = Number(j.shops)
   const items = Number(j.items)
-  if (!Number.isFinite(shops) || !Number.isFinite(items)) return null
-  return { shops: Math.max(0, Math.floor(shops)), items: Math.max(0, Math.floor(items)) }
+  const s = Number.isFinite(shops) ? Math.max(0, Math.floor(shops)) : 0
+  const it = Number.isFinite(items) ? Math.max(0, Math.floor(items)) : 0
+  if (!r.ok) {
+    return { shops: s, items: it }
+  }
+  return { shops: s, items: it }
 }

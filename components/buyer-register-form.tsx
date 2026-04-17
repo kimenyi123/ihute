@@ -42,6 +42,7 @@ import {
   type ShopInfo,
 } from "@/components/category_ai/shops-by-sector"
 import { cn } from "@/lib/utils"
+import { GRANDMA_PATHS } from "@/lib/grandma-urls"
 
 function placeholderEmailFromPhone(phone: string): string {
   const d = phone.replace(/\D/g, "")
@@ -420,7 +421,12 @@ export function BuyerRegisterForm() {
         pharmacySector: !!json?.pharmacySector,
       })
       persistBuyerPrefs({ preferredShopIds, payment, rider })
-      router.push("/")
+      try {
+        localStorage.setItem("grandma:mode", "buyer")
+      } catch {
+        /* ignore */
+      }
+      router.push(GRANDMA_PATHS.appRoot)
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "Network error")
     } finally {

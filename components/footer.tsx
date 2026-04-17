@@ -1,5 +1,7 @@
 import Link from "next/link"
 import { Facebook, Twitter, Instagram, Mail, Phone, MapPin } from "lucide-react"
+import { APP_VERSION_DISPLAY } from "@/lib/app-version"
+import { GRANDMA_TRADING_AI_VERSION } from "@/lib/grandma-trading-apis"
 
 type FooterProps = {
   /** Category AI landing: tagline sits above copyright in the bottom bar (merged, not duplicated at top). */
@@ -133,6 +135,18 @@ export function Footer({ showIshyigaIntelligenceTagline = false }: FooterProps) 
             }
           >
             &copy; {new Date().getFullYear()} ihute.rw by Ishyiga Software. All rights reserved.
+          </p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            {APP_VERSION_DISPLAY} · Grandma v{GRANDMA_TRADING_AI_VERSION}
+            {process.env.NODE_ENV === "development" ? (
+              <>
+                {" "}
+                ·{" "}
+                <Link href="/dev/redis" className="underline underline-offset-2 hover:text-foreground">
+                  Redis
+                </Link>
+              </>
+            ) : null}
           </p>
         </div>
       </div>

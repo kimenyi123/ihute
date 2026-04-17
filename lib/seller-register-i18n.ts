@@ -36,6 +36,11 @@ export const L = {
   email: { en: "Email (login)", rw: "Imeri", fr: "E-mail (connexion)" },
   password: { en: "Password", rw: "Ijambo ry'ibanga", fr: "Mot de passe" },
   tin: { en: "TIN / tax ID", rw: "TIN", fr: "N° contribuable (TIN)" },
+  shopNickname: {
+    en: "Shop nickname (optional)",
+    rw: "Izina ry'iduka (si ngombwa)",
+    fr: "Surnom du magasin (optionnel)",
+  },
 } satisfies Record<string, Tri>
 
 /** Buyer registration at `/register/buyer` (location labels reuse `L` where applicable). */
@@ -131,12 +136,22 @@ export const BUYER_UI = {
   riderMoto: { en: "Moto", rw: "Moto", fr: "Moto" },
 } satisfies Record<string, Tri>
 
-/** `/register/umuriro` — quick shop + pay (MoMo USSD) while logged in. */
+/** `/register/umuriro` — Quick Shop UI; Umuriro = flow name (drafts, not direct account_seller). */
 export const UMURIRO_UI = {
-  pageSubtitle: {
-    en: "Save a shop & pay (Umuriro)",
-    rw: "Bika iduka ukishyure (Umuriro)",
-    fr: "Enregistrer une boutique et payer",
+  pageTitle: {
+    en: "Quick Shop",
+    rw: "Quick Shop",
+    fr: "Quick Shop",
+  },
+  payWithMomo: {
+    en: "Pay with MoMo",
+    rw: "Ishyura na MoMo",
+    fr: "Payer avec MoMo",
+  },
+  dialMomo: {
+    en: "Dial",
+    rw: "Hamagara",
+    fr: "Composer",
   },
   cardTitle: {
     en: "Shop, Save, Pay",
@@ -204,12 +219,58 @@ export const UMURIRO_UI = {
     rw: "Byabitswe. Hamagara kode kuri telefoni.",
     fr: "Enregistré. Composez le code pour payer.",
   },
+  /** Shown when ONBOARDING_MYSQL_* is set and INSERT succeeded — data is in shop_onboarding_draft, not account_seller. */
+  savedDraftStored: {
+    en: "Stored in MySQL table shop_onboarding_draft (request id: {rid}).",
+    rw: "Byabitswe muri MySQL (shop_onboarding_draft, id: {rid}).",
+    fr: "Enregistré dans MySQL (shop_onboarding_draft, id : {rid}).",
+  },
+  /** Shown when MySQL env is missing or INSERT failed — not a CORS issue; configure Node → MySQL. */
+  savedEchoOnly: {
+    en:
+      "Not saved to MySQL yet. Set ONBOARDING_MYSQL_HOST, USER, PASSWORD, DATABASE in .env.local, run sql/shop_onboarding_draft.sql, restart Next. Umuriro writes drafts only (shop_onboarding_draft), not account_seller.",
+    rw:
+      "Ntibitswe muri MySQL. Shyiraho ONBOARDING_MYSQL_* muri .env.local, koresha sql/shop_onboarding_draft.sql, ongera utangire Next. Umuriro ibika muri shop_onboarding_draft, atari account_seller.",
+    fr:
+      "Pas encore enregistré en MySQL. Définissez ONBOARDING_MYSQL_* dans .env.local, exécutez sql/shop_onboarding_draft.sql, redémarrez Next. Umuriro écrit les brouillons (shop_onboarding_draft), pas account_seller.",
+  },
   loginRequired: {
     en: "Sign in to save shops to your account.",
     rw: "Injira kugira ngo ubike amaduka ku konti yawe.",
     fr: "Connectez-vous pour enregistrer.",
   },
   signIn: { en: "Sign in", rw: "Injira", fr: "Connexion" },
+  modeQuick: { en: "Quick", rw: "Byihuse", fr: "Rapide" },
+  modeAdvanced: { en: "Advanced", rw: "Buruzuye", fr: "Complet" },
+  saveOrder: { en: "Save order", rw: "Bika komande", fr: "Enregistrer la commande" },
+  orderSentQuick: {
+    en: "Order sent. We received your request — complete payment on your phone when ready.",
+    rw: "Komande yoherejwe. Twakiriye — ishure kuri telefoni iyo ubasha.",
+    fr: "Commande envoyée. Paiement MoMo sur votre téléphone quand vous voulez.",
+  },
+  orderSentAdvanced: {
+    en: "Order saved. Track it under My orders.",
+    rw: "Komande yabitswe. Ireba mu komande zawe.",
+    fr: "Commande enregistrée. Suivez-la dans Mes commandes.",
+  },
+  trackDialogTitle: { en: "Your order space", rw: "Ahantu hawe", fr: "Espace commande" },
+  trackDialogBody: {
+    en: "Signed in as your Ihute account. Open My orders to follow status.",
+    rw: "Winjiye ku konti yawe ya Ihute. Fungura komande zawe urebe uko bigenda.",
+    fr: "Connecté avec votre compte Ihute. Ouvrez Mes commandes pour le suivi.",
+  },
+  goToMyOrders: { en: "Go to My orders", rw: "Kuri komande zanjye", fr: "Mes commandes" },
+  needBuyerAccount: {
+    en: "Need a buyer account?",
+    rw: "Ukeneye konti y'umuguzi?",
+    fr: "Besoin d’un compte acheteur ?",
+  },
+  createBuyer: { en: "Create buyer account", rw: "Kora konti y'umuguzi", fr: "Créer un compte acheteur" },
+  savedEchoShort: {
+    en: "Draft not in MySQL (set ONBOARDING_MYSQL_*).",
+    rw: "Ntago byabitswe muri MySQL (shyiraho ONBOARDING_MYSQL_*).",
+    fr: "Brouillon absent de MySQL (ONBOARDING_MYSQL_*).",
+  },
 } satisfies Record<string, Tri>
 
 /** Page chrome (header subtitle + steps). */

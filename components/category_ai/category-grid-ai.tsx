@@ -50,7 +50,7 @@ async function fetchSectorTotals(sectorId: string): Promise<SectorTotals> {
   const sid = sectorId.trim().toLowerCase()
   if (!sid) return { shops: 0, items: 0 }
   const fromStats = await fetchSectorStatsFromApi(sid)
-  if (fromStats) return fromStats
+  if (fromStats.shops > 0 || fromStats.items > 0) return fromStats
   const url = `/api/sector-list-suppliers?sector=${encodeURIComponent(sid)}&Currency=RWF&limit=${LIST_SUPPLIERS_LIMIT}`
   const r = await fetch(url, { cache: "no-store" })
   const parsed = r.ok ? await r.json().catch(() => []) : []

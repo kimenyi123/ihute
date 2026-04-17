@@ -30,6 +30,8 @@ async function persistPayload(body: unknown): Promise<boolean> {
 
 export type UmuriroPayload = {
   kind: "umuriro"
+  /** `quick` = minimal line; `advanced` = category + catalog search + track dialog. */
+  umuriroMode?: "quick" | "advanced"
   incompleteSeller: true
   savedBy: { email: string; name: string; phone: string }
   /** Creator + reserved 100 RWF ledger line (discount or fee — product rules). */

@@ -1,7 +1,6 @@
-"use client"
+import { redirect } from "next/navigation"
 
-import { RegisterAccountForm } from "@/components/register-account-form"
-
+/** Default signup is buyer onboarding; sellers and riders use `/register/seller` and `/register/rider`. */
 export default function RegisterPage() {
-  return <RegisterAccountForm />
+  redirect("/register/buyer")
 }

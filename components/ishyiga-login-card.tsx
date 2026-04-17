@@ -8,18 +8,31 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { PasswordInputWithToggle } from "@/components/password-input-with-toggle"
 import { loginWithCredentials } from "@/lib/auth-login-client"
 import type { User } from "@/lib/auth-store"
 import { cn } from "@/lib/utils"
 
-const defaultCardClass = "w-full border-blue-100/90 shadow-lg shadow-blue-950/5"
-const btnPrimary = "w-full bg-[#17324d] hover:bg-[#1e4260] text-white"
+const defaultCardClass =
+  "w-full rounded-2xl border border-[#dbe7f3] bg-white shadow-[0_8px_18px_rgba(24,151,224,.08)]"
+const btnPrimary =
+  "w-full rounded-xl bg-gradient-to-r from-[#1897e0] to-[#127fc0] hover:from-[#1589cc] hover:to-[#0f6ba3] text-white shadow-[0_4px_12px_rgba(24,151,224,.25)] border-0 h-11 font-semibold"
+
+/** Digits only count; Rwanda mobile typically 9–12 digits with or without country code. */
+function isValidPhoneLogin(raw: string): boolean {
+  const t = raw.trim()
+  if (!t || t.includes("@")) return false
+  const digits = t.replace(/\D/g, "")
+  return digits.length >= 9 && digits.length <= 15
+}
 
 export type IshyigaLoginCardProps = {
   title?: string
   description?: string
   submitLabel?: string
   /** When this string changes (e.g. sheet opens), phone field resets to it and password clears */
+  defaultPhone?: string
+  /** @deprecated Use `defaultPhone` */
   defaultPhoneOrEmail?: string
   registerHref?: string
   forgotHref?: string
@@ -30,32 +43,45 @@ export type IshyigaLoginCardProps = {
 
 export function IshyigaLoginCard({
   title = "Welcome back",
-  description = "Sign in with your phone number or email",
+  description = "Sign in with your phone number",
   submitLabel = "Sign in",
-  defaultPhoneOrEmail = "",
-  registerHref = "/register",
+  defaultPhone,
+  defaultPhoneOrEmail,
+  registerHref = "/register/buyer",
   forgotHref = "/forgot-password",
   showLogo = true,
   className,
   onSuccess,
 }: IshyigaLoginCardProps) {
-  const [phoneOrEmail, setPhoneOrEmail] = useState(defaultPhoneOrEmail)
+  const initialPhone = defaultPhone ?? defaultPhoneOrEmail ?? ""
+  const [phone, setPhone] = useState(initialPhone)
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    setPhoneOrEmail(defaultPhoneOrEmail)
+    setPhone(defaultPhone ?? defaultPhoneOrEmail ?? "")
     setPassword("")
     setError(null)
-  }, [defaultPhoneOrEmail])
+  }, [defaultPhone, defaultPhoneOrEmail])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setError(null)
     try {
-      const user = await loginWithCredentials(phoneOrEmail.trim(), password)
+      const id = phone.trim()
+      if (id.includes("@")) {
+        setError("Sign in with your phone number only, not email.")
+        setLoading(false)
+        return
+      }
+      if (!isValidPhoneLogin(id)) {
+        setError("Enter a valid phone number (e.g. 0788123456).")
+        setLoading(false)
+        return
+      }
+      const user = await loginWithCredentials(id, password)
       await onSuccess(user)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Network error")
@@ -79,20 +105,23 @@ export function IshyigaLoginCard({
           </div>
         ) : null}
         <CardTitle className="text-2xl text-[#17324d]">{title}</CardTitle>
-        <CardDescription>{description}</CardDescription>
+        <CardDescription className="text-[#6f8399]">{description}</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleLogin} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="ishyiga-login-phone">Phone or email</Label>
+            <Label htmlFor="ishyiga-login-phone" className="text-[#17324d]">
+              Phone number
+            </Label>
             <Input
               id="ishyiga-login-phone"
-              type="text"
+              type="tel"
               inputMode="tel"
-              autoComplete="username"
-              placeholder="e.g. 0788123456 or you@email.com"
-              value={phoneOrEmail}
-              onChange={(e) => setPhoneOrEmail(e.target.value)}
+              autoComplete="tel"
+              placeholder="e.g. 0788123456"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              className="border-[#dbe7f3] bg-white"
               required
             />
           </div>
@@ -103,9 +132,8 @@ export function IshyigaLoginCard({
                 Forgot?
               </Link>
             </div>
-            <Input
+            <PasswordInputWithToggle
               id="ishyiga-login-password"
-              type="password"
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
