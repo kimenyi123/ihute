@@ -49,6 +49,13 @@ export type Order = {
   amount?: number
   /** Seller display name (orders list page) */
   seller?: string
+  /** EBM/SDC response information */
+  timeSdc?: string
+  sdcId?: string
+  receiptNumber?: string
+  sdcInternalData?: string
+  receiptSignature?: string
+  internalData?: string
 }
 
 type OrdersState = {

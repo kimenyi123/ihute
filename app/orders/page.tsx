@@ -7,8 +7,11 @@ import { useAuthStore } from "@/lib/auth-store"
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
+import { SdcInfoCell } from "@/components/sdc-info-cell"
 import { useOrdersStore, type Order } from "@/lib/orders-store"
+import { Loader2 } from "lucide-react"
 import { mapBackendOrderStatusToStore } from "@/lib/order-status-map"
+import { useAuthPersistHydrated } from "@/lib/use-auth-persist-hydrated"
 
 type RawTxn = {
   ID_ORDER?: string
@@ -25,6 +28,12 @@ type RawTxn = {
   SELLER_TIN?: string
   subtotal?: number
   BUYER_ISHYIGA_ACCOUNT?: string
+  TIME_SDC?: string
+  SDC_ID?: string
+  RECEIPT_NUMBER?: string
+  SDC_INTERNAL_DATA?: string
+  RECEIPT_SIGNATURE?: string
+  INTERNAL_DATA?: string
 }
 
 function toIso(v?: number | string) {
@@ -98,6 +107,7 @@ export default function OrdersPage() {
   const router = useRouter()
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
   const user = useAuthStore((s) => s.user)
+  const authHydrated = useAuthPersistHydrated()
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
 
@@ -109,12 +119,13 @@ export default function OrdersPage() {
   const setOrders = useOrdersStore((s) => s.setOrders)
 
   useEffect(() => {
+    if (!authHydrated) return
     if (!isAuthenticated) router.push("/login")
-  }, [isAuthenticated, router])
+  }, [authHydrated, isAuthenticated, router])
 
   useEffect(() => {
     async function load() {
-      if (!user?.email) return
+      if (!authHydrated || !isAuthenticated || !user?.email) return
 
       setLoading(true)
       setErr(null)
@@ -157,6 +168,12 @@ export default function OrdersPage() {
             subtotal: raw.subtotal ?? raw.AMOUNT ?? 0,
             buyerTIN: raw.buyerTIN || raw.BUYER_TIN || "",
             supplierTIN: raw.SUPPLIER_TIN || raw.SELLER_TIN || "",
+            timeSdc: raw.TIME_SDC || "",
+            sdcId: raw.SDC_ID || "",
+            receiptNumber: raw.RECEIPT_NUMBER || "",
+            sdcInternalData: raw.SDC_INTERNAL_DATA || "",
+            receiptSignature: raw.RECEIPT_SIGNATURE || "",
+            internalData: raw.INTERNAL_DATA || "",
           }))
 
           setOrders(finalOrders)
@@ -170,7 +187,7 @@ export default function OrdersPage() {
     }
 
     load()
-  }, [user?.email, page, pageSize, setOrders, user?.owner])
+  }, [authHydrated, isAuthenticated, user?.email, page, pageSize, setOrders, user?.owner])
 
   const filteredOrders = useMemo(() => {
     if (!search) return orders
@@ -200,6 +217,19 @@ export default function OrdersPage() {
     for (let n = start; n <= end; n++) buttons.push(n)
     return buttons
   }, [page, totalPages])
+
+  if (!authHydrated) {
+    return (
+      <div className="min-h-screen w-full flex flex-col bg-gray-50">
+        <Header />
+        <main className="flex-1 flex flex-col items-center justify-center gap-2 text-gray-600">
+          <Loader2 className="h-8 w-8 animate-spin" aria-hidden />
+          <p className="text-sm">Checking session…</p>
+        </main>
+        <Footer />
+      </div>
+    )
+  }
 
   if (!isAuthenticated) return null
 
@@ -243,6 +273,7 @@ export default function OrdersPage() {
                   <th className="px-4 py-3 border">Amount</th>
                   <th className="px-4 py-3 border">Status</th>
                   <th className="px-4 py-3 border">Date</th>
+                  <th className="px-4 py-3 border">SDC Info</th>
                   <th className="px-4 py-3 border">Action</th>
                 </tr>
               </thead>
@@ -266,6 +297,9 @@ export default function OrdersPage() {
                     </td>
                     <td className="px-4 py-3 border">
                       {new Date(o.createdAt).toLocaleString()}
+                    </td>
+                    <td className="px-4 py-3 border align-middle">
+                      <SdcInfoCell order={o} />
                     </td>
                     <td className="px-4 py-3 border flex gap-2">
                       <Button

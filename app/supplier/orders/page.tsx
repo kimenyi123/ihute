@@ -13,6 +13,7 @@ import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Search, RotateCw, Calendar } from "lucide-react"
+import { SdcInfoCell, sdcRaw } from "@/components/sdc-info-cell"
 
 // ===========================================
 // Constants
@@ -351,6 +352,12 @@ export default function SupplierOrdersPage() {
             pickAnyNum(t, "CONFIRMED_RECEIVED_QTY", "SERVED_QTY", "servedQty", "SERVED_QUANTITY", "received_quantity") ?? 0,
           orderNote:
             pickAnyStr(t, "CONDITIONS", "ORDER_NOTE", "orderNote", "NOTE") || "",
+          internalData: pickAnyStr(t, "INTERNAL_DATA", "internal_data"),
+          timeSdc: pickAnyStr(t, "TIME_SDC", "time_sdc", "SDC_TIME", "sdc_time"),
+          sdcId: pickAnyStr(t, "SDC_ID", "sdc_id"),
+          receiptNumber: pickAnyStr(t, "RECEIPT_NUMBER", "receipt_number"),
+          sdcInternalData: pickAnyStr(t, "SDC_INTERNAL_DATA", "sdc_internal_data"),
+          receiptSignature: pickAnyStr(t, "RECEIPT_SIGNATURE", "receipt_signature"),
         }
       })
 
@@ -449,6 +456,11 @@ export default function SupplierOrdersPage() {
       "Served Amount",
       "Status",
       "Date",
+      "TIME_SDC",
+      "SDC_ID",
+      "RECEIPT_NUMBER",
+      "SDC_INTERNAL_DATA",
+      "RECEIPT_SIGNATURE",
     ]
     const values = [
       String(order.id ?? ""),
@@ -458,6 +470,11 @@ export default function SupplierOrdersPage() {
       String(Number(order.servedAmount ?? 0)),
       String(order.status ?? ""),
       String(order.createdAt ?? ""),
+      sdcRaw(order.timeSdc) === "N/A" ? "" : String(order.timeSdc).trim(),
+      sdcRaw(order.sdcId) === "N/A" ? "" : String(order.sdcId).trim(),
+      sdcRaw(order.receiptNumber) === "N/A" ? "" : String(order.receiptNumber).trim(),
+      sdcRaw(order.sdcInternalData) === "N/A" ? "" : String(order.sdcInternalData).trim(),
+      sdcRaw(order.receiptSignature) === "N/A" ? "" : String(order.receiptSignature).trim(),
     ]
     const esc = (v: string) => `"${v.replace(/"/g, '""')}"`
     const csv = `${fields.map(esc).join(",")}\n${values.map(esc).join(",")}\n`
@@ -658,7 +675,7 @@ export default function SupplierOrdersPage() {
         </div>
 
         <div className="rounded-lg border bg-white overflow-x-auto">
-          <Table className="min-w-[1000px]">
+          <Table className="min-w-[1150px]">
             <TableHeader>
               <TableRow>
                 <TableHead>Order #</TableHead>
@@ -666,6 +683,7 @@ export default function SupplierOrdersPage() {
                 <TableHead>Company</TableHead>
                 <TableHead>Served Amount</TableHead>
                 <TableHead>Date</TableHead>
+                <TableHead>SDC Info</TableHead>
                 <TableHead>Total</TableHead>
                 <TableHead>Payment</TableHead>
                 <TableHead>Status</TableHead>
@@ -675,7 +693,7 @@ export default function SupplierOrdersPage() {
             <TableBody>
               {!loading && !err && pagedOrders.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
                     {orders.length === 0
                       ? "No orders yet. Orders from customers will appear here."
                       : "No orders match your search or filters. Try different criteria."}
@@ -698,6 +716,9 @@ export default function SupplierOrdersPage() {
                     <TableCell>{(order as any).buyerOwner || "—"}</TableCell>
                     <TableCell>{Number((order as any).servedAmount ?? 0).toLocaleString()} RWF</TableCell>
                     <TableCell>{formatOrderDate(order.createdAt)}</TableCell>
+                    <TableCell className="align-middle">
+                      <SdcInfoCell order={order} />
+                    </TableCell>
                     <TableCell>{order.subtotal.toLocaleString()} RWF</TableCell>
                     <TableCell>{order.paymentStatus}</TableCell>
                     <TableCell>

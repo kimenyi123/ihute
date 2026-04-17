@@ -66,16 +66,14 @@ export function SessionProvider({ children }: SessionProviderProps) {
     run()
   }, [isAuthenticated, user?.email, hasHydrated, favorites, setFavorites])
 
-  // Session tracking without activity extension (fixed 60-minute timeout)
+  // Extend sliding session window on real user activity (60 min from last activity)
   useEffect(() => {
     if (!isAuthenticated) return
 
-    // Events that indicate user activity (for tracking only, not extending session)
     const activityEvents = ['mousedown', 'keydown', 'scroll', 'touchstart', 'click']
 
     const handleActivity = () => {
-      // Activity tracking only - session timeout is fixed at 60 minutes
-      console.log('[Session] User activity detected (timeout remains 60 minutes)')
+      useAuthStore.getState().touchSession()
     }
 
     // Add event listeners
