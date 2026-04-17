@@ -14,8 +14,7 @@ interface Props {
 export function KioskCartPanel({ open, onOpenChange }: Props) {
   const router = useRouter()
   const items = useCartStore((s) => s.items)
-  const inc = useCartStore((s) => s.inc)
-  const dec = useCartStore((s) => s.dec)
+  const setQty = useCartStore((s) => s.setQty)
   const remove = useCartStore((s) => s.remove)
   const getTotalPrice = useCartStore((s) => s.getTotalPrice)
 
@@ -56,29 +55,22 @@ export function KioskCartPanel({ open, onOpenChange }: Props) {
                   </div>
                 </div>
                 <div className="flex flex-col items-end gap-2">
-                  <div className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900/80">
-                    <Button
-                      type="button"
-                      size="icon-sm"
-                      variant="ghost"
-                      className="rounded-full"
-                      onClick={() => dec(line.id, line.selectedUnit)}
-                    >
-                      −
-                    </Button>
-                    <span className="w-8 text-center text-sm font-semibold tabular-nums">
-                      {line.qty}
-                    </span>
-                    <Button
-                      type="button"
-                      size="icon-sm"
-                      variant="ghost"
-                      className="rounded-full"
-                      onClick={() => inc(line.id, line.selectedUnit)}
-                    >
-                      +
-                    </Button>
-                  </div>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={line.qty}
+                    onChange={(e) => {
+                      const parsed = Number.parseInt(e.target.value, 10)
+                      if (Number.isFinite(parsed)) setQty(line.id, parsed, line.selectedUnit)
+                    }}
+                    onBlur={(e) => {
+                      const parsed = Number.parseInt(e.target.value, 10)
+                      setQty(line.id, Number.isFinite(parsed) ? parsed : line.qty, line.selectedUnit)
+                    }}
+                    className="w-16 rounded-md border border-slate-700 bg-slate-900/80 px-2 py-1 text-center text-sm font-semibold tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                    aria-label="Quantity"
+                  />
                   <button
                     type="button"
                     onClick={() => remove(line.id, line.selectedUnit)}

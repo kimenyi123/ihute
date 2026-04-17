@@ -94,6 +94,7 @@ type CartState = {
   addOrInc: (item: Omit<CartItem, "qty">, qty?: number) => void
   inc: (id: string, selectedUnit?: string, lineSignature?: string) => void
   dec: (id: string, selectedUnit?: string, lineSignature?: string) => void
+  setQty: (id: string, qty: number, selectedUnit?: string, lineSignature?: string) => void
   remove: (id: string, selectedUnit?: string, lineSignature?: string) => void
   clear: () => void
   clearCart: () => void
@@ -384,6 +385,18 @@ export const useCartStore = create<CartState>()(
             const matchSig = (lineSignature ?? "") === (sig || "")
             if (x.id === id && x.selectedUnit === selectedUnit && matchSig) {
               return { ...x, qty: Math.max(1, x.qty - 1) } // clamp at 1; use remove() to drop
+            }
+            return x
+          }),
+        })),
+
+      setQty: (id, qty, selectedUnit, lineSignature) =>
+        set((s) => ({
+          items: s.items.map((x) => {
+            const sig = x.lineSignature ?? prescriptionLineKey({ erx: x.erx, notes: x.notes })
+            const matchSig = (lineSignature ?? "") === (sig || "")
+            if (x.id === id && x.selectedUnit === selectedUnit && matchSig) {
+              return { ...x, qty: Math.max(1, Math.floor(Number(qty) || 1)) }
             }
             return x
           }),

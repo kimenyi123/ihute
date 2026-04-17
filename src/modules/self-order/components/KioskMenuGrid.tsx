@@ -450,25 +450,22 @@ function ItemExpandPanel({
 
       {/* Qty + Add to Cart */}
       <div className="flex items-center gap-3 px-4 pb-4 pt-3 border-t border-gray-100">
-        <div className="flex items-center border-2 border-gray-200 rounded-xl overflow-hidden">
-          <button
-            type="button"
-            className="w-10 h-10 flex items-center justify-center text-gray-700 hover:bg-gray-50 font-bold text-xl"
-            onClick={() => setQty((q) => Math.max(1, q - 1))}
-          >
-            −
-          </button>
-          <span className="px-4 font-bold text-gray-900 min-w-[3rem] text-center text-lg">
-            {qty}
-          </span>
-          <button
-            type="button"
-            className="w-10 h-10 flex items-center justify-center text-gray-700 hover:bg-gray-50 font-bold text-xl"
-            onClick={() => setQty((q) => q + 1)}
-          >
-            +
-          </button>
-        </div>
+        <input
+          type="number"
+          min={1}
+          step={1}
+          value={qty}
+          onChange={(e) => {
+            const parsed = Number.parseInt(e.target.value, 10)
+            if (Number.isFinite(parsed)) setQty(Math.max(1, parsed))
+          }}
+          onBlur={(e) => {
+            const parsed = Number.parseInt(e.target.value, 10)
+            setQty(Number.isFinite(parsed) ? Math.max(1, parsed) : 1)
+          }}
+          className="w-20 h-10 rounded-xl border-2 border-gray-200 bg-white px-2 text-center font-bold text-gray-900 text-lg [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          aria-label="Quantity"
+        />
         <button
           type="button"
           className="flex-1 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl py-3 text-base transition shadow-lg"
@@ -560,7 +557,7 @@ function CartSidebar({
   cartHref: string
 }) {
   const router = useRouter()
-  const { items, remove, inc, dec } = useCartStore()
+  const { items, remove, setQty } = useCartStore()
   const total = items.reduce((s, i) => s + i.price * (i.qty ?? 0), 0)
 
   return (
@@ -602,21 +599,22 @@ function CartSidebar({
                 <p className="font-semibold text-sm text-gray-900 line-clamp-2">{ci.name}</p>
                 <p className="text-red-600 font-bold text-sm mt-0.5">{formatPrice(ci.price)}</p>
                 <div className="flex items-center gap-2 mt-2">
-                  <button
-                    type="button"
-                    className="w-7 h-7 rounded-full border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50"
-                    onClick={() => dec(ci.id, ci.selectedUnit)}
-                  >
-                    <Minus className="w-3 h-3" />
-                  </button>
-                  <span className="text-sm font-semibold min-w-[1.5rem] text-center">{ci.qty}</span>
-                  <button
-                    type="button"
-                    className="w-7 h-7 rounded-full border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50"
-                    onClick={() => inc(ci.id, ci.selectedUnit)}
-                  >
-                    <Plus className="w-3 h-3" />
-                  </button>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={ci.qty}
+                    onChange={(e) => {
+                      const parsed = Number.parseInt(e.target.value, 10)
+                      if (Number.isFinite(parsed)) setQty(ci.id, parsed, ci.selectedUnit)
+                    }}
+                    onBlur={(e) => {
+                      const parsed = Number.parseInt(e.target.value, 10)
+                      setQty(ci.id, Number.isFinite(parsed) ? parsed : ci.qty, ci.selectedUnit)
+                    }}
+                    className="w-14 h-7 rounded-md border border-gray-300 px-1 text-center text-sm font-semibold [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                    aria-label="Quantity"
+                  />
                 </div>
               </div>
               <button

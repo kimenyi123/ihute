@@ -2596,6 +2596,12 @@ export default function GrandmaPage() {
     })
   }
 
+  const setQtyDirect = (id: number, nextQty: number) => {
+    const safeQty = Math.max(0, Math.floor(Number(nextQty) || 0))
+    setProducts((prev) => prev.map((p) => (p.id === id ? { ...p, qty: safeQty } : p)))
+    setApiProducts((prev) => prev.map((p) => (p.id === id ? { ...p, qty: safeQty } : p)))
+  }
+
   useEffect(() => {
     if (typeof window === "undefined") return
     try {
@@ -2996,8 +3002,8 @@ export default function GrandmaPage() {
         .p-name{font-size:16px;font-weight:700;}
         .p-price{margin-top:4px;color:var(--muted);font-size:14px;}
         .qty{display:flex;align-items:center;gap:8px;background:#f1f8ff;border-radius:12px;padding:6px;}
-        .qty button{width:30px;height:30px;border:none;border-radius:9px;background:#d8edfb;color:var(--blue-dark);font-size:20px;cursor:pointer;}
-        .qty span{min-width:18px;text-align:center;font-weight:700;}
+        .qty input{width:72px;height:32px;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--text);font-weight:700;text-align:center;padding:0 6px;outline:none;}
+        .qty input:focus{border-color:var(--blue);box-shadow:0 0 0 2px rgba(24,151,224,.16);}
         .bottom-bar{position:sticky;bottom:74px;margin-top:12px;background:linear-gradient(90deg,var(--blue),var(--blue-dark));color:#fff;border-radius:16px;padding:14px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-weight:700;box-shadow:0 10px 20px rgba(24,151,224,.22);cursor:pointer;}
         .bottom-bar:active{transform:scale(.995);}
         .bottom-bar-left{display:flex;align-items:center;gap:8px;}
@@ -3812,11 +3818,21 @@ export default function GrandmaPage() {
                       {o.shopDistanceKm.toFixed(1)} km
                     </div>
                   </div>
-                  <div className="qty" aria-label="Add to cart">
-                    <button onClick={(e) => { e.stopPropagation(); if (o.shopId) setSelectedShopId(o.shopId); changeQty(o.productId, 1) }} aria-label="Add">
-                      +
-                    </button>
-                    <span> </span>
+                  <div className="qty" aria-label="Set quantity">
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={Math.max(0, products.find((p) => p.id === o.productId)?.qty ?? 0)}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => {
+                        e.stopPropagation()
+                        if (o.shopId) setSelectedShopId(o.shopId)
+                        const parsed = Number.parseInt(e.target.value, 10)
+                        if (Number.isFinite(parsed)) setQtyDirect(o.productId, parsed)
+                      }}
+                      aria-label="Quantity"
+                    />
                   </div>
                 </div>
               ))
@@ -3846,13 +3862,17 @@ export default function GrandmaPage() {
                     <div className="p-price">{formatRwf(p.price)}</div>
                   </div>
                   <div className="qty">
-                    <button onClick={() => changeQty(p.id, -1)} aria-label="Decrease">
-                      −
-                    </button>
-                    <span>{p.qty}</span>
-                    <button onClick={() => changeQty(p.id, 1)} aria-label="Increase">
-                      +
-                    </button>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={p.qty}
+                      onChange={(e) => {
+                        const parsed = Number.parseInt(e.target.value, 10)
+                        if (Number.isFinite(parsed)) setQtyDirect(p.id, parsed)
+                      }}
+                      aria-label={`Quantity for ${p.name}`}
+                    />
                   </div>
                 </div>
               ))}

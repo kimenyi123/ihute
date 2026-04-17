@@ -28,7 +28,7 @@ export function getBackendBase(): string {
   if (explicit && String(explicit).trim()) {
     raw = noTrailingSlash(String(explicit).trim())
   } else if (process.env.NODE_ENV === "development") {
-    raw = "http://127.0.0.1:8080/trading_ai"
+    raw = "https://ihute.rw/trading_ai/"
   } else {
     raw = "https://ihute.rw/Trading"
   }
