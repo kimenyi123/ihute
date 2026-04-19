@@ -124,6 +124,26 @@ export const usePriceWatchStore = create<PriceWatchState>()(
 
       removeAll: () => set({ watched: [] }),
     }),
-    { name: "ihute-price-watch", version: 2 }
+    {
+      name: "ihute-price-watch",
+      version: 2,
+      partialize: (state) => ({
+        watched: state.watched,
+        autoRemoveAfterPurchase: state.autoRemoveAfterPurchase,
+      }),
+      migrate: (persistedState) => {
+        const p = persistedState as {
+          watched?: unknown
+          autoRemoveAfterPurchase?: unknown
+        } | null
+        if (!p || typeof p !== "object") {
+          return { watched: [] as WatchedItem[], autoRemoveAfterPurchase: false }
+        }
+        return {
+          watched: Array.isArray(p.watched) ? (p.watched as WatchedItem[]) : [],
+          autoRemoveAfterPurchase: p.autoRemoveAfterPurchase === true,
+        }
+      },
+    }
   )
 )

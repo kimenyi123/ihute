@@ -48,7 +48,7 @@ export default function BuyerLayout({ children }: { children: React.ReactNode })
   const buyerNav: NavItem[] = [
     { name: "Dashboard", href: "/buyer/dashboard", icon: LayoutDashboard },
     { name: "Order Reports", href: "/buyer/orders", icon: ShoppingBag },
-    { name: "Umusada upload", href: "/buyer/umusada/upload", icon: FileSpreadsheet },
+    // { name: "Umusada upload", href: "/buyer/umusada/upload", icon: FileSpreadsheet },
   ]
 
   const shopNav: NavItem[] = [

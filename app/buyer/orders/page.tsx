@@ -12,6 +12,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Header } from "@/components/header"
+import { Footer } from "@/components/footer"
 import { SdcInfoCell, sdcRaw } from "@/components/sdc-info-cell"
 import { Loader2 } from "lucide-react"
 import { ResponsiveTable } from "@/components/ui/responsive-table"
@@ -582,7 +584,6 @@ export default function BuyerOrdersPage() {
                         >
                           Financing
                         </Button>
-                      </div>
                     </td>
                   </tr>
                 ))}
