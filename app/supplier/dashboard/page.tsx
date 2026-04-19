@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { LanguageSelector } from "@/components/language-selector";
 import { useAuthStore } from "@/lib/auth-store";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,6 +38,8 @@ import {
   Share2,
   Copy,
   User,
+  Smartphone,
+  ArrowRight,
 } from "lucide-react";
 import Link from "next/link";
 import AddProductModal, { ProductFormData } from "@/components/supplier/AddProductModal";
@@ -82,6 +85,17 @@ function formatSupplierProductLastSync(p: Record<string, unknown>): string {
 
 const QRCode = dynamic(() => import("react-qr-code"), { ssr: false });
 
+type TopupPeriodParam = 30 | 90 | "all";
+
+type TopupSummary = {
+  topupSalesTotal: number;
+  topupLineCount: number;
+  topupOrdersCount: number;
+  period: "all" | "range";
+  rangeDays: number | null;
+  ordersScanned: number;
+};
+
 function SupplierDashboard() {
   const router = useRouter();
   const { user, isAuthenticated, logout } = useAuthStore();
@@ -113,6 +127,10 @@ function SupplierDashboard() {
     dailyOrdersCount: number;
     bestSelling: Array<{ name: string; quantity: number; total: number }>;
   } | null>(null);
+  const [topup, setTopup] = useState<TopupSummary | null>(null);
+  const [topupLoading, setTopupLoading] = useState(false);
+  const [topupErr, setTopupErr] = useState<string | null>(null);
+  const [topupPeriod, setTopupPeriod] = useState<TopupPeriodParam>(30);
   const [bulkPriceOpen, setBulkPriceOpen] = useState(false);
   const [bulkPriceSelected, setBulkPriceSelected] = useState<Set<string>>(new Set());
   const [bulkPricePercent, setBulkPricePercent] = useState("");
@@ -351,6 +369,54 @@ function SupplierDashboard() {
     }
   }, [user?.ishyigaAccount, user?.role])
 
+  useEffect(() => {
+    if (!user?.ishyigaAccount || user?.role !== "supplier") return;
+
+    let cancelled = false;
+    setTopupLoading(true);
+    setTopupErr(null);
+
+    const daysQ = topupPeriod === "all" ? "all" : String(topupPeriod);
+    fetch(
+      `/api/supplier/topup-sales?account=${encodeURIComponent(user.ishyigaAccount)}&days=${daysQ}`,
+      { cache: "no-store" }
+    )
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (!data?.ok) {
+          setTopupErr(data?.error || "Could not load top-up summary");
+          setTopup(null);
+          return;
+        }
+        const period = data.period === "all" ? "all" : "range";
+        const rangeDays =
+          period === "all"
+            ? null
+            : typeof data.rangeDays === "number" && !Number.isNaN(data.rangeDays)
+              ? data.rangeDays
+              : Number(data.days) || 30;
+        setTopup({
+          topupSalesTotal: Number(data.topupSalesTotal) || 0,
+          topupLineCount: Number(data.topupLineCount) || 0,
+          topupOrdersCount: Number(data.topupOrdersCount) || 0,
+          period,
+          rangeDays,
+          ordersScanned: Number(data.ordersScanned) || 0,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setTopupErr("Could not load top-up summary");
+      })
+      .finally(() => {
+        if (!cancelled) setTopupLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.ishyigaAccount, user?.role, topupPeriod]);
+
   const handleLogout = () => {
     logout();
     router.push("/");
@@ -480,9 +546,9 @@ function SupplierDashboard() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-b-2 border-blue-600"></div>
           <p className="text-slate-600">Loading products...</p>
         </div>
       </div>
@@ -491,7 +557,7 @@ function SupplierDashboard() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100">
         <Card className="max-w-md">
           <CardHeader>
             <CardTitle className="text-red-600">Error</CardTitle>
@@ -508,116 +574,178 @@ function SupplierDashboard() {
   }
 
   return (
-    <div className="min-h-0 bg-gradient-to-br from-slate-50 to-slate-100">
+    <div className="min-h-0 bg-gradient-to-br from-slate-50 to-slate-100 text-slate-900">
       {/* Header */}
-      <header className="bg-white border-b shadow-sm">
-        <div className="container mx-auto px-4 sm:px-6 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0 hidden lg:block">
-            <h1 className="text-2xl font-bold text-slate-900">
-              {user?.businessName || "Supplier Dashboard"}
-            </h1>
-            <p className="text-sm text-slate-600 break-words">
-              {user?.businessCategory || "Supplier Panel"} • Account: {user?.ishyigaAccount}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="ghost" asChild className="gap-2">
-              <Link href="/account">
-                <User className="h-4 w-4" />
-                My profile
-              </Link>
-            </Button>
-            {user?.dualPharmacyRetail && (
+      <header className="border-b border-slate-200 bg-white shadow-sm">
+        <div className="container mx-auto space-y-4 px-4 py-4 sm:px-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <h1 className="text-2xl font-bold text-slate-900">
+                {user?.businessName || "Supplier Dashboard"}
+              </h1>
+              <p className="break-words text-sm text-slate-600">
+                {user?.businessCategory || "Supplier Panel"} • Account: {user?.ishyigaAccount}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <LanguageSelector />
               <Button variant="ghost" asChild className="gap-2">
-                <Link href="/buyer/orders">
-                  <Package className="h-4 w-4" />
-                  My purchases
+                <Link href="/account">
+                  <User className="h-4 w-4" />
+                  My profile
                 </Link>
               </Button>
-            )}
-            <Button variant="outline" onClick={handleLogout} className="gap-2">
-              <LogOut className="h-4 w-4" />
-              Logout
-            </Button>
+              {user?.dualPharmacyRetail && (
+                <Button variant="ghost" asChild className="gap-2">
+                  <Link href="/buyer/orders">
+                    <Package className="h-4 w-4" />
+                    My purchases
+                  </Link>
+                </Button>
+              )}
+              <Button variant="outline" onClick={handleLogout} className="gap-2">
+                <LogOut className="h-4 w-4" />
+                Logout
+              </Button>
+            </div>
           </div>
+
+          {/* Top-up sales — top of page (header) so it stays visible above the fold */}
+          <Card className="border-2 border-emerald-200 bg-gradient-to-br from-emerald-50/90 to-white shadow-sm">
+            <CardHeader className="pb-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4 space-y-0">
+              <div className="space-y-1 min-w-0">
+                <CardTitle className="flex items-center gap-2 text-lg text-slate-900 ">
+                  <Smartphone className="h-6 w-6 shrink-0 text-emerald-600 " />
+                  Top-up sales
+                </CardTitle>
+                <CardDescription className="text-slate-600 ">
+                  Airtime, bundles, and similar lines on your orders
+                  {topup?.period === "all"
+                    ? " (all time, within scan limit)."
+                    : topup?.rangeDays != null
+                      ? ` (last ${topup.rangeDays} days).`
+                      : " (last 30 days)."}
+                </CardDescription>
+              </div>
+              <div className="flex flex-wrap gap-2 shrink-0 pt-1 sm:pt-0">
+                {([30, 90, "all"] as const).map((p) => (
+                  <Button
+                    key={String(p)}
+                    type="button"
+                    variant={topupPeriod === p ? "default" : "outline"}
+                    size="sm"
+                    className="h-8"
+                    onClick={() => setTopupPeriod(p)}
+                  >
+                    {p === "all" ? "All" : `${p}d`}
+                  </Button>
+                ))}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3 pt-0">
+              {topupLoading ? (
+                <p className="text-sm text-slate-500">Loading top-up summary…</p>
+              ) : topupErr ? (
+                <p className="text-sm text-red-600">{topupErr}</p>
+              ) : topup ? (
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <p className="text-3xl font-bold tabular-nums leading-tight text-emerald-900  sm:text-4xl">
+                      {topup.topupSalesTotal.toLocaleString()} RWF
+                    </p>
+                    <p className="mt-1 text-xs text-slate-600 ">
+                      {topup.topupOrdersCount} order{topup.topupOrdersCount === 1 ? "" : "s"} with top-up lines ·{" "}
+                      {topup.topupLineCount} line{topup.topupLineCount === 1 ? "" : "s"}
+                      {topup.ordersScanned > 0 ? ` · ${topup.ordersScanned} orders scanned` : ""}
+                      {topup.period === "all" ? " (capped for speed)" : ""}
+                    </p>
+                  </div>
+                  <Button variant="outline" size="sm" asChild className="gap-2 w-fit shrink-0">
+                    <Link href="/supplier/orders">
+                      View orders
+                      <ArrowRight className="h-4 w-4" />
+                    </Link>
+                  </Button>
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
         </div>
       </header>
 
       <div className="container mx-auto px-4 sm:px-6 py-6 sm:py-8">
-
-
         {/* Stats Section */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <Card className="bg-white shadow-md hover:shadow-lg transition-shadow">
+          <Card className="bg-card shadow-md transition-shadow hover:shadow-lg">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-slate-600">
+              <CardTitle className="text-sm font-medium text-slate-600 ">
                 Total Products
               </CardTitle>
-              <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
-                <Package className="h-5 w-5 text-blue-600" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 ">
+                <Package className="h-5 w-5 text-blue-600 " />
               </div>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold text-slate-900">
+              <div className="text-3xl font-bold text-slate-900 ">
                 {totalProducts}
               </div>
-              <p className="text-xs text-slate-500 mt-1">All products</p>
+              <p className="mt-1 text-xs text-slate-500 ">All products</p>
               {latestInventorySyncLabel != null && (
-                <p className="text-xs text-slate-500 mt-1.5 pt-1 border-t border-slate-100">
+                <p className="mt-1.5 border-t border-slate-100 pt-1 text-xs text-slate-500">
                   Last sync  {latestInventorySyncLabel}
                 </p>
               )}
             </CardContent>
           </Card>
 
-          <Card className="bg-white shadow-md hover:shadow-lg transition-shadow">
+          <Card className="bg-card shadow-md transition-shadow hover:shadow-lg">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-slate-600">
+              <CardTitle className="text-sm font-medium text-slate-600 ">
                 Inventory Value
               </CardTitle>
-              <div className="h-10 w-10 rounded-full bg-green-100 flex items-center justify-center">
-                <TrendingUp className="h-5 w-5 text-green-600" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-100 ">
+                <TrendingUp className="h-5 w-5 text-green-600 " />
               </div>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold text-slate-900">
+              <div className="text-3xl font-bold text-slate-900 ">
                 {totalValue.toLocaleString()} RWF
               </div>
-              <p className="text-xs text-slate-500 mt-1">Total stock value</p>
+              <p className="mt-1 text-xs text-slate-500 ">Total stock value</p>
             </CardContent>
           </Card>
 
-          <Card className="bg-white shadow-md hover:shadow-lg transition-shadow">
+          <Card className="bg-card shadow-md transition-shadow hover:shadow-lg">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-slate-600">
+              <CardTitle className="text-sm font-medium text-slate-600 ">
                 Low Stock Items
               </CardTitle>
-              <div className="h-10 w-10 rounded-full bg-yellow-100 flex items-center justify-center">
-                <AlertTriangle className="h-5 w-5 text-yellow-600" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-yellow-100 ">
+                <AlertTriangle className="h-5 w-5 text-yellow-600 " />
               </div>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold text-yellow-700">
+              <div className="text-3xl font-bold text-yellow-700 ">
                 {lowStock}
               </div>
-              <p className="text-xs text-slate-500 mt-1">Items below 10 units</p>
+              <p className="mt-1 text-xs text-slate-500 ">Items below 10 units</p>
             </CardContent>
           </Card>
 
-          <Card className="bg-white shadow-md hover:shadow-lg transition-shadow">
+          <Card className="bg-card shadow-md transition-shadow hover:shadow-lg">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-slate-600">
+              <CardTitle className="text-sm font-medium text-slate-600 ">
                 Out of Stock
               </CardTitle>
-              <div className="h-10 w-10 rounded-full bg-red-100 flex items-center justify-center">
-                <AlertTriangle className="h-5 w-5 text-red-600" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-red-100 ">
+                <AlertTriangle className="h-5 w-5 text-red-600 " />
               </div>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold text-red-700">
+              <div className="text-3xl font-bold text-red-700 ">
                 {outOfStock}
               </div>
-              <p className="text-xs text-slate-500 mt-1">Items with 0 stock</p>
+              <p className="mt-1 text-xs text-slate-500 ">Items with 0 stock</p>
             </CardContent>
           </Card>
         </div>
@@ -627,25 +755,25 @@ function SupplierDashboard() {
           const lowStockList = supplierProducts.filter((p) => p.stock <= 10 && p.stock > 0).slice(0, 5);
           if (lowStockList.length === 0) return null;
           return (
-            <Card className="bg-white shadow-md mb-6">
+            <Card className="mb-6 bg-card shadow-md">
               <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-yellow-700">Low stock alerts</CardTitle>
+                <CardTitle className="text-sm font-medium text-yellow-700 ">Low stock alerts</CardTitle>
                 <Button variant="ghost" size="sm" onClick={() => setStatusFilter("low")}>
                   View all ({lowStock})
                 </Button>
               </CardHeader>
               <CardContent>
-                <ul className="text-sm space-y-0 divide-y divide-slate-100">
+                <ul className="space-y-0 divide-y divide-slate-100 text-sm ">
                   {lowStockList.map((p) => (
                     <li
                       key={p.itemCode || p.ITEM_CODE}
-                      className="flex justify-between gap-3 items-start py-2 first:pt-0"
+                      className="flex items-start justify-between gap-3 py-2 first:pt-0"
                     >
                       <div className="min-w-0 flex-1">
-                        <span className="truncate block text-slate-900">
+                        <span className="block truncate text-slate-900 ">
                           {p.itemName || p.ITEM_NAME}
                         </span>
-                        <span className="text-xs text-slate-500 mt-0.5 block">
+                        <span className="mt-0.5 block text-xs text-slate-500 ">
                           Last sync: {formatSupplierProductLastSync(p as Record<string, unknown>)}
                         </span>
                       </div>
@@ -663,25 +791,25 @@ function SupplierDashboard() {
         {/* Daily sales & best-selling */}
         {analytics && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-            <Card className="bg-white shadow-md">
+            <Card className="bg-card shadow-md">
               <CardHeader>
-                <CardTitle className="text-sm font-medium text-slate-600">Today&apos;s sales</CardTitle>
+                <CardTitle className="text-sm font-medium text-slate-600 ">Today&apos;s sales</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-slate-900">
+                <div className="text-2xl font-bold text-slate-900 ">
                   {analytics.dailySalesTotal.toLocaleString()} RWF
                 </div>
-                <p className="text-xs text-slate-500 mt-1">{analytics.dailyOrdersCount} orders today</p>
+                <p className="mt-1 text-xs text-slate-500 ">{analytics.dailyOrdersCount} orders today</p>
               </CardContent>
             </Card>
-            <Card className="bg-white shadow-md">
+            <Card className="bg-card shadow-md">
               <CardHeader>
-                <CardTitle className="text-sm font-medium text-slate-600">Best selling</CardTitle>
+                <CardTitle className="text-sm font-medium text-slate-600 ">Best selling</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-xs text-slate-500 mb-2">{analytics.dailyOrdersCount} orders today</p>
+                <p className="mb-2 text-xs text-slate-500 ">{analytics.dailyOrdersCount} orders today</p>
                 {analytics.bestSelling.length === 0 ? (
-                  <p className="text-sm text-slate-500">No orders today</p>
+                  <p className="text-sm text-slate-500 ">No orders today</p>
                 ) : (
                   <ul className="text-sm space-y-1">
                     {analytics.bestSelling.slice(0, 5).map((item, i) => (
@@ -701,14 +829,14 @@ function SupplierDashboard() {
         )}
 
         {/* Shop With Me QR Code — collapsible so original dashboard stays primary */}
-        <Card className="bg-white shadow-md mb-8">
+        <Card className="mb-8 bg-card shadow-md">
           <CardHeader
-            className="border-b bg-slate-50 cursor-pointer hover:bg-slate-100 transition-colors select-none"
+            className="cursor-pointer select-none border-b bg-slate-50 transition-colors hover:bg-slate-100"
             onClick={() => setShopWithMeQROpen((o) => !o)}
           >
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <Share2 className="h-6 w-6 text-blue-600 shrink-0" />
+                <Share2 className="h-6 w-6 shrink-0 text-blue-600 " />
                 <div>
                   <CardTitle className="text-xl">QR Codes</CardTitle>
                   <CardDescription className="mt-1">
@@ -773,13 +901,13 @@ function SupplierDashboard() {
                 </div>
               )}
               {shopWithMeLink && (
-                <div className="flex flex-col sm:flex-row gap-4 items-start pt-4 border-t">
-                  <div className="bg-slate-50 p-4 rounded-lg">
+                <div className="flex flex-col items-start gap-4 border-t border-slate-200 pt-4  sm:flex-row">
+                  <div className="rounded-lg bg-slate-50 p-4 ">
                     <QRCode value={shopWithMeLink} size={180} />
                   </div>
-                  <div className="flex-1 min-w-0 space-y-2">
-                    <Label className="text-slate-600">Link (for customers)</Label>
-                    <p className="text-sm text-slate-700 break-all font-mono">{shopWithMeLink}</p>
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <Label className="text-slate-600 ">Link (for customers)</Label>
+                    <p className="break-all font-mono text-sm text-slate-700 ">{shopWithMeLink}</p>
                     <Button variant="outline" size="sm" onClick={copyShopWithMeLink} className="gap-2">
                       <Copy className="h-4 w-4" />
                       Copy link
@@ -790,16 +918,16 @@ function SupplierDashboard() {
 
               {/* Supplier: scan to open my orders (e.g. on phone) */}
               {supplierOrdersLink && (
-                <div className="flex flex-col sm:flex-row gap-4 items-start pt-6 mt-6 border-t">
-                  <div className="bg-slate-50 p-4 rounded-lg">
+                <div className="mt-6 flex flex-col items-start gap-4 border-t border-slate-200 pt-6  sm:flex-row">
+                  <div className="rounded-lg bg-slate-50 p-4 ">
                     <QRCode value={supplierOrdersLink} size={180} />
                   </div>
-                  <div className="flex-1 min-w-0 space-y-2">
-                    <Label className="text-slate-600">Scan to open your orders</Label>
-                    <p className="text-sm text-slate-700">
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <Label className="text-slate-600 ">Scan to open your orders</Label>
+                    <p className="text-sm text-slate-700 ">
                       Scan with your phone to open this link. Log in with your supplier account — you’ll be returned here to view only your orders.
                     </p>
-                    <p className="text-sm text-slate-500 break-all font-mono">{supplierOrdersLink}</p>
+                    <p className="break-all font-mono text-sm text-slate-500 ">{supplierOrdersLink}</p>
                     <Button
                       variant="outline"
                       size="sm"
@@ -819,9 +947,9 @@ function SupplierDashboard() {
         </Card>
 
         {/* Product Management Card */}
-        <Card className="bg-white shadow-md">
+        <Card className="bg-card shadow-md">
           <CardHeader className="border-b bg-slate-50">
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
                 <CardTitle className="text-xl">My Products</CardTitle>
                 <CardDescription className="mt-1">
@@ -865,11 +993,11 @@ function SupplierDashboard() {
             {/* Filters */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transform text-slate-400 " />
                 <input
                   type="text"
                   placeholder="Search by name..."
-                  className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full rounded-lg border border-slate-300 bg-background py-2 pl-10 pr-4 text-slate-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
                   value={searchTerm}
                   onChange={(e) => {
                     setSearchTerm(e.target.value);
@@ -879,7 +1007,7 @@ function SupplierDashboard() {
               </div>
 
               <select
-                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                className="w-full rounded-lg border border-slate-300 bg-background px-4 py-2 text-sm text-slate-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
                 value={categoryFilter}
                 onChange={(e) => {
                   setCategoryFilter(e.target.value);
@@ -895,7 +1023,7 @@ function SupplierDashboard() {
               </select>
 
               <select
-                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                className="w-full rounded-lg border border-slate-300 bg-background px-4 py-2 text-sm text-slate-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
                 value={statusFilter}
                 onChange={(e) => {
                   setStatusFilter(e.target.value);
@@ -926,50 +1054,50 @@ function SupplierDashboard() {
               </div>
             ) : (
               <>
-                <ResponsiveTable className="rounded-lg border border-slate-200" minWidth="1100px">
+                <ResponsiveTable className="rounded-lg border border-slate-200 " minWidth="1100px">
                   <table className="w-full">
-                    <thead className="bg-slate-100 border-b border-slate-200">
+                    <thead className="border-b border-slate-200 bg-slate-100">
                       <tr>
-                        <th className="text-left px-4 py-3 text-sm font-semibold text-slate-700">
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 ">
                           Product
                         </th>
-                        <th className="text-left px-4 py-3 text-sm font-semibold text-slate-700">
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 ">
                           Selling Price
                         </th>
-                        <th className="text-left px-4 py-3 text-sm font-semibold text-slate-700">
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 ">
                           Cost Price
                         </th>
-                        <th className="text-left px-4 py-3 text-sm font-semibold text-slate-700">
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 ">
                           Package
                         </th>
-                        <th className="text-left px-4 py-3 text-sm font-semibold text-slate-700">
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 ">
                           Batch
                         </th>
-                        <th className="text-left px-4 py-3 text-sm font-semibold text-slate-700 whitespace-nowrap">
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700  whitespace-nowrap">
                           Expiry
                         </th>
-                        <th className="text-center px-4 py-3 text-sm font-semibold text-slate-700">
+                        <th className="px-4 py-3 text-center text-sm font-semibold text-slate-700 ">
                           Stock
                         </th>
-                        <th className="text-left px-4 py-3 text-sm font-semibold text-slate-700 whitespace-nowrap">
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700  whitespace-nowrap">
                           Last sync
                         </th>
-                        <th className="text-center px-4 py-3 text-sm font-semibold text-slate-700">
+                        <th className="px-4 py-3 text-center text-sm font-semibold text-slate-700 ">
                           Status
                         </th>
-                        <th className="text-left px-4 py-3 text-sm font-semibold text-slate-700">
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 ">
                           Value
                         </th>
-                        <th className="text-left px-4 py-3 text-sm font-semibold text-slate-700">
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 ">
                           Image
                         </th>
-                        <th className="text-center px-4 py-3 text-sm font-semibold text-slate-700">
+                        <th className="px-4 py-3 text-center text-sm font-semibold text-slate-700 ">
                           Actions
                         </th>
                       </tr>
                     </thead>
 
-                    <tbody className="divide-y divide-slate-200">
+                    <tbody className="divide-y divide-slate-200 ">
                       {paginatedProducts.map((p, rowIndex) => {
                         const displayName = p.ITEM_NAME || p.itemName || "Unknown";
                         const displayCode = p.ITEM_CODE || p.itemCode || "";
@@ -997,24 +1125,24 @@ function SupplierDashboard() {
                         return (
                           <tr
                             key={uniqueKey}
-                            className="hover:bg-slate-50 transition-colors"
+                            className="transition-colors hover:bg-slate-50 "
                           >
                             <td className="px-4 py-4">
                               <div className="flex items-center gap-3">
-                                <div className="h-10 w-10 rounded-lg bg-slate-200 flex items-center justify-center">
-                                  <Package className="h-5 w-5 text-slate-500" />
+                                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-200 ">
+                                  <Package className="h-5 w-5 text-slate-500 " />
                                 </div>
                                 <div>
-                                  <p className="font-medium text-slate-900">
+                                  <p className="font-medium text-slate-900 ">
                                     {displayName}
                                   </p>
-                                  <p className="text-xs text-slate-500">{displayCode}</p>
+                                  <p className="text-xs text-slate-500 ">{displayCode}</p>
                                 </div>
                               </div>
                             </td>
                             <td className="px-4 py-4">
                               {displaySelling > 0 ? (
-                                <span className="font-medium text-slate-900 whitespace-nowrap">
+                                <span className="whitespace-nowrap font-medium text-slate-900 ">
                                   {displaySelling.toLocaleString()}{" "}
                                   {p.currency ?? "RWF"}
                                 </span>
@@ -1025,7 +1153,7 @@ function SupplierDashboard() {
                               )}
                             </td>
                             <td className="px-4 py-4">
-                              <span className="font-medium text-slate-900">
+                              <span className="font-medium text-slate-900 ">
                                 {displayCost.toLocaleString(undefined, {
                                   minimumFractionDigits: 1,
                                   maximumFractionDigits: 1,
@@ -1033,12 +1161,12 @@ function SupplierDashboard() {
                                 {p.currency ?? "RWF"}
                               </span>
                             </td>
-                            <td className="px-4 py-4 text-sm text-slate-700 max-w-[140px]">
+                            <td className="max-w-[140px] px-4 py-4 text-sm text-slate-700 ">
                               <span className="break-words" title={emballageDisplay}>
                                 {emballageDisplay}
                               </span>
                             </td>
-                            <td className="px-4 py-4 text-sm text-slate-700 max-w-[120px]">
+                            <td className="max-w-[120px] px-4 py-4 text-sm text-slate-700 ">
                               {batch ? (
                                 <span className="break-words font-mono text-xs" title={batch}>
                                   {batch}
@@ -1092,18 +1220,18 @@ function SupplierDashboard() {
                                     ? "text-red-600"
                                     : p.stock <= 10
                                     ? "text-yellow-600"
-                                    : "text-slate-900"
+                                    : "text-slate-900 "
                                 }`}
                               >
                                 {p.stock}
                               </span>
                             </td>
-                            <td className="px-4 py-4 text-sm text-slate-600 whitespace-nowrap tabular-nums">
+                            <td className="whitespace-nowrap px-4 py-4 text-sm tabular-nums text-slate-600 ">
                               {formatSupplierProductLastSync(p as Record<string, unknown>)}
                             </td>
                             <td className="px-4 py-4 text-center">
                               <span
-                                className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
+                                className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${
                                   p.stock === 0
                                     ? "bg-red-100 text-red-700"
                                     : p.stock <= 10
@@ -1116,7 +1244,7 @@ function SupplierDashboard() {
                             </td>
                             <td className="px-4 py-4">
                               {revenue > 0 ? (
-                                <span className="font-medium text-slate-900">
+                                <span className="font-medium text-slate-900 ">
                                   {revenue.toLocaleString()} RWF
                                 </span>
                               ) : (
@@ -1165,7 +1293,7 @@ function SupplierDashboard() {
                   <div className="flex items-center gap-2">
                     <span className="text-sm text-slate-600">Show</span>
                     <select
-                      className="px-3 py-1 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                      className="rounded-lg border border-slate-300 bg-background px-3 py-1 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       value={itemsPerPage}
                       onChange={(e) => {
                         setItemsPerPage(Number(e.target.value));
