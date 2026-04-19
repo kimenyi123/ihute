@@ -11,6 +11,7 @@ export type ApiLoginOK = {
   dbRole?: string
   dualPharmacyRetail?: boolean
   pharmacySector?: boolean
+  adminApiToken?: string
   user: { email: string; firstName: string; lastName: string; tel: string; location: string; owner: string }
 }
 
@@ -52,6 +53,10 @@ export function normalizeJavaLoginToUser(payload: ApiLoginOK): User {
   }
   const id = phone || email || ishyiga
   const displayEmail = email || (phone ? `${phone}@phone.local` : "")
+  const adminTok =
+    typeof (payload as { adminApiToken?: unknown }).adminApiToken === "string"
+      ? String((payload as { adminApiToken: string }).adminApiToken).trim()
+      : undefined
   return {
     id,
     email: displayEmail,
@@ -69,6 +74,7 @@ export function normalizeJavaLoginToUser(payload: ApiLoginOK): User {
     location: String(u.location ?? "").trim(),
     ishyigaAccount: payload.ishyiga || undefined,
     businessName: u.owner ? String(u.owner).trim() : undefined,
+    ...(adminTok ? { adminApiToken: adminTok } : {}),
   }
 }
 

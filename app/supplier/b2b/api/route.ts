@@ -3,10 +3,9 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getJavaSetCookieValues, rewriteForwardedSetCookie } from "@/lib/java-proxy-cookies";
+import { getServerProxyBackendBase } from "@/lib/backend-config";
 
-// For local development (default)
-const JAVA_BACKEND_BASE =
-  process.env.JAVA_BACKEND_BASE || "http://localhost:8080/Trading";
+const JAVA_BACKEND_BASE = getServerProxyBackendBase();
 
 // B2B servlet URL - JAVA_BACKEND_BASE already includes /Trading
 const B2B_SERVLET_URL = `${JAVA_BACKEND_BASE}/supplier/b2b/api`;

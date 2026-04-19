@@ -4,12 +4,13 @@ import { useMemo } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useCartStore } from "@/lib/cart-store"
 import { Trash2, ShoppingCart, ChevronLeft } from "lucide-react"
+import { KioskCartLineQty } from "@/src/modules/self-order/components/KioskCartLineQty"
+import { Trash2, ShoppingCart, ChevronLeft } from "lucide-react"
 
 export function KioskCartPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const items = useCartStore((s) => s.items)
-  const setQty = useCartStore((s) => s.setQty)
   const remove = useCartStore((s) => s.remove)
 
   const total = useMemo(
@@ -111,24 +112,12 @@ export function KioskCartPage() {
               </p>
             </div>
 
-            {/* Qty controls */}
+            {/* Qty */}
             <div className="flex flex-col items-end gap-2">
-              <input
-                type="number"
-                min={1}
-                step={1}
-                value={line.qty}
-                onChange={(e) => {
-                  const parsed = Number.parseInt(e.target.value, 10)
-                  if (Number.isFinite(parsed)) setQty(line.id, parsed, line.selectedUnit)
-                }}
-                onBlur={(e) => {
-                  const parsed = Number.parseInt(e.target.value, 10)
-                  setQty(line.id, Number.isFinite(parsed) ? parsed : line.qty, line.selectedUnit)
-                }}
-                className="w-16 rounded-xl border-2 border-gray-200 bg-white px-2 py-1 text-center text-sm font-bold tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                aria-label="Quantity"
-              />
+              <div className="flex flex-col items-end gap-1">
+                <span className="text-[10px] font-semibold text-slate-500">Qty</span>
+                <KioskCartLineQty line={line} />
+              </div>
               <button
                 type="button"
                 onClick={() => remove(line.id, line.selectedUnit)}

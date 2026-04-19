@@ -8,7 +8,7 @@ import { useCartStore, CartItem } from "@/lib/cart-store"
 import { parseErxFromNotes, prescriptionLineKey } from "@/lib/erx-prescription"
 import { Trash2 } from "lucide-react"
 import { getProductImageCandidates, isValidImageUrl, NO_IMAGE_URL } from "@/lib/image-utils"
-import { DEFAULT_CART_CURRENCY, displayUnitForPrice } from "@/lib/cart-display-utils"
+import { DEFAULT_CART_CURRENCY, itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
 
 const PLACEHOLDER = "/placeholder.svg?height=64&width=64"
 
@@ -49,7 +49,9 @@ export function CartItemCard({ item }: { item: CartItem }) {
     setInputValue(String(item.qty))
   }, [item.qty])
 
-  const unitLabel = displayUnitForPrice(item.unit ?? item.selectedUnit)
+  const unitLabel = itemEmballageDisplaySuffix(
+    item.itemEmballage ?? item.unit ?? item.selectedUnit,
+  )
 
   return (
     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2.5 sm:gap-4 rounded-lg border p-2.5 sm:p-3">

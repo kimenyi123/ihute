@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { useCartStore } from "@/lib/cart-store"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Button } from "@/components/ui/button"
+import { KioskCartLineQty } from "@/src/modules/self-order/components/KioskCartLineQty"
 
 interface Props {
   open: boolean
@@ -55,22 +56,10 @@ export function KioskCartPanel({ open, onOpenChange }: Props) {
                   </div>
                 </div>
                 <div className="flex flex-col items-end gap-2">
-                  <input
-                    type="number"
-                    min={1}
-                    step={1}
-                    value={line.qty}
-                    onChange={(e) => {
-                      const parsed = Number.parseInt(e.target.value, 10)
-                      if (Number.isFinite(parsed)) setQty(line.id, parsed, line.selectedUnit)
-                    }}
-                    onBlur={(e) => {
-                      const parsed = Number.parseInt(e.target.value, 10)
-                      setQty(line.id, Number.isFinite(parsed) ? parsed : line.qty, line.selectedUnit)
-                    }}
-                    className="w-16 rounded-md border border-slate-700 bg-slate-900/80 px-2 py-1 text-center text-sm font-semibold tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                    aria-label="Quantity"
-                  />
+                  <div className="flex flex-col items-end gap-1">
+                    <span className="text-[10px] font-semibold text-slate-500">Qty</span>
+                    <KioskCartLineQty line={line} variant="dark" />
+                  </div>
                   <button
                     type="button"
                     onClick={() => remove(line.id, line.selectedUnit)}

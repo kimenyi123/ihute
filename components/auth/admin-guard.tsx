@@ -10,44 +10,53 @@ interface AdminGuardProps {
 
 /**
  * AdminGuard - Protects admin routes from unauthorized access
- * 
- * Features:
- * - Waits for localStorage rehydration before checking auth
- * - Shows loading spinner during rehydration
- * - Redirects to /login if not authenticated
+ *
+ * - Waits for Zustand persist hydration (same pattern as supplier guarded pages)
+ * - Redirects to /login if not authenticated or session expired
  * - Redirects to / if user is not admin
- * - Only renders children when authenticated admin user confirmed
+ * - Renders children only when an authenticated admin session is confirmed (no flash of dashboard)
  */
 export function AdminGuard({ children }: AdminGuardProps) {
     const router = useRouter()
-    const { user, isAuthenticated, checkSession, hasHydrated } = useAuthStore()
-    const [isLoading, setIsLoading] = useState(true)
+    const { user, isAuthenticated, checkSession, loginTime, sessionTimeout } = useAuthStore()
+    const [hydrated, setHydrated] = useState(false)
 
     useEffect(() => {
-        // Wait for localStorage to rehydrate
-        if (!hasHydrated) {
+        const setNow = () => setHydrated(true)
+        setHydrated(!!useAuthStore.persist?.hasHydrated?.())
+        const unsub = useAuthStore.persist?.onFinishHydration?.(setNow)
+        return () => {
+            unsub?.()
+        }
+    }, [])
+
+    const sessionFresh =
+        loginTime != null && Date.now() - loginTime <= sessionTimeout
+
+    const allowed =
+        hydrated &&
+        isAuthenticated &&
+        user?.role === 'admin' &&
+        sessionFresh
+
+    useEffect(() => {
+        if (!hydrated) {
             return
         }
 
-        // Check session validity (handles inactivity timeout)
         const sessionValid = checkSession()
 
         if (!sessionValid || !isAuthenticated) {
-            router.push('/login')
+            router.replace('/login')
             return
         }
 
         if (user?.role !== 'admin') {
-            router.push('/')
-            return
+            router.replace('/')
         }
+    }, [hydrated, isAuthenticated, user?.role, checkSession, router])
 
-        // All checks passed, show content immediately
-        setIsLoading(false)
-    }, [hasHydrated, isAuthenticated, user, checkSession, router])
-
-    // Show loading until rehydration completes and auth is verified
-    if (!hasHydrated || isLoading) {
+    if (!hydrated || !allowed) {
         return (
             <div className="flex items-center justify-center min-h-screen bg-gray-50">
                 <div className="text-center">

@@ -10,17 +10,24 @@ const BACKEND_URL = getBackendBase()
 
 export async function POST(req: Request) {
   try {
-    // Parse request body - use req.json() for Next.js API routes
-    let body: any = {}
-    try {
-      body = await req.json()
-      console.log("[admin/route] POST - Parsed body:", JSON.stringify(body))
-    } catch (parseError: any) {
-      console.error("[admin/route] POST - Failed to parse JSON body:", parseError?.message)
-      console.error("[admin/route] POST - Error stack:", parseError?.stack)
+    let body: Record<string, unknown> = {}
+    const raw = await req.text()
+    const trimmed = raw?.trim() ?? ""
+    if (!trimmed) {
       return NextResponse.json(
-        { ok: false, error: "Invalid JSON in request body", details: parseError?.message },
-        { status: 400 }
+        { ok: false, error: "Empty request body. Send JSON with { \"action\": \"...\" }." },
+        { status: 400 },
+      )
+    }
+    try {
+      body = JSON.parse(trimmed) as Record<string, unknown>
+      console.log("[admin/route] POST - Parsed body:", JSON.stringify(body))
+    } catch (parseError: unknown) {
+      const msg = parseError instanceof Error ? parseError.message : String(parseError)
+      console.error("[admin/route] POST - Failed to parse JSON body:", msg)
+      return NextResponse.json(
+        { ok: false, error: "Invalid JSON in request body", details: msg },
+        { status: 400 },
       )
     }
     
@@ -34,6 +41,10 @@ export async function POST(req: Request) {
     }
     
     const { action, ...params } = body
+    const adminTokenFromBody =
+      typeof (params as { adminToken?: unknown }).adminToken === "string"
+        ? String((params as { adminToken?: string }).adminToken).trim()
+        : ""
 
     if (!action) {
       console.error("[admin/route] POST - Missing action parameter. Body was:", JSON.stringify(body))
@@ -45,42 +56,64 @@ export async function POST(req: Request) {
     
     console.log("[admin/route] POST - Action:", action, "Params:", JSON.stringify(params))
 
-    // Get admin email from request body or cookies
-    const publicActions = ['getHomepageCategories']
+    const publicActions = ["getHomepageCategories"]
     const needsAuth = !publicActions.includes(action)
-    
-    // First, try to get admin email from request body (preferred method)
-    let adminEmail = params.adminEmail || ''
-    
-    // Fallback: Try to get admin email from cookies (set by frontend after login)
-    if (!adminEmail) {
-      const cookies = req.headers.get('cookie') || ''
-      if (cookies) {
-        const authMatch = cookies.match(/auth-storage=([^;]+)/)
-        if (authMatch) {
-          try {
-            const authData = JSON.parse(decodeURIComponent(authMatch[1]))
-            if (authData?.state?.user?.role === 'admin' && authData?.state?.user?.email) {
-              adminEmail = authData.state.user.email
-            }
-          } catch (e) {
-            // Ignore parse errors
+
+    const headerEmail = req.headers.get("x-admin-email")?.trim() || ""
+    const bodyEmail =
+      typeof params.adminEmail === "string" ? String(params.adminEmail).trim() : ""
+
+    let adminEmail = ""
+    if (headerEmail) {
+      adminEmail = headerEmail
+    } else {
+      const cookies = req.headers.get("cookie") || ""
+      const authMatch = cookies.match(/auth-storage=([^;]+)/)
+      if (authMatch) {
+        try {
+          const authData = JSON.parse(decodeURIComponent(authMatch[1]))
+          if (authData?.state?.user?.role === "admin" && authData?.state?.user?.email) {
+            adminEmail = String(authData.state.user.email).trim()
           }
+        } catch {
+          /* ignore */
         }
+      }
+      if (!adminEmail) {
+        adminEmail = bodyEmail
       }
     }
 
-    // Build form data for servlet
+    if (headerEmail && bodyEmail && headerEmail.toLowerCase() !== bodyEmail.toLowerCase()) {
+      console.warn("[admin/route] using x-admin-email; ignoring mismatched body.adminEmail")
+    }
+
+    const headerAdminToken = req.headers.get("x-admin-token")?.trim() || ""
+    const tokenForJava = adminTokenFromBody || headerAdminToken
+
     const form = new URLSearchParams()
     form.set("action", action)
-    
-    // Add admin email for authentication (if needed and available)
+
+    if (needsAuth && !adminEmail) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Admin email missing for this action. Sign in again as admin, or ensure the client sends x-admin-email.",
+        },
+        { status: 401 },
+      )
+    }
+
     if (needsAuth && adminEmail) {
       form.set("adminEmail", adminEmail)
     }
-    
-    // Add all other parameters
+    if (needsAuth && tokenForJava) {
+      form.set("adminToken", tokenForJava)
+    }
+
     Object.entries(params).forEach(([key, value]) => {
+      if (key === "adminEmail" || key === "adminToken") return
       if (value !== null && value !== undefined) {
         form.set(key, String(value))
       }
@@ -89,15 +122,18 @@ export async function POST(req: Request) {
     const url = `${BACKEND_URL}/AdminServlet`
     console.log("[admin/route] Calling backend:", url)
     console.log("[admin/route] Action:", action)
-    
+
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 30000)
-    
+
+    const inboundCookie = req.headers.get("cookie") || ""
     const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
-        "Accept": "application/json",
+        Accept: "application/json",
+        ...(inboundCookie ? { Cookie: inboundCookie } : {}),
+        ...(tokenForJava ? { "X-Admin-Token": tokenForJava } : {}),
       },
       body: form.toString(),
       signal: controller.signal,
@@ -128,7 +164,13 @@ export async function POST(req: Request) {
     }
 
     if (!json.ok) {
-      return NextResponse.json(json, { status: 400 })
+      const st =
+        res.status === 401 || res.status === 403
+          ? res.status
+          : res.status >= 400 && res.status < 600
+            ? res.status
+            : 400
+      return NextResponse.json(json, { status: st })
     }
 
     return NextResponse.json(json)
@@ -171,27 +213,75 @@ export async function GET(req: Request) {
   }
 
   try {
+    const paramRecord: Record<string, unknown> = {}
+    searchParams.forEach((value, key) => {
+      if (key !== "action") paramRecord[key] = value
+    })
+
+    const publicActions = ["getHomepageCategories"]
+    const needsAuth = !publicActions.includes(action)
+    const headerEmail = req.headers.get("x-admin-email")?.trim() || ""
+    const bodyEmail =
+      typeof paramRecord.adminEmail === "string" ? String(paramRecord.adminEmail).trim() : ""
+    let adminEmail = headerEmail
+    if (!adminEmail) {
+      const cookies = req.headers.get("cookie") || ""
+      const authMatch = cookies.match(/auth-storage=([^;]+)/)
+      if (authMatch) {
+        try {
+          const authData = JSON.parse(decodeURIComponent(authMatch[1]))
+          if (authData?.state?.user?.role === "admin" && authData?.state?.user?.email) {
+            adminEmail = String(authData.state.user.email).trim()
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      if (!adminEmail) adminEmail = bodyEmail
+    }
+    const headerTok = req.headers.get("x-admin-token")?.trim() || ""
+    const bodyTok =
+      typeof paramRecord.adminToken === "string" ? String(paramRecord.adminToken).trim() : ""
+    const tokenForJava = bodyTok || headerTok
+
     const params = new URLSearchParams()
     params.set("action", action)
-    
-    // Add all query parameters
     searchParams.forEach((value, key) => {
       if (key !== "action") {
         params.set(key, value)
       }
     })
 
+    if (needsAuth && !adminEmail) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Admin email missing. Send x-admin-email (or adminEmail query) after signing in as admin.",
+        },
+        { status: 401 },
+      )
+    }
+    if (needsAuth && adminEmail) {
+      params.set("adminEmail", adminEmail)
+    }
+    if (needsAuth && tokenForJava) {
+      params.set("adminToken", tokenForJava)
+    }
+
     const url = `${BACKEND_URL}/AdminServlet?${params.toString()}`
     console.log("[admin/route] GET - Calling backend:", url)
     console.log("[admin/route] GET - Action:", action)
-    
+
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 30000)
-    
+
+    const inboundCookie = req.headers.get("cookie") || ""
     const res = await fetch(url, {
       method: "GET",
       headers: {
-        "Accept": "application/json",
+        Accept: "application/json",
+        ...(inboundCookie ? { Cookie: inboundCookie } : {}),
+        ...(tokenForJava ? { "X-Admin-Token": tokenForJava } : {}),
       },
       signal: controller.signal,
       cache: "no-store",
@@ -221,7 +311,13 @@ export async function GET(req: Request) {
     }
 
     if (!json.ok) {
-      return NextResponse.json(json, { status: 400 })
+      const st =
+        res.status === 401 || res.status === 403
+          ? res.status
+          : res.status >= 400 && res.status < 600
+            ? res.status
+            : 400
+      return NextResponse.json(json, { status: st })
     }
 
     return NextResponse.json(json)

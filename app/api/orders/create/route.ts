@@ -17,7 +17,7 @@ function describeConnectFailure(raw?: string): string {
   }
   const r = raw.toLowerCase()
   if (r.includes("econnrefused")) {
-    return "Java backend refused the connection (nothing is listening on that host/port). Start Tomcat and confirm the port in .env.local matches (often 8080, not 8081)."
+    return "Java backend refused the connection (nothing is listening on that host/port). Start Tomcat and confirm JAVA_BACKEND_BASE / NEXT_PUBLIC_API_URL in .env.local matches your connector port (e.g. http://localhost:8082/Trading)."
   }
   if (r.includes("enotfound") || r.includes("getaddrinfo")) {
     return `Could not reach order service: ${raw}`
@@ -414,7 +414,7 @@ export async function POST(req: Request) {
         hint:
           lastErr != null && (lastErr.status ?? 0) > 0
             ? "HTTP 500 means Tomcat reached OrdersServlet but Java threw an error — inspect catalina.out / IDE console. Connection issues are different (ECONNREFUSED / timeout)."
-            : "Check Java/Tomcat is running. In .env.local set JAVA_BACKEND_BASE to your context root (e.g. http://localhost:8080/Trading). Port must match Tomcat (8080 vs 8081).",
+            : "Check Java/Tomcat is running. In .env.local set JAVA_BACKEND_BASE or NEXT_PUBLIC_API_URL to your context root (e.g. http://localhost:8082/Trading).",
       },
       { status: 502 }
     )

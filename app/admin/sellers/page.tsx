@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { CheckCircle, XCircle, Eye, AlertCircle, Search } from 'lucide-react'
-import { useAuthStore } from '@/lib/auth-store'
+import { postAdminApi } from '@/lib/admin-client'
 
 interface Seller {
   id: number
@@ -21,7 +21,6 @@ interface Seller {
 }
 
 export default function SellersPage() {
-  const { user } = useAuthStore()
   const [activeTab, setActiveTab] = useState<'applications' | 'active' | 'suspended'>('applications')
   const [applications, setApplications] = useState<Seller[]>([])
   const [activeSellers, setActiveSellers] = useState<Seller[]>([])
@@ -79,11 +78,7 @@ export default function SellersPage() {
         page = pageSuspended
       }
 
-      const res = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, page, pageSize: size, adminEmail: user?.email || '' })
-      })
+      const res = await postAdminApi({ action, page, pageSize: size })
       const data = await res.json()
 
       if (data.ok) {
@@ -113,11 +108,7 @@ export default function SellersPage() {
 
     try {
       setActionLoading(sellerAccount)
-      const res = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'approveSeller', sellerAccount, adminEmail: user?.email || '' })
-      })
+      const res = await postAdminApi({ action: 'approveSeller', sellerAccount })
       const data = await res.json()
 
       if (data.ok) {
@@ -140,11 +131,7 @@ export default function SellersPage() {
 
     try {
       setActionLoading(sellerAccount)
-      const res = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'suspendSeller', sellerAccount, reason, adminEmail: user?.email || '' })
-      })
+      const res = await postAdminApi({ action: 'suspendSeller', sellerAccount, reason })
       const data = await res.json()
 
       if (data.ok) {
@@ -166,11 +153,7 @@ export default function SellersPage() {
 
     try {
       setActionLoading(sellerAccount)
-      const res = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'reinstateSeller', sellerAccount, adminEmail: user?.email || '' })
-      })
+      const res = await postAdminApi({ action: 'reinstateSeller', sellerAccount })
       const data = await res.json()
 
       if (data.ok) {

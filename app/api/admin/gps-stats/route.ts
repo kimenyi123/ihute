@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
+import { getServerProxyBackendBase } from "@/lib/backend-config"
 
 export async function GET(req: NextRequest) {
     try {
-        const backendUrl = process.env.JAVA_BACKEND_BASE || "http://localhost:8080/Trading"
+        const backendUrl = getServerProxyBackendBase()
         const cookies = req.headers.get('cookie') || '';
 
         const response = await fetch(`${backendUrl}/GPSStatsServlet`, {

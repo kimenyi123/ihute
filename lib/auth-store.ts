@@ -3,6 +3,9 @@ import { create } from "zustand"
 import { persist, createJSONStorage } from "zustand/middleware"
 import { mergeSessionToUser } from "./interaction-tracker"
 
+/** Stale test accounts in persisted storage — must not be sent to AdminServlet. */
+const LEGACY_DISCARD_EMAILS = new Set<string>(["admin0799338897@ihute.local"])
+
 export type UserRole = "customer" | "supplier" | "admin" | "staff"
 
 export interface User {
@@ -37,6 +40,8 @@ export interface User {
   description?: string
   /** Display nickname (e.g. for Shop with Me URL) */
   nickname?: string
+  /** From Java login when ADMIN_API_SECRET is set — sent to AdminServlet via Next proxy */
+  adminApiToken?: string
 }
 
 interface AuthState {
@@ -63,8 +68,7 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       isAuthenticated: false,
       loginTime: null,
-      /** Default 30 days — “keep me signed in” for marketplace flows (was 24h). */
-      sessionTimeout: 30 * 24 * 60 * 60 * 1000,
+      sessionTimeout: 60 * 60 * 1000, // 60 minutes
       hasHydrated: false,
 
       login: (user) => {
@@ -146,6 +150,33 @@ export const useAuthStore = create<AuthState>()(
             state.sessionTimeout = minSession
           }
         }
+        queueMicrotask(() => {
+          try {
+            const p = persisted as
+              | { state?: { user?: { email?: string | null } | null } }
+              | undefined
+            const em =
+              typeof p?.state?.user?.email === "string" ? p.state!.user!.email!.trim().toLowerCase() : ""
+            if (em && LEGACY_DISCARD_EMAILS.has(em)) {
+              console.warn("[auth-store] dropping legacy persisted auth:", em)
+              try {
+                localStorage.removeItem("auth-storage")
+              } catch {
+                /* ignore */
+              }
+              useAuthStore.setState({
+                user: null,
+                isAuthenticated: false,
+                loginTime: null,
+                hasHydrated: true,
+              })
+              return
+            }
+          } catch (e) {
+            console.warn("[auth-store] rehydrate legacy check failed:", e)
+          }
+          useAuthStore.setState({ hasHydrated: true })
+        })
       },
     }
   )

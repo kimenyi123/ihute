@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerProxyBackendBase } from "@/lib/backend-config";
 
 export async function GET(request: NextRequest) {
   try {
@@ -11,7 +12,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'sellerAccount is required' }, { status: 400 });
     }
     
-    const backendUrl = process.env.BACKEND_URL || 'http://localhost:8080/Trading';
+    const backendUrl = getServerProxyBackendBase();
     const apiUrl = `${backendUrl}/Kaos/RatingServlet?action=getSupplierRatingStats&sellerAccount=${encodeURIComponent(sellerAccount)}`;
     
     console.log('[Rating Stats API] Calling backend URL:', apiUrl);

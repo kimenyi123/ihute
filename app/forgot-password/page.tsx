@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { ArrowLeft } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -30,7 +29,6 @@ const btnDialogPrimary =
   "bg-gradient-to-r from-[#1897e0] to-[#127fc0] hover:from-[#1589cc] hover:to-[#0f6ba3] text-white border-0"
 
 export default function ForgotPasswordPage() {
-  const [email, setEmail] = useState("")
   const router = useRouter()
   const [phone, setPhone] = useState("")
   const [streetNumber, setStreetNumber] = useState("")
@@ -38,16 +36,12 @@ export default function ForgotPasswordPage() {
   const [newPassword, setNewPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [loading, setLoading] = useState(false)
-  const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState(false)
 
-  const handleSubmit = async (e: React.FormEvent) => {
   const openPasswordDialog = (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true)
     setError(null)
-    setMessage(null)
     if (!phone.trim() || !streetNumber.trim()) {
       setError("Enter your phone and the street number or street name you used when registering.")
       return
@@ -70,20 +64,17 @@ export default function ForgotPasswordPage() {
       const res = await fetch("/api/auth/forgot-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim() }),
         body: JSON.stringify({
           tel: phone.trim(),
           streetNumber: streetNumber.trim(),
           newPassword,
         }),
       })
-      const json = await res.json().catch(() => ({}))
-      if (json?.message) {
-        setMessage(json.message)
-      } else if (json?.ok) {
-        setMessage("If an account exists for that email, you will receive reset instructions shortly.")
-      } else {
-        setError(json?.error || "Something went wrong")
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean
+        error?: string
+        message?: string
+      }
       if (!res.ok || !json?.ok) {
         throw new Error(json?.error || "Could not update password")
       }
@@ -91,8 +82,6 @@ export default function ForgotPasswordPage() {
       setDone(true)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Something went wrong")
-    } catch {
-      setError("Network error")
     } finally {
       setLoading(false)
     }
@@ -199,32 +188,6 @@ export default function ForgotPasswordPage() {
             </CardContent>
           </Card>
         </div>
-            <CardTitle className="text-2xl">Forgot password</CardTitle>
-            <CardDescription>
-              Enter your email. If you have an account, we will send a link to choose a new password.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  autoComplete="email"
-                />
-              </div>
-              {error && <p className="text-sm text-destructive">{error}</p>}
-              {message && <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-md p-3">{message}</p>}
-              <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? "Sending…" : "Send reset link"}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
       </div>
 
       <Dialog

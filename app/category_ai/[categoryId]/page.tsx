@@ -5,10 +5,7 @@ import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
 import { CategoryClientAI } from "@/components/category_ai/category-client-ai";
 
-type CategoryParams = { categoryId: string };
-type CategoryPageProps =
-  | { params: CategoryParams }
-  | { params: Promise<CategoryParams> };
+type CategoryParams = { categoryId: string }
 
 const categoryNames: Record<string, string> = {
   pharmacy: "Pharmacy",
@@ -21,10 +18,12 @@ const categoryNames: Record<string, string> = {
   general: "General Store",
 };
 
-export default async function CategoryAIPage(props: CategoryPageProps) {
-  const { categoryId } = (await Promise.resolve(
-    (props as any).params
-  )) as CategoryParams;
+export default async function CategoryAIPage({
+  params,
+}: {
+  params: Promise<CategoryParams>
+}) {
+  const { categoryId } = await params
 
   const categoryName = categoryNames[categoryId] || "Products";
 
