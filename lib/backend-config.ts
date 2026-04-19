@@ -17,7 +17,7 @@ function noTrailingSlash(s: string): string {
  * The path segment must match Tomcat’s **context path** (the `webapps/<Context>` name):
  * `Trading.war` → `/Trading`; `trading_ai.war` → `/trading_ai`.
  *
- * **Local `next dev`:** if nothing is set, defaults to `http://127.0.0.1:8080/trading_ai` (Kaos WAR name in this repo).
+ * **Local `next dev`:** if nothing is set, defaults to `https://ihute.rw/trading_ai` (override with `BACKEND_URL` for local Tomcat).
  * If you only pass `http://localhost:8080` with no path, development appends `/trading_ai`, production appends `/Trading`.
  */
 export function getBackendBase(): string {
