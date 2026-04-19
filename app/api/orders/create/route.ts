@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getOrdersUrl } from "@/lib/backend-config"
+import { getOrCreatePublicTokenForOrderId } from "@/lib/order-tracking-token"
 import { DEFAULT_GUEST_ISHYIGA_ACCOUNT } from "@/lib/guest-checkout"
 import { orderErrorMessageWithProductNames } from "@/lib/order-error-display"
 
@@ -349,9 +350,17 @@ export async function POST(req: Request) {
       }
 
       if (res.ok && json?.ok === true) {
+        const oid = json.orderId ?? `ORD-${Date.now()}`
+        let trackToken: string | undefined
+        try {
+          trackToken = getOrCreatePublicTokenForOrderId(String(oid))
+        } catch {
+          /* ignore */
+        }
         return NextResponse.json({
           ok: true,
-          orderId: json.orderId ?? `ORD-${Date.now()}`,
+          orderId: oid,
+          ...(trackToken ? { trackToken } : {}),
           via: url,
           sellerTel: json?.sellerTel ?? "",
           paymentName: shared.paymentName,

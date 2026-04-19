@@ -454,7 +454,7 @@ function ItemExpandPanel({
       {/* Header row */}
       <div className="flex items-start gap-4 p-4 pb-3">
         {item.image_url ? (
-           
+
           <img
             src={item.image_url}
             alt={item.item_commercial_name}
@@ -473,11 +473,7 @@ function ItemExpandPanel({
             <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{description}</p>
           )}
           <p className="text-emerald-600 font-extrabold text-lg mt-1 tracking-tight">
-<<<<<<< HEAD
             <span>{formatPrice(unitPrice)}</span>
-=======
-            ⭐ ⭐ ⭐ {formatPrice(unitPrice)}
->>>>>>> 820f3c4 (improved top -up sale and seprate seller table and buyer table)
             {embSuffix ? (
               <span className="font-normal text-gray-600"> ({embSuffix})</span>
             ) : null}
@@ -595,7 +591,7 @@ function ItemCard({
       {/* Image */}
       <div className="relative h-20 w-20 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0">
         {item.image_url ? (
-           
+
           <img
             src={item.image_url}
             alt={item.item_commercial_name}
@@ -617,11 +613,7 @@ function ItemCard({
           <p className="text-[11px] text-gray-400 line-clamp-1 mt-0.5">{description}</p>
         )}
         <p className="text-emerald-600 font-extrabold text-sm mt-1 tracking-tight">
-<<<<<<< HEAD
           <span>{formatPrice(price)}</span>
-=======
-          ⭐ ⭐ ⭐ {formatPrice(price)}
->>>>>>> 820f3c4 (improved top -up sale and seprate seller table and buyer table)
           {embSuffix ? (
             <span className="font-normal text-gray-600"> ({embSuffix})</span>
           ) : null}
@@ -710,7 +702,7 @@ function CartSidebar({
           {items.map((ci) => (
             <div key={`${ci.id}-${ci.selectedUnit}`} className="flex items-start gap-3">
               {ci.image ? (
-                 
+
                 <img src={ci.image} alt={ci.name} className="h-14 w-14 rounded-xl object-cover flex-shrink-0" />
               ) : (
                 <div className="h-14 w-14 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0 text-xl">🍽️</div>
@@ -1191,7 +1183,7 @@ export function KioskMenuGrid({
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0 text-lg">
               {venueLogoUrl ? (
-                 
+
                 <img src={venueLogoUrl} alt="" className="w-8 h-8 rounded-full object-cover" />
               ) : useUnifiedShopTabs ? (
                 <span className="text-sm leading-none">🍽🍺</span>

@@ -48,7 +48,7 @@ export default function BuyerLayout({ children }: { children: React.ReactNode })
   const buyerNav: NavItem[] = [
     { name: "Dashboard", href: "/buyer/dashboard", icon: LayoutDashboard },
     { name: "Order Reports", href: "/buyer/orders", icon: ShoppingBag },
-    { name: "Umusada upload", href: "/buyer/umusada/upload", icon: FileSpreadsheet },
+    // { name: "Umusada upload", href: "/buyer/umusada/upload", icon: FileSpreadsheet },
   ]
 
   const shopNav: NavItem[] = [
@@ -61,6 +61,8 @@ export default function BuyerLayout({ children }: { children: React.ReactNode })
     { name: "Reorder", href: "/reorder", icon: PackageSearch },
     { name: "Ratings", href: "/ratings", icon: Star },
     { name: "Price watch", href: "/price-watch", icon: Eye },
+    { name: "Orders", href: "/buyer/orders", icon: ShoppingBag },
+    // { name: "Umusada Excel", href: "/buyer/umusada/upload", icon: FileSpreadsheet },
   ]
 
   const isActive = (href: string) =>

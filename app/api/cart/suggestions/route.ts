@@ -30,6 +30,7 @@ function rawToSuggestion(
   const emb = p.item_emballage ?? p.ITEM_EMBALLAGE
   const img = (p.image_url ?? p.item_image_url ?? p.IMAGE_URL ?? p.image) as string | undefined
   const supplierId = String(p.supplier_account ?? p.seller_account ?? p.SELLER_ISHYIGA_ACCOUNT ?? "").trim() || (fallbackSupplierId ?? "")
+  const brand = (p.item_fabricant ?? p.id_fabricant ?? p.brand) as string | undefined
   const itemKeyWords = String(p.item_key_words ?? p.ITEM_CODE ?? p.item_code ?? id ?? "").trim()
   return {
     product_id: productId,
@@ -49,6 +50,7 @@ function rawToSuggestion(
     supplier_id: supplierId,
     supplier_name: String(p.supplier_name ?? p.OWNER ?? p.SELLER_NAMES ?? ""),
     item_code: String(p.item_code ?? p.item_key_words ?? p.ITEM_CODE ?? ""),
+    ...(brand ? { brand } : {}),
   }
 }
 

@@ -1,8 +1,9 @@
 /**
  * Central backend API configuration from .env / .env.local.
- * One base is enough for deployment: set NEXT_PUBLIC_API_URL or JAVA_BACKEND_BASE
- * (e.g. https://ihute.rw/Trading or http://localhost:8081/Trading).
- * Optional overrides: JAVA_ORDERS_URL, JAVA_SELLER_ORDERS_URL, JAVA_SUPPLIER_URL, JAVA_DELIVERY_URL, etc.
+ * One base is enough: set BACKEND_URL, JAVA_BACKEND_BASE, or NEXT_PUBLIC_API_URL
+ * (e.g. http://64.225.66.239:8080/trading_ai or https://ihute.rw/Trading).
+ * All servlet URLs (fetchSuggestions, shop_with_me, orders, etc.) are derived from this base.
+ * Optional overrides: JAVA_ORDERS_URL, JAVA_FETCH_SUGGESTIONS_URL, JAVA_SHOP_WITH_ME_URL, etc.
  */
 
 function noTrailingSlash(s: string): string {
@@ -12,6 +13,16 @@ function noTrailingSlash(s: string): string {
 const LOCAL_JAVA_BACKEND_DEFAULT = "http://localhost:8082/Trading"
 
 /** Java backend base URL (no trailing slash). Uses NEXT_PUBLIC_API_URL or JAVA_BACKEND_BASE from env. */
+/**
+ * Java backend base URL (no trailing slash).
+ * Uses BACKEND_URL, JAVA_BACKEND_BASE, or NEXT_PUBLIC_API_URL from env.
+ *
+ * The path segment must match Tomcat’s **context path** (the `webapps/<Context>` name):
+ * `Trading.war` → `/Trading`; `trading_ai.war` → `/trading_ai`.
+ *
+ * **Local `next dev`:** if nothing is set, defaults to `http://127.0.0.1:8080/trading_ai` (Kaos WAR name in this repo).
+ * If you only pass `http://localhost:8080` with no path, development appends `/trading_ai`, production appends `/Trading`.
+ */
 export function getBackendBase(): string {
   const raw = noTrailingSlash(
     process.env.JAVA_BACKEND_BASE ||
@@ -19,14 +30,29 @@ export function getBackendBase(): string {
       process.env.BACKEND_URL ||
       (process.env.NODE_ENV === "development" ? LOCAL_JAVA_BACKEND_DEFAULT : "https://ihute.rw/Trading")
   )
+  const explicit =
+    process.env.BACKEND_URL || process.env.JAVA_BACKEND_BASE || process.env.NEXT_PUBLIC_API_URL
 
-  // Some local/dev env values point only to the Tomcat host (e.g. http://localhost:8080)
-  // while the Java servlets live under the `/Trading` context path.
-  // If the base is missing `/Trading`, append it so `/api/kiosk/*` routes resolve.
-  if (!raw.toLowerCase().includes("/trading")) {
-    return `${raw}/Trading`
+  let raw: string
+  if (explicit && String(explicit).trim()) {
+    raw = noTrailingSlash(String(explicit).trim())
+  } else if (process.env.NODE_ENV === "development") {
+    raw = "https://ihute.rw/trading_ai/"
+  } else {
+    raw = "https://ihute.rw/Trading"
   }
-  return raw
+
+  try {
+    const u = new URL(raw)
+    const path = u.pathname.replace(/\/+$/, "") || ""
+    if (path === "" || path === "/") {
+      u.pathname = process.env.NODE_ENV === "development" ? "/trading_ai" : "/Trading"
+      return noTrailingSlash(u.toString())
+    }
+    return raw
+  } catch {
+    return raw
+  }
 }
 
 /**
@@ -87,12 +113,99 @@ export function getFetchSuggestionsUrl(): string {
   return process.env.JAVA_FETCH_SUGGESTIONS_URL || `${getBackendBase()}/Kaos/fetchSuggestions`
 }
 
+/** Sector-only AND-token search (shops vs items); separate servlet from fetchSuggestions globalSearch. */
+export function getSectorScopedSearchUrl(): string {
+  return process.env.JAVA_SECTOR_SCOPED_SEARCH_URL || `${getBackendBase()}/Kaos/sectorScopedSearch`
+}
+
+/** Sector shop grid JSON (sellers + sample products) — isolated from {@link getFetchSuggestionsUrl} for analysis. */
+export function getSectorListSuppliersUrl(): string {
+  return process.env.JAVA_SECTOR_LIST_SUPPLIERS_URL || `${getBackendBase()}/Kaos/sectorListSuppliers`
+}
+
+/** Same servlet: GET ?sectorStats=pharmacy → JSON { ok, sector, shops, items } (full DB counts). */
+export function getSectorStatsQuery(sectorSlug: string): string {
+  return `sectorStats=${encodeURIComponent(sectorSlug.trim())}`
+}
+
 export function getShopWithMeUrl(): string {
   return process.env.JAVA_SHOP_WITH_ME_URL || `${getBackendBase()}/shop_with_me`
 }
 
 export function getAuthUrl(): string {
   return process.env.JAVA_AUTH_URL || `${getBackendBase()}/Kaos/user-auth`
+}
+
+/**
+ * Grandma buyer POST — `grandmaAPIs.CreateBuyerServlet` at `/Api/grandma/buyers` (not `/grandma`).
+ * Override with `GRANDMA_BUYER_API_URL` or point `BACKEND_URL` / `JAVA_BACKEND_BASE` at your Tomcat context.
+ */
+export function getGrandmaBuyerApiUrl(): string {
+  if (process.env.GRANDMA_BUYER_API_URL) {
+    return process.env.GRANDMA_BUYER_API_URL
+  }
+  return `${getBackendBase()}/Api/grandma/buyers`
+}
+
+/** Grandma seller POST — `grandmaAPIs.CreateSellerServlet` at `/Api/grandma/sellers`. */
+export function getGrandmaSellerApiUrl(): string {
+  if (process.env.GRANDMA_SELLER_API_URL) {
+    return process.env.GRANDMA_SELLER_API_URL
+  }
+  return `${getBackendBase()}/Api/grandma/sellers`
+}
+
+/** Bulk stock lines for an existing Grandma seller — `POST` JSON `{ sellerAccount, lines }`. */
+export function getGrandmaSellerStockApiUrl(): string {
+  if (process.env.GRANDMA_SELLER_STOCK_API_URL) {
+    return process.env.GRANDMA_SELLER_STOCK_API_URL
+  }
+  // Short path matches web.xml `/grandma/sellers/stock` (same servlet as `/Api/grandma/sellers/stock`).
+  return `${getBackendBase()}/grandma/sellers/stock`
+}
+
+/** S5/S6: `GET`/`POST` — list stock, search Niki, adjust quantity. */
+export function getGrandmaSellerInventoryApiUrl(): string {
+  if (process.env.GRANDMA_INVENTORY_API_URL) {
+    return process.env.GRANDMA_INVENTORY_API_URL
+  }
+  // Short path: `/grandma/sellers/inventory` — same servlet as `/Api/grandma/sellers/inventory` (Kaos web.xml).
+  // Some deployments/proxies only exercised the short mapping; Grandma home documents it for `/trading_ai`.
+  return `${getBackendBase()}/grandma/sellers/inventory`
+}
+
+/** Long path for the same inventory servlet if the short path404s (`null` when URL is fully overridden). */
+export function getGrandmaSellerInventoryApiUrlFallback(): string | null {
+  if (process.env.GRANDMA_INVENTORY_API_URL) {
+    return null
+  }
+  return `${getBackendBase()}/Api/grandma/sellers/inventory`
+}
+
+/** S7: `POST` — temp item + `PEND-{id}` stock row. */
+export function getGrandmaSellerTempItemApiUrl(): string {
+  if (process.env.GRANDMA_TEMP_ITEM_API_URL) {
+    return process.env.GRANDMA_TEMP_ITEM_API_URL
+  }
+  return `${getBackendBase()}/grandma/sellers/items/temp`
+}
+
+/**
+ * Redis-first sector browse (same payload as `GET …/Kaos/sectorListSuppliers` / legacy `listSuppliersWithProducts`).
+ * Short path `/grandma/suppliers/browse`; long `/Api/grandma/suppliers/browse`.
+ */
+export function getGrandmaListSuppliersBrowseUrl(): string {
+  if (process.env.GRANDMA_LIST_SUPPLIERS_URL) {
+    return process.env.GRANDMA_LIST_SUPPLIERS_URL
+  }
+  return `${getBackendBase()}/grandma/suppliers/browse`
+}
+
+export function getGrandmaListSuppliersBrowseUrlFallback(): string | null {
+  if (process.env.GRANDMA_LIST_SUPPLIERS_URL) {
+    return null
+  }
+  return `${getBackendBase()}/Api/grandma/suppliers/browse`
 }
 
 /** Account profile (account_signup): GET by email/account, PUT to update. */
@@ -137,5 +250,12 @@ export function getPublicSiteUrl(): string {
  * Same as backend base in most setups; override with NEXT_PUBLIC_API_URL if different.
  */
 export function getPublicApiUrl(): string {
-  return noTrailingSlash(process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw/Trading")
+  const explicit = process.env.NEXT_PUBLIC_API_URL
+  if (explicit && String(explicit).trim()) {
+    return noTrailingSlash(String(explicit).trim())
+  }
+  if (process.env.NODE_ENV === "development") {
+    return "http://127.0.0.1:8080/trading_ai"
+  }
+  return "https://ihute.rw/Trading"
 }

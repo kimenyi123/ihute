@@ -25,6 +25,8 @@ interface SellerProfile {
   rating: number
   discount: number
   businessName?: string // Business name for sellers
+  /** Shop With Me / public shop nickname (account_signup.nickname) */
+  nickname?: string
 }
 
 interface SalesData {
@@ -288,6 +290,29 @@ export default function SellerDetailPage() {
               ) : (
                 <p className="text-gray-900">{profile.tel}</p>
               )}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Shop nickname
+                <span className="text-gray-500 font-normal"> (Shop With Me URL)</span>
+              </label>
+              {editing ? (
+                <input
+                  type="text"
+                  autoComplete="off"
+                  placeholder="e.g. burrows"
+                  value={editData.nickname ?? ''}
+                  onChange={(e) => setEditData({ ...editData, nickname: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg font-mono text-sm"
+                />
+              ) : (
+                <p className="text-gray-900 font-mono text-sm">
+                  {(profile.nickname || '').trim() || '—'}
+                </p>
+              )}
+              <p className="text-xs text-gray-500 mt-1">
+                Lowercase letters, numbers, and hyphens. Used for /shop-with-me links on the homepage.
+              </p>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Location</label>

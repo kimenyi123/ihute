@@ -1,0 +1,45 @@
+VINCENT,AIMABLE,AREA,FUNCTION,WHY IT MATTERS,SIMPLE RULE,User,Comment,Priority,IN IHUTE MAIN,GRANDMA,DATABASE,API,REDIS,Function existence (IHUTE codebase),Needed enhancement
+"*dukeneye niba umucuruzi yifuza kwandikisha shop ,ye abyikorere namarakwandisha shopye abone page irimo add item fom",board new shop,BOARDING,,,,Seller,,0,EXIST,REUSE,account_signup,,,Exists: supplier onboarding + registration; account_signup area.,Align all seller types; polish add-item onboarding.
+,create shopwithme link,ACCESS,Open shop link (no login),Anyone can browse instantly,No barrier,Seller,,0,EXIST,REUSE,account_signup,,,Exists: shop-with-me public browse; share links.,Stable per-shop URLs; analytics on shares.
+,add item,item,,,,Seller,only in both no 30K not for grandma,0,EXIST,NEW,chaos_beta.niki_items,,,Exists: supplier add product; NiKi chaos_beta.niki_items.,Grandma 30K rule if required; unify forms.
+,new item,item,,,,Seller,,0,EXIST,NEW,chaos_beta.niki_items,,,Exists: same add/new item flows.,
+* Haraburamo product image,set image,item,Show products with IMAGE + PRICE,Avoid confusion,Always visible,Seller,*frontend and UI bakemure ikibazo cyamafoto ,2,EXIST,NEW,chaos_beta.niki_items,,,Exists: images in product payloads; shop-with-me UI.,Faster upload/preview; fix photo bugs noted in Comment.
+,existing item,item,,,,Seller,,1,EXIST,NEW,niki_items,,,Exists: supplier catalog + edit paths; niki_items.,Clear edit vs add UX.
+,FMCG and NiKi Sync,item,,,,Seller,NiKi need to be updated and have the FMCG mark so only these sync with grandam,1,NEW,NEW,chaos_beta.niki_items,,,Gap: FMCG mark + selective Grandma sync (sheet NEW).,DB flag FMCG; sync job; filter NiKi by flag.
+,add stock and price,STOCK,Show “Available / Out of stock”,Avoid fake orders,Real stock only,Seller,,1,EXIST,LITE,seller_add_stock,,,Exists: seller_add_stock LITE; stock APIs; availability in UI.,Stock reservation at checkout; alerts.
+,BY NOW,ORDER,“⚡ Buy Now” button,Fast action,No complexity,BUYER,,0,EXIST,NEW,,,,Exists: Buy Now in product-card + shop-with-me; checkout.,One-tap path tested on mobile WebView.
+,sell,ORDER,Add / remove items easily,Basic shopping,1 click only,BUYER,,0,EXIST,NEW,,,,Exists: cart add/remove; cart-store + APIs.,Multi-seller edge cases.
+,refill,ORDER,,,,Seller,,0,NEW,NEW,,,,Partial: eRx Refill field for pharmacy; not generic reorder.,If generic refill: wire reorder API + UI; clarify scope.
+,report,ORDER,,,,Seller,,0,EXIST,NEW,,,,Exists: seller reports/analytics (verify exact module).,Export CSV/PDF; date range.
+,search by name,ORDER,Simple search (name only),Grandma finds fast,No filters needed,BUYER,,0,EXIST,NEW,,,,Exists: global-search; search page.,Typo/synonym handling.
+"*Ikindi dukeneye ni'ba umukiriya asuye ihute ahitemo category,shop ,pharmacy,restrant nibind",search by CATEGORY,ORDER,,,,BUYER,"nakora click kuri category ashaka niba arishop ,abone list ya shps",1,EXIST,NEW,,,,Exists: categories + category AI; grandma category UX.,DB-backed categories; list shops under category.
+"location,owner and click to open shop hanyuma nibwo shop izafunguka ",search by location,ORDER,,,,BUYER,*Kuri glandma nakora click kurishop abe yahitamo imwegereye and open shop,1,EXIST,NEW,account_distances,,,Exists: nearest suppliers; account_distances; location.,Distance sort + map; grandma tap-to-open shop.
+,Search by Favorites,ORDER,,,,BUYER,,3,NEW,NEW,user_preferences,,,Partial: favorites + prefs; not search-only-in-favorites.,Filter/sort favorites + search scope.
+,search by cheapest,ORDER,,,,BUYER,,1,NEW,NEW,,,,Gap: cheapest-first sort.,sort=price_asc in API + UI.
+,search by brand,ORDER,,,,BUYER,,3,EXIST,NEW,,,,Partial: brand may exist in data.,Brand facet + indexed field + filter.
+,search by closest,ORDER,,,,BUYER,,1,WEAK,NEW,,,,Weak: closest (sheet WEAK).,Prominent geolocation + km sort.
+*ikindi kuri ihute hakemurwe ikibazo cya create acount to login/signup,,CUSTOMER INFO,Name + Phone,Identify buyer,Mandatory,BUYER,,0,EXIST,REUSE,account_payment,,,Exists: login/register; auth APIs; account_payment reuse.,Fix broken forms row 41.
+,,PAYMENT,Show: MoMo / Cash,Simple choice,No integration needed first,BUYER,,0,EXIST,REUSE,,,,Exists: MoMo/Cash in checkout; confirmPayment.,Automate confirmation if still manual.
+,,CONFIRMATION,Show “Order received”,Trust,Always confirm,BUYER,,0,EXIST,REUSE,,,,Exists: order-success + confirmation copy.,Optional SMS/email.
+,,ORDER ID,Generate simple number,Track order,Must exist,Seller,,0,EXIST,REUSE,,,,Exists: order IDs via post_orders / Java.,Short support-friendly IDs.
+*Ese client nagura product aramenya aguze muri shop yande aramenya arinde  mu seller umwakiriye. Kuko dufite many products and different price ntago azingo shop naguzeho ngo irihe ngize ikibazo nahamagarande.,,📲 ORDERS LIST,See mY orders,,,BUYER,,1,EXIST,REUSE,order_ratings,,,Exists: buyer orders; order_ratings tie-in.,Clarify which shop per line item (CSV concern).
+*ikindi seller akeneye simple dashboard imwereka abakiriya batanze order online,,📲 ORDERS LIST,See all orders,Know what to prepare,Real-time,Seller,,1,EXIST,REUSE,order_transaction_list,,,Exists: supplier orders; order_transaction_list; dashboards.,Real-time new-order signal.
+,,📲 ORDER STATUS,Pending / Preparing / Sent / Done,Control flow,1 tap change,Seller,,1,EXIST,REUSE,,,,Exists: status APIs; grandma seller workflow.,Match labels Pending/Preparing/Sent/Done; push to buyer.
+,,📲 CALL BUTTON,Call customer,Fix issues fast,Direct call,Seller,,3,NEW,NEW,,,,Gap: dedicated Call button on order.,tel: from order phone + mobile UX.
+,,📲 SMS BUTTON,Send message,Confirm order,1 click,Seller,,3,NEW,NEW,,,,Gap: one-tap SMS.,sms: link with order id or Twilio backend.
+,,📲 PAYMENT INFO,Show MoMo code + ID,Avoid confusion,Always visible,Seller,,1,EXIST,REUSE,,,,Exists: payment info in flows; payment dashboard.,Always on seller order card; mask in logs.
+,,📲 MANUAL CONFIRM,Accept / Reject order,Human control,No auto,Seller,,1,NEW,NEW,,,,Exists: grandma Accept/Reject; rejected status.,Mirror on supplier/orders if missing; audit log.
+,,📲 TIME,Show order time,Prioritize,Clear timing,Seller,,1,NEW,REUSE,,,,Partial: timestamps in orders.,Relative time + TZ on seller cards.
+,,🚲 ADDRESS,Simple location text,Deliver easily,No map needed first,rider,,0,EXIST,REUSE,vehicles,,,Exists: delivery create/list; vehicles reference.,Address validation + landmarks.
+,,🚲 STATUS,“Out for delivery”,Customer trust,Simple update,rider,,1,EXIST,REUSE,drivers,,,Exists: driver/delivery status.,Buyer map link optional.
+,,🚲 CALL RIDER,Connect rider,Coordination,Optional,rider,,2,WEAK,REUSE,drivers,,,Weak: call rider (sheet WEAK).,Show rider phone + tel when assigned.
+,,Rate a driver,,,,rider,,2,WEAK,REUSE,drivers,,,Weak: delivery rate API.,Post-delivery rating prompt.
+,,Rate a shop,,,,Seller,,2,WEAK,REUSE,order_ratings,,,Weak: order_ratings / supplier rating.,Post-order shop rating UI.
+,,Rate product,,,,BUYER,,2,WEAK,REUSE,chaos_beta.niki_items,,,Weak: product rate API.,Surface on product after purchase.
+niba akatuza akore kuri button ya katuza ,,,,,,Seller,,4,NEW,REUSE,,,,Unclear: katuruza/payout button.,Define product rule; link payment dashboard.
+nawe akohereza commands,,,,,,Seller,not clear,5,NEW,LITE,,,,Unclear: commands (table/B2B?).,Clarify; table-commands APIs exist for venues.
+* izi form 2 become supplier and become customer ntizikora  kuri ihute.,,,,,,Seller,hakemurwe ikibazo cya backend,5,NEW,NEW,,,,Gap: forms broken (sheet).,Fix Java endpoints + Next proxies; E2E tests.
+*ikindi price ya derively iri fixed kumuntu uguze ipaki ya Nile numuntu uranguye derively yabo ikwiyeguhinduka,,,,,,BUYER,not clear,5,NEW,NEW,,,,Gap: delivery pricing rule unclear.,Rules engine: zones/tiers; admin config.
+Purchase,,,,,,Seller,,,NEW,LITE,,,,Partial: B2B purchase flows.,Expand if procurement module needed.
+Ebm,,,,,,Seller,,,NEW,LITE,sdc009000057_transaction,,,Unknown: EBM / sdc009000057_transaction.,Document integration + settings UI.
+whishlist,,,,,,BUYER,,,EXIST,NEW,wishlist,,,Partial: favorites; wishlist table in sheet.,Rename or split wishlist vs favorites.

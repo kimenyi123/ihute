@@ -40,7 +40,9 @@ export function TableCommandBanner() {
 
   const sellerGroups = getGroupsBySeller()
 
-  // Auto-leave active table session when cart has no seller groups (individual order completed).
+  // Auto-leave stale active table session when cart is empty.
+  // This prevents users from being forced to manually click "Leave Table"
+  // after completing a normal individual order flow.
   useEffect(() => {
     if (!activeSession) return
     if (activeSession.status !== "ACTIVE") return

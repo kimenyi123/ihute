@@ -269,6 +269,8 @@ export function CheckoutForm() {
       console.log("✅ Order created successfully:", json)
 
       clearCart()
+      const slug = (json as { trackToken?: string }).trackToken || json.orderId
+      router.push(`/track-order/${encodeURIComponent(String(slug))}`)
       await flushCartToServer(user?.email ?? "", [])
       router.push(`/track-order/${json.orderId}`)
 

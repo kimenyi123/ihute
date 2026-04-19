@@ -15,6 +15,7 @@ interface Props {
 export function KioskCartPanel({ open, onOpenChange }: Props) {
   const router = useRouter()
   const items = useCartStore((s) => s.items)
+  const setQty = useCartStore((s) => s.setQty)
   const remove = useCartStore((s) => s.remove)
   const getTotalPrice = useCartStore((s) => s.getTotalPrice)
 

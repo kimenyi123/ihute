@@ -47,12 +47,17 @@ export interface User {
 interface AuthState {
   user: User | null
   isAuthenticated: boolean
+  /** When the user signed in (epoch ms). */
   loginTime: number | null
+  /** Last user activity; session expires `sessionTimeout` after this (sliding window). */
+  lastActivityAt: number | null
   sessionTimeout: number
   hasHydrated: boolean
   login: (user: User) => void
   logout: () => void
   updateUser: (user: Partial<User>) => void
+  /** Bump the sliding session window (call on interaction). */
+  touchSession: () => void
   checkSession: () => boolean
   setSessionTimeout: (timeout: number) => void
 }
@@ -68,7 +73,13 @@ export const useAuthStore = create<AuthState>()(
 
       login: (user) => {
         const now = Date.now()
-        set({ user, isAuthenticated: true, loginTime: now, hasHydrated: true })
+        set({
+          user,
+          isAuthenticated: true,
+          loginTime: now,
+          lastActivityAt: now,
+          hasHydrated: true,
+        })
         
         // Merge anonymous session interactions to user account
         if (typeof window !== "undefined") {
@@ -79,7 +90,7 @@ export const useAuthStore = create<AuthState>()(
       },
 
       logout: () => {
-        set({ user: null, isAuthenticated: false, loginTime: null, hasHydrated: true })
+        set({ user: null, isAuthenticated: false, loginTime: null, lastActivityAt: null })
         if (typeof window !== "undefined") {
           localStorage.removeItem("auth-storage")
           localStorage.removeItem("cart-storage")
@@ -89,17 +100,29 @@ export const useAuthStore = create<AuthState>()(
           localStorage.removeItem("prefs-storage")
           localStorage.removeItem("table-command-storage")
           sessionStorage.clear()
+          for (let i = localStorage.length - 1; i >= 0; i--) {
+            const k = localStorage.key(i)
+            if (k?.startsWith("grandma:")) localStorage.removeItem(k)
+          }
         }
       },
 
       updateUser: (updates) =>
         set((state) => ({ user: state.user ? { ...state.user, ...updates } : null })),
 
+      touchSession: () => {
+        const s = get()
+        if (!s.isAuthenticated) return
+        set({ lastActivityAt: Date.now() })
+      },
+
       checkSession: () => {
         const state = get()
         if (!state.isAuthenticated || !state.loginTime) return false
         const now = Date.now()
-        const sessionExpired = now - state.loginTime > state.sessionTimeout
+        // Sliding window: timeout from last activity (older persisted state has no lastActivityAt → use loginTime)
+        const anchor = state.lastActivityAt ?? state.loginTime
+        const sessionExpired = now - anchor > state.sessionTimeout
         if (sessionExpired) {
           state.logout()
           return false
@@ -116,11 +139,16 @@ export const useAuthStore = create<AuthState>()(
         user: s.user,
         isAuthenticated: s.isAuthenticated,
         loginTime: s.loginTime,
+        lastActivityAt: s.lastActivityAt,
         sessionTimeout: s.sessionTimeout,
       }),
-      onRehydrateStorage: () => (persisted: unknown, error: unknown) => {
-        if (error) {
-          console.warn("[auth-store] persist rehydrate error:", error)
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          state.hasHydrated = true
+          const minSession = 30 * 24 * 60 * 60 * 1000
+          if (typeof state.sessionTimeout === "number" && state.sessionTimeout < minSession) {
+            state.sessionTimeout = minSession
+          }
         }
         queueMicrotask(() => {
           try {

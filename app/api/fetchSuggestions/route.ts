@@ -25,16 +25,44 @@ function paramsToRecord(searchParams: URLSearchParams): Record<string, string> {
   return out
 }
 
+/** When set, Kaos logs SQL and may return `_debugSql` + `X-SectorStats-*` headers; Next skips its Redis cache. */
+function isDebugSql(params: URLSearchParams): boolean {
+  const v = params.get("debugSql")?.trim().toLowerCase()
+  return v === "1" || v === "true" || v === "yes"
+}
+
+const SECTOR_STATS_DEBUG_HEADER_NAMES = [
+  "x-sectorstats-shops-sql",
+  "x-sectorstats-items-sql",
+  "x-sectorstats-category-like-binds",
+  "x-sectorstats-debug-cache-phase",
+] as const
+
+/** Kaos `?sectorStats=pharmacy` returns `{ ok, sector, shops, items }` — must not be replaced by empty-search JSON. */
+function sectorStatsErrorBody(sectorSlug: string, warning: string): string {
+  return JSON.stringify({
+    ok: true,
+    sector: sectorSlug.trim(),
+    shops: 0,
+    items: 0,
+    warning,
+  })
+}
+
 async function forward(req: NextRequest) {
   const incoming = new URL(req.url)
+  const sectorStatsParam = incoming.searchParams.get("sectorStats")
+  const debugSql = isDebugSql(incoming.searchParams)
   const target = new URL(getFetchSuggestionsUrl())
 
   // Copy query params. Backend must always search Redis first, then DB (see docs/backend-redis-search.md).
+  // Category, brand, price: frontend sends category, brand, priceMin, priceMax; backend can filter by them.
+  // See docs/backend-category-price-filters.md for SQL/API guidance.
   incoming.searchParams.forEach((v, k) => target.searchParams.append(k, v))
 
   // Redis first (this app): check our response cache before calling backend (DB)
   const cacheKey = buildCacheKey("fetchSuggestions", paramsToRecord(incoming.searchParams))
-  const cached = await getCached(cacheKey)
+  const cached = debugSql ? null : await getCached(cacheKey)
   if (cached) {
     console.log("[fetchSuggestions] Redis cache hit")
     try {
@@ -68,12 +96,19 @@ async function forward(req: NextRequest) {
   }
 
   // Cache miss: call backend (DB), then store in Redis
-  console.log("[fetchSuggestions] Redis miss, forwarding to backend:", target.toString())
+  console.log(
+    "[fetchSuggestions] Redis miss, forwarding to backend:",
+    target.toString(),
+    debugSql ? "(debugSql=1: Next Redis cache bypassed)" : "",
+  )
 
   const method = req.method
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'Accept': 'application/json'
+    Accept: "application/json",
+  }
+  if (method !== "GET" && method !== "HEAD") {
+    const ct = req.headers.get("content-type")
+    headers["Content-Type"] = ct && ct.trim() ? ct : "application/json"
   }
 
   const body = method === "GET" || method === "HEAD" ? undefined : await req.text()
@@ -91,8 +126,22 @@ async function forward(req: NextRequest) {
     })
 
     if (!resp.ok) {
-      const outBody = await resp.text()
+      await resp.text()
       console.warn("[fetchSuggestions] Backend returned", resp.status, ", returning empty results")
+      if (sectorStatsParam) {
+        return new Response(
+          sectorStatsErrorBody(sectorStatsParam, "Sector stats unavailable (backend HTTP " + resp.status + ")"),
+          {
+            status: 200,
+            headers: {
+              "content-type": "application/json",
+              "Access-Control-Allow-Origin": "*",
+              "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+              "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            },
+          }
+        )
+      }
       return new Response(JSON.stringify({
         ok: true,
         suppliersByName: [],
@@ -113,12 +162,33 @@ async function forward(req: NextRequest) {
 
     const outBody = await resp.text()
 
+    if (sectorStatsParam && debugSql) {
+      console.log("[fetchSuggestions][sectorStats-DEBUG] upstream URL:", target.toString())
+      for (const hn of SECTOR_STATS_DEBUG_HEADER_NAMES) {
+        const hv = resp.headers.get(hn)
+        if (hv) {
+          console.log(`[fetchSuggestions][sectorStats-DEBUG] header ${hn}:`, hv)
+        }
+      }
+    }
+
     // Validate JSON response and log where results come from (redis vs database) based on product.source
     let parsed: any
     try {
       parsed = JSON.parse(outBody)
     } catch (e) {
       console.error("Invalid JSON from backend:", outBody.substring(0, 200))
+      if (sectorStatsParam) {
+        return new Response(sectorStatsErrorBody(sectorStatsParam, "Invalid JSON from backend for sectorStats"), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+          },
+        })
+      }
       return new Response(JSON.stringify({ 
         ok: false, 
         error: "Invalid response format from backend",
@@ -176,6 +246,10 @@ async function forward(req: NextRequest) {
       console.log("[fetchSuggestions] Data source: unknown (no products array) | supplier=" + (supplierParam || "n/a"))
     }
 
+    if (sectorStatsParam && debugSql && parsed && typeof parsed === "object" && parsed._debugSql != null) {
+      console.log("[fetchSuggestions][sectorStats-DEBUG] JSON _debugSql:", JSON.stringify(parsed._debugSql, null, 2))
+    }
+
     // Remove strictly expired lots before dedupe so merged rows reflect sellable batches only (same idea Kaos validateStock should use).
     stripExpiredFromFetchSuggestionsBody(parsed ?? {})
 
@@ -201,23 +275,55 @@ async function forward(req: NextRequest) {
 
     enrichFetchSuggestionsProducts(parsed ?? {})
 
-    // Store in Redis for next time (Redis first, then DB)
-    await setCached(cacheKey, JSON.stringify(parsed ?? {}), SUGGESTIONS_TTL_SEC)
+    // Store in Redis for next time (Redis first, then DB) — skip when debugSql so each hit refreshes upstream + logs
+    if (!debugSql) {
+      await setCached(cacheKey, JSON.stringify(parsed ?? {}), SUGGESTIONS_TTL_SEC)
+    }
+
+    const resHeaders = new Headers({
+      "content-type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    })
+    if (sectorStatsParam && debugSql) {
+      let anySectorDebugHeader = false
+      for (const hn of SECTOR_STATS_DEBUG_HEADER_NAMES) {
+        const hv = resp.headers.get(hn)
+        if (hv) {
+          resHeaders.set(hn, hv)
+          anySectorDebugHeader = true
+        }
+      }
+      if (anySectorDebugHeader) {
+        resHeaders.set(
+          "Access-Control-Expose-Headers",
+          "X-SectorStats-Shops-Sql, X-SectorStats-Items-Sql, X-SectorStats-Category-Like-Binds, X-SectorStats-Debug-Cache-Phase",
+        )
+      }
+    }
 
     return new Response(JSON.stringify(parsed ?? {}), {
       status: resp.status,
-      headers: {
-        "content-type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-      },
+      headers: resHeaders,
     })
   } catch (err: any) {
     console.error("Backend fetch error:", err?.message || err)
     
     // Return empty results instead of error for search timeouts
     if (err?.name === "AbortError") {
+      if (sectorStatsParam) {
+        return new Response(
+          sectorStatsErrorBody(sectorStatsParam, "Sector stats request timed out"),
+          {
+            status: 200,
+            headers: {
+              "content-type": "application/json",
+              "Access-Control-Allow-Origin": "*",
+            },
+          }
+        )
+      }
       return new Response(JSON.stringify({
         ok: true,
         suppliersByName: [],
@@ -232,6 +338,21 @@ async function forward(req: NextRequest) {
           "Access-Control-Allow-Origin": "*",
         },
       })
+    }
+
+    if (sectorStatsParam) {
+      return new Response(
+        sectorStatsErrorBody(sectorStatsParam, "Cannot reach backend for sectorStats: " + (err?.message || String(err))),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+          },
+        }
+      )
     }
 
     return new Response(JSON.stringify({

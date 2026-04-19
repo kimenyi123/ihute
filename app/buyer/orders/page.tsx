@@ -1,5 +1,7 @@
 "use client"
 
+import { Header } from "@/components/header"
+import { BuyerOrdersPanel } from "@/components/buyer-orders-panel"
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useAuthStore } from "@/lib/auth-store"
@@ -12,10 +14,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { SdcInfoCell, sdcRaw } from "@/components/sdc-info-cell"
+import { Loader2 } from "lucide-react"
 import { ResponsiveTable } from "@/components/ui/responsive-table"
 import { useOrdersStore, type Order } from "@/lib/orders-store"
 import { isInvoiceFinanced, canRequestInvoiceFinancing } from "@/lib/order-financing"
 import { mapBackendOrderStatusToStore } from "@/lib/order-status-map"
+import { useAuthPersistHydrated } from "@/lib/use-auth-persist-hydrated"
 
 type RawTxn = {
   ID_ORDER?: string
@@ -43,6 +48,12 @@ type RawTxn = {
   SELLER_TIN?: string
   subtotal?: number
   BUYER_ISHYIGA_ACCOUNT?: string
+  TIME_SDC?: string
+  SDC_ID?: string
+  RECEIPT_NUMBER?: string
+  SDC_INTERNAL_DATA?: string
+  RECEIPT_SIGNATURE?: string
+  INTERNAL_DATA?: string
   /** Backend may use camelCase or other keys; indexed access in pickRawStr */
   [key: string]: unknown
 }
@@ -206,6 +217,7 @@ export default function BuyerOrdersPage() {
   const router = useRouter()
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
   const user = useAuthStore((s) => s.user)
+  const authHydrated = useAuthPersistHydrated()
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
 
@@ -222,12 +234,13 @@ export default function BuyerOrdersPage() {
   const upsertOrder = useOrdersStore((s) => s.upsertOrder)
 
   useEffect(() => {
+    if (!authHydrated) return
     if (!isAuthenticated) router.push("/login")
-  }, [isAuthenticated, router])
+  }, [authHydrated, isAuthenticated, router])
 
   useEffect(() => {
     async function load() {
-      if (!user?.email) return
+      if (!authHydrated || !isAuthenticated || !user?.email) return
 
       setLoading(true)
       setErr(null)
@@ -291,6 +304,12 @@ export default function BuyerOrdersPage() {
             servedAmount: pickRawNum(raw, "SERVED_AMOUNT", "servedAmount", "AMOUNT_SERVED", "SERVED_TOTAL"),
             servedQty: pickRawNum(raw, "CONFIRMED_RECEIVED_QTY", "SERVED_QTY", "servedQty", "SERVED_QUANTITY", "received_quantity"),
             orderNote: pickRawStr(raw, "CONDITIONS", "ORDER_NOTE", "orderNote", "NOTE"),
+            timeSdc: pickRawStr(raw, "TIME_SDC", "time_sdc", "SDC_TIME", "sdc_time"),
+            sdcId: pickRawStr(raw, "SDC_ID", "sdc_id"),
+            receiptNumber: pickRawStr(raw, "RECEIPT_NUMBER", "receipt_number"),
+            sdcInternalData: pickRawStr(raw, "SDC_INTERNAL_DATA", "sdc_internal_data"),
+            receiptSignature: pickRawStr(raw, "RECEIPT_SIGNATURE", "receipt_signature"),
+            internalData: pickRawStr(raw, "INTERNAL_DATA", "internal_data"),
           }
           })
 
@@ -306,7 +325,20 @@ export default function BuyerOrdersPage() {
     }
 
     load()
-  }, [user?.email, user?.ishyigaAccount, search, dateFrom, dateTo, criteria, page, pageSize, setOrders, user?.owner])
+  }, [
+    authHydrated,
+    isAuthenticated,
+    user?.email,
+    user?.ishyigaAccount,
+    search,
+    dateFrom,
+    dateTo,
+    criteria,
+    page,
+    pageSize,
+    setOrders,
+    user?.owner,
+  ])
 
   const distinctStatuses = useMemo(() => {
     const set = new Set<string>()
@@ -365,6 +397,18 @@ export default function BuyerOrdersPage() {
     return buttons
   }, [page, totalPages])
 
+  if (!authHydrated) {
+    return (
+      <div className="min-h-screen w-full flex flex-col bg-slate-50">
+        <Header />
+        <main className="flex flex-1 flex-col items-center justify-center gap-2 text-slate-600">
+          <Loader2 className="h-8 w-8 animate-spin" aria-hidden />
+          <p className="text-sm">Checking session…</p>
+        </main>
+      </div>
+    )
+  }
+
   if (!isAuthenticated) return null
 
   const getStatusColor = (status?: string) => {
@@ -393,6 +437,11 @@ export default function BuyerOrdersPage() {
       "Status",
       "Date",
       "Order Note",
+      "TIME_SDC",
+      "SDC_ID",
+      "RECEIPT_NUMBER",
+      "SDC_INTERNAL_DATA",
+      "RECEIPT_SIGNATURE",
     ]
     const values = [
       String(o.id),
@@ -405,6 +454,11 @@ export default function BuyerOrdersPage() {
       String(o.orderStatus ?? ""),
       new Date(o.createdAt).toISOString(),
       String((o as any).orderNote ?? ""),
+      String((o as any).timeSdc ?? "").trim(),
+      String((o as any).sdcId ?? "").trim(),
+      String((o as any).receiptNumber ?? "").trim(),
+      String((o as any).sdcInternalData ?? "").trim(),
+      String((o as any).receiptSignature ?? "").trim(),
     ]
     const esc = (v: string) => `"${v.replace(/"/g, '""')}"`
     const csv = `${fields.map(esc).join(",")}\n${values.map(esc).join(",")}\n`
@@ -418,7 +472,10 @@ export default function BuyerOrdersPage() {
   }
 
   return (
-    <main className="w-full max-w-7xl mx-auto p-6">
+    <div className="min-h-screen w-full flex flex-col bg-slate-50">
+      <Header />
+      <BuyerOrdersPanel variant="buyer" loginRedirect="/login" />
+      <main className="mx-auto w-full max-w-7xl flex-1 p-6">
         <h1 className="text-2xl font-bold mb-4 text-slate-800">Order Reports</h1>
 
         <div className="mb-4 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2">
@@ -477,6 +534,7 @@ export default function BuyerOrdersPage() {
                   <th className="px-4 py-3 text-left text-sm font-semibold">Order Note</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold">Status</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold">Date</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold">SDC Info</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold">Action</th>
                 </tr>
               </thead>
@@ -484,19 +542,19 @@ export default function BuyerOrdersPage() {
               <tbody className="divide-y divide-slate-200">
                 {filteredOrders.map((o) => (
                   <tr key={o.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 font-semibold">{o.id}</td>
-                    <td className="px-4 py-3">{o.buyerName || (o as any).buyerOwner || "—"}</td>
-                    <td className="px-4 py-3">{o.seller}</td>
-                    <td className="px-4 py-3 font-medium">
+                    <td className="px-4 py-3 align-middle font-semibold">{o.id}</td>
+                    <td className="px-4 py-3 align-middle">{o.buyerName || (o as any).buyerOwner || "—"}</td>
+                    <td className="px-4 py-3 align-middle">{o.seller}</td>
+                    <td className="px-4 py-3 align-middle font-medium">
                       {(o.amount ?? o.subtotal ?? 0).toLocaleString()} RWF
                     </td>
-                    <td className="px-4 py-3 font-medium">
+                    <td className="px-4 py-3 align-middle font-medium">
                       {Number((o as any).servedAmount ?? 0).toLocaleString()} RWF
                     </td>
-                    <td className="px-4 py-3 max-w-[220px] truncate" title={(o as any).orderNote || ""}>
+                    <td className="px-4 py-3 align-middle max-w-[220px] truncate" title={(o as any).orderNote || ""}>
                       {(o as any).orderNote || "—"}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 align-middle">
                       <span
                         className={`px-2 py-1 rounded text-white text-sm ${getStatusColor(o.orderStatus)}`}
                         title="Status from your account orders (backend)"
@@ -504,15 +562,17 @@ export default function BuyerOrdersPage() {
                         {o.orderStatus}
                       </span>
                     </td>
-                    <td className="px-4 py-3">{new Date(o.createdAt).toLocaleString()}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
-                        <Button size="sm" variant="default" onClick={() => router.push(`/orders/${o.id}`)}>
-                          View
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => exportOrderRowCsv(o)}>
-                          Export
-                        </Button>
+                    <td className="px-4 py-3 align-middle whitespace-nowrap">{new Date(o.createdAt).toLocaleString()}</td>
+                    <td className="px-4 py-3 align-middle">
+                      <SdcInfoCell order={o} />
+                    </td>
+                    <td className="px-4 py-3 align-middle flex gap-2">
+                      <Button size="sm" variant="default" onClick={() => router.push(`/orders/${o.id}`)}>
+                        View
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => exportOrderRowCsv(o)}>
+                        Export
+                      </Button>
 
                         <Button
                           size="sm"
@@ -526,7 +586,6 @@ export default function BuyerOrdersPage() {
                         >
                           Financing
                         </Button>
-                      </div>
                     </td>
                   </tr>
                 ))}
@@ -558,6 +617,7 @@ export default function BuyerOrdersPage() {
             Next
           </Button>
         </div>
-    </main>
+      </main>
+    </div>
   )
 }

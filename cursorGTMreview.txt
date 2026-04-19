@@ -1,0 +1,121 @@
+IHUTE — Technical + Product Readiness Report (GTM Review)
+==========================================================
+Generated from codebase analysis (Next.js app: app/, components/, lib/, API routes, next.config.mjs).
+Behaviour that depends only on Java backend / MySQL is noted where the frontend cannot guarantee it.
+
+---
+
+FULL TECHNICAL + PRODUCT READINESS REPORT
+-----------------------------------------
+
+CUSTOMER SIDE (BUYING)
+----------------------
+
+| Feature / Issue | Y/N (Exists) | % Working | Explanation (from code) | Suggested fix / improvement | Priority |
+|-----------------|--------------|-----------|-------------------------|------------------------------|----------|
+| Open shop link (no login) | Y | 85% | app/shop-with-me/[nickname]/page.tsx + components/shop-with-me.tsx; browsing/adding does not require auth. Checkout defaults to anonymous when not logged in (cart-summary.tsx: checkoutMode === "anonymous"). | Smoke-test each nickname against Java shop_with_me; ensure Redis/cache miss paths match backend nicknames. | Medium |
+| Product list (image + price) | Y | 75% | Shop-with-me flattens API products, shows price from selling_price / price; images via getProductImageCandidates / getProductImageSrc (lib/image-utils.ts, shop-with-me.tsx). | Depends on backend image fields + KAOS paths; add monitoring when NO_IMAGE_URL dominates. | Medium |
+| Stock visibility | Y | 70% | in_stock, stock / item_packet mapped in shop-with-me.tsx (flattening + in_stock_products). Not guaranteed on every API shape. | Align one contract with Java for stock fields; surface "out of stock" consistently on cards. | Medium |
+| Search (simple) | Y | 65% | productSearch / q passed to /api/shop-with-me (route.ts); components/global-search.tsx, app/api/global-search/route.ts. | E2E test search → results; tune timeouts (getProxyTimeoutMs). | Medium |
+| Add to cart | Y | 80% | lib/cart-store.ts with persist (sessionStorage), merge rules, eRx + image fields. | Test merge edge cases (same code, different prescriptions). | Low |
+| Buy Now button | Y | 75% | components/product-card.tsx "Buy Now" adds/increments cart; optional navigate to /cart. Pharmacy path can open ErxPrescriptionDialog. | Ensure anonymous checkout path tested for pharmacy. | Medium |
+| Customer info (name + phone) | Y | 80% | Cart summary collects anonymousName / anonymousPhone when anonymous; validates before payment (cart-summary.tsx). | Harden validation (phone format) if required for SMS/WhatsApp. | Low |
+| Payment display (MoMo / Cash) | Y | 75% | MoMo/Airtel/COD flows in cart-summary.tsx; USSD helpers (buildMoMoUssd). Success depends on /api/orders/create + Java. | Document env for MoMo numbers; monitor pollPayment failures. | High |
+| Order confirmation | Y | 70% | Redirect to order-success with query params after successful create (router.push /order-success?...). | Ensure Java always returns ok: true + orderId when order persisted. | High |
+| Order ID generation | Y | 60% | app/api/orders/create/route.ts returns json.orderId ?? ORD-${Date.now()} — fallback ID is client-facing even if backend failed to persist. | Never surface fallback ORD-* as success without backend confirmation; align with Java contract. | High |
+
+SHOP SIDE (MANAGEMENT)
+----------------------
+
+| Feature / Issue | Y/N (Exists) | % Working | Explanation (from code) | Suggested fix / improvement | Priority |
+|-----------------|--------------|-----------|-------------------------|------------------------------|----------|
+| Orders list | Y | 65% | app/supplier/orders/page.tsx loads orders via store/API mapping; filters, pagination. | Depends on /api/orders POST + Java responses; add error UX when load fails. | Medium |
+| Real-time orders | Partial | 40% | app/api/seller-orders/live/route.ts — SSE + Redis pub/sub; if no Redis → NO_REDIS and no live stream. | Run Redis in prod or fall back to polling interval on supplier UI. | High |
+| Order status (workflow) | Y | 60% | Supplier UI uses open, processing, invoice, in-transit, delivered (SUPPLIER_STATUS); updates via /api/orders/update-status. Not literally "Pending / Preparing / Sent / Done" as named. | Map labels to business language in UI; verify Java accepts all transitions. | Medium |
+| Call customer button | N (main list) | 20% | app/supplier/orders/page.tsx table: View only; no tel: / call button in this list. | Add tel: link from buyerPhone if present in order payload; confirm field in API mapping. | High |
+| SMS button | N | 0% | No SMS integration found on supplier orders list. | Integrate provider or sms:/mailto placeholder; or document WhatsApp-only workflow. | Medium |
+| Product image in orders | Partial | 50% | OrderItem type includes image (lib/orders-store.ts); visibility depends on /api/orders mapping from Java. | Ensure order details API returns line images; render in order detail view. | Medium |
+| Payment info (MoMo + TX ID) | Partial | 55% | Cart flow sends paymentId, paymentName; supplier list shows paymentStatus derived from PAYMENT_NAME regex (page.tsx). Full TX display depends on backend fields in detail views. | Surface paymentId / reference on supplier order detail page. | High |
+| Manual accept/reject | Y | 55% | app/supplier/orders/view/page.tsx — handleDecision with accept / reject / etc. Main orders list uses status dropdown, not accept/reject pair. | Clarify which page is canonical for merchants; unify flows. | Medium |
+| Order timestamp | Y | 75% | formatOrderDate handles MySQL-style datetime and ISO (supplier/orders/page.tsx). | Ensure API always sends consistent createdAt / heure. | Low |
+
+SYSTEM / INFRA
+--------------
+
+| Feature / Issue | Y/N (Exists) | % Working | Explanation (from code) | Suggested fix / improvement | Priority |
+|-----------------|--------------|-----------|-------------------------|------------------------------|----------|
+| API stability (orders never fail) | N | ≤50% | /api/orders/create has 15s timeout, connection error messages, one retry (form → JSON) on hard failure (route.ts ~226–273). Still fails if Java down. | Health checks, queue/retry for payments, status page for backend. | High |
+| CORS (frontend ↔ backend) | Y (pattern) | 80% | Browser calls Next.js /api/*; server fetches Java (shop-with-me comment; next.config.mjs rewrites for payment). True CORS bypass for Java from browser not required if all go through Next. | Avoid direct browser→Java URLs in new features. | Medium |
+| Next.js API middle layer | Y | 85% | Large app/api/** surface (orders, auth, shop-with-me, kiosk, etc.). | Standardize error JSON shape across routes. | Low |
+| Logs / traceability | Partial | 65% | Verbose logging in app/api/orders/route.ts, [orders/create] logs, RID in register route. | Structured logging (request ID middleware), log shipping (e.g. Axiom/CloudWatch). | Medium |
+| Retry mechanism | Partial | 55% | Order create: conditional second attempt; cart pollPayment for MoMo (60s). No generic retry for all failures. | Idempotent order create + safe retries on network only. | High |
+| Mobile performance | Partial | 60% | next.config.mjs: images.unoptimized: true (faster to ship, heavier bandwidth). | Re-enable optimization where possible; lazy images already used in places. | Medium |
+| Crash handling | Partial | 50% | Dev: Turbopack can fail with persistence DB error; webpack dev may work. typescript.ignoreBuildErrors: true hides TS issues at build. | Fix Turbopack cache or default next dev --webpack; remove ignoreBuildErrors for release. | High |
+
+AUTO ONBOARDING (CEO REQUIREMENT)
+---------------------------------
+
+| Feature / Issue | Y/N (Exists) | % Working | Explanation (from code) | Suggested fix / improvement | Priority |
+|-----------------|--------------|-----------|-------------------------|------------------------------|----------|
+| Shop creates account alone | Y | 70% | app/register/page.tsx → POST /api/auth/register → seller branch → Java InsertSuppliers (app/api/auth/register/route.ts). No frontend "pending admin approval" gate. | Confirm Java never holds accounts in "pending" without UI handling. | High |
+| Shop adds products alone | Partial | 40% | Supplier dashboard flows exist; app/api/supplier/add-product/route.ts inserts into MySQL with hardcoded localhost credentials — not production-safe and not clearly the same path as Java catalog. | Replace with env-driven DB or single backend API for products; remove secrets from repo. | High |
+| Publish shop link automatically | Partial | 50% | Public URL pattern is /shop-with-me/[nickname]; nickname resolution in API (nicknameLookupVariants in shop-with-me/route.ts). Registration does not show a generated share URL in code reviewed. | After registration, redirect to "Your shop link: …" using nickname from API response. | High |
+| No manual validation blocking activation | Unknown (frontend) | ? | Frontend treats HTTP 201 on seller register as success. Blocking rules would live in Java, not visible here. | Backend audit: ensure no manual approval step. | High |
+| Default templates for fast setup | Partial | 30% | app/grandma/page.tsx has demo/placeholder onboarding alert — not a real template wizard. Kiosk/self-order modules add separate flows. | Minimal "starter menu" template + CSV import doc. | Medium |
+
+OPTIONAL (LOW PRIORITY)
+-----------------------
+
+| Feature / Issue | Y/N (Exists) | % Working | Explanation (from code) | Suggested fix / improvement | Priority |
+|-----------------|--------------|-----------|-------------------------|------------------------------|----------|
+| Delivery flow | Y | 50% | app/api/delivery/*, delivery fields on orders, cart location. | E2E buyer → supplier with location. | Low |
+| Order tracking | Y | 65% | app/track-order/[orderId]/page.tsx, app/api/orders/track/route.ts. | Test with real order IDs from Java. | Low |
+| Rider communication | Partial | 35% | Delivery list/rate APIs; no dedicated rider chat in reviewed UI. | Out of scope for MVP unless required. | Low |
+
+---
+
+GO LIVE DECISION
+----------------
+
+NOT READY for a reliable money-critical launch without addressing backend coupling, secrets, and High gaps below. Limited pilot is possible if Java + Redis + env are stable and manual workarounds are accepted (e.g. phone copy-paste instead of Call button).
+
+---
+
+TOP 5 BLOCKERS
+--------------
+
+1. Backend dependency: Orders and catalog depend on Java + DB; Next.js only proxies — no guarantee "works every time" without ops monitoring.
+
+2. supplier/add-product hardcoded DB credentials (localhost, fixed user/pass in app/api/supplier/add-product/route.ts) — security and deployment blocker.
+
+3. Order ID fallback (ORD-${Date.now()}) when Java response is ambiguous — risk of false success for customers.
+
+4. Real-time seller feed requires Redis; without it, live stream degrades (NO_REDIS).
+
+5. typescript.ignoreBuildErrors: true — ships despite type errors; increases production risk.
+
+---
+
+FASTEST PATH TO MARKET (1 WEEK PLAN)
+------------------------------------
+
+1. Freeze env: Document NEXT_PUBLIC_API_URL, JAVA_* URLs, Redis URL; smoke-test /api/orders/create GET health and POST from staging.
+
+2. Remove or gate add-product local MySQL route — point product creation to one Java/API path with env-based config only.
+
+3. Supplier orders list: add tel: (and optional WhatsApp) using buyer phone from mapped order fields.
+
+4. Order success: only redirect when json.ok && json.orderId matches backend contract; remove or narrow fallback ID.
+
+5. CI: next build without ignoreBuildErrors, or fix top TS errors; run one E2E path: shop-with-me → cart → anonymous checkout → order-success.
+
+6. Pilot checklist: Redis on for seller live stream OR enable polling fallback; verify seller registration end-to-end on staging Java.
+
+---
+
+FINAL NOTE
+----------
+
+Goal: a system that works every time for a simple shop and a simple customer. The code supports that path (anonymous checkout, Next API proxy, shop-with-me, order success). Reliability "every time" is not proven in-repo; it requires stable Java + DB + Redis + correct env and the fixes above.
+
+Follow-up: say REVIEW CURSOR OUTPUT to trim scope to a Wolf-ready feature list only.

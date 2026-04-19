@@ -47,10 +47,16 @@ export function BusinessList({
   categoryId,
   selectedSupplier = "all",
   onSelect = () => {},
+  hideHeader = false,
+  shopSelectionOnly = false,
 }: {
   categoryId: string
   selectedSupplier?: string
   onSelect?: (id: string, name: string) => void
+  /** When true, only the horizontal shop pills are shown (parent supplies context). */
+  hideHeader?: boolean
+  /** Hide “All suppliers”; user must pick one shop (Browse by shop). */
+  shopSelectionOnly?: boolean
 }) {
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [loading, setLoading] = useState(false)
@@ -109,6 +115,15 @@ export function BusinessList({
   const showEmpty = !loading && !error && suppliers.length === 0
 
   return (
+    <div>
+      {!hideHeader && (
+        <div className="mb-4">
+          <h2 className="text-xl font-semibold">Businesses in this category</h2>
+          <p className="text-sm text-muted-foreground">
+            Pick a business to see their products — or view all.
+          </p>
+        </div>
+      )}
     <section aria-labelledby={headingId}>
       <div className="mb-4">
         <h2 id={headingId} className="text-xl font-semibold">
@@ -169,19 +184,19 @@ export function BusinessList({
             }
           }}
         >
-          <button
-            type="button"
-            onClick={() => onSelect("all", "All Suppliers")}
-            aria-pressed={selectedSupplier === "all"}
-            className={cn(
-              "px-3 py-1.5 rounded-full border text-sm flex-shrink-0",
-              selectedSupplier === "all"
-                ? "bg-primary text-primary-foreground border-primary"
-                : "bg-background hover:bg-accent"
-            )}
-          >
-            All Suppliers
-          </button>
+          {!shopSelectionOnly && (
+            <button
+              onClick={() => onSelect("all", "All Suppliers")}
+              className={cn(
+                "px-3 py-1.5 rounded-full border text-sm flex-shrink-0",
+                selectedSupplier === "all"
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-background hover:bg-accent"
+              )}
+            >
+              All Suppliers
+            </button>
+          )}
 
           {loading &&
             Array.from({ length: SKELETON_CHIPS }, (_, i) => (
@@ -254,5 +269,6 @@ export function BusinessList({
         <div className="pointer-events-none absolute right-0 top-0 h-full w-8 bg-gradient-to-l from-background to-transparent" />
       </div>
     </section>
+    </div>
   )
 }

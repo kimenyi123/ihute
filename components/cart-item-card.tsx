@@ -5,9 +5,10 @@ import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useCartStore, CartItem } from "@/lib/cart-store"
-import { Minus, Plus, Trash2 } from "lucide-react"
+import { parseErxFromNotes, prescriptionLineKey } from "@/lib/erx-prescription"
+import { Trash2 } from "lucide-react"
 import { getProductImageCandidates, isValidImageUrl, NO_IMAGE_URL } from "@/lib/image-utils"
-import { DEFAULT_CART_CURRENCY, displayUnitForPrice } from "@/lib/cart-display-utils"
+import { DEFAULT_CART_CURRENCY, itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
 
 const PLACEHOLDER = "/placeholder.svg?height=64&width=64"
 
@@ -36,25 +37,21 @@ export function CartItemCard({ item }: { item: CartItem }) {
   const src = hasValidUrl ? resolvedUrl : NO_IMAGE_URL
   const isRemote = /^https?:\/\//i.test(src)
 
+  const erx = item.erx ?? parseErxFromNotes(item.notes ?? undefined)
+  const lineSig = item.lineSignature ?? prescriptionLineKey({ erx: item.erx, notes: item.notes })
+
   useEffect(() => {
     setCandidateIdx(0)
   }, [candidatesSignature, item.id, item.selectedUnit])
 
-<<<<<<< HEAD
   // Sync input value when quantity changes externally
-=======
->>>>>>> 820f3c4 (improved top -up sale and seprate seller table and buyer table)
   useEffect(() => {
     setInputValue(String(item.qty))
   }, [item.qty])
 
-<<<<<<< HEAD
-  const unitLabel = displayUnitForPrice(item.unit ?? item.selectedUnit)
-=======
   const unitLabel = itemEmballageDisplaySuffix(
     item.itemEmballage ?? item.unit ?? item.selectedUnit,
   )
->>>>>>> 820f3c4 (improved top -up sale and seprate seller table and buyer table)
 
   return (
     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2.5 sm:gap-4 rounded-lg border p-2.5 sm:p-3">
@@ -102,6 +99,21 @@ export function CartItemCard({ item }: { item: CartItem }) {
             {item.supplierLocation ? ` · ${item.supplierLocation}` : ""}
           </div>
           <div className="text-xs sm:text-sm mt-1">
+          {erx && (
+            <div className="text-[11px] text-muted-foreground mt-1.5 space-y-0.5 border-l-2 border-primary/30 pl-2">
+              <p className="font-medium text-foreground/80">Prescription</p>
+              <p>Measurement: {erx.measurement}</p>
+              <p>Every: {erx.every}</p>
+              {erx.toBeTakenDays ? <p>Duration (days): {erx.toBeTakenDays}</p> : null}
+              {erx.quantityOnce ? <p>Qty (once): {erx.quantityOnce}</p> : null}
+              <p>Route: {erx.route}</p>
+              <p>Refill: {erx.refill}</p>
+              {erx.instructionNotes ? (
+                <p className="line-clamp-3">Instructions: {erx.instructionNotes}</p>
+              ) : null}
+            </div>
+          )}
+          <div className="text-sm mt-1">
             {Number(item.price) > 0 ? (
               <>
                 <span className="font-medium">
@@ -120,59 +132,28 @@ export function CartItemCard({ item }: { item: CartItem }) {
               </div>
             ) : null}
           </div>
+          </div>
         </div>
       </div>
 
-      <div className="w-full sm:w-auto flex flex-col gap-2 sm:gap-3">
-        <div className="flex w-full items-center justify-center sm:justify-start gap-1.5 sm:gap-2">
-          <Button
-            size="icon"
-            variant="outline"
-            onClick={() => {
-              dec(item.id, item.selectedUnit)
-              setInputValue(String(Math.max(1, item.qty - 1)))
-            }}
-            aria-label="Decrease"
-            className="h-7 w-7 sm:h-8 sm:w-8"
-          >
-            <Minus className="h-4 w-4" />
-          </Button>
+      <div className="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
+        <div className="flex items-center gap-2">
           <Input
             type="number"
             min={1}
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onBlur={() => {
-              const newQty = parseInt(inputValue, 10)
-              if (!isNaN(newQty) && newQty >= 1) {
-                setQty(item.id, item.selectedUnit, newQty)
-              } else {
-                setInputValue(String(item.qty))
-              }
+            step={1}
+            value={item.qty}
+            onChange={(e) => {
+              const parsed = Number.parseInt(e.target.value, 10)
+              if (Number.isFinite(parsed)) setQty(item.id, parsed, item.selectedUnit, lineSig)
             }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                const newQty = parseInt(inputValue, 10)
-                if (!isNaN(newQty) && newQty >= 1) {
-                  setQty(item.id, item.selectedUnit, newQty)
-                }
-                e.currentTarget.blur()
-              }
+            onBlur={(e) => {
+              const parsed = Number.parseInt(e.target.value, 10)
+              setQty(item.id, Number.isFinite(parsed) ? parsed : item.qty, item.selectedUnit, lineSig)
             }}
-            className="h-7 sm:h-8 w-12 sm:w-16 text-center font-medium px-1"
+            aria-label="Quantity"
+            className="h-8 w-20 text-center font-medium [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
           />
-          <Button
-            size="icon"
-            variant="outline"
-            onClick={() => {
-              inc(item.id, item.selectedUnit)
-              setInputValue(String(item.qty + 1))
-            }}
-            aria-label="Increase"
-            className="h-7 w-7 sm:h-8 sm:w-8"
-          >
-            <Plus className="h-4 w-4" />
-          </Button>
         </div>
 
         <div className="flex items-center justify-between sm:justify-end gap-2 pt-1">
@@ -185,7 +166,7 @@ export function CartItemCard({ item }: { item: CartItem }) {
           <Button
             size="icon"
             variant="ghost"
-            onClick={() => remove(item.id, item.selectedUnit)}
+            onClick={() => remove(item.id, item.selectedUnit, lineSig)}
             aria-label="Remove"
             className="h-8 w-8"
           >

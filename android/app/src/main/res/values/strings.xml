@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Ihute</string>
+    <string name="title_activity_main">Ihute</string>
+    <string name="package_name">rw.ihute.app</string>
+    <string name="custom_url_scheme">rw.ihute.app</string>
+</resources>

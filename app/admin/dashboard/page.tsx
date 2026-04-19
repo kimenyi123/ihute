@@ -9,20 +9,13 @@ import {
   AlertCircle,
   TrendingUp,
   Package,
-<<<<<<< HEAD
-  FileText
-} from 'lucide-react'
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
-import { useAuthStore } from '@/lib/auth-store'
-import { mapBackendOrderStatusToTrack, type TrackOrderStatus } from '@/lib/order-status-map'
-import { ResponsiveTable } from '@/components/ui/responsive-table'
-=======
   FileText,
   Smartphone,
 } from "lucide-react"
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts"
 import { postAdminApi } from "@/lib/admin-client"
 import { useAuthStore } from "@/lib/auth-store"
+import { ResponsiveTable } from "@/components/ui/responsive-table"
 
 type TopupPeriod = 30 | 90 | "all"
 
@@ -35,7 +28,6 @@ interface PlatformTopup {
   ordersScanned: number
   ordersAvailable: number
 }
->>>>>>> 820f3c4 (improved top -up sale and seprate seller table and buyer table)
 
 interface DashboardKPIs {
   totalRevenue: number
@@ -52,44 +44,6 @@ interface SalesData {
   orderCount: number
 }
 
-<<<<<<< HEAD
-function getStatusLabel(status: TrackOrderStatus): string {
-  switch (status) {
-    case 'pending':
-      return 'Pending'
-    case 'open':
-      return 'Open'
-    case 'processing':
-      return 'Processing'
-    case 'invoice':
-      return 'Invoice'
-    case 'in-transit':
-      return 'Out for Delivery'
-    case 'delivered':
-      return 'Delivered'
-    default:
-      return 'Open'
-  }
-}
-
-function getStatusBadgeClass(status: TrackOrderStatus): string {
-  switch (status) {
-    case 'pending':
-      return 'bg-yellow-100 text-yellow-800'
-    case 'open':
-      return 'bg-blue-100 text-blue-800'
-    case 'processing':
-      return 'bg-purple-100 text-purple-800'
-    case 'invoice':
-      return 'bg-violet-100 text-violet-800'
-    case 'in-transit':
-      return 'bg-indigo-100 text-indigo-800'
-    case 'delivered':
-      return 'bg-green-100 text-green-800'
-    default:
-      return 'bg-gray-100 text-gray-800'
-  }
-=======
 function orderRowKey(order: Record<string, unknown>, idx: number): string {
   const id = order.id ?? order.ID_ORDER
   if (id != null && String(id) !== "") return `o-${id}`
@@ -103,7 +57,6 @@ function formatOrderTime(order: Record<string, unknown>): string {
   if (!t) return "—"
   const d = new Date(String(t))
   return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString()
->>>>>>> 820f3c4 (improved top -up sale and seprate seller table and buyer table)
 }
 
 export default function AdminDashboard() {
@@ -280,11 +233,6 @@ export default function AdminDashboard() {
         <p className="text-sm text-slate-600">Overview of platform performance</p>
       </div>
 
-<<<<<<< HEAD
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-=======
       {loadError && (
         <div
           className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
@@ -295,9 +243,8 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-4">
-        <div className="bg-white rounded-lg shadow p-6">
->>>>>>> 820f3c4 (improved top -up sale and seprate seller table and buyer table)
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-600">Total Revenue</p>
@@ -454,20 +401,11 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-<<<<<<< HEAD
-      {/* Charts Row */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* Sales & Revenue Graph */}
         <div className="min-w-0 rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <h2 className="mb-4 text-lg font-semibold text-slate-900">Sales & Revenue (Last 30 Days)</h2>
           <div className="h-[260px] w-full min-w-0 sm:h-[300px]">
-          <ResponsiveContainer width="100%" height="100%">
-=======
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Sales & Revenue (Last 30 Days)</h2>
-          <ResponsiveContainer width="100%" height={300}>
->>>>>>> 820f3c4 (improved top -up sale and seprate seller table and buyer table)
+            <ResponsiveContainer width="100%" height="100%">
             <LineChart data={salesData}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="date" />
@@ -477,102 +415,36 @@ export default function AdminDashboard() {
               <Line type="monotone" dataKey="revenue" stroke="#3b82f6" name="Revenue (RWF)" />
               <Line type="monotone" dataKey="orderCount" stroke="#10b981" name="Orders" />
             </LineChart>
-          </ResponsiveContainer>
+            </ResponsiveContainer>
           </div>
         </div>
 
-<<<<<<< HEAD
-        {/* Trending Sectors */}
         <div className="min-w-0 rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <h2 className="mb-4 text-lg font-semibold text-slate-900">Trending Sectors</h2>
           <div className="h-[260px] w-full min-w-0 sm:h-[300px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={trendingSectors}>
-=======
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Trending Sectors</h2>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={trendingSectors as { name?: string; orderCount?: number }[]}>
->>>>>>> 820f3c4 (improved top -up sale and seprate seller table and buyer table)
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={trendingSectors as { name?: string; orderCount?: number }[]}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="name" />
               <YAxis />
               <Tooltip />
               <Legend />
               <Bar dataKey="orderCount" fill="#3b82f6" name="Orders" />
-            </BarChart>
-          </ResponsiveContainer>
+              </BarChart>
+            </ResponsiveContainer>
           </div>
         </div>
       </div>
 
-<<<<<<< HEAD
-      {/* Alerts and Active Orders Row */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* Low Inventory Alerts */}
-        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">Low Inventory Alerts</h2>
-            <AlertCircle className="text-orange-500" size={20} />
-          </div>
-          <div className="space-y-3 max-h-64 overflow-y-auto">
-            {lowInventory.length === 0 ? (
-              <p className="text-gray-500 text-sm">No low inventory alerts</p>
-            ) : (
-              lowInventory.slice(0, 10).map((alert: any, idx: number) => (
-                <div key={idx} className="flex items-center justify-between p-3 bg-orange-50 rounded-lg">
-                  <div>
-                    <p className="font-medium text-sm text-gray-900">{alert.itemName}</p>
-                    <p className="text-xs text-gray-600">{alert.sellerName}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-bold text-orange-600">{alert.quantity}</p>
-                    <p className="text-xs text-gray-500">units left</p>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Compliance Alerts */}
-        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">Compliance Alerts</h2>
-            <FileText className="text-red-500" size={20} />
-          </div>
-          <div className="space-y-3 max-h-64 overflow-y-auto">
-            {complianceAlerts.length === 0 ? (
-              <p className="text-gray-500 text-sm">No compliance alerts</p>
-            ) : (
-              complianceAlerts.map((alert: any, idx: number) => (
-                <div key={idx} className="flex items-center justify-between p-3 bg-red-50 rounded-lg">
-                  <div>
-                    <p className="font-medium text-sm text-gray-900">{alert.sellerName}</p>
-                    <p className="text-xs text-red-600">{alert.issue}</p>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Active Orders Monitor */}
       <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
         <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-lg font-semibold text-slate-900">Active Orders Monitor</h2>
-          <Package className="text-blue-500 shrink-0" size={20} />
-=======
-      {/* Seller-focused orders (no buyer column — avoids mixing roles in one row) */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">Active orders — seller view</h2>
-            <p className="text-sm text-gray-500 mt-0.5">Logistics / fulfilment side (seller name & account context)</p>
+            <p className="text-sm text-gray-500 mt-0.5">
+              Logistics / fulfilment side (seller name & account context)
+            </p>
           </div>
-          <Package className="text-blue-500" size={20} />
->>>>>>> 820f3c4 (improved top -up sale and seprate seller table and buyer table)
+          <Package className="shrink-0 text-blue-500" size={20} />
         </div>
         <ResponsiveTable className="rounded-md border border-slate-100" minWidth="720px">
           <table className="w-full">
@@ -627,7 +499,7 @@ export default function AdminDashboard() {
               )}
             </tbody>
           </table>
-        </div>
+        </ResponsiveTable>
       </div>
 
       {/* Buyer-focused orders */}
@@ -658,31 +530,6 @@ export default function AdminDashboard() {
                   </td>
                 </tr>
               ) : (
-<<<<<<< HEAD
-                activeOrders.map((order: any) => (
-                  (() => {
-                    const normalizedStatus = mapBackendOrderStatusToTrack(order.status, order.paymentStatus)
-                    return (
-                  <tr key={order.id} className="border-b border-gray-100 hover:bg-gray-50">
-                    <td className="py-3 px-4 text-sm text-gray-900">{order.orderNumber || `#${order.id}`}</td>
-                    <td className="py-3 px-4 text-sm text-gray-700">{order.sellerName}</td>
-                    <td className="py-3 px-4 text-sm text-gray-700">{order.buyerName}</td>
-                    <td className="py-3 px-4 text-sm font-medium text-gray-900">
-                      {formatCurrency(order.amount)}
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(normalizedStatus)}`}>
-                        {getStatusLabel(normalizedStatus)}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-sm text-gray-500">
-                      {new Date(order.timestamp).toLocaleString()}
-                    </td>
-                  </tr>
-                    )
-                  })()
-                ))
-=======
                 activeOrders.map((order, idx) => {
                   const o = order as Record<string, unknown>
                   const status = String(o.status ?? "")
@@ -714,11 +561,10 @@ export default function AdminDashboard() {
                     </tr>
                   )
                 })
->>>>>>> 820f3c4 (improved top -up sale and seprate seller table and buyer table)
               )}
             </tbody>
           </table>
-        </ResponsiveTable>
+        </div>
         <div className="mt-4 flex flex-col gap-3 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
           <div>
             Page {ordersPage} of {Math.max(1, Math.ceil(ordersTotal / pageSize))}
@@ -726,11 +572,7 @@ export default function AdminDashboard() {
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-<<<<<<< HEAD
               className="rounded border px-3 py-1 disabled:opacity-50"
-=======
-              className="px-3 py-1 border rounded disabled:opacity-50"
->>>>>>> 820f3c4 (improved top -up sale and seprate seller table and buyer table)
               onClick={() => setOrdersPage((p) => Math.max(1, p - 1))}
               disabled={ordersPage === 1}
             >
@@ -738,11 +580,7 @@ export default function AdminDashboard() {
             </button>
             <button
               type="button"
-<<<<<<< HEAD
               className="rounded border px-3 py-1 disabled:opacity-50"
-=======
-              className="px-3 py-1 border rounded disabled:opacity-50"
->>>>>>> 820f3c4 (improved top -up sale and seprate seller table and buyer table)
               onClick={() => {
                 const maxPage = Math.max(1, Math.ceil(ordersTotal / pageSize))
                 setOrdersPage((p) => (p < maxPage ? p + 1 : p))

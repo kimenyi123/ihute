@@ -1,71 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { useParams, useRouter } from "next/navigation"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
-import {
-  ArrowLeft,
-  Package,
-  MapPin,
-  Phone,
-  Store,
-  User,
-  CheckCircle,
-  XCircle,
-  MessageCircle,
-  Truck,
-} from "lucide-react"
-import Link from "next/link"
-import { formatPaymentMethod } from "@/lib/payment-utils"
-import { useAuthStore } from "@/lib/auth-store"
-import { isInvoiceFinanced, canRequestInvoiceFinancing } from "@/lib/order-financing"
-
-interface OrderItem {
-  ITEM_CODE: string
-  ITEM_NAME: string
-  name: string
-  QUANTITY: number
-  qty: number
-  SERVED_QTY?: number
-  servedQty?: number
-  UNIT_PRICE: number
-  unitPrice: number
-  UNIT: string
-  unit: string
-}
-
-interface OrderDetails {
-  ID_ORDER: number
-  SELLER_NAMES: string
-  SELLER_PHONE: string
-  SELLER_ISHYIGA_ACCOUNT: string
-  BUYER_ISHYIGA_ACCOUNT?: string
-  BUYER_OWNER: string
-  BUYER_NAME: string
-  BUYER_PHONE: string
-  BUYER_EMAIL: string
-  DELIVERY_LOCATION: string
-  BUYER_LOCATION: string
-  PAYMENT_NAME: string
-  PAYMENT_STATUS: string
-  ORDER_STATUS: string
-  REKISIYO_STATUS: string
-  REFERENCE: string
-  AMOUNT: number | null
-  SERVED_AMOUNT?: number | null
-  total: number | null
-  CONDITIONS?: string
-  ORDER_NOTE?: string
-  CURRENCY: string
-  CREATED_AT: number
-  createdAt: string
-  IS_TABLE_COMMAND: boolean
-  TABLE_NAME?: string
-  TABLE_LOCATION?: string
-  items: OrderItem[]
-}
+import { OrderDetailsView } from "@/components/order-details-view"
 
 function pickAnyNum(row: Record<string, unknown>, ...keys: string[]): number | null {
   for (const k of keys) {
@@ -78,6 +13,7 @@ function pickAnyNum(row: Record<string, unknown>, ...keys: string[]): number | n
 }
 
 export default function OrderDetailsPage() {
+  return <OrderDetailsView variant="site" />
   const params = useParams()
   const router = useRouter()
   const orderId = params.orderId as string

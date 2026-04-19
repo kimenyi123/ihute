@@ -11,6 +11,11 @@ export default function SellerLayout({ children }: { children: React.ReactNode }
     { href: "/seller/orders", label: "Orders" },
   ]
 
+  function navActive(href: string) {
+    if (href === "/seller") return pathname === href
+    return pathname === href || pathname.startsWith(`${href}/`)
+  }
+
   return (
     <div className="min-h-screen grid grid-cols-1 md:grid-cols-[240px_1fr]">
       <aside className="border-r p-4 space-y-4">
@@ -20,7 +25,7 @@ export default function SellerLayout({ children }: { children: React.ReactNode }
             <Link
               key={n.href}
               href={n.href}
-              className={`block rounded px-3 py-2 text-sm ${pathname === n.href ? "bg-slate-900 text-white" : "hover:bg-slate-100"}`}
+              className={`block rounded px-3 py-2 text-sm ${navActive(n.href) ? "bg-slate-900 text-white" : "hover:bg-slate-100"}`}
             >
               {n.label}
             </Link>

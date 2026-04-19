@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ishyiga Ihute — Grandma</title>
+    <style>
+      :root {
+        --bg: #f4f7fb;
+        --card: #ffffff;
+        --ink: #142433;
+        --accent: #1897e0;
+        --accent-dark: #1270b0;
+        --muted: #5a6b7a;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+        background: radial-gradient(1200px 600px at 50% -10%, #dbeaf7 0%, var(--bg) 55%);
+        color: var(--ink);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1.5rem;
+      }
+      .card {
+        max-width: 28rem;
+        width: 100%;
+        background: var(--card);
+        border-radius: 1rem;
+        padding: 2rem 1.75rem;
+        box-shadow: 0 12px 40px rgba(20, 36, 51, 0.12);
+        border: 1px solid rgba(24, 151, 224, 0.15);
+      }
+      h1 {
+        font-size: 1.35rem;
+        font-weight: 700;
+        margin: 0 0 0.35rem;
+        letter-spacing: -0.02em;
+      }
+      .sub {
+        color: var(--muted);
+        font-size: 0.95rem;
+        line-height: 1.5;
+        margin: 0 0 1.5rem;
+      }
+      a.btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        padding: 0.85rem 1rem;
+        font-size: 1rem;
+        font-weight: 600;
+        color: #fff;
+        background: var(--accent);
+        border-radius: 0.65rem;
+        text-decoration: none;
+        transition: background 0.15s ease, transform 0.1s ease;
+      }
+      a.btn:hover {
+        background: var(--accent-dark);
+      }
+      a.btn:active {
+        transform: scale(0.99);
+      }
+      .hint {
+        margin-top: 1.25rem;
+        font-size: 0.8rem;
+        color: var(--muted);
+        line-height: 1.45;
+      }
+      .hint code {
+        font-size: 0.78em;
+        background: #eef3f8;
+        padding: 0.12rem 0.35rem;
+        border-radius: 0.25rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <h1>Grandma</h1>
+      <p class="sub">
+        This copy is for <strong>Next.js dev</strong> (static file under <code>public/</code>). Open
+        the full Grandma app here, or use the same design from the WAR welcome file after you deploy.
+      </p>
+      <a class="btn" href="/grandma">Enter Grandma (Next)</a>
+      <p class="hint">
+        On Tomcat, rebuild the WAR so it includes <code>kaos/web/grandma-welcome.html</code>, then open
+        your context root (e.g. <code>http://localhost:8080/trading_ai/</code>) to see this layout;
+        <strong>Enter Grandma</strong> there links to <code>…/trading_ai/grandma</code>.
+      </p>
+    </main>
+  </body>
+</html>

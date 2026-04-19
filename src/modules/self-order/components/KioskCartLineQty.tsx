@@ -35,14 +35,14 @@ export function KioskCartLineQty({ line, variant = "light" }: Props) {
         setText(v)
         const n = Number.parseInt(v, 10)
         if (Number.isFinite(n) && n >= 1) {
-          setQty(line.id, line.selectedUnit, n)
+          setQty(line.id, n, line.selectedUnit)
         }
       }}
       onBlur={() => {
         const n = Number.parseInt(text, 10)
         const clamped = Number.isFinite(n) && n >= 1 ? n : 1
         setText(String(clamped))
-        setQty(line.id, line.selectedUnit, clamped)
+        setQty(line.id, clamped, line.selectedUnit)
       }}
       aria-label="Quantity"
       className={className}

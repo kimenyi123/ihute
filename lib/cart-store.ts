@@ -4,6 +4,8 @@ import { create } from "zustand"
 import { persist, createJSONStorage } from "zustand/middleware"
 import { trackClick } from "./interaction-tracker"
 import { getPublicApiUrl } from "./backend-config"
+import type { ErxPrescription } from "./erx-prescription"
+import { prescriptionLineKey } from "./erx-prescription"
 import { isConcreteProductImageUrl } from "./image-utils"
 
 export type CartItem = {
@@ -12,6 +14,12 @@ export type CartItem = {
   price: number
   unit?: string
   image?: string
+  /** Free text or JSON (e.g. ihute_erx_v1) for DB / order APIs */
+  notes?: string
+  /** Structured eRx when added from pharmacy flow */
+  erx?: ErxPrescription
+  /** Distinguishes lines with same product code but different prescriptions */
+  lineSignature?: string
   /** Backend product image fields — kept so cart can resolve images after merge / refresh */
   image_url?: string
   item_image_url?: string
@@ -95,11 +103,10 @@ type CartState = {
   addItem: (item: Omit<CartItem, "qty">, qty?: number) => void
   add: (item: Omit<CartItem, "qty">, qty?: number) => void
   addOrInc: (item: Omit<CartItem, "qty">, qty?: number) => void
-  inc: (id: string, selectedUnit?: string) => void
-  dec: (id: string, selectedUnit?: string) => void
-  /** Set quantity directly (clamped to >= 1). */
-  setQty: (id: string, selectedUnit: string | undefined, qty: number) => void
-  remove: (id: string, selectedUnit?: string) => void
+  inc: (id: string, selectedUnit?: string, lineSignature?: string) => void
+  dec: (id: string, selectedUnit?: string, lineSignature?: string) => void
+  setQty: (id: string, qty: number, selectedUnit?: string, lineSignature?: string) => void
+  remove: (id: string, selectedUnit?: string, lineSignature?: string) => void
   clear: () => void
   clearCart: () => void
   /** Replace cart with items from sync API (account-based cart sync). */
@@ -195,6 +202,7 @@ export const useCartStore = create<CartState>()(
           const selectedUnit = item.selectedUnit ?? item.unit
           const productCode = (item.itemCode ?? item.id).toString().trim()
           const nameKey = (item.name ?? "").toString().trim().toLowerCase()
+          const incomingSig = prescriptionLineKey({ erx: item.erx, notes: item.notes })
           const sid = (item.supplierId ?? "").toString().trim()
           const itemCents = cartPriceCents(item.price)
           const cartLineId = buildCartLineId({
@@ -207,8 +215,16 @@ export const useCartStore = create<CartState>()(
             price: item.price,
           })
 
+          const sigOf = (x: CartItem) => x.lineSignature ?? prescriptionLineKey({ erx: x.erx, notes: x.notes })
+
           const matchExact = (x: CartItem) => {
             const xCode = (x.itemCode ?? x.id).toString().trim()
+            return (
+              (x.supplierId ?? "").toString().trim() === sid &&
+              xCode === productCode &&
+              (x.selectedUnit ?? x.unit) === selectedUnit &&
+              sigOf(x) === incomingSig
+            )
             const xUnit = (x.selectedUnit ?? x.unit) ?? ""
             return (
               (x.supplierId ?? "").toString().trim() === sid &&
@@ -219,14 +235,11 @@ export const useCartStore = create<CartState>()(
           }
           const matchByCode = (x: CartItem) => {
             const xCode = (x.itemCode ?? x.id).toString().trim()
-            return (
-              (x.supplierId ?? "").toString().trim() === sid &&
-              xCode === productCode &&
-              cartPriceCents(x.price) === itemCents
-            )
+            return (x.supplierId ?? "").toString().trim() === sid && xCode === productCode && sigOf(x) === incomingSig
           }
           const matchByName = (x: CartItem) => {
             const xName = (x.name ?? "").toString().trim().toLowerCase()
+            return (x.supplierId ?? "").toString().trim() === sid && xName === nameKey && nameKey !== "" && sigOf(x) === incomingSig
             return (
               (x.supplierId ?? "").toString().trim() === sid &&
               xName === nameKey &&
@@ -268,6 +281,9 @@ export const useCartStore = create<CartState>()(
               qty: totalQty,
               price: bestPrice,
               itemCode: (first.itemCode ?? item.itemCode ?? first.id ?? item.id).toString().trim() || first.itemCode,
+              notes: first.notes ?? item.notes,
+              erx: first.erx ?? item.erx,
+              lineSignature: first.lineSignature ?? incomingSig,
               image: pickBestCartImage(
                 first.image,
                 item.image,
@@ -305,11 +321,11 @@ export const useCartStore = create<CartState>()(
           const priceNum = typeof rawPrice === "number" && Number.isFinite(rawPrice) ? rawPrice : Number(String(rawPrice ?? "").replace(/[^\d.-]/g, "")) || 0
           const withCode: CartItem = {
             ...item,
-            id: cartLineId,
             price: priceNum,
             selectedUnit,
             qty,
             itemCode: (item.itemCode ?? item.id).toString().trim() || undefined,
+            lineSignature: incomingSig,
           }
           return { items: [...state.items, withCode] }
         })
@@ -363,8 +379,11 @@ export const useCartStore = create<CartState>()(
           const selectedUnit = item.selectedUnit ?? item.unit
           const productCode = (item.itemCode ?? item.id).toString().trim()
           const nameKey = (item.name ?? "").toString().trim().toLowerCase()
+          const incomingSig = prescriptionLineKey({ erx: item.erx, notes: item.notes })
           const sid = (item.supplierId ?? "").toString().trim()
           const itemCents = cartPriceCents(item.price)
+
+          const sigOf = (x: CartItem) => x.lineSignature ?? prescriptionLineKey({ erx: x.erx, notes: x.notes })
 
           const matchExact = (x: CartItem) => {
             const xCode = (x.itemCode ?? x.id).toString().trim()
@@ -372,19 +391,16 @@ export const useCartStore = create<CartState>()(
               (x.supplierId ?? "").toString().trim() === sid &&
               xCode === productCode &&
               (x.selectedUnit ?? x.unit) === selectedUnit &&
-              cartPriceCents(x.price) === itemCents
+              sigOf(x) === incomingSig
             )
           }
           const matchByCode = (x: CartItem) => {
             const xCode = (x.itemCode ?? x.id).toString().trim()
-            return (
-              (x.supplierId ?? "").toString().trim() === sid &&
-              xCode === productCode &&
-              cartPriceCents(x.price) === itemCents
-            )
+            return (x.supplierId ?? "").toString().trim() === sid && xCode === productCode && sigOf(x) === incomingSig
           }
           const matchByName = (x: CartItem) => {
             const xName = (x.name ?? "").toString().trim().toLowerCase()
+            return (x.supplierId ?? "").toString().trim() === sid && xName === nameKey && nameKey !== "" && sigOf(x) === incomingSig
             return (
               (x.supplierId ?? "").toString().trim() === sid &&
               xName === nameKey &&
@@ -407,6 +423,9 @@ export const useCartStore = create<CartState>()(
               ...first,
               qty: totalQty,
               itemCode: (first.itemCode ?? item.itemCode ?? first.id ?? item.id).toString().trim() || first.itemCode,
+              notes: first.notes ?? item.notes,
+              erx: first.erx ?? item.erx,
+              lineSignature: first.lineSignature ?? incomingSig,
               image: pickBestCartImage(
                 first.image,
                 item.image,
@@ -439,40 +458,62 @@ export const useCartStore = create<CartState>()(
               items: state.items.filter((x) => !keyMatch(x)).concat([mergedLine]),
             }
           }
-          const withCode = { ...item, selectedUnit, qty, itemCode: (item.itemCode ?? item.id).toString().trim() || undefined }
+          const withCode: CartItem = {
+            ...item,
+            selectedUnit,
+            qty,
+            itemCode: (item.itemCode ?? item.id).toString().trim() || undefined,
+            lineSignature: incomingSig,
+          }
           return { items: [...state.items, withCode] }
         }),
 
-      inc: (id, selectedUnit) =>
-        set((s) => ({
-          items: s.items.map((x) => (x.id === id && x.selectedUnit === selectedUnit ? { ...x, qty: x.qty + 1 } : x)),
-        })),
-
-      dec: (id, selectedUnit) =>
+      inc: (id, selectedUnit, lineSignature) =>
         set((s) => ({
           items: s.items.map((x) => {
-            if (x.id === id && x.selectedUnit === selectedUnit) {
+            const sig = x.lineSignature ?? prescriptionLineKey({ erx: x.erx, notes: x.notes })
+            const matchSig = (lineSignature ?? "") === (sig || "")
+            if (x.id === id && x.selectedUnit === selectedUnit && matchSig) {
+              return { ...x, qty: x.qty + 1 }
+            }
+            return x
+          }),
+        })),
+
+      dec: (id, selectedUnit, lineSignature) =>
+        set((s) => ({
+          items: s.items.map((x) => {
+            const sig = x.lineSignature ?? prescriptionLineKey({ erx: x.erx, notes: x.notes })
+            const matchSig = (lineSignature ?? "") === (sig || "")
+            if (x.id === id && x.selectedUnit === selectedUnit && matchSig) {
               return { ...x, qty: Math.max(1, x.qty - 1) } // clamp at 1; use remove() to drop
             }
             return x
           }),
         })),
 
-      setQty: (id, selectedUnit, qty) =>
+      setQty: (id, qty, selectedUnit, lineSignature) =>
         set((s) => ({
           items: s.items.map((x) => {
-            if (x.id !== id || x.selectedUnit !== selectedUnit) return x
-            const n = Number.isFinite(qty) ? Math.floor(qty) : NaN
-            return { ...x, qty: Math.max(1, Number.isFinite(n) ? n : x.qty) }
+            const sig = x.lineSignature ?? prescriptionLineKey({ erx: x.erx, notes: x.notes })
+            const matchSig = (lineSignature ?? "") === (sig || "")
+            if (x.id === id && x.selectedUnit === selectedUnit && matchSig) {
+              return { ...x, qty: Math.max(1, Math.floor(Number(qty) || 1)) }
+            }
+            return x
           }),
         })),
 
-      remove: (id, selectedUnit) =>
+      remove: (id, selectedUnit, lineSignature) =>
         set((s) => ({
-          items: s.items.filter((x) => !(x.id === id && x.selectedUnit === selectedUnit)),
+          items: s.items.filter((x) => {
+            const sig = x.lineSignature ?? prescriptionLineKey({ erx: x.erx, notes: x.notes })
+            const matchSig = (lineSignature ?? "") === (sig || "")
+            return !(x.id === id && x.selectedUnit === selectedUnit && matchSig)
+          }),
         })),
 
-      clear: () => set({ items: [], payment: {}, tableInfo: null }),  // Clear table info too
+      clear: () => set({ items: [], payment: {}, tableInfo: null }),  // ✅ Clear table info too
       replaceItemsFromSync: (items) => set({ items: Array.isArray(items) ? items : [] }),
 
       // ✅ Alias for clear() to match checkout form usage
@@ -500,7 +541,9 @@ export const useCartStore = create<CartState>()(
             const existingIdx = merged.findIndex((m) => {
               const msid = (m.supplierId ?? "").toString().trim()
               if (msid !== sid) return false
-              if (cartPriceCents(m.price) !== cartPriceCents(it.price)) return false
+              const mSig = m.lineSignature ?? prescriptionLineKey({ erx: m.erx, notes: m.notes })
+              const itSig = it.lineSignature ?? prescriptionLineKey({ erx: it.erx, notes: it.notes })
+              if (mSig !== itSig) return false
               const mCode = (m.itemCode ?? m.id).toString().trim()
               if (code && mCode === code) return true
               const mName = (m.name ?? "").toString().trim().toLowerCase()
@@ -513,6 +556,9 @@ export const useCartStore = create<CartState>()(
                 ...cur,
                 qty: cur.qty + it.qty,
                 itemCode: (cur.itemCode ?? it.itemCode ?? cur.id ?? it.id).toString().trim() || cur.itemCode,
+                erx: cur.erx ?? it.erx,
+                notes: cur.notes ?? it.notes,
+                lineSignature: cur.lineSignature ?? it.lineSignature,
                 image: pickBestCartImage(cur.image, it.image),
                 image_url: pickBestCartImage(cur.image_url, it.image_url),
                 item_image_url: pickBestCartImage(cur.item_image_url, it.item_image_url),

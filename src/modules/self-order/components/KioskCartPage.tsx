@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { useCartStore } from "@/lib/cart-store"
 import { Trash2, ShoppingCart, ChevronLeft } from "lucide-react"
 import { KioskCartLineQty } from "@/src/modules/self-order/components/KioskCartLineQty"
+import { Trash2, ShoppingCart, ChevronLeft } from "lucide-react"
 
 export function KioskCartPage() {
   const router = useRouter()
