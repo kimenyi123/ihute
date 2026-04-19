@@ -40,12 +40,21 @@ export function CartItemCard({ item }: { item: CartItem }) {
     setCandidateIdx(0)
   }, [candidatesSignature, item.id, item.selectedUnit])
 
+<<<<<<< HEAD
   // Sync input value when quantity changes externally
+=======
+>>>>>>> 820f3c4 (improved top -up sale and seprate seller table and buyer table)
   useEffect(() => {
     setInputValue(String(item.qty))
   }, [item.qty])
 
+<<<<<<< HEAD
   const unitLabel = displayUnitForPrice(item.unit ?? item.selectedUnit)
+=======
+  const unitLabel = itemEmballageDisplaySuffix(
+    item.itemEmballage ?? item.unit ?? item.selectedUnit,
+  )
+>>>>>>> 820f3c4 (improved top -up sale and seprate seller table and buyer table)
 
   return (
     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2.5 sm:gap-4 rounded-lg border p-2.5 sm:p-3">

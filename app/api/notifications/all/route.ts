@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerProxyBackendBase } from "@/lib/backend-config";
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,7 +15,7 @@ export async function GET(request: NextRequest) {
       }, { status: 401 });
     }
     
-    const backendUrl = process.env.BACKEND_URL || 'http://localhost:8080/Trading';
+    const backendUrl = getServerProxyBackendBase();
     const response = await fetch(
       `${backendUrl}/NotificationServlet?action=getAll&userId=${encodeURIComponent(userId)}`
     );

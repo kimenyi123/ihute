@@ -3,14 +3,13 @@
 import { useMemo } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useCartStore } from "@/lib/cart-store"
-import { Minus, Plus, Trash2, ShoppingCart, ChevronLeft } from "lucide-react"
+import { Trash2, ShoppingCart, ChevronLeft } from "lucide-react"
+import { KioskCartLineQty } from "@/src/modules/self-order/components/KioskCartLineQty"
 
 export function KioskCartPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const items = useCartStore((s) => s.items)
-  const inc = useCartStore((s) => s.inc)
-  const dec = useCartStore((s) => s.dec)
   const remove = useCartStore((s) => s.remove)
 
   const total = useMemo(
@@ -112,26 +111,11 @@ export function KioskCartPage() {
               </p>
             </div>
 
-            {/* Qty controls */}
+            {/* Qty */}
             <div className="flex flex-col items-end gap-2">
-              <div className="inline-flex items-center rounded-xl border-2 border-gray-200 overflow-hidden bg-white">
-                <button
-                  type="button"
-                  className="w-8 h-8 flex items-center justify-center text-gray-600 hover:bg-gray-50"
-                  onClick={() => dec(line.id, line.selectedUnit)}
-                >
-                  <Minus className="w-3.5 h-3.5" />
-                </button>
-                <span className="w-8 text-center text-sm font-bold tabular-nums">
-                  {line.qty}
-                </span>
-                <button
-                  type="button"
-                  className="w-8 h-8 flex items-center justify-center text-gray-600 hover:bg-gray-50"
-                  onClick={() => inc(line.id, line.selectedUnit)}
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                </button>
+              <div className="flex flex-col items-end gap-1">
+                <span className="text-[10px] font-semibold text-slate-500">Qty</span>
+                <KioskCartLineQty line={line} />
               </div>
               <button
                 type="button"

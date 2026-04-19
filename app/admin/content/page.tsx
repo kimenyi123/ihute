@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { Image as ImageIcon, Star, Zap, FolderTree } from 'lucide-react'
+import { postAdminApi } from '@/lib/admin-client'
 
 export default function ContentPage() {
   const [banners, setBanners] = useState<any[]>([])
@@ -18,33 +19,21 @@ export default function ContentPage() {
       setLoading(true)
       
       // Load banners
-      const bannersRes = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'getHomepageBanners' })
-      })
+      const bannersRes = await postAdminApi({ action: 'getHomepageBanners' })
       const bannersData = await bannersRes.json()
       if (bannersData.ok) {
         setBanners(bannersData.banners || [])
       }
 
       // Load featured sellers
-      const sellersRes = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'getFeaturedSellers' })
-      })
+      const sellersRes = await postAdminApi({ action: 'getFeaturedSellers' })
       const sellersData = await sellersRes.json()
       if (sellersData.ok) {
         setFeaturedSellers(sellersData.sellers || [])
       }
 
       // Load flash sales
-      const salesRes = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'getFlashSales' })
-      })
+      const salesRes = await postAdminApi({ action: 'getFlashSales' })
       const salesData = await salesRes.json()
       if (salesData.ok) {
         setFlashSales(salesData.sales || [])

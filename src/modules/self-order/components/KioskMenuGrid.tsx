@@ -473,7 +473,11 @@ function ItemExpandPanel({
             <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{description}</p>
           )}
           <p className="text-emerald-600 font-extrabold text-lg mt-1 tracking-tight">
+<<<<<<< HEAD
             <span>{formatPrice(unitPrice)}</span>
+=======
+            ⭐ ⭐ ⭐ {formatPrice(unitPrice)}
+>>>>>>> 820f3c4 (improved top -up sale and seprate seller table and buyer table)
             {embSuffix ? (
               <span className="font-normal text-gray-600"> ({embSuffix})</span>
             ) : null}
@@ -613,7 +617,11 @@ function ItemCard({
           <p className="text-[11px] text-gray-400 line-clamp-1 mt-0.5">{description}</p>
         )}
         <p className="text-emerald-600 font-extrabold text-sm mt-1 tracking-tight">
+<<<<<<< HEAD
           <span>{formatPrice(price)}</span>
+=======
+          ⭐ ⭐ ⭐ {formatPrice(price)}
+>>>>>>> 820f3c4 (improved top -up sale and seprate seller table and buyer table)
           {embSuffix ? (
             <span className="font-normal text-gray-600"> ({embSuffix})</span>
           ) : null}

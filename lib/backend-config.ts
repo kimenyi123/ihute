@@ -9,12 +9,15 @@ function noTrailingSlash(s: string): string {
   return (s || "").replace(/\/+$/, "")
 }
 
+const LOCAL_JAVA_BACKEND_DEFAULT = "http://localhost:8082/Trading"
+
 /** Java backend base URL (no trailing slash). Uses NEXT_PUBLIC_API_URL or JAVA_BACKEND_BASE from env. */
 export function getBackendBase(): string {
   const raw = noTrailingSlash(
     process.env.JAVA_BACKEND_BASE ||
       process.env.NEXT_PUBLIC_API_URL ||
-      "https://ihute.rw/Trading"
+      process.env.BACKEND_URL ||
+      (process.env.NODE_ENV === "development" ? LOCAL_JAVA_BACKEND_DEFAULT : "https://ihute.rw/Trading")
   )
 
   // Some local/dev env values point only to the Tomcat host (e.g. http://localhost:8080)
@@ -101,9 +104,14 @@ export function getUmusadaExcelUrl(): string {
   return process.env.JAVA_UMUSADA_EXCEL_URL || `${getBackendBase()}/UmusadaExcelServlet`
 }
 
-/** Seller registration POST JSON. Override JAVA_SUPPLIERS_URL if your WAR maps a different path (e.g. /InsertSupplier vs /Api/InsertSuppliers). */
+/**
+ * Seller registration POST JSON (InsertSuppliers servlet).
+ * Production ihute.rw serves this at `/Trading/InsertSuppliers` (GET → 400 = mapped).
+ * `/Trading/Api/InsertSuppliers` returns 404 there — do not use as default.
+ * Override with JAVA_SUPPLIERS_URL if your WAR uses another path.
+ */
 export function getSuppliersUrl(): string {
-  return process.env.JAVA_SUPPLIERS_URL || `${getBackendBase()}/Api/InsertSuppliers`
+  return process.env.JAVA_SUPPLIERS_URL || `${getBackendBase()}/InsertSuppliers`
 }
 export function getOrderStatusUrl(): string {
   return process.env.JAVA_ORDER_STATUS_URL || `${getBackendBase()}/OrderStatusServlet`

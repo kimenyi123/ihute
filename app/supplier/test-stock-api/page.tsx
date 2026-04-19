@@ -35,7 +35,8 @@ export default function TestStockAPI() {
   const testDirectBackend = async () => {
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:8080/Trading/supplier/stock/api?action=test', {
+      const base = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8082/Trading").replace(/\/+$/, "")
+      const response = await fetch(`${base}/supplier/stock/api?action=test`, {
         method: 'GET',
         credentials: 'include',
       });

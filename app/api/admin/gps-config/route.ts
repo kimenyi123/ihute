@@ -1,9 +1,9 @@
 // Admin GPS Configuration API
 // Handles GPS config CRUD and seller overrides
 import { NextRequest, NextResponse } from "next/server"
+import { getServerProxyBackendBase } from "@/lib/backend-config"
 
-// Use localhost as fallback for local development (production sets via env var)
-const JAVA_BACKEND_BASE = process.env.JAVA_BACKEND_BASE || "http://localhost:8080/Trading"
+const JAVA_BACKEND_BASE = getServerProxyBackendBase()
 const GPS_CONFIG_SERVLET = `${JAVA_BACKEND_BASE}/AdminGPSConfigServlet`
 
 export async function GET(req: NextRequest) {

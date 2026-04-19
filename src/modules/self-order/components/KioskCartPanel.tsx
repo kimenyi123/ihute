@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { useCartStore } from "@/lib/cart-store"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Button } from "@/components/ui/button"
+import { KioskCartLineQty } from "@/src/modules/self-order/components/KioskCartLineQty"
 
 interface Props {
   open: boolean
@@ -14,8 +15,6 @@ interface Props {
 export function KioskCartPanel({ open, onOpenChange }: Props) {
   const router = useRouter()
   const items = useCartStore((s) => s.items)
-  const inc = useCartStore((s) => s.inc)
-  const dec = useCartStore((s) => s.dec)
   const remove = useCartStore((s) => s.remove)
   const getTotalPrice = useCartStore((s) => s.getTotalPrice)
 
@@ -56,28 +55,9 @@ export function KioskCartPanel({ open, onOpenChange }: Props) {
                   </div>
                 </div>
                 <div className="flex flex-col items-end gap-2">
-                  <div className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900/80">
-                    <Button
-                      type="button"
-                      size="icon-sm"
-                      variant="ghost"
-                      className="rounded-full"
-                      onClick={() => dec(line.id, line.selectedUnit)}
-                    >
-                      −
-                    </Button>
-                    <span className="w-8 text-center text-sm font-semibold tabular-nums">
-                      {line.qty}
-                    </span>
-                    <Button
-                      type="button"
-                      size="icon-sm"
-                      variant="ghost"
-                      className="rounded-full"
-                      onClick={() => inc(line.id, line.selectedUnit)}
-                    >
-                      +
-                    </Button>
+                  <div className="flex flex-col items-end gap-1">
+                    <span className="text-[10px] font-semibold text-slate-500">Qty</span>
+                    <KioskCartLineQty line={line} variant="dark" />
                   </div>
                   <button
                     type="button"

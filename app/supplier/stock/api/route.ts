@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerProxyBackendBase } from '@/lib/backend-config';
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080/Trading';
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || getServerProxyBackendBase();
 
 /**
  * Supplier Stock API Proxy

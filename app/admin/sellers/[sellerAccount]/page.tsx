@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { ArrowLeft, Edit, Save, X, XCircle } from 'lucide-react'
-import { useAuthStore } from '@/lib/auth-store'
+import { postAdminApi } from '@/lib/admin-client'
 import { REJECTION_REASONS } from '@/lib/rejection-reasons'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -36,7 +36,6 @@ interface SalesData {
 export default function SellerDetailPage() {
   const params = useParams()
   const router = useRouter()
-  const { user } = useAuthStore()
   const sellerAccount = params.sellerAccount as string
 
   const [profile, setProfile] = useState<SellerProfile | null>(null)
@@ -60,16 +59,11 @@ export default function SellerDetailPage() {
     try {
       setLoading(true)
       setError(null)
-      const res = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'getSellerDetails',
-          sellerAccount,
-          adminEmail: user?.email || '',
-          productPage,
-          productPageSize
-        })
+      const res = await postAdminApi({
+        action: 'getSellerDetails',
+        sellerAccount,
+        productPage,
+        productPageSize,
       })
       const data = await res.json()
 
@@ -115,15 +109,10 @@ export default function SellerDetailPage() {
         ? customReason
         : REJECTION_REASONS.find(r => r.value === rejectionReason)?.label || rejectionReason
 
-      const res = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'rejectSeller',
-          sellerAccount,
-          rejectionReason: finalReason,
-          adminEmail: user?.email || ''
-        })
+      const res = await postAdminApi({
+        action: 'rejectSeller',
+        sellerAccount,
+        rejectionReason: finalReason,
       })
       const data = await res.json()
 
@@ -144,15 +133,10 @@ export default function SellerDetailPage() {
 
   const handleSave = async () => {
     try {
-      const res = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'updateSeller',
-          sellerAccount,
-          adminEmail: user?.email || '',
-          ...editData
-        })
+      const res = await postAdminApi({
+        action: 'updateSeller',
+        sellerAccount,
+        ...editData,
       })
       const data = await res.json()
 

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { getServerProxyBackendBase } from "@/lib/backend-config"
 
 export async function POST(request: NextRequest) {
     try {
@@ -13,7 +14,7 @@ export async function POST(request: NextRequest) {
             )
         }
 
-        const backendUrl = process.env.JAVA_BACKEND_BASE || "http://localhost:8080/Trading"
+        const backendUrl = getServerProxyBackendBase()
 
         const response = await fetch(`${backendUrl}/Kaos/AdminGPSServlet?action=update`, {
             method: "POST",

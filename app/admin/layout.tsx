@@ -48,7 +48,6 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     setSidebarOpen(false)
   }, [])
 
-  // Close sidebar with Escape key on mobile / when overlay is open
   useEffect(() => {
     if (!sidebarOpen) return
 
@@ -78,10 +77,16 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
   return (
     <AdminGuard>
+<<<<<<< HEAD
       <div className="min-h-screen bg-slate-50">
         {/* Top bar — same pattern as supplier: visible on all widths, sticky */}
         <div className="sticky top-0 z-40 bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between">
           <h1 className="text-lg font-bold text-slate-900 truncate pr-2">{headerTitle}</h1>
+=======
+      <div className="min-h-screen bg-gray-50">
+        <div className="lg:hidden bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
+          <h1 className="text-xl font-bold text-gray-900">Admin Panel</h1>
+>>>>>>> 820f3c4 (improved top -up sale and seprate seller table and buyer table)
           <button
             type="button"
             onClick={() => setSidebarOpen((open) => !open)}
@@ -93,7 +98,10 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         </div>
 
         <div className="flex">
+<<<<<<< HEAD
           {/* Sidebar — fixed drawer like supplier (not in-flow on lg) */}
+=======
+>>>>>>> 820f3c4 (improved top -up sale and seprate seller table and buyer table)
           <aside
             className={cn(
               'fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-slate-200',
@@ -102,13 +110,18 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             )}
           >
             <div className="h-full flex flex-col overflow-y-auto">
+<<<<<<< HEAD
               {/* Logo/Header */}
               <div className="p-6 border-b border-slate-200 hidden lg:block">
                 <h2 className="text-2xl font-bold text-slate-900">Admin Panel</h2>
                 <p className="text-sm text-slate-500 mt-1">Ihute Platform</p>
+=======
+              <div className="p-6 border-b border-gray-200 hidden lg:block">
+                <h1 className="text-2xl font-bold text-gray-900">Admin Panel</h1>
+                <p className="text-sm text-gray-500 mt-1">Ihute Platform</p>
+>>>>>>> 820f3c4 (improved top -up sale and seprate seller table and buyer table)
               </div>
 
-              {/* Navigation */}
               <nav className="flex-1 overflow-y-auto p-4">
                 <ul className="space-y-2">
                   {menuItems.map((item) => {
@@ -135,8 +148,12 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                 </ul>
               </nav>
 
+<<<<<<< HEAD
               {/* Footer */}
               <div className="p-4 border-t border-slate-200">
+=======
+              <div className="p-4 border-t border-gray-200">
+>>>>>>> 820f3c4 (improved top -up sale and seprate seller table and buyer table)
                 <button
                   type="button"
                   className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-slate-700 hover:bg-slate-100 transition-colors"
@@ -153,7 +170,6 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             </div>
           </aside>
 
-          {/* Overlay for mobile */}
           {sidebarOpen && (
             <div
               className="fixed inset-0 z-40 bg-black/50 lg:hidden"
@@ -162,6 +178,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             />
           )}
 
+<<<<<<< HEAD
           {/* Main Content */}
           <main
             className={cn(
@@ -170,6 +187,12 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             )}
           >
             <div className="p-4 lg:p-8">{children}</div>
+=======
+          <main className="flex-1 lg:ml-0">
+            <div className="p-4 lg:p-8">
+              {children}
+            </div>
+>>>>>>> 820f3c4 (improved top -up sale and seprate seller table and buyer table)
           </main>
         </div>
       </div>

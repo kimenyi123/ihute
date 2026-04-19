@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { Filter, Eye } from 'lucide-react'
+import { postAdminApi } from '@/lib/admin-client'
 import Link from 'next/link'
 import { mapBackendOrderStatusToTrack, type TrackOrderStatus } from '@/lib/order-status-map'
 
@@ -73,11 +74,7 @@ export default function OrdersPage() {
 
   const loadSectors = async () => {
     try {
-      const res = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'getSectors' })
-      })
+      const res = await postAdminApi({ action: 'getSectors' })
       const data = await res.json()
       
       if (data.ok) {
@@ -91,14 +88,10 @@ export default function OrdersPage() {
   const loadOrders = async () => {
     try {
       setLoading(true)
-      const res = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'getAllOrders',
-          ...filters,
-          limit: 100
-        })
+      const res = await postAdminApi({
+        action: 'getAllOrders',
+        ...filters,
+        limit: 100,
       })
       const data = await res.json()
       

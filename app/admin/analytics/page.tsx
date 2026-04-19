@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { Users, ShoppingCart, DollarSign } from 'lucide-react'
+import { postAdminApi } from '@/lib/admin-client'
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
@@ -23,55 +24,35 @@ export default function AnalyticsPage() {
       setLoading(true)
       
       // Load sector performance
-      const sectorRes = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'getSectorPerformance' })
-      })
+      const sectorRes = await postAdminApi({ action: 'getSectorPerformance' })
       const sectorData = await sectorRes.json()
       if (sectorData.ok) {
         setSectorPerformance(sectorData.sectors || [])
       }
 
       // Load seller performance
-      const sellerRes = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'getSellerPerformance' })
-      })
+      const sellerRes = await postAdminApi({ action: 'getSellerPerformance' })
       const sellerData = await sellerRes.json()
       if (sellerData.ok) {
         setSellerPerformance(sellerData.sellers || [])
       }
 
       // Load revenue report
-      const revenueRes = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'getRevenueReport', period: 'monthly' })
-      })
+      const revenueRes = await postAdminApi({ action: 'getRevenueReport', period: 'monthly' })
       const revenueData = await revenueRes.json()
       if (revenueData.ok) {
         setRevenueReport(revenueData.data || [])
       }
 
       // Load order analytics
-      const orderRes = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'getOrderAnalytics' })
-      })
+      const orderRes = await postAdminApi({ action: 'getOrderAnalytics' })
       const orderData = await orderRes.json()
       if (orderData.ok) {
         setOrderAnalytics(orderData)
       }
 
       // Load customer insights
-      const customerRes = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'getCustomerInsights' })
-      })
+      const customerRes = await postAdminApi({ action: 'getCustomerInsights' })
       const customerData = await customerRes.json()
       if (customerData.ok) {
         setCustomerInsights(customerData)

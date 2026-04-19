@@ -1,5 +1,6 @@
 "use client"
 
+<<<<<<< HEAD
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react"
 import {
   ArrowUpRight,
@@ -70,6 +71,12 @@ function SellerPickerSearchIcon({ className }: { className?: string }) {
     </svg>
   )
 }
+=======
+import { useState, useEffect } from 'react'
+import { DollarSign, TrendingUp, Settings } from 'lucide-react'
+import { postAdminApi } from '@/lib/admin-client'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
+>>>>>>> 820f3c4 (improved top -up sale and seprate seller table and buyer table)
 
 interface CommissionSettings {
   platformFee: number
@@ -471,6 +478,7 @@ export default function CommissionPage() {
     loadData()
   }, [loadData])
 
+<<<<<<< HEAD
   useEffect(() => {
     if (adminEmail) {
       setCollForm((c) => ({ ...c, collectedBy: c.collectedBy || adminEmail }))
@@ -651,6 +659,29 @@ export default function CommissionPage() {
       await loadData({ silent: true })
     } else {
       setCollFeedback({ type: "err", text: (data?.error as string) || "Failed to record collection." })
+=======
+  const loadData = async () => {
+    try {
+      setLoading(true)
+      
+      // Load settings
+      const settingsRes = await postAdminApi({ action: 'getCommissionSettings' })
+      const settingsData = await settingsRes.json()
+      if (settingsData.ok) {
+        setSettings(settingsData.settings)
+      }
+
+      // Load report
+      const reportRes = await postAdminApi({ action: 'getCommissionReport', period })
+      const reportData = await reportRes.json()
+      if (reportData.ok) {
+        setReport(reportData.data || [])
+      }
+    } catch (error) {
+      console.error('Error loading commission data:', error)
+    } finally {
+      setLoading(false)
+>>>>>>> 820f3c4 (improved top -up sale and seprate seller table and buyer table)
     }
   }
 
