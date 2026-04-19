@@ -1,7 +1,7 @@
   export const translations = {
     en: {
       // Header
-      searchPlaceholder: "Search products...",
+      searchPlaceholder: "🔍 Search products, brands, or scan barcode...",
       login: "Login",
       logout: "Logout",
       allLocations: "All Locations",
@@ -43,6 +43,39 @@
       coffeeShopDesc: "Coffee & pastries",
       beautyDesc: "Skincare & makeup",
       generalStoreDesc: "Everything else",
+
+      // Shops by sector (category_ai)
+      shopsListNickname: "Nickname",
+      shopsListNoNickname: "No nickname",
+      shopsListLinkDisabledHint: "Add a NICKNAME for this supplier to enable Shop With Me.",
+      sectorPanelShops: "shops",
+      sectorPanelItems: "items",
+      categoryBrowseByPrefix: "Shop in",
+      categoryBrowseBySuffix: "by:",
+      categoryBrowseChooseShop: "Choose a shop",
+      categoryBrowseChooseItem: "Choose an item",
+      categoryBrowseShopsHint: "Pick a shop to see its catalog.",
+      categoryBrowsePickShopForProducts: "Pick a shop above to see products.",
+      categoryBrowseFamily: "Family",
+      categoryBrowseFamilyAny: "Any",
+      categoryBrowseTrendingSort: "Trending",
+      categoryBrowseTrendingHint: "Top 20 preview — full trending scores coming soon.",
+      categoryBrowseAllItemsInSector: "All items in this sector",
+      categoryBrowseUseHeaderSearchProducts:
+        "Use the main search bar (top of the page) to find products or brands. Here you can sort and filter by family for this sector only.",
+      categoryShopGridHint:
+        "Find a shop with the main search (top), then open it below. Optional: narrow by area — matches your location filter when set in the header.",
+      categoryShopLocationFilter: "Area",
+      categoryShopLocationAll: "All areas",
+      categoryShopLocationMatchesHeader: "Header location applied",
+      filterSheetSortProducts: "Sort products",
+      filterSheetSortHint: "For “Choose an item” on a category page, this controls how products are ordered.",
+      filterSortFeatured: "Featured",
+      filterSortPriceLow: "Price: Low to High",
+      filterSortPriceHigh: "Price: High to Low",
+      filterSortNewest: "Newest first",
+      filterSortRating: "Highest rated",
+      filterSheetDone: "Done",
 
       // How It Works
       howItWorks: "How It Works",
@@ -146,7 +179,7 @@
     },
     fr: {
       // Header
-      searchPlaceholder: "Rechercher des produits...",
+      searchPlaceholder: "🔍 Rechercher produits, marques ou scanner un code-barres...",
       login: "Connexion",
       logout: "Déconnexion",
       allLocations: "Tous les emplacements",
@@ -189,6 +222,39 @@
       coffeeShopDesc: "Café et pâtisseries",
       beautyDesc: "Soins de la peau et maquillage",
       generalStoreDesc: "Tout le reste",
+
+      // Shops by sector (category_ai)
+      shopsListNickname: "Surnom",
+      shopsListNoNickname: "Pas de surnom",
+      shopsListLinkDisabledHint: "Ajoutez un NICKNAME pour ce fournisseur pour activer Shop With Me.",
+      sectorPanelShops: "magasins",
+      sectorPanelItems: "articles",
+      categoryBrowseByPrefix: "Acheter en",
+      categoryBrowseBySuffix: "par :",
+      categoryBrowseChooseShop: "Choisir un magasin",
+      categoryBrowseChooseItem: "Choisir un article",
+      categoryBrowseShopsHint: "Choisissez un magasin pour voir son catalogue.",
+      categoryBrowsePickShopForProducts: "Choisissez un magasin ci-dessus pour voir les produits.",
+      categoryBrowseFamily: "Famille",
+      categoryBrowseFamilyAny: "Toutes",
+      categoryBrowseTrendingSort: "Tendances",
+      categoryBrowseTrendingHint: "Top 20 (aperçu) — scores complets bientôt.",
+      categoryBrowseAllItemsInSector: "Tous les articles du secteur",
+      categoryBrowseUseHeaderSearchProducts:
+        "Utilisez la barre de recherche principale (en haut) pour trouver des produits ou des marques. Ici : tri et filtre par famille pour ce secteur.",
+      categoryShopGridHint:
+        "Trouvez un magasin avec la recherche principale (en haut), puis ouvrez-le ci-dessous. Option : filtrer par zone — tient compte du lieu défini dans l’en-tête.",
+      categoryShopLocationFilter: "Zone",
+      categoryShopLocationAll: "Toutes les zones",
+      categoryShopLocationMatchesHeader: "Lieu de l’en-tête appliqué",
+      filterSheetSortProducts: "Trier les produits",
+      filterSheetSortHint: "En « Choisir un article » sur une catégorie, ceci définit l’ordre des produits.",
+      filterSortFeatured: "À la une",
+      filterSortPriceLow: "Prix : croissant",
+      filterSortPriceHigh: "Prix : décroissant",
+      filterSortNewest: "Plus récents",
+      filterSortRating: "Mieux notés",
+      filterSheetDone: "Terminé",
 
       // How It Works
       howItWorks: "Comment ça marche",
@@ -292,7 +358,7 @@
     },
     rw: {
       // Header
-      searchPlaceholder: "Shakisha ibicuruzwa...",
+      searchPlaceholder: "🔍 Shakisha ibicuruzwa, amabara, cyangwa scan barcode...",
       login: "Injira",
       logout: "Sohoka",
       allLocations: "Ahantu hose",
@@ -334,6 +400,39 @@
       coffeeShopDesc: "Ikawa na cake",
       beautyDesc: "Ubwiza n'ibikoresho",
       generalStoreDesc: "Ibindi byose",
+
+      // Shops by sector (category_ai)
+      shopsListNickname: "Izina ryihuse",
+      shopsListNoNickname: "Nta zina ryihuse",
+      shopsListLinkDisabledHint: "Ongeraho NICKNAME kuri uyu mucuruzi kugirango Shop With Me ikore.",
+      sectorPanelShops: "amaduka",
+      sectorPanelItems: "ibicuruzwa",
+      categoryBrowseByPrefix: "Gura muri",
+      categoryBrowseBySuffix: "ukoresheje:",
+      categoryBrowseChooseShop: "Hitamo iduka",
+      categoryBrowseChooseItem: "Hitamo icuruzwa",
+      categoryBrowseShopsHint: "Hitamo iduka kugirango ubone ibicuruzwa byacyo.",
+      categoryBrowsePickShopForProducts: "Hitamo iduka hejuru kugirango ubone ibicuruzwa.",
+      categoryBrowseFamily: "Umuryango",
+      categoryBrowseFamilyAny: "Byose",
+      categoryBrowseTrendingSort: "Bya cyane",
+      categoryBrowseTrendingHint: "20 mbere (reba) — ubuhamya buzaza vuba.",
+      categoryBrowseAllItemsInSector: "Ibicuruzwa byose muri uyu gice",
+      categoryBrowseUseHeaderSearchProducts:
+        "Koresha akabaga ko gushakisha hejuru kugirango ubone ibicuruzwa cyangwa amabara. Hano: gutondeka no gutoranya umuryango w’iyi gice gusa.",
+      categoryShopGridHint:
+        "Shakisha iduka ukoresheje gushakisha hejuru, uhitemo hepfo. Ushobora gutoranya ahantu — bihuza n’ahantu wahisemo ku mutwe w’urupapuro.",
+      categoryShopLocationFilter: "Ahantu",
+      categoryShopLocationAll: "Ahantu hose",
+      categoryShopLocationMatchesHeader: "Ahantu hejuru hakoreshwa",
+      filterSheetSortProducts: "Tondeka ibicuruzwa",
+      filterSheetSortHint: "Iyo uhitemo « Hitamo icuruzwa » ku gice, ibi bigenzura uko byerekana.",
+      filterSortFeatured: "Byihariye",
+      filterSortPriceLow: "Igiciro: kuva hasi",
+      filterSortPriceHigh: "Igiciro: kuva hejuru",
+      filterSortNewest: "Bishya mbere",
+      filterSortRating: "Byubahwe cyane",
+      filterSheetDone: "Byarangiye",
 
       // How It Works
       howItWorks: "Uburyo bikora",

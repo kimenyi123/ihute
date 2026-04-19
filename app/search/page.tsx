@@ -115,7 +115,7 @@ type SectorSeller = {
 // Category image mapping
 const CATEGORY_IMAGES: Record<string, string> = {
   pharmacy: "/pharmacy-medicine-pills-bottles.jpg",
-  "liquor-store": "/wine-bottles-liquor-store.jpg", 
+  "liquor-store": "/wine-bottles-liquor-store.jpg",
   boutique: "/fashion-clothing-boutique-store.jpg",
   "bar-resto": "/restaurant-food-dining-bar.jpg",
   supermarket: "/supermarket-groceries-shopping-cart.jpg",
@@ -248,6 +248,31 @@ function extractNumericPrice(value: any): number {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+/**
+ * Client-side filter by URL category and price.
+ * Backend does not yet support category/brand/price; when it does, see docs/backend-category-price-filters.md
+ * for query params and example SQL. Then this filter can be removed or used only as fallback.
+ */
+function productMatchesCategoryAndPrice(
+  p: Product,
+  categorySlug: string,
+  priceMin: number,
+  priceMax: number
+): boolean {
+  const price = extractNumericPrice(p.selling_price) || extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) || extractNumericPrice((p as any).price) || 0
+  if (priceMin > 0 && price < priceMin) return false
+  if (priceMax > 0 && price > priceMax) return false
+  if (!categorySlug.trim()) return true
+  const slug = categorySlug.trim().toLowerCase()
+  const name = (p.item_commercial_name ?? "").toLowerCase()
+  const famille = ((p as any).famille ?? (p as any).FAMILLE ?? "").toString().toLowerCase()
+  const type = ((p as any).type ?? (p as any).TYPE ?? "").toString().toLowerCase()
+  const category = ((p as any).category ?? (p as any).CATEGORY ?? "").toString().toLowerCase()
+  const kw = (p.item_key_words ?? "").toLowerCase()
+  const searchable = [name, famille, type, category, kw].join(" ")
+  return searchable.includes(slug) || name.includes(slug)
+}
+
 function coerceOptionalPositiveNumber(raw: unknown): number | undefined {
   if (raw == null || raw === "") return undefined
   const n =
@@ -297,7 +322,7 @@ function toCardProduct(p: Product & { search_priority?: string; contains_ingredi
   const { expiryLabel } = parseItemStateBatchExpiry(itemStateRaw || undefined)
 
   return {
-    id,
+    id: p.item_code || p.item_key_words || `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`,
     name: p.item_commercial_name || "Product",
     description: undefined,
     price,
@@ -322,6 +347,7 @@ function toCardProduct(p: Product & { search_priority?: string; contains_ingredi
     itemEmballage: productItemEmballageRaw(p) as string | number | undefined,
     ...(itemStateRaw ? { item_state: itemStateRaw } : {}),
     ...(expiryLabel ? { expiryLabel } : {}),
+    brand: (p as any).item_fabricant ?? (p as any).id_fabricant ?? (p as any).brand,
   }
 }
 
@@ -452,6 +478,8 @@ function normalizeSupplierProductsResponse(
           cost_price: q.cost_price,
           currency: q.currency,
           momo: q.momo,
+          famille: (q as any).famille ?? (q as any).FAMILLE,
+          item_fabricant: (q as any).item_fabricant ?? (q as any).id_fabricant,
         })
       }
     }
@@ -485,6 +513,9 @@ export default function SearchPage() {
   const locationParam = searchParams.get("location") || ""
   const sectorParam = searchParams.get("sector") || ""
   const itemParam = searchParams.get("item")?.trim() ?? ""
+  const categoryParam = searchParams.get("category") || ""
+  const priceMinParam = searchParams.get("priceMin") || ""
+  const priceMaxParam = searchParams.get("priceMax") || ""
 
   const [q, setQ] = useState(initialQ)
   const [debouncedQ, setDebouncedQ] = useState("")
@@ -516,14 +547,13 @@ export default function SearchPage() {
   const [supplierProductsPerPage, setSupplierProductsPerPage] = useState(15)
 
   function toQuickViewProduct(p: Product): QuickViewProduct {
-    const emb = productItemEmballageRaw(p)
-    // Pass raw catalog image fields so Quick view uses the same chain as ProductCard:
-    // image_url / item_image_url / KAOS paths — not only one pre-resolved URL.
+    const price = extractNumericPrice(p.selling_price) || extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) || extractNumericPrice((p as any).price) || 0
     return {
       id: p.item_code || p.item_key_words || "",
       name: p.item_commercial_name || "Product",
-      price: productLinePrice(p),
+      price,
       currency: p.currency || "RWF",
+      image: getProductImageSrc(p),
       unit: p.item_packet ?? "",
       itemCode: p.item_code || p.item_key_words,
       supplierId: p.supplier_account,
@@ -620,23 +650,20 @@ export default function SearchPage() {
     const itemFromUrl = searchParams.get("item")?.trim()
     if (itemFromUrl && supplierParam) params.set("item", itemFromUrl)
 
-    // location: if explicitly provided in updates, use it (empty string => remove)
+    // location
     const locProvided = Object.prototype.hasOwnProperty.call(updates, "location")
     const locValue = locProvided ? updates.location : locationParam
-    if (locProvided) {
-      if (locValue) params.set("location", locValue)
-    } else if (locationParam) {
-      params.set("location", locationParam)
-    }
+    if (locProvided) { if (locValue) params.set("location", locValue) } else if (locationParam) { params.set("location", locationParam) }
 
-    // sector: same idea
+    // sector
     const secProvided = Object.prototype.hasOwnProperty.call(updates, "sector")
     const secValue = secProvided ? updates.sector : sectorParam
-    if (secProvided) {
-      if (secValue) params.set("sector", secValue)
-    } else if (sectorParam) {
-      params.set("sector", sectorParam)
-    }
+    if (secProvided) { if (secValue) params.set("sector", secValue) } else if (sectorParam) { params.set("sector", sectorParam) }
+
+    // category, priceMin, priceMax (from Filters sheet)
+    if (categoryParam) params.set("category", categoryParam)
+    if (priceMinParam) params.set("priceMin", priceMinParam)
+    if (priceMaxParam) params.set("priceMax", priceMaxParam)
 
     router.push(`/search?${params.toString()}`)
   }
@@ -794,7 +821,7 @@ export default function SearchPage() {
       }
     }
     run()
-     
+
   }, [debouncedQ, selectedShop?.supplier_account, locationParam, sectorParam])
 
   // Seller catalogue (RIGHT)
@@ -976,9 +1003,22 @@ export default function SearchPage() {
     [supplierProductPage, supplierTotalPages],
   )
 
-  // Main search products (global): exclude 0 price, then sort
+  const priceMinNum = useMemo(() => (priceMinParam ? parseInt(priceMinParam, 10) : 0), [priceMinParam])
+  const priceMaxNum = useMemo(() => (priceMaxParam ? parseInt(priceMaxParam, 10) : 0), [priceMaxParam])
+
+  // Main search products (global): apply client-side category + price filter (API has no support), exclude 0 price, then sort
   const searchProductsWithPrice = useMemo(() => {
     const list = searchResult?.products ?? []
+    let filtered = list.filter(p => {
+      const price = extractNumericPrice(p.selling_price) || extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) || extractNumericPrice((p as any).price)
+      if (price <= 0) return false
+      return productMatchesCategoryAndPrice(p, categoryParam, priceMinNum, priceMaxNum)
+    })
+    const priceNum = (p: Product) => extractNumericPrice(p.selling_price) || extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) || extractNumericPrice((p as any).price)
+    if (productSort === "price-asc") return [...filtered].sort((a, b) => priceNum(a) - priceNum(b))
+    if (productSort === "price-desc") return [...filtered].sort((a, b) => priceNum(b) - priceNum(a))
+    return filtered
+  }, [searchResult?.products, productSort, categoryParam, priceMinNum, priceMaxNum])
     // Same as supplier-scoped: prefer `final_selling_price` when backend provides it.
     const filtered = list.filter((p) => productLinePrice(p) > 0)
     let ordered: Product[]
@@ -1120,18 +1160,18 @@ export default function SearchPage() {
     router.push(`/search?${params.toString()}`)
   }
 
-  /** Drop `item` from URL but keep supplier + query so user can browse the full catalog. */
-  const openSellerCatalogWithoutItem = () => {
-    if (!selectedShop) return
-    const params = new URLSearchParams()
-    const term = debouncedQ.trim() || q.trim()
-    if (term) params.set("q", term)
-    params.set("supplier", selectedShop.supplier_account)
-    params.set("supplierName", selectedShop.supplier_name)
-    if (locationParam) params.set("location", locationParam)
-    if (sectorParam) params.set("sector", sectorParam)
-    router.push(`/search?${params.toString()}`)
-  }
+  // Sector spotlight: apply client-side category + price filter to each seller's products
+  const filteredSectorSellers = useMemo(() => {
+    if (!categoryParam && !priceMinNum && !priceMaxNum) return sectorSellers
+    return sectorSellers
+      .map((s) => ({
+        ...s,
+        products: (s.products || []).filter((p: Product) =>
+          productMatchesCategoryAndPrice(p, categoryParam, priceMinNum, priceMaxNum)
+        ),
+      }))
+      .filter((s) => s.products.length > 0)
+  }, [sectorSellers, categoryParam, priceMinNum, priceMaxNum])
 
   // Sector Spotlight: fetch sellers with a few products when sector is set
   useEffect(() => {
@@ -1143,7 +1183,7 @@ export default function SearchPage() {
       }
       setLoadingSector(true)
       try {
-        const url = `/api/fetchSuggestions?listSuppliersWithProducts=${encodeURIComponent(
+        const url = `/api/sector-list-suppliers?sector=${encodeURIComponent(
           sectorParam,
         )}&Currency=RWF`
         const res = await fetch(url, { cache: "no-store" })
@@ -1413,6 +1453,16 @@ export default function SearchPage() {
                 🗂️ Sector: {sectorParam}
               </Badge>
             )}
+            {categoryParam && (
+              <Badge variant="secondary" title="Category filter (client-side)">
+                📁 Category: {categoryParam}
+              </Badge>
+            )}
+            {(priceMinParam || priceMaxParam) && (
+              <Badge variant="secondary" title="Price filter (client-side)">
+                💰 {priceMinParam || "0"}–{priceMaxParam || "∞"} RWF
+              </Badge>
+            )}
             {selectedShop && (
               <Badge
                 variant="outline"
@@ -1507,12 +1557,14 @@ export default function SearchPage() {
                   </div>
                 </div>
 
-                {sectorSellers.length === 0 && !loadingSector && (
-                  <div className="text-sm text-gray-500">No featured sellers found for this sector.</div>
+                {filteredSectorSellers.length === 0 && !loadingSector && (
+                  <div className="text-sm text-gray-500">
+                    {sectorSellers.length === 0 ? "No featured sellers found for this sector." : "No products in this sector match the current category or price filters."}
+                  </div>
                 )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {sectorSellers.map((s) => (
+                  {filteredSectorSellers.map((s) => (
                     <div key={s.seller_account} className="rounded-lg border p-3">
                       <div className="flex items-center justify-between">
                         <div>
@@ -1959,7 +2011,13 @@ export default function SearchPage() {
             )}
 
             {/* No Results */}
-            {searchResult && allSuppliers.length === 0 && searchResult.products.length === 0 && (
+            {searchResult && allSuppliers.length === 0 && searchProductsWithPrice.length === 0 && (categoryParam || priceMinParam || priceMaxParam) && (searchResult.products?.length ?? 0) > 0 && (
+              <div className="text-center py-8 text-amber-700 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
+                <p className="font-medium">No products match your category or price filters.</p>
+                <p className="text-sm">Try widening the price range or clearing the category in the Filters panel.</p>
+              </div>
+            )}
+            {searchResult && allSuppliers.length === 0 && searchResult.products.length === 0 && searchProductsWithPrice.length === 0 && (
               <div className="text-center py-8 text-gray-500 space-y-2">
                 <p>No results found for &quot;{debouncedQ}&quot;</p>
                 <p className="text-sm">Try a different search term, or check spelling (e.g. product name in English or Kinyarwanda).</p>

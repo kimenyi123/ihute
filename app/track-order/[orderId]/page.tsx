@@ -1,21 +1,46 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { useParams, useRouter } from "next/navigation"
-import { Header } from "@/components/header"
-import { Footer } from "@/components/footer"
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
+import Link from "next/link"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Truck, CheckCircle, Clock, Package, MessageCircle, ArrowLeft, CreditCard, FileText } from "lucide-react"
+import {
+  Truck,
+  CheckCircle,
+  Clock,
+  Package,
+  MessageCircle,
+  ArrowLeft,
+  CreditCard,
+  FileText,
+  XCircle,
+} from "lucide-react"
 import { formatPaymentMethod } from "@/lib/payment-utils"
 import { RatingModal } from "@/components/RatingModal"
 import { useOrderTracking } from "@/hooks/useOrderTracking"
 import { DeliveryCountdown } from "@/components/delivery-countdown"
 import { unitMeaningfulForDisplay } from "@/lib/product-unit-display"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Textarea } from "@/components/ui/textarea"
 
-// Updated to match supplier statuses
-type OrderStatus = "open" | "processing" | "invoice" | "delivered" | "pending" | "in-transit"
+// Updated to match supplier statuses + cancelled (reject / cancel from seller or system)
+type OrderStatus =
+  | "open"
+  | "processing"
+  | "invoice"
+  | "delivered"
+  | "pending"
+  | "in-transit"
+  | "cancelled"
 
 type OrderDetail = {
   orderId: string
@@ -40,10 +65,15 @@ type OrderDetail = {
   createdAt: string
   estimatedDeliveryAt?: string
   driverPhone?: string
+  /** Seller marked payment (shared server meta; gateway may still be pending). */
+  sellerPaymentAck?: "paid" | "pending"
+  clientMetaUpdatedAt?: string
 }
 
 function statusIcon(status: OrderStatus) {
   switch (status) {
+    case "cancelled":
+      return <Clock className="h-5 w-5 text-red-600" />
     case "delivered":
       return <CheckCircle className="h-5 w-5 text-green-600" />
     case "in-transit":
@@ -61,6 +91,8 @@ function statusIcon(status: OrderStatus) {
 
 function statusBadge(status: OrderStatus) {
   switch (status) {
+    case "cancelled":
+      return <Badge className="bg-red-600 capitalize">Rejected / cancelled</Badge>
     case "delivered":
       return <Badge className="bg-green-600 capitalize">Delivered</Badge>
     case "in-transit":
@@ -95,6 +127,17 @@ function paymentStatusBadge(paymentStatus?: string) {
   return <Badge variant="outline" className="capitalize">{paymentStatus}</Badge>
 }
 
+/** True when buyer may still need to confirm payment on their side (tap badge to report). */
+function isPaymentPendingLike(paymentStatus?: string): boolean {
+  if (!paymentStatus) return false
+  const s = paymentStatus.toLowerCase()
+  if (s === "paid" || s === "success" || s.includes("paid")) return false
+  return s === "pending" || s.includes("pending") || s === "unpaid" || s.includes("unpaid")
+}
+
+const PAYMENT_ACK_STORAGE_PREFIX = "ihute:track:paymentAck:"
+const BUYER_ADDRESS_STORAGE_PREFIX = "ihute:track:buyerAddress:"
+
 /** Prefer raw ORDER_STATUS from the API; otherwise the friendly badge from mapped `status`. */
 function orderStatusBadge(order: Pick<OrderDetail, "status" | "ORDER_STATUS">) {
   const raw = order.ORDER_STATUS?.trim()
@@ -113,6 +156,27 @@ function orderStatusBadge(order: Pick<OrderDetail, "status" | "ORDER_STATUS">) {
 }
 
 function buildTracking(status: OrderStatus) {
+  if (status === "cancelled") {
+    return [
+      {
+        label: "Order placed",
+        subtitle: "",
+        completed: true,
+        date: "",
+        isCurrent: false,
+        failed: false,
+      },
+      {
+        label: "Not accepted",
+        subtitle: "The shop rejected or cancelled this order",
+        completed: true,
+        date: "",
+        isCurrent: true,
+        failed: true,
+      },
+    ]
+  }
+
   // Map real statuses to tracking steps (now with 5 distinct steps)
   const statusMap: Record<OrderStatus, number> = {
     "open": 0,
@@ -121,6 +185,7 @@ function buildTracking(status: OrderStatus) {
     "invoice": 2,
     "in-transit": 3,
     "delivered": 4,
+    "cancelled": 0,
   }
 
   const currentStep = statusMap[status] ?? 0
@@ -132,7 +197,8 @@ function buildTracking(status: OrderStatus) {
     "processing": "Processing",
     "invoice": "Invoice",
     "in-transit": "Out for Delivery",
-    "delivered": "Delivered"
+    "delivered": "Delivered Successfully",
+    "cancelled": "Not accepted",
   }
 
   const currentStatusLabel = statusLabels[status] || status
@@ -143,35 +209,40 @@ function buildTracking(status: OrderStatus) {
       subtitle: currentStep === 0 ? currentStatusLabel : "",
       completed: currentStep >= 0,
       date: "",
-      isCurrent: currentStep === 0
+      isCurrent: currentStep === 0,
+      failed: false,
     },
     {
       label: "Processing",
       subtitle: currentStep === 1 ? currentStatusLabel : "",
       completed: currentStep >= 1,
       date: "",
-      isCurrent: currentStep === 1
+      isCurrent: currentStep === 1,
+      failed: false,
     },
     {
       label: "Invoice",
       subtitle: currentStep === 2 ? currentStatusLabel : "",
       completed: currentStep >= 2,
       date: "",
-      isCurrent: currentStep === 2
+      isCurrent: currentStep === 2,
+      failed: false,
     },
     {
       label: "Out for Delivery",
       subtitle: currentStep === 3 ? currentStatusLabel : "",
       completed: currentStep >= 3,
       date: "",
-      isCurrent: currentStep === 3
+      isCurrent: currentStep === 3,
+      failed: false,
     },
     {
       label: "Delivered",
       subtitle: currentStep === 4 ? currentStatusLabel : "",
       completed: currentStep >= 4,
       date: "",
-      isCurrent: currentStep === 4
+      isCurrent: currentStep === 4,
+      failed: false,
     },
   ]
 }
@@ -192,14 +263,30 @@ function waHrefFor(phone: string, text: string) {
   return `https://wa.me/${p}?text=${encoded}`
 }
 
-export default function TrackOrderPage() {
+const trackShell =
+  "min-h-screen bg-gradient-to-b from-[#0369a1] via-[#0ea5e9] to-[#7dd3fc] text-white"
+
+function TrackOrderPageInner() {
   const params = useParams()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const orderId = params.orderId as string
+  const fromGrandma = searchParams.get("from") === "grandma"
+  const homeHref = fromGrandma ? "/grandma" : "/"
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [order, setOrder] = useState<OrderDetail | null>(null)
+
+  const [paymentAckOpen, setPaymentAckOpen] = useState(false)
+  const [buyerPaymentAck, setBuyerPaymentAck] = useState<"received" | "not_received" | null>(null)
+  /** `undefined` = no localStorage entry (use API). A string (incl. empty) = saved on this device. */
+  const [buyerAddressOverride, setBuyerAddressOverride] = useState<string | undefined>(undefined)
+  const [addressDraft, setAddressDraft] = useState("")
+  const [addressBusy, setAddressBusy] = useState(false)
+  const [editingAddress, setEditingAddress] = useState(false)
+  /** Opaque 5-char code for share links (from API). */
+  const [publicToken, setPublicToken] = useState<string | null>(null)
 
   // Rating modal state
   const [showRatingModal, setShowRatingModal] = useState(false)
@@ -212,10 +299,10 @@ export default function TrackOrderPage() {
     isMonitoring, 
     startMonitoring, 
     isDelivered 
-  } = useOrderTracking({ 
-    orderId, 
+  } = useOrderTracking({
+    orderId: order?.orderId != null ? String(order.orderId) : orderId,
     initialStatus: order?.status,
-    autoStart: true 
+    autoStart: true,
   })
 
   // Use the tracking hook values to show monitoring status (optional)
@@ -248,49 +335,80 @@ export default function TrackOrderPage() {
     }
   }
 
+  const stableOrderKey = useMemo(
+    () => (order?.orderId != null ? String(order.orderId) : orderId),
+    [order?.orderId, orderId],
+  )
+
   // ✅ NEW: Watch for status changes and trigger rating popup
   useEffect(() => {
     // This effect will trigger rating popup when order becomes delivered
-    if (order?.status === "delivered" && !showRatingModal && !hasCheckedRating) {
+    if (order?.status === "delivered" && !showRatingModal && !hasCheckedRating && order?.orderId != null) {
       setHasCheckedRating(true)
-      checkIfShouldShowRating(orderId)
+      checkIfShouldShowRating(String(order.orderId))
     }
-  }, [order?.status, orderId, showRatingModal, hasCheckedRating])
+  }, [order?.status, order?.orderId, showRatingModal, hasCheckedRating])
 
   useEffect(() => {
-    async function fetchOrder() {
-      if (!orderId) return
+    if (!stableOrderKey || typeof window === "undefined") return
+    try {
+      const raw = window.localStorage.getItem(`${PAYMENT_ACK_STORAGE_PREFIX}${stableOrderKey}`)
+      if (raw === "received" || raw === "not_received") setBuyerPaymentAck(raw)
+    } catch {
+      /* ignore */
+    }
+  }, [stableOrderKey])
 
+  useEffect(() => {
+    if (!stableOrderKey || typeof window === "undefined") return
+    try {
+      const raw = window.localStorage.getItem(`${BUYER_ADDRESS_STORAGE_PREFIX}${stableOrderKey}`)
+      if (raw === null) setBuyerAddressOverride(undefined)
+      else setBuyerAddressOverride(raw)
+    } catch {
+      setBuyerAddressOverride(undefined)
+    }
+  }, [stableOrderKey])
+
+  const loadOrderFromServer = useCallback(async () => {
+    if (!orderId) return
+    const res = await fetch("/api/orders/track", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ orderId }),
+      cache: "no-store",
+    })
+    const json = (await res.json()) as {
+      ok?: boolean
+      order?: OrderDetail
+      publicToken?: string
+      error?: string
+    }
+    if (!res.ok || !json?.ok) {
+      throw new Error(json?.error || "Failed to load order")
+    }
+    console.log("[Track Order] Order data received:", json.order)
+    setOrder(json.order ?? null)
+    setPublicToken(typeof json.publicToken === "string" ? json.publicToken : null)
+  }, [orderId])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
       setLoading(true)
       setError(null)
-
       try {
-        const res = await fetch("/api/orders/track", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ orderId }),
-          cache: "no-store",
-        })
-
-        const json = await res.json()
-
-        if (!res.ok || !json?.ok) {
-          throw new Error(json?.error || "Failed to load order")
-        }
-
-        console.log("[Track Order] Order data received:", json.order)
-        setOrder(json.order)
-
-        // Rating popup will be handled by the status change useEffect
-      } catch (err: any) {
-        setError(err?.message || "Failed to load order")
+        await loadOrderFromServer()
+      } catch (err: unknown) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load order")
       } finally {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       }
+    })()
+    return () => {
+      cancelled = true
     }
-
-    fetchOrder()
-  }, [orderId])
+  }, [orderId, loadOrderFromServer])
 
   // Sync currentStatus from useOrderTracking to order state
   useEffect(() => {
@@ -304,6 +422,10 @@ export default function TrackOrderPage() {
   async function handleRatingDismiss() {
     setShowRatingModal(false)
 
+    const numericOrderId =
+      order?.orderId != null ? parseInt(String(order.orderId), 10) : parseInt(/^\d+$/.test(orderId) ? orderId : "0", 10)
+    if (Number.isNaN(numericOrderId) || numericOrderId <= 0) return
+
     // Track attempt (optional - don't break if it fails)
     try {
       const res = await fetch("/api/ratings", {
@@ -311,8 +433,8 @@ export default function TrackOrderPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "trackAttempt",
-          orderId: parseInt(orderId)
-        })
+          orderId: numericOrderId,
+        }),
       })
 
       const data = await res.json()
@@ -328,7 +450,7 @@ export default function TrackOrderPage() {
 
           setTimeout(() => {
             setHasCheckedRating(false) // Allow checking again
-            checkIfShouldShowRating(orderId)
+            if (order?.orderId != null) checkIfShouldShowRating(String(order.orderId))
           }, waitMs)
         }
       } else {
@@ -336,7 +458,7 @@ export default function TrackOrderPage() {
         // Fallback: show again in 2 minutes if tracking fails
         setTimeout(() => {
           setHasCheckedRating(false)
-          checkIfShouldShowRating(orderId)
+          if (order?.orderId != null) checkIfShouldShowRating(String(order.orderId))
         }, 2 * 60 * 1000)
       }
     } catch (error) {
@@ -344,7 +466,7 @@ export default function TrackOrderPage() {
       // Fallback: show again in 2 minutes if tracking fails
       setTimeout(() => {
         setHasCheckedRating(false)
-        checkIfShouldShowRating(orderId)
+        if (order?.orderId != null) checkIfShouldShowRating(String(order.orderId))
       }, 2 * 60 * 1000)
     }
   }
@@ -358,48 +480,70 @@ export default function TrackOrderPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50">
-        <Header />
-        <main className="container mx-auto px-4 py-8">
-          <Card>
+      <div className={trackShell}>
+        <header className="sticky top-0 z-40 border-b border-white/15 bg-gradient-to-r from-[#0369a1] to-[#0ea5e9] shadow-md">
+          <div className="mx-auto flex max-w-[430px] items-center gap-3 px-4 py-3">
+            <Link
+              href={homeHref}
+              className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-white/15 px-2 py-1.5 text-sm font-semibold text-white hover:bg-white/25"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back
+            </Link>
+            <span className="text-sm font-bold text-white/90">Tracking…</span>
+          </div>
+        </header>
+        <main className="mx-auto max-w-[430px] px-4 py-8">
+          <Card className="border-0 bg-white text-slate-900 shadow-xl">
             <CardHeader>
-              <CardTitle>Loading order...</CardTitle>
+              <CardTitle>Loading order…</CardTitle>
             </CardHeader>
             <CardContent className="text-sm text-muted-foreground">Please wait.</CardContent>
           </Card>
         </main>
-        <Footer />
       </div>
     )
   }
 
   if (error || !order) {
     return (
-      <div className="min-h-screen bg-slate-50">
-        <Header />
-        <main className="container mx-auto px-4 py-8">
-          <Card>
+      <div className={trackShell}>
+        <header className="sticky top-0 z-40 border-b border-white/15 bg-gradient-to-r from-[#0369a1] to-[#0ea5e9] shadow-md">
+          <div className="mx-auto flex max-w-[430px] items-center gap-3 px-4 py-3">
+            <Link
+              href={homeHref}
+              className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-white/15 px-2 py-1.5 text-sm font-semibold text-white hover:bg-white/25"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back
+            </Link>
+          </div>
+        </header>
+        <main className="mx-auto max-w-[430px] px-4 py-8">
+          <Card className="border-0 bg-white text-slate-900 shadow-xl">
             <CardHeader>
-              <CardTitle>Order Not Found</CardTitle>
+              <CardTitle>Order not found</CardTitle>
               <CardDescription className="text-destructive">
                 {error || "We couldn't find an order with this ID."}
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Button onClick={() => router.push("/")}>
+              <Button variant="secondary" onClick={() => router.push(homeHref)}>
                 <ArrowLeft className="h-4 w-4 mr-2" />
-                Back to Home
+                {fromGrandma ? "Back to Grandma" : "Back to Home"}
               </Button>
             </CardContent>
           </Card>
         </main>
-        <Footer />
       </div>
     )
   }
 
   const steps = buildTracking(order.status)
   const sellerPhoneNormalized = normalizePhone(order.sellerPhone)
+  const displayBuyerLocation =
+    buyerAddressOverride !== undefined ? buyerAddressOverride : (order.buyerLocation ?? "")
+  const canEditDeliveryAddress = order.status !== "delivered" && order.status !== "cancelled"
 
   // Format items for WhatsApp message
   const formatCurrency = (amount: number) => `${amount.toLocaleString()} RWF`
@@ -424,12 +568,15 @@ export default function TrackOrderPage() {
   const isPaid = order.paymentMethod && !order.paymentMethod.toLowerCase().includes('delivery')
   const paidAmount = isPaid ? order.total : 0
 
+  const shareTrackSlug = publicToken || orderId
+  const internalOrderNo = String(order.orderId ?? orderId)
+
   const whatsappMessage = [
     'Order',
     '',
     `Shop: ${order.sellerName}`,
-    order.buyerLocation ? `Location: ${order.buyerLocation}` : '',
-    `Order ID: ${orderId}`,
+    displayBuyerLocation.trim() ? `Location: ${displayBuyerLocation.trim()}` : "",
+    `Order ID: ${internalOrderNo}`,
     '',
     '```',
     header,
@@ -442,35 +589,47 @@ export default function TrackOrderPage() {
     `Paid: ${formatCurrency(paidAmount)}`,
     '',
     `Paid at: ${formatPaymentMethod(order.paymentMethod)}`,
-    `Message: ${orderId ? `ORDER ${orderId}` : '-'}`,
+    `Message: ${internalOrderNo ? `ORDER ${internalOrderNo}` : '-'}`,
     `My phone: ${order.buyerPhone || ''}`,
     '',
-    `Follow: ${typeof window !== 'undefined' ? window.location.origin : ''}/track-order/${orderId}`
-  ].filter(Boolean).join('\n')
+    `Follow: ${typeof window !== "undefined" ? window.location.origin : ""}/track-order/${encodeURIComponent(shareTrackSlug)}${fromGrandma ? "?from=grandma" : ""}`
+  ].filter(Boolean).join("\n")
 
   const whatsappHref = sellerPhoneNormalized ? waHrefFor(sellerPhoneNormalized, whatsappMessage) : ""
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <Header />
-      <main className="container mx-auto px-4 py-8">
-        <div className="max-w-3xl mx-auto space-y-6">
-          {/* Header */}
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-slate-900">Order Tracking</h1>
-              <p className="text-slate-600">Order #{orderId}</p>
-            </div>
-            <div className="flex items-center gap-2">
-              {statusIcon(order.status)}
-              {statusBadge(order.status)}
-            </div>
+    <div className={trackShell}>
+      <header className="sticky top-0 z-40 border-b border-white/15 bg-gradient-to-r from-[#0369a1] to-[#0ea5e9] shadow-md">
+        <div className="mx-auto flex max-w-[430px] items-center gap-3 px-4 py-3">
+          <Link
+            href={homeHref}
+            className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-white/15 px-2 py-1.5 text-sm font-semibold text-white hover:bg-white/25"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </Link>
+          <div className="min-w-0 flex-1">
+            <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/80">Live tracking</div>
+            <div className="truncate text-lg font-bold leading-tight">Order #{internalOrderNo}</div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2 text-slate-900">
+            <span className="rounded-full bg-white px-2 py-1 shadow-sm">{statusIcon(order.status)}</span>
+            <span className="hidden sm:inline">{statusBadge(order.status)}</span>
+          </div>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-[430px] space-y-4 px-4 py-4 pb-12">
+        <div className="space-y-4">
+          {/* Header row (duplicate badge on small screens) */}
+          <div className="flex items-center justify-between rounded-2xl bg-white/10 px-3 py-2 sm:hidden">
+            {statusBadge(order.status)}
           </div>
 
           {/* Order Details */}
-          <Card>
+          <Card className="border-0 shadow-xl rounded-2xl bg-white text-slate-900">
             <CardHeader>
-              <CardTitle>Order Informations</CardTitle>
+              <CardTitle>Order details</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
@@ -519,28 +678,197 @@ export default function TrackOrderPage() {
                 )}
               </div>
 
-              {/* Payment Status Badge */}
+              {/* Payment Status — tap when pending to say if you paid (helps seller / your records) */}
               {order.paymentStatus && (
-                <div className="pt-4 border-t">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm text-muted-foreground">Payment Status</p>
-                    {paymentStatusBadge(order.paymentStatus)}
+                <div className="border-t pt-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm text-muted-foreground">Payment status</p>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      {order.sellerPaymentAck === "paid" && isPaymentPendingLike(order.paymentStatus) ? (
+                        <Badge className="bg-green-600 hover:bg-green-600">Seller confirmed receipt</Badge>
+                      ) : null}
+                      {isPaymentPendingLike(order.paymentStatus) ? (
+                        <button
+                          type="button"
+                          className="rounded-full outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-sky-500"
+                          onClick={() => setPaymentAckOpen(true)}
+                        >
+                          {paymentStatusBadge(order.paymentStatus)}
+                          <span className="sr-only">Open payment confirmation</span>
+                        </button>
+                      ) : (
+                        paymentStatusBadge(order.paymentStatus)
+                      )}
+                    </div>
                   </div>
+                  {order.sellerPaymentAck === "paid" && isPaymentPendingLike(order.paymentStatus) ? (
+                    <p className="mt-2 rounded-lg border border-green-200 bg-green-50 p-2 text-sm text-green-900">
+                      The seller marked your payment as received on their side. The gateway can still show Pending until
+                      MoMo or your bank confirms.
+                    </p>
+                  ) : null}
+                  {buyerPaymentAck ? (
+                    <p className="mt-2 text-xs text-slate-600">
+                      Your note:{" "}
+                      <span className="font-semibold text-slate-800">
+                        {buyerPaymentAck === "received"
+                          ? "I completed payment to the seller"
+                          : "Payment not completed yet on my side"}
+                      </span>{" "}
+                      (saved on this device — tell the seller on WhatsApp too if needed)
+                    </p>
+                  ) : isPaymentPendingLike(order.paymentStatus) ? (
+                    <p className="mt-2 text-xs text-slate-500">Tap Pending to say if you paid.</p>
+                  ) : null}
                 </div>
               )}
 
-              {order.buyerLocation && (
-                <div>
-                  <p className="text-sm text-muted-foreground">Delivery Location</p>
-                  <p className="font-medium">{order.buyerLocation}</p>
+              {(displayBuyerLocation.trim() || canEditDeliveryAddress) && (
+                <div className="border-t pt-4">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-medium text-slate-800">Buyer delivery address</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        Where this order should be delivered — not the shop&apos;s address. Saving updates the server so
+                        your seller sees this line on the order.
+                      </p>
+                    </div>
+                    {canEditDeliveryAddress && !editingAddress ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0 border-sky-200 text-[#0369a1]"
+                        onClick={() => {
+                          setAddressDraft(displayBuyerLocation.trim())
+                          setEditingAddress(true)
+                        }}
+                      >
+                        Edit
+                      </Button>
+                    ) : null}
+                  </div>
+                  {canEditDeliveryAddress && editingAddress ? (
+                    <div className="mt-3 space-y-3">
+                      <Textarea
+                        id="track-buyer-address-inline"
+                        rows={4}
+                        value={addressDraft}
+                        onChange={(e) => setAddressDraft(e.target.value)}
+                        className="resize-y min-h-[100px] border-slate-200"
+                        placeholder="Street, cell, landmark, phone for delivery…"
+                        disabled={addressBusy}
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          disabled={addressBusy}
+                          className="bg-[#0369a1] text-white hover:bg-[#025a8a]"
+                          onClick={() => {
+                            void (async () => {
+                              const t = addressDraft.trim()
+                              setAddressBusy(true)
+                              try {
+                                const res = await fetch("/api/orders/client-meta", {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ orderId: stableOrderKey, buyerDeliveryAddress: t }),
+                                })
+                                const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string }
+                                if (!res.ok || !json?.ok) {
+                                  throw new Error(json?.error || "Could not save address")
+                                }
+                                try {
+                                  if (typeof window !== "undefined") {
+                                    window.localStorage.setItem(`${BUYER_ADDRESS_STORAGE_PREFIX}${stableOrderKey}`, t)
+                                  }
+                                } catch {
+                                  /* ignore */
+                                }
+                                setBuyerAddressOverride(undefined)
+                                await loadOrderFromServer()
+                                setEditingAddress(false)
+                              } catch (e: unknown) {
+                                window.alert(e instanceof Error ? e.message : "Could not save address")
+                              } finally {
+                                setAddressBusy(false)
+                              }
+                            })()
+                          }}
+                        >
+                          {addressBusy ? "Saving…" : "Save address"}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={addressBusy}
+                          onClick={() => {
+                            setEditingAddress(false)
+                            setAddressDraft(displayBuyerLocation.trim())
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="text-muted-foreground"
+                          disabled={addressBusy}
+                          onClick={() => {
+                            void (async () => {
+                              setAddressBusy(true)
+                              try {
+                                const res = await fetch("/api/orders/client-meta", {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ orderId: stableOrderKey, buyerDeliveryAddress: null }),
+                                })
+                                const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string }
+                                if (!res.ok || !json?.ok) {
+                                  throw new Error(json?.error || "Could not reset address")
+                                }
+                                try {
+                                  if (typeof window !== "undefined") {
+                                    window.localStorage.removeItem(`${BUYER_ADDRESS_STORAGE_PREFIX}${stableOrderKey}`)
+                                  }
+                                } catch {
+                                  /* ignore */
+                                }
+                                setBuyerAddressOverride(undefined)
+                                await loadOrderFromServer()
+                                setEditingAddress(false)
+                              } catch (e: unknown) {
+                                window.alert(e instanceof Error ? e.message : "Could not reset address")
+                              } finally {
+                                setAddressBusy(false)
+                              }
+                            })()
+                          }}
+                        >
+                          Use original from order
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="font-medium mt-2">
+                        {displayBuyerLocation.trim() ? displayBuyerLocation : "— (add before delivery)"}
+                      </p>
+                      {canEditDeliveryAddress ? (
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          Tap Edit to change the address. The seller refreshes from the same server data.
+                        </p>
+                      ) : null}
+                    </>
+                  )}
                 </div>
               )}
             </CardContent>
           </Card>
 
           {/* Estimated delivery countdown */}
-          {order.estimatedDeliveryAt && order.status !== "delivered" && (
-            <Card>
+          {order.estimatedDeliveryAt && order.status !== "delivered" && order.status !== "cancelled" && (
+            <Card className="border-0 shadow-xl rounded-2xl bg-white text-slate-900">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Truck className="h-5 w-5" />
@@ -558,7 +886,7 @@ export default function TrackOrderPage() {
 
           {/* Driver contact (when in transit) */}
           {(order.status === "in-transit" && (order.driverPhone || order.sellerPhone)) && (
-            <Card className="border-blue-100">
+            <Card className="border-0 shadow-xl rounded-2xl border-blue-100 bg-white text-slate-900">
               <CardHeader>
                 <CardTitle>Delivery contact</CardTitle>
                 <CardDescription>
@@ -583,26 +911,33 @@ export default function TrackOrderPage() {
           )}
 
           {/* Tracking Timeline */}
-          <Card>
+          <Card className="border-0 shadow-xl rounded-2xl bg-white text-slate-900">
             <CardHeader>
-              <CardTitle>Order Progress</CardTitle>
-              <CardDescription>Track your order from placement to delivery</CardDescription>
+              <CardTitle>Order progress</CardTitle>
+              <CardDescription>Status updates when the shop confirms, prepares, or completes your order</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="relative">
                 <div className="space-y-4">
-                  {steps.map((step, index) => (
+                  {steps.map((step, index) => {
+                    const failed = "failed" in step && step.failed
+                    return (
                     <div key={index} className="flex items-start gap-3">
                       <div className="relative">
                         <div
-                          className={`h-10 w-10 rounded-full flex items-center justify-center transition-colors ${step.completed
-                              ? "bg-green-600"
-                              : step.isCurrent
-                                ? "bg-blue-500 ring-4 ring-blue-100"
-                                : "bg-slate-200"
-                            }`}
+                          className={`h-10 w-10 rounded-full flex items-center justify-center transition-colors ${
+                            failed
+                              ? "bg-red-600 ring-4 ring-red-100"
+                              : step.completed
+                                ? "bg-[#0ea5e9] ring-4 ring-sky-100"
+                                : step.isCurrent
+                                  ? "bg-[#0284c7] ring-4 ring-sky-100"
+                                  : "bg-slate-200"
+                          }`}
                         >
-                          {step.completed ? (
+                          {failed ? (
+                            <XCircle className="h-6 w-6 text-white" />
+                          ) : step.completed ? (
                             <CheckCircle className="h-6 w-6 text-white" />
                           ) : step.isCurrent ? (
                             <Clock className="h-6 w-6 text-white animate-pulse" />
@@ -612,41 +947,57 @@ export default function TrackOrderPage() {
                         </div>
                         {index < steps.length - 1 && (
                           <div
-                            className={`absolute left-5 top-10 w-0.5 h-8 transition-colors ${step.completed ? "bg-green-600" : "bg-slate-200"
-                              }`}
+                            className={`absolute left-5 top-10 w-0.5 h-8 transition-colors ${
+                              failed || step.completed ? "bg-[#38bdf8]" : "bg-slate-200"
+                            }`}
                           />
                         )}
                       </div>
                       <div className="flex-1 pt-2">
-                        <p className={`font-medium ${step.completed
-                            ? "text-slate-900"
-                            : step.isCurrent
-                              ? "text-blue-600 font-semibold"
-                              : "text-slate-500"
-                          }`}>
+                        <p
+                          className={`font-medium ${
+                            failed
+                              ? "text-red-700"
+                              : step.completed
+                                ? "text-slate-900"
+                                : step.isCurrent
+                                  ? "text-[#0369a1] font-semibold"
+                                  : "text-slate-500"
+                          }`}
+                        >
                           {step.label}
-                          {step.isCurrent && (
-                            <span className="ml-2 text-xs text-blue-600 font-normal">(Current)</span>
+                          {step.isCurrent && !failed && (
+                            <span className="ml-2 text-xs font-normal text-[#0369a1]">(current)</span>
+                          )}
+                          {failed && (
+                            <span className="ml-2 text-xs font-normal text-red-600">(current)</span>
                           )}
                         </p>
-                        {step.subtitle && (
-                          <p className="text-sm text-blue-600 font-medium mt-1">{step.subtitle}</p>
-                        )}
-                        {step.completed && step.date && (
+                        {step.subtitle ? (
+                          <p
+                            className={`mt-1 text-sm font-medium ${
+                              failed ? "text-red-600" : "text-[#0369a1]"
+                            }`}
+                          >
+                            {step.subtitle}
+                          </p>
+                        ) : null}
+                        {step.completed && step.date ? (
                           <p className="text-sm text-slate-500">{step.date}</p>
-                        )}
+                        ) : null}
                       </div>
                     </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
             </CardContent>
           </Card>
 
           {/* Items */}
-          <Card>
+          <Card className="border-0 shadow-xl rounded-2xl bg-white text-slate-900">
             <CardHeader>
-              <CardTitle>Order Items</CardTitle>
+              <CardTitle>Order items</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
@@ -674,8 +1025,8 @@ export default function TrackOrderPage() {
           </Card>
 
           {/* Contact Seller */}
-          {sellerPhoneNormalized && (
-            <Card className="border-2 border-green-100">
+          {sellerPhoneNormalized && order.status !== "cancelled" && (
+            <Card className="border-0 shadow-xl rounded-2xl border-2 border-green-100 bg-white text-slate-900">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <MessageCircle className="h-5 w-5 text-[#25D366]" />
@@ -701,23 +1052,79 @@ export default function TrackOrderPage() {
           )}
 
           {/* Actions */}
-          <div className="flex gap-3">
-            <Button variant="outline" className="flex-1" onClick={() => router.push("/")}>
+          <div className="flex gap-3 pt-2">
+            <Button
+              variant="secondary"
+              className="flex-1 bg-white text-slate-900 hover:bg-white/90"
+              onClick={() => router.push(homeHref)}
+            >
               <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Home
+              {fromGrandma ? "Back to Grandma" : "Home"}
             </Button>
-            <Button variant="outline" className="flex-1" onClick={() => window.location.reload()}>
-              Refresh Status
+            <Button
+              className="flex-1 bg-white text-[#0369a1] hover:bg-white/90"
+              variant="outline"
+              onClick={() => window.location.reload()}
+            >
+              Refresh status
             </Button>
           </div>
         </div>
       </main>
-      <Footer />
+
+      <Dialog open={paymentAckOpen} onOpenChange={setPaymentAckOpen}>
+        <DialogContent className="max-w-[min(100vw,400px)] border-0 bg-white text-slate-900 sm:rounded-2xl">
+          <DialogHeader>
+            <DialogTitle>Did you pay the seller?</DialogTitle>
+            <DialogDescription>
+              Tap one option. This is saved on <strong>this device only</strong> so you can keep track. The shop still
+              sees the real payment status from MoMo/bank — message them on WhatsApp if you need to confirm.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-col gap-2 sm:flex-col">
+            <Button
+              type="button"
+              className="w-full bg-green-600 text-white hover:bg-green-700"
+              onClick={() => {
+                try {
+                  if (typeof window !== "undefined") {
+                    window.localStorage.setItem(`${PAYMENT_ACK_STORAGE_PREFIX}${stableOrderKey}`, "received")
+                  }
+                } catch {
+                  /* ignore */
+                }
+                setBuyerPaymentAck("received")
+                setPaymentAckOpen(false)
+              }}
+            >
+              I paid (completed on my side)
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              onClick={() => {
+                try {
+                  if (typeof window !== "undefined") {
+                    window.localStorage.setItem(`${PAYMENT_ACK_STORAGE_PREFIX}${stableOrderKey}`, "not_received")
+                  }
+                } catch {
+                  /* ignore */
+                }
+                setBuyerPaymentAck("not_received")
+                setPaymentAckOpen(false)
+              }}
+            >
+              Not yet / still pending
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       
       {/* Rating Modal */}
       {order && showRatingModal && (
         <RatingModal
-          orderId={orderId}
+          orderId={String(order.orderId)}
           sellerId={order.sellerAccount || ""}
           sellerName={order.sellerName}
           buyerPhone={order.buyerPhone || ""}
@@ -728,5 +1135,21 @@ export default function TrackOrderPage() {
         />
       )}
     </div>
+  )
+}
+
+export default function TrackOrderPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className={trackShell}>
+          <div className="mx-auto max-w-[430px] px-4 py-16 text-center text-sm font-medium text-white/90">
+            Loading tracking…
+          </div>
+        </div>
+      }
+    >
+      <TrackOrderPageInner />
+    </Suspense>
   )
 }

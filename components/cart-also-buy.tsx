@@ -25,6 +25,8 @@ type Product = {
   supplierId?: string
   supplierName?: string
   supplierLocation?: string
+  /** Brand from backend: item_fabricant or id_fabricant */
+  brand?: string
   momo?: string
   inStock?: boolean
   itemEmballage?: string | number
@@ -90,6 +92,7 @@ export function CartAlsoBuy({ cartItems }: { cartItems: CartItem[] }) {
         supplierId: p.SELLER_ISHYIGA_ACCOUNT ?? p.item_seller_account ?? supplierIdRaw ?? "",
         supplierName: p.SELLER_NAMES ?? p.supplier_name ?? supplierNameRaw ?? "",
         supplierLocation: p.LOCATION ?? p.supplier_location,
+        brand: p.item_fabricant ?? p.id_fabricant ?? p.brand,
         momo: p.momo,
         inStock: true,
         ...(itemEmballage ? { itemEmballage } : {}),

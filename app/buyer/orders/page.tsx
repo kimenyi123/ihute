@@ -1,5 +1,8 @@
 "use client"
 
+import { Header } from "@/components/header"
+import { Footer } from "@/components/footer"
+import { BuyerOrdersPanel } from "@/components/buyer-orders-panel"
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useAuthStore } from "@/lib/auth-store"
@@ -473,6 +476,11 @@ export default function BuyerOrdersPage() {
   }
 
   return (
+    <div className="min-h-screen w-full flex flex-col bg-slate-50">
+      <Header />
+      <BuyerOrdersPanel variant="buyer" loginRedirect="/login" />
+      <Footer />
+    </div>
     <main className="w-full max-w-7xl mx-auto p-6">
         <h1 className="text-2xl font-bold mb-4 text-slate-800">Order Reports</h1>
 

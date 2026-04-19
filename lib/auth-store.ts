@@ -63,8 +63,8 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       isAuthenticated: false,
       loginTime: null,
-      lastActivityAt: null,
-      sessionTimeout: 60 * 60 * 1000, // 60 minutes from last activity
+      /** Default 30 days — “keep me signed in” for marketplace flows (was 24h). */
+      sessionTimeout: 30 * 24 * 60 * 60 * 1000,
       hasHydrated: false,
 
       login: (user) => {
@@ -96,6 +96,10 @@ export const useAuthStore = create<AuthState>()(
           localStorage.removeItem("prefs-storage")
           localStorage.removeItem("table-command-storage")
           sessionStorage.clear()
+          for (let i = localStorage.length - 1; i >= 0; i--) {
+            const k = localStorage.key(i)
+            if (k?.startsWith("grandma:")) localStorage.removeItem(k)
+          }
         }
       },
 
@@ -137,6 +141,10 @@ export const useAuthStore = create<AuthState>()(
       onRehydrateStorage: () => (state) => {
         if (state) {
           state.hasHydrated = true
+          const minSession = 30 * 24 * 60 * 60 * 1000
+          if (typeof state.sessionTimeout === "number" && state.sessionTimeout < minSession) {
+            state.sessionTimeout = minSession
+          }
         }
       },
     }

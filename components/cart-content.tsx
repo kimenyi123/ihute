@@ -148,7 +148,10 @@ export function CartContent() {
         <div className="space-y-4 lg:col-span-2">
           {filteredItems.length > 0 ? (
             filteredItems.map((item) => (
-              <CartItemCard key={`${item.id}-${item.selectedUnit}`} item={item} />
+              <CartItemCard
+                key={`${item.id}-${item.selectedUnit}-${item.lineSignature ?? item.notes ?? ""}`}
+                item={item}
+              />
             ))
           ) : (
             <div className="text-center py-8 text-muted-foreground">

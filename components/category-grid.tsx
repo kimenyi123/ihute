@@ -201,10 +201,21 @@ export function CategoryGrid() {
       
       if (data.ok && data.categories && data.categories.length > 0) {
         // Filter only active categories that have suppliers, and sort by display order
-        const activeCategories = data.categories
+        const active = data.categories
           .filter((cat: Category) => cat.isActive !== false && (cat as any).sellerCount > 0)
           .sort((a: Category, b: Category) => (a.displayOrder || 0) - (b.displayOrder || 0))
-        setCategories(activeCategories)
+        // Dedupe Bar & Restaurant: DB may return "resto-bar", "barrestaurant" etc.; show one canonical card
+        const barRestoIds = ['resto-bar', 'barrestaurant', 'bar_resto', 'barresto', 'bar-resto']
+        const canonicalBarResto = defaultCategories.find((c) => c.categoryId === 'bar-resto')
+        const rest = active.filter((cat: Category) => !barRestoIds.includes((cat.categoryId || '').toLowerCase()))
+        const firstBarResto = active.find((cat: Category) => barRestoIds.includes((cat.categoryId || '').toLowerCase()))
+        const merged =
+          firstBarResto && canonicalBarResto
+            ? [...rest, { ...canonicalBarResto, ...firstBarResto, categoryId: 'bar-resto', nameKey: 'barResto', descKey: 'barRestoDesc', imageUrl: canonicalBarResto.imageUrl }]
+            : firstBarResto
+              ? [...rest, { ...firstBarResto, categoryId: 'bar-resto', nameKey: 'barResto', descKey: 'barRestoDesc', imageUrl: defaultCategories.find((c) => c.categoryId === 'bar-resto')?.imageUrl ?? firstBarResto.imageUrl }]
+              : rest
+        setCategories(merged)
       }
     } catch (error) {
       console.warn("[CategoryGrid] Error loading categories:", error)

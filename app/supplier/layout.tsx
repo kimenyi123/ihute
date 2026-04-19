@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Menu, X, LogOut } from "lucide-react";
+import { Menu, X, LogOut, Smartphone } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { UnifiedNotification } from "@/components/unified-notification";
 import { useAuthStore } from "@/lib/auth-store";
@@ -228,6 +228,33 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                 ))}
               </ul>
             </nav>
+
+            {/* Grandma marketplace (mobile-style app) */}
+            <div className="px-4 pb-2">
+              <Link
+                href="/grandma"
+                onClick={() => {
+                  try {
+                    if (typeof window !== "undefined") {
+                      window.localStorage.setItem("grandma:mode", "seller");
+                    }
+                  } catch {
+                    /* ignore */
+                  }
+                  closeSidebar();
+                }}
+                className={cn(
+                  "flex w-full items-center gap-3 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-semibold text-sky-950 shadow-sm transition-colors hover:bg-sky-100",
+                  pathname?.startsWith("/grandma") && "border-sky-400 bg-sky-100 ring-2 ring-sky-200",
+                )}
+              >
+                <Smartphone className="h-5 w-5 shrink-0 text-sky-700" aria-hidden />
+                <span className="leading-tight">Grandma app</span>
+              </Link>
+              <p className="mt-1.5 px-1 text-[11px] leading-snug text-slate-500">
+                Shop and orders in the Grandma experience
+              </p>
+            </div>
 
             {/* Footer / Logout */}
             <div className="p-4 border-t border-slate-200">

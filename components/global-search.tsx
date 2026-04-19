@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState, KeyboardEvent, useMemo } from "react"
 import { createPortal } from "react-dom"
-import { useRouter } from "next/navigation"
+import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { Search, Package, Store, Clock, Trash2, MapPin } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
@@ -145,7 +145,7 @@ function groupProductsBySupplier(products: GlobalResult[]): Map<string, GlobalRe
 }
 
 export function GlobalSearch({
-  placeholder = "Search products from multiple sellers...",
+  placeholder = "🔍 Search products, brands, or scan barcode...",
   className,
   maxSuggestions = 15,
 }: {
@@ -154,6 +154,11 @@ export function GlobalSearch({
   maxSuggestions?: number
 }) {
   const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  /** On `/category_ai/*`, search drives the page grid via `?sq=` — no suggestion dropdown. */
+  const isCategoryAi = Boolean(pathname?.startsWith("/category_ai"))
+  const sqFromUrl = searchParams.get("sq") ?? ""
   const [q, setQ] = useState("")
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -169,8 +174,10 @@ export function GlobalSearch({
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const dropdownRef = useRef<HTMLDivElement | null>(null)
+  const categoryInputFocusedRef = useRef(false)
 
   const sector = usePrefsStore((s) => s.sector)
+  const categoryBrowseMode = usePrefsStore((s) => s.categoryBrowseMode)
   const location = usePrefsStore((s) => s.location)
   const { user } = useAuthStore()
   const userLocation = useLocationStoreEnhanced((s) => s.location)
@@ -203,6 +210,29 @@ export function GlobalSearch({
     // Load recent searches for suggestions
     getRecentSearches(5).then(setRecentSearches).catch(() => { })
   }, [user])
+
+  /** Keep input in sync with `?sq=` (back/forward, deep links). */
+  useEffect(() => {
+    if (!isCategoryAi) return
+    if (categoryInputFocusedRef.current) return
+    setQ(sqFromUrl)
+  }, [isCategoryAi, sqFromUrl, pathname])
+
+  /** Debounce header text → `?sq=` so category grids can filter without a dropdown. */
+  useEffect(() => {
+    if (!isCategoryAi) return
+    const id = setTimeout(() => {
+      const trimmed = q.trim()
+      const next = new URLSearchParams(searchParams.toString())
+      if (trimmed) next.set("sq", trimmed)
+      else next.delete("sq")
+      const nextStr = next.toString()
+      const cur = searchParams.toString()
+      if (nextStr === cur) return
+      router.replace(`${pathname}?${nextStr}`, { scroll: false })
+    }, 300)
+    return () => clearTimeout(id)
+  }, [q, isCategoryAi, pathname, router, searchParams])
 
   // Fetch supplier GPS coordinates for distance calculation
   useEffect(() => {
@@ -289,6 +319,10 @@ export function GlobalSearch({
     let cancelled = false
 
     const fetchNearbyProducts = async () => {
+      if (isCategoryAi) {
+        setNearbyProducts(null)
+        return
+      }
       // Only search nearby if we have a query and GPS location
       if (!q.trim() || q.trim().length < 2 || !userGPS) {
         setNearbyProducts(null)
@@ -318,7 +352,7 @@ export function GlobalSearch({
       cancelled = true
       clearTimeout(timeout)
     }
-  }, [q, userGPS])
+  }, [q, userGPS, isCategoryAi])
 
   /** Full search page: user adds to cart there, not from the dropdown. */
   const openProductInSearch = (p: GlobalResult) => {
@@ -380,6 +414,13 @@ export function GlobalSearch({
       return
     }
 
+    if (isCategoryAi) {
+      setLoading(false)
+      setErr(null)
+      return
+    }
+
+    const id = setTimeout(async () => {
     const requestId = ++searchRequestIdRef.current
     const abortController = new AbortController()
     /** Hard cap so the dropdown never spins until the browser default if the proxy hangs. */
@@ -396,6 +437,65 @@ export function GlobalSearch({
       console.log(`[GlobalSearch] Searching for: "${trimmedQuery}"`)
 
       try {
+        const trimmedSector = (sector ?? "").trim()
+        if (trimmedSector) {
+          const mode = categoryBrowseMode === "item" ? "items" : "shops"
+          const params = new URLSearchParams({
+            sector: trimmedSector,
+            mode,
+            q: q.trim(),
+            Currency: "RWF",
+          })
+          const res = await fetch(`/api/sector-scoped-search?${params}`, {
+            cache: "no-store",
+            headers: { Accept: "application/json" },
+          })
+          if (!res.ok) {
+            throw new Error(`Search failed: ${res.status}`)
+          }
+          const json = (await res.json()) as {
+            results?: GlobalResult[]
+            cacheHit?: boolean
+            tomcatRtMs?: number
+            rtMs?: number
+            proxyRtMs?: number
+            nextRtMs?: number
+          }
+          const rawResults = Array.isArray(json.results) ? json.results : []
+          console.log("[GlobalSearch] sectorScoped:", {
+            sector: trimmedSector,
+            mode,
+            tomcatRtMs: json.tomcatRtMs ?? json.rtMs,
+            proxyRtMs: json.proxyRtMs ?? json.nextRtMs,
+            cacheHit: json.cacheHit,
+            count: rawResults.length,
+          })
+          if (mode === "items") {
+            setProducts(rawResults.slice(0, maxSuggestions))
+            setSuppliers([])
+          } else {
+            const s = rawResults
+              .filter((x) => x.supplier_name || x.supplier_account)
+              .slice(0, maxSuggestions)
+            setSuppliers(s)
+            setProducts([])
+          }
+          setStats({
+            totalProducts: mode === "items" ? rawResults.length : 0,
+            totalSuppliers: mode === "shops" ? rawResults.length : 0,
+            dataSource: "sectorScopedSearch",
+            cacheHit: Boolean(json.cacheHit),
+          })
+          setFromNiki(null)
+          setOpen(true)
+          if (q.trim().length >= 2) {
+            recordSearch(q.trim(), rawResults.length, "sectorScoped").catch((err) =>
+              console.warn("[SearchIntent] Failed to record search:", err)
+            )
+          }
+          return
+        }
+
         const locationData = useLocationStoreEnhanced.getState().location
         const params = new URLSearchParams({
           globalSearch: trimmedQuery,
@@ -523,13 +623,8 @@ export function GlobalSearch({
       }
     }, 300)
 
-    return () => {
-      clearTimeout(debounceTimer)
-      clearTimeout(clientTimeout)
-      abortController.abort()
-      setLoading(false)
-    }
-  }, [q, maxSuggestions, sector, location])
+    return () => clearTimeout(id)
+  }, [q, maxSuggestions, sector, categoryBrowseMode, location, isCategoryAi])
 
   // Click outside detection
   useEffect(() => {
@@ -577,9 +672,22 @@ export function GlobalSearch({
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
       e.preventDefault()
+      if (isCategoryAi) {
+        document.getElementById("category-ai-grid-section")?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        })
+        return
+      }
       onSubmit(q)
     } else if (e.key === "Escape") {
       setOpen(false)
+      if (isCategoryAi) {
+        setQ("")
+        const next = new URLSearchParams(searchParams.toString())
+        next.delete("sq")
+        router.replace(`${pathname}?${next.toString()}`, { scroll: false })
+      }
     }
   }
 
@@ -640,6 +748,8 @@ export function GlobalSearch({
   const productsBySupplier = groupProductsBySupplier(productsWithDistance)
   const supplierCount = productsBySupplier.size
 
+  const TRENDING_SUGGESTIONS = ["cheap beer", "pharmacy near me", "Leffe", "wine"]
+
   return (
     <>
       <div ref={wrapRef} className={cn("relative w-full", className)}>
@@ -650,13 +760,19 @@ export function GlobalSearch({
           placeholder={placeholder}
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          onFocus={() => q.trim() && setOpen(true)}
+          onFocus={() => {
+            categoryInputFocusedRef.current = true
+            if (!isCategoryAi) setOpen(true)
+          }}
+          onBlur={() => {
+            categoryInputFocusedRef.current = false
+          }}
           onKeyDown={onKeyDown}
-          className="pl-10 pr-3 h-9"
+          className="pl-10 pr-3 h-9 transition-shadow focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary"
         />
       </div>
 
-      {mounted && open && createPortal(
+      {mounted && open && !isCategoryAi && createPortal(
         <div
           ref={dropdownRef}
           className="fixed z-50 rounded-md border bg-popover text-popover-foreground shadow-lg"
@@ -681,9 +797,25 @@ export function GlobalSearch({
             <div className="px-3 py-2 text-sm text-destructive">{err}</div>
           )}
 
-          {searchWarning && !loading && !err && (
-            <div className="px-3 py-2 text-xs text-amber-900 bg-amber-50 border-b border-amber-100">
-              {searchWarning}
+          {/* Try / trending suggestions when query empty */}
+          {!loading && !err && q.trim().length === 0 && (
+            <div className="p-3 border-b">
+              <p className="text-[10px] text-muted-foreground mb-1.5">Try:</p>
+              <div className="flex flex-wrap gap-1">
+                {TRENDING_SUGGESTIONS.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    className="text-xs px-2 py-0.5 rounded-full bg-muted hover:bg-primary/10 text-foreground transition-colors"
+                    onClick={() => {
+                      setQ(s)
+                      onSubmit(s)
+                    }}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 

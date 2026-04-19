@@ -1,12 +1,12 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useAuthStore } from "@/lib/auth-store"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Loader2, PackageSearch, AlertCircle } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { LayoutDashboard, ShoppingBag } from "lucide-react"
 
 type SellerOrder = {
   ID_ORDER: number
@@ -24,11 +24,9 @@ type SellerOrder = {
 }
 
 export default function SellerOrdersPage() {
+export default function SellerDashboardPage() {
   const router = useRouter()
   const { user, isAuthenticated } = useAuthStore()
-  const [orders, setOrders] = useState<SellerOrder[]>([])
-  const [loading, setLoading] = useState(true)
-  const [err, setErr] = useState<string | null>(null)
 
   const totalSales = orders.reduce((sum, order) => sum + Number(order.AMOUNT || 0), 0)
   const deliveredOrders = orders.filter((order) =>
@@ -39,42 +37,41 @@ export default function SellerOrdersPage() {
     if (!isAuthenticated) router.push("/login")
   }, [isAuthenticated, router])
 
-  useEffect(() => {
-    async function loadOrders() {
-      if (!user?.ishyigaAccount) return
-      try {
-        setLoading(true)
-        const res = await fetch("/api/seller-orders", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sellerAccount: user.ishyigaAccount }),
-        })
-        const data = await res.json()
-        if (!res.ok || data.ok === false) throw new Error(data.error || "Failed to fetch orders")
-        setOrders(data.orders || [])
-      } catch (error: any) {
-        setErr(error.message)
-      } finally {
-        setLoading(false)
-      }
-    }
-    loadOrders()
-  }, [user?.ishyigaAccount])
-
-  if (loading)
-    return (
-      <div className="flex items-center justify-center h-64 text-muted-foreground">
-        <Loader2 className="h-5 w-5 mr-2 animate-spin" /> Loading orders...
+  return (
+    <div className="max-w-3xl space-y-8">
+      <div>
+        <h1 className="text-2xl font-semibold flex items-center gap-2">
+          <LayoutDashboard className="h-7 w-7" />
+          Seller dashboard
+        </h1>
+        <p className="text-muted-foreground mt-2">
+          Welcome
+          {user?.ishyigaAccount ? (
+            <>
+              , <span className="text-foreground font-medium">{user.name || user.ishyigaAccount}</span>
+            </>
+          ) : null}
+          . Use the links below to manage your shop.
+        </p>
       </div>
-    )
 
-  if (err)
-    return (
-      <div className="flex flex-col items-center justify-center h-64 text-red-600">
-        <AlertCircle className="h-6 w-6 mb-2" /> {err}
-      </div>
-    )
-
+      <div className="grid gap-4 sm:grid-cols-1">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <ShoppingBag className="h-5 w-5" />
+              Orders
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              See orders placed with your seller account. The list may be empty until customers order from your shop.
+            </p>
+            <Button asChild>
+              <Link href="/seller/orders">View orders</Link>
+            </Button>
+          </CardContent>
+        </Card>
   if (!orders.length)
     return (
       <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
@@ -136,7 +133,7 @@ export default function SellerOrdersPage() {
               <p><strong>Buyer:</strong> {o.BUYER_OWNER || "Guest"}</p>
               <p><strong>Phone:</strong> {o.BUYER_PHONE || "N/A"}</p>
               <p><strong>Location:</strong> {o.DELIVERY_LOCATION || "N/A"}</p>
-              
+
               {/* Display all status fields */}
               <div className="space-y-1">
                 <p><strong>Status:</strong> {o.STATUS || "PENDING"}</p>

@@ -5,7 +5,7 @@ import dynamic from "next/dynamic"
 import { useMemo, useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { useAuthStore } from "@/lib/auth-store"
-import { useCartStore } from "@/lib/cart-store"
+import { useCartStore, type CartItem } from "@/lib/cart-store"
 import { trackClick } from "@/lib/interaction-tracker"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -20,7 +20,7 @@ import { useToast } from "@/components/ui/use-toast"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog"
-import { Copy, PhoneCall, CheckCircle2, RotateCcw, MessageCircle, Truck, CreditCard, Wallet, Users, Lock, MapPin } from "lucide-react"
+import { Copy, PhoneCall, CheckCircle2, RotateCcw, MessageCircle, Truck, CreditCard, Wallet, Beer, Users, Lock, Tag, MapPin, Link2 } from "lucide-react"
 import { isBarOrRestaurant } from "@/lib/constants"
 import { useTableCommandStore, getOrCreateGuestName } from "@/lib/table-command-store"
 import { GUEST_POOL_EMAIL, getGuestBuyerAccount, ensureGuestPoolBuyerAccount } from "@/lib/guest-checkout"
@@ -53,8 +53,62 @@ import {
 const QRCode = dynamic(() => import("react-qr-code"), { ssr: false })
 const CUR = "RWF"
 import { buildMoMoUssd } from "@/lib/momo-ussd"
+import { parseErxFromNotes } from "@/lib/erx-prescription"
 
 // ---------- helpers ----------
+function formatErxLinesForShare(it: CartItem): string[] {
+  const erx = it.erx ?? parseErxFromNotes(it.notes ?? undefined)
+  if (!erx) return []
+  const out: string[] = []
+  out.push(`📋 ${erx.measurement} · ${erx.every}`)
+  if (erx.toBeTakenDays) out.push(`   Duration: ${erx.toBeTakenDays} days`)
+  if (erx.quantityOnce) out.push(`   Per dose: ${erx.quantityOnce}`)
+  out.push(`   ${erx.route} · Refill: ${erx.refill}`)
+  if (erx.instructionNotes?.trim()) {
+    const n = erx.instructionNotes.trim()
+    out.push(`   Note: ${n.length > 140 ? `${n.slice(0, 137)}…` : n}`)
+  }
+  return out
+}
+
+/** Readable multi-line text for wa.me/?text= (newlines → %0A). */
+function buildWhatsAppCartShareText(
+  g: { supplierName: string; supplierLocation?: string; items: CartItem[]; subtotal: number },
+  link: string
+): string {
+  const shop = g.supplierName || "Shop"
+  const loc = g.supplierLocation?.trim()
+  const lines: string[] = [
+    "🛒 *IHUTE — shared cart*",
+    "",
+    loc ? `*${shop}*` + `\n📍 _${loc}_` : `*${shop}*`,
+    "",
+    "───────────────",
+  ]
+  g.items.forEach((it, idx) => {
+    const name = stripTrailingPriceParen(it.name || "Product")
+    const q = Math.max(1, it.qty || 1)
+    const unit = Math.round(it.price || 0)
+    const lineTotal = unit * q
+    lines.push("")
+    lines.push(`*${idx + 1}. ${name}*`)
+    lines.push(`   ${q} × ${unit.toLocaleString()} ${CUR} = *${lineTotal.toLocaleString()} ${CUR}*`)
+    const rx = formatErxLinesForShare(it)
+    if (rx.length) lines.push(...rx)
+  })
+  lines.push(
+    "",
+    "───────────────",
+    "",
+    `💰 *Total:* ${Math.round(g.subtotal).toLocaleString()} ${CUR}`,
+    "",
+    "🔗 *Open in browser to pay:*",
+    link,
+    "",
+    "_If the link is long, tap it once to open your cart on IHUTE._"
+  )
+  return lines.join("\n")
+}
 function normalizePhone(raw?: string | null): string {
   const v = (raw || "").replace(/\s|-/g, "")
   if (!v) return ""
@@ -112,6 +166,49 @@ function waHrefFor(phone: string, text: string) {
   const p = phone.replace(/^\+/, "")
   const encoded = encodeURIComponent(text)
   return `https://wa.me/${p}?text=${encoded}`
+}
+
+function WhatsAppLogo({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M20.52 3.48A11.86 11.86 0 0012.06 0C5.47 0 .1 5.37.1 11.96c0 2.1.55 4.16 1.6 5.99L0 24l6.2-1.63a11.9 11.9 0 005.86 1.49h.01c6.59 0 11.96-5.37 11.96-11.96a11.9 11.9 0 00-3.51-8.42ZM12.07 21.8h-.01a9.82 9.82 0 01-5.01-1.37l-.36-.21-3.68.96.98-3.58-.23-.37a9.82 9.82 0 01-1.5-5.27c0-5.43 4.42-9.85 9.86-9.85 2.63 0 5.1 1.02 6.95 2.89a9.77 9.77 0 012.89 6.96c0 5.43-4.42 9.84-9.89 9.84Zm5.4-7.33c-.29-.14-1.72-.84-1.99-.94-.27-.1-.47-.14-.66.14-.2.29-.76.94-.94 1.13-.17.2-.35.22-.64.07-.29-.14-1.24-.46-2.36-1.47a8.8 8.8 0 01-1.64-2.04c-.17-.29-.02-.44.13-.58.13-.13.29-.35.43-.52.14-.17.2-.29.29-.48.1-.2.05-.37-.02-.52-.08-.14-.66-1.59-.91-2.18-.24-.57-.49-.49-.66-.5h-.57c-.2 0-.52.07-.79.37-.27.29-1.04 1.01-1.04 2.46s1.06 2.86 1.21 3.06c.14.2 2.08 3.18 5.03 4.46.7.3 1.25.48 1.67.61.71.23 1.35.2 1.86.12.56-.09 1.72-.7 1.96-1.38.24-.68.24-1.26.17-1.39-.07-.13-.27-.2-.56-.34Z"
+      />
+    </svg>
+  )
+}
+
+function XLogo({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M18.244 2H21l-6.01 6.87L22.06 22h-5.53l-4.33-5.77L7.16 22H4.4l6.43-7.35L2 2h5.67l3.92 5.23L18.244 2Zm-.97 18h1.53L6.84 3.9H5.2L17.273 20Z"
+      />
+    </svg>
+  )
+}
+
+function slugifyShopName(v: string): string {
+  const raw = String(v || "").toLowerCase().trim()
+  // Keep canonical nickname used by backend routing
+  if (raw.includes("pangolin")) return "burrows"
+  return raw
+    .toLowerCase()
+    .trim()
+    .replace(/['"]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "shop";
+}
+
+function encodeSharedItem(args: { name: string; qty: number; price: number; itemCode?: string }): string {
+  const cleanedName = String(args.name || "").replace(/[;,]/g, " ").replace(/\s+/g, " ").trim();
+  const qty = Math.max(1, Number(args.qty || 1));
+  const price = Math.max(0, Math.round(Number(args.price || 0)));
+  const code = String(args.itemCode || "").trim();
+  // Format: name;qty;price;code (code optional). Parser on shop-with-me supports ; and ,.
+  return code ? `${cleanedName};${qty};${price};${code}` : `${cleanedName};${qty};${price}`;
 }
 
 // ---------- component ----------
@@ -369,6 +466,34 @@ function CartSummaryBody() {
     })
   }, [groups, orderIds, orderPhones, myPhone, getPaymentStatus])
 
+  const buildGroupShareLink = (g: ReturnType<typeof getGroupsBySeller>[number]) => {
+    const shopSlug = slugifyShopName(g.supplierName || g.supplierId || "shop");
+    const params = new URLSearchParams();
+    params.set("shopname", shopSlug);
+    g.items.forEach((it, idx) => {
+      const value = encodeSharedItem({
+        name: stripTrailingPriceParen(it.name || "Product"),
+        qty: it.qty || 1,
+        price: it.price || 0,
+        itemCode: it.itemCode || it.id,
+      });
+      params.set(`item${idx + 1}`, value);
+    });
+    const base = typeof window !== "undefined" ? window.location.origin : "";
+    return `${base}/shop-with-me/${encodeURIComponent(shopSlug)}?${params.toString()}`;
+  };
+
+  const buildGroupShareText = (g: ReturnType<typeof getGroupsBySeller>[number], link: string) =>
+    buildWhatsAppCartShareText(
+      {
+        supplierName: g.supplierName,
+        supplierLocation: g.supplierLocation,
+        items: g.items,
+        subtotal: g.subtotal,
+      },
+      link
+    );
+
   if (groups.length === 0) {
     return (
       <Card>
@@ -470,6 +595,14 @@ function CartSummaryBody() {
             : {}),
         }
       })
+      const items = g.items.map(it => ({
+        name: it.name,
+        qty: it.qty,
+        unitPrice: it.price,
+        unit: it.unit ?? "",
+        itemCode: it.itemCode ?? it.id,
+        notes: it.notes ?? "",
+      }))
 
       const paymentId = opts.paymentId || `${opts.paymentName}_${Date.now()}`
 
@@ -802,6 +935,50 @@ function CartSummaryBody() {
                   <CreditCard className="h-4 w-4 mr-2" />
                   {status === "paid" ? "Order Placed" : "Proceed to Checkout"}
                 </Button>
+
+                {/* Share this cart: copy link / WhatsApp / X */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={async () => {
+                      const link = buildGroupShareLink(g);
+                      try {
+                        await navigator.clipboard.writeText(link);
+                        alert("Cart link copied");
+                      } catch {
+                        alert(link);
+                      }
+                    }}
+                  >
+                    <Link2 className="h-4 w-4 mr-2" />
+                    Copy link
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => {
+                      const link = buildGroupShareLink(g);
+                      const text = buildGroupShareText(g, link);
+                      window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
+                    }}
+                  >
+                    <WhatsAppLogo className="h-4 w-4 mr-2" />
+                    WhatsApp
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => {
+                      const link = buildGroupShareLink(g);
+                      const text = buildGroupShareText(g, link);
+                      window.open(`https://x.com/intent/tweet?text=${encodeURIComponent(text)}`, "_blank");
+                    }}
+                  >
+                    <XLogo className="h-4 w-4 mr-2" />
+                    X
+                  </Button>
+                </div>
 
                 {status === "paid" && (
                   <Button variant="outline" className="w-full" onClick={unmark}>
@@ -1229,6 +1406,20 @@ function CartSummaryBody() {
                           {unitLine && (
                             <div className="text-xs text-muted-foreground">Unit: {unitLine}</div>
                           )}
+                          {(() => {
+                            const erx = (item as CartItem).erx ?? parseErxFromNotes(item.notes ?? undefined)
+                            if (!erx) return null
+                            return (
+                              <div className="text-xs text-muted-foreground space-y-0.5 mt-1">
+                                <div className="font-medium text-foreground">Prescription</div>
+                                <div>Measurement: {erx.measurement} · Every: {erx.every}</div>
+                                {erx.toBeTakenDays ? <div>Duration (days): {erx.toBeTakenDays}</div> : null}
+                                {erx.quantityOnce ? <div>Qty (once): {erx.quantityOnce}</div> : null}
+                                <div>Route: {erx.route} · Refill: {erx.refill}</div>
+                                {erx.instructionNotes ? <div>Instructions: {erx.instructionNotes}</div> : null}
+                              </div>
+                            )
+                          })()}
                         </div>
                         <div className="flex items-center gap-4">
                           <div className="text-sm text-muted-foreground">

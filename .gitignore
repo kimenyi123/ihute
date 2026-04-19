@@ -1,4 +1,9 @@
 # =============================================================
+# Local order client meta (buyer address / seller payment hints)
+# =============================================================
+.data/
+
+# =============================================================
 # Node / Next.js Essentials
 # =============================================================
 node_modules/
@@ -50,6 +55,7 @@ next-env.d.ts
 # =============================================================
 # Local Dev / Tooling
 # =============================================================
+.cursor/
 .vercel/
 .claude/
 .claude/*
@@ -62,3 +68,9 @@ next-env.d.ts
 # pnpm-lock.yaml
 
 nul
+
+# Android (machine-specific SDK path)
+android/local.properties
+
+# iOS (CocoaPods — regenerated with `pod install`)
+ios/App/Pods/

@@ -61,6 +61,8 @@ export default function BuyerLayout({ children }: { children: React.ReactNode })
     { name: "Reorder", href: "/reorder", icon: PackageSearch },
     { name: "Ratings", href: "/ratings", icon: Star },
     { name: "Price watch", href: "/price-watch", icon: Eye },
+    { name: "Orders", href: "/buyer/orders", icon: ShoppingBag },
+    // { name: "Umusada Excel", href: "/buyer/umusada/upload", icon: FileSpreadsheet },
   ]
 
   const isActive = (href: string) =>

@@ -107,13 +107,16 @@ export async function POST(req: Request) {
       )
     }
 
-    // ─── BUYER → existing general auth servlet ───────────────────────────────
+    // ─── BUYER / DRIVER → existing general auth servlet ─────────────────────
     if (!JAVA_AUTH_URL) {
       console.error(`[RID ${rid}] Missing JAVA_AUTH_URL`)
       return NextResponse.json({ ok: false, error: "JAVA_AUTH_URL not configured", rid }, { status: 500 })
     }
 
     const { email, password, firstName, lastName, tel, location, latitude, longitude, gpsAccuracy } = body
+    const javaRole = String(role || "BUYER").toUpperCase()
+    const signupRole =
+      javaRole === "DRIVER" || javaRole === "RIDER" ? "DRIVER" : "BUYER"
 
     const form = new URLSearchParams()
     form.set("action", "register")
@@ -123,19 +126,34 @@ export async function POST(req: Request) {
     form.set("lastName", String(lastName || ""))
     form.set("tel", String(tel || ""))
     form.set("location", String(location || ""))
-    form.set("role", "BUYER")
+    form.set("role", signupRole)
     if (latitude  != null) form.set("latitude",    String(latitude))
     if (longitude != null) form.set("longitude",   String(longitude))
     if (gpsAccuracy != null) form.set("gpsAccuracy", String(gpsAccuracy))
 
-    console.log(`[RID ${rid}] -> POST ${JAVA_AUTH_URL} action=register email=${email} role=BUYER`)
+    console.log(`[RID ${rid}] -> POST ${JAVA_AUTH_URL} action=register email=${email} role=${signupRole}`)
 
-    const res = await fetch(JAVA_AUTH_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: form.toString(),
-      cache: "no-store",
-    })
+    let res: Response
+    try {
+      res = await fetch(JAVA_AUTH_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: form.toString(),
+        cache: "no-store",
+      })
+    } catch (fetchErr: unknown) {
+      console.error(`[RID ${rid}] Register upstream fetch failed`, fetchErr)
+      const detail = fetchErr instanceof Error ? fetchErr.message : String(fetchErr)
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `Cannot reach the Java backend at ${JAVA_AUTH_URL}. ${detail}`,
+          code: "UPSTREAM_UNREACHABLE",
+          rid,
+        },
+        { status: 503 }
+      )
+    }
 
     const text = await res.text()
     let json: any
@@ -146,7 +164,12 @@ export async function POST(req: Request) {
 
     if (!res.ok || !json?.ok) {
       console.warn(`[RID ${rid}] Upstream register failed HTTP ${res.status}`, json)
-      return NextResponse.json({ ok: false, error: json?.error || "Register failed", rid }, { status: 400 })
+      const statusOut =
+        res.status >= 500 ? 502 : res.status === 401 || res.status === 403 ? res.status : 400
+      return NextResponse.json(
+        { ok: false, error: json?.error || "Register failed", code: json?.code, rid },
+        { status: statusOut }
+      )
     }
 
     return NextResponse.json({ ...json, rid })

@@ -60,17 +60,12 @@ export function PriceWatchButton({
       className={className}
       onClick={handleClick}
       title={watched ? "Stop watching price" : "Notify me when price drops"}
+      aria-label={watched ? "Stop watching price" : "Watch price"}
     >
       {watched ? (
-        <>
-          <EyeOff className="h-4 w-4 mr-1" />
-          Watching
-        </>
+        <EyeOff className="h-4 w-4" />
       ) : (
-        <>
-          <Eye className="h-4 w-4 mr-1" />
-          Watch price
-        </>
+        <Eye className="h-4 w-4" />
       )}
     </Button>
   )

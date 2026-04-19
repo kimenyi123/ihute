@@ -2,6 +2,14 @@ import { NextRequest, NextResponse } from "next/server"
 
 const RID_HEADER = "x-request-id"
 import { getOrdersUrl, getSellerOrdersUrl } from "@/lib/backend-config"
+import { getOrdersUrl } from "@/lib/backend-config"
+import { getOrderMeta } from "@/lib/order-client-meta-store"
+import {
+  getOrCreatePublicTokenForOrderId,
+  isPublicTrackingTokenFormat,
+  normalizePublicToken,
+  resolvePublicTokenToOrderId,
+} from "@/lib/order-tracking-token"
 import { mapBackendOrderStatusToTrack, type TrackOrderStatus } from "@/lib/order-status-map"
 
 function rid() {
@@ -38,6 +46,20 @@ function buildStatusHistory(
   const history: StatusHistoryEntry[] = []
   const createdTime = new Date(createdAt).getTime()
 
+  if (currentStatus === "cancelled") {
+    history.push({
+      status: "open",
+      timestamp: createdAt,
+      note: "Order placed",
+    })
+    history.push({
+      status: "cancelled",
+      timestamp: updatedAt || createdAt,
+      note: "Cancelled or rejected by seller",
+    })
+    return history
+  }
+
   // Always add the "open" status when order was created
   history.push({
     status: "open",
@@ -53,6 +75,7 @@ function buildStatusHistory(
     "invoice": 1000 * 60 * 60 * 2, // 2 hours after open
     "in-transit": 1000 * 60 * 60 * 24, // 1 day after open
     "delivered": 1000 * 60 * 60 * 48, // 2 days after open
+    "cancelled": 0,
   }
 
   const statusOrder: OrderStatus[] = ["open", "processing", "invoice", "in-transit", "delivered"]
@@ -96,18 +119,30 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json()
-    const { orderId, buyerAccount } = body
+    const rawInput = String(body?.orderId ?? body?.token ?? "").trim()
 
-    if (!orderId) {
+    if (!rawInput) {
       return NextResponse.json(
-        { ok: false, error: "Order ID is required" },
+        { ok: false, error: "Order ID or tracking code is required" },
         { status: 400 }
       )
     }
 
+    let orderId = rawInput
+    if (isPublicTrackingTokenFormat(rawInput)) {
+      const t = normalizePublicToken(rawInput)
+      const resolved = resolvePublicTokenToOrderId(t)
+      if (!resolved) {
+        log(requestId, `Unknown public token ${t}`)
+        return NextResponse.json({ ok: false, error: "Unknown tracking code" }, { status: 404 })
+      }
+      orderId = resolved
+      log(requestId, `Resolved public token ${t} → orderId=${orderId}`)
+    }
+
     log(requestId, `Fetching order details for orderId=${orderId}`)
 
-    // Prefer SellerOrdersServlet buyer details when buyerAccount is provided
+    // Try getOrderDetails first (if servlet is updated), fallback to buyerOrderDetails
     let data: any = null
     let usingFallback = false
 
@@ -340,8 +375,28 @@ export async function POST(req: NextRequest) {
       TABLE_LOCATION: data.TABLE_LOCATION || data.table_location,
     }
 
+    const clientMeta = getOrderMeta(String(orderId))
+    if (clientMeta?.buyerDeliveryAddress) {
+      ;(order as Record<string, unknown>).buyerLocation = clientMeta.buyerDeliveryAddress
+      ;(order as Record<string, unknown>).DELIVERY_LOCATION = clientMeta.buyerDeliveryAddress
+      ;(order as Record<string, unknown>).BUYER_LOCATION = clientMeta.buyerDeliveryAddress
+    }
+    if (clientMeta?.sellerPaymentAck) {
+      ;(order as Record<string, unknown>).sellerPaymentAck = clientMeta.sellerPaymentAck
+    }
+    if (clientMeta?.updatedAt) {
+      ;(order as Record<string, unknown>).clientMetaUpdatedAt = clientMeta.updatedAt
+    }
+
+    let publicToken: string | undefined
+    try {
+      publicToken = getOrCreatePublicTokenForOrderId(String(orderId))
+    } catch {
+      /* ignore */
+    }
+
     log(requestId, "✅ Order tracking SUCCESS - paymentMethod:", order.paymentMethod, "paymentStatus:", order.PAYMENT_STATUS, "ORDER_STATUS:", order.ORDER_STATUS, "history entries:", statusHistory.length)
-    return NextResponse.json({ ok: true, order })
+    return NextResponse.json({ ok: true, order, publicToken })
   } catch (error: any) {
     log(requestId, "❌ ERROR:", error?.message)
     return NextResponse.json(

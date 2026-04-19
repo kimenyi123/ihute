@@ -33,6 +33,8 @@ import { Sheet, SheetContent, SheetTrigger, SheetClose, SheetTitle } from "@/com
 import { LanguageSelector } from "@/components/language-selector"
 import { GlobalSearch } from "@/components/global-search"
 import { NotificationBell } from "@/components/notification-bell"
+import { SlidersHorizontal } from "lucide-react"
+import { ProductFiltersSheet } from "@/components/product-filters-sheet"
 
 import { useCartStore } from "@/lib/cart-store"
 import { useFavoritesStore } from "@/lib/favorites-store"
@@ -64,6 +66,10 @@ export function Header() {
   const pendingCount = useOrdersStore((s) => s.getPendingCount())
   const [sellerCount, setSellerCount] = useState<number>(0)
   const [barcodeOpen, setBarcodeOpen] = useState(false)
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => setMounted(true), [])
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   useEffect(() => {
@@ -107,28 +113,33 @@ export function Header() {
     <header className="sticky top-0 z-50 w-full border-b bg-white shadow-sm">
       <div className="container mx-auto px-4">
         <div className="flex h-16 items-center justify-between gap-2 md:gap-4">
-          {/* Logo */}
-          <Link href="/" className="flex items-center shrink-0">
+          {/* Logo — full Ishyiga Software wordmark (icon + ISHYIGA / SOFTWARE) */}
+          <Link href="/" className="flex items-center shrink-0 min-w-0">
             <Image
-              src="/images/ishyiga-logo.png"
+              src="/images/ishyiga-logo-brand.png"
               alt="Ishyiga Software"
-              width={100}
-              height={35}
-              className="h-8 w-auto md:h-10"
+              width={280}
+              height={93}
+              priority
+              sizes="(max-width: 768px) 38vw, 220px"
+              className="h-7 w-auto max-w-[min(38vw,200px)] md:h-9 md:max-w-[240px]"
             />
           </Link>
 
-          {/* Global Search - Desktop (hidden when viewing a supplier-scoped /search?supplier=…) */}
-          <div
-            className={cn(
-              "hidden lg:flex min-w-0 flex-1 max-w-3xl relative items-center gap-2",
-              hideHeaderGlobalSearch && "justify-end",
-            )}
-          >
-            {!hideHeaderGlobalSearch && (
-              <GlobalSearch placeholder={t("searchPlaceholder")} className="w-full min-w-0" />
-            )}
-            <LocationBadge />
+          {/* Global Search + Location filter + Filters - same line */}
+          <div className="hidden lg:flex flex-1 max-w-xl relative items-center gap-2">
+            <GlobalSearch placeholder={t("searchPlaceholder")} className="min-w-0 flex-1" />
+            <LocationBadge compact />
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-9 w-9 shrink-0"
+              onClick={() => setFiltersOpen(true)}
+              title="Filters"
+              aria-label="Open filters"
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+            </Button>
           </div>
 
           {/* Actions */}
@@ -193,35 +204,33 @@ export function Header() {
                 </DropdownMenu>
                 </div>
 
-                {/* Order icons - hidden on mobile, visible on desktop */}
-                <div className="hidden md:flex items-center gap-1">
-                  {/* Supplier Orders */}
-                  {user?.role === "supplier" && (
-                    <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Orders (Seller)">
-                      <Link href="/supplier/orders">
-                        <PackageSearch className="h-5 w-5" />
-                        {sellerCount > 0 && (
-                          <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-amber-600 text-xs font-bold text-white">
-                            {sellerCount}
-                          </span>
-                        )}
-                      </Link>
-                    </Button>
-                  )}
+                {/* Supplier Orders */}
+                {user?.role === "supplier" && (
+                  <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Orders (Seller)">
+                    <Link href="/supplier/orders">
+                      <PackageSearch className="h-5 w-5" />
+                      {mounted && sellerCount > 0 && (
+                        <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-amber-600 text-xs font-bold text-white">
+                          {sellerCount}
+                        </span>
+                      )}
+                    </Link>
+                  </Button>
+                )}
 
-                  {/* Customer Orders */}
-                  {(user?.role !== "supplier" || user?.dualPharmacyRetail) && (
-                    <>
-                      <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Orders">
-                        <Link href="/buyer/orders">
-                          <ScrollText className="h-5 w-5" />
-                          {pendingCount > 0 && (
+                {/* Customer Orders */}
+            {(user?.role !== "supplier" || user?.dualPharmacyRetail) && (
+                  <>
+                    <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Orders">
+                      <Link href="/buyer/orders">
+                        <ScrollText className="h-5 w-5" />
+                        {mounted && pendingCount > 0 && (
                             <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">
                               {pendingCount}
                             </span>
                           )}
-                        </Link>
-                      </Button>
+                      </Link>
+                    </Button>
 
                       {/* Deliveries */}
                       <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Deliveries">
@@ -258,38 +267,37 @@ export function Header() {
               </Button>
             )}
 
-            {/* Desktop-only icons - hidden on mobile */}
-            <div className="hidden md:flex items-center gap-1">
-              {/* Favorites */}
-              <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Favorites">
-                <Link href="/favorites">
-                  <Heart className="h-5 w-5" />
-                  {favoritesCount > 0 && (
-                    <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs font-bold text-white">
-                      {favoritesCount}
-                    </span>
-                  )}
-                </Link>
-              </Button>
-              {/* Watched prices */}
-              <Button asChild variant="ghost" size="icon" className="h-9 w-9" title="Watched prices">
-                <Link href="/price-watch">
-                  <Eye className="h-5 w-5" />
-                </Link>
-              </Button>
-              {/* Reorder (use orders-style icon) */}
-              <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Reorder Items">
-                <Link href="/reorder">
-                  <PackageSearch className="h-5 w-5" />
-                </Link>
-              </Button>
-              {/* Ratings */}
-              <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Ratings">
-                <Link href="/ratings">
-                  <Star className="h-5 w-5" />
-                </Link>
-              </Button>
-            </div>
+            {/* Favorites */}
+            <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Favorites">
+              <Link href="/favorites">
+                <Heart className="h-5 w-5" />
+                {mounted && favoritesCount > 0 && (
+                  <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs font-bold text-white">
+                    {favoritesCount}
+                  </span>
+                )}
+              </Link>
+            </Button>
+            {/* Watched prices */}
+            <Button asChild variant="ghost" size="icon" className="h-9 w-9" title="Watched prices">
+              <Link href="/price-watch">
+                <Eye className="h-5 w-5" />
+              </Link>
+            </Button>
+            {/* Reorder (use orders-style icon) */}
+            <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Reorder Items">
+              <Link href="/reorder">
+                <PackageSearch className="h-5 w-5" />
+              </Link>
+            </Button>
+
+
+            {/* Ratings */}
+            <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Ratings">
+              <Link href="/ratings">
+                <Star className="h-5 w-5" />
+              </Link>
+            </Button>
 
             {/* Barcode add to cart */}
             {/*<Button variant="ghost" size="icon" className="h-9 w-9" title="Add by barcode" onClick={() => setBarcodeOpen(true)}>
@@ -299,7 +307,7 @@ export function Header() {
             <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Cart">
               <Link href="/cart">
                 <ShoppingCart className="h-5 w-5" />
-                {totalItems > 0 && (
+                {mounted && totalItems > 0 && (
                   <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-green-600 text-xs font-bold text-white">
                     {totalItems}
                   </span>
@@ -500,20 +508,27 @@ export function Header() {
           </div>
         </div>
 
-        {/* Mobile Search + Location */}
-        <div className={cn("pb-3 space-y-2 lg:hidden", hideHeaderGlobalSearch && "pb-2")}>
-          {!hideHeaderGlobalSearch && (
-            <div className="relative w-full">
-              <GlobalSearch placeholder={t("searchPlaceholder")} className="w-full" />
-            </div>
-          )}
-          <div className="flex items-center justify-center">
-            <LocationBadge />
+        {/* Mobile: Search + Location + Filters on one row */}
+        <div className="pb-3 flex flex-col gap-2 lg:hidden">
+          <div className="flex items-center gap-2 w-full">
+            <GlobalSearch placeholder={t("searchPlaceholder")} className="flex-1 min-w-0" />
+            <LocationBadge compact />
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-9 w-9 shrink-0"
+              onClick={() => setFiltersOpen(true)}
+              title="Filters"
+              aria-label="Open filters"
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+            </Button>
           </div>
         </div>
       </div>
       <TableCommandBanner />
       <BarcodeAddToCart open={barcodeOpen} onOpenChange={setBarcodeOpen} />
+      <ProductFiltersSheet open={filtersOpen} onOpenChange={setFiltersOpen} />
     </header>
   )
 }

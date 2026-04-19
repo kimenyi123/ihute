@@ -1,11 +1,13 @@
 "use client"
 
+import { Suspense, useEffect, useState, useMemo } from "react"
+import Link from "next/link"
 import { useEffect, useState, useMemo, useRef } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Header } from "@/components/header"
-import { Footer } from "@/components/footer"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { CheckCircle, MessageCircle, Copy, ArrowRight, ArrowLeft } from "lucide-react"
+import { formatPaymentMethod } from "@/lib/payment-utils" // ✅ IMPORTED
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { CheckCircle, MessageCircle, Copy, ArrowRight, Users, X } from "lucide-react"
 import { formatPaymentMethod } from "@/lib/payment-utils"
@@ -28,15 +30,18 @@ function waHrefFor(phone: string, text: string) {
   return `https://wa.me/${p}?text=${encoded}`
 }
 
-export default function OrderSuccessPage() {
+function OrderSuccessPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
   const orderId = searchParams.get("orderId")
+  const trackToken = searchParams.get("trackToken")
   const sellerName = searchParams.get("sellerName")
   const sellerPhone = searchParams.get("sellerPhone")
   const buyerPhone = searchParams.get("buyerPhone")
   const total = searchParams.get("total")
+  const fromGrandma = searchParams.get("from") === "grandma"
+  const homeHref = fromGrandma ? "/grandma" : "/"
 
   const [copied, setCopied] = useState(false)
   const [orderDetails, setOrderDetails] = useState<any>(null)
@@ -44,7 +49,7 @@ export default function OrderSuccessPage() {
   const [showRatingModal, setShowRatingModal] = useState(false)
   const [ratingItems, setRatingItems] = useState<Array<{ code: string, name: string }>>([])
   const [hasCheckedRating, setHasCheckedRating] = useState(false)
-  
+
   // ✅ Get table session reactively from store
   const tableSession = useTableCommandStore((state) => state.activeSession)
 
@@ -53,40 +58,40 @@ export default function OrderSuccessPage() {
   const [tableShareLink, setTableShareLink] = useState<string>("")
   const [tableName, setTableName] = useState<string>("")
   const hasShownAlert = useRef(false)
-  
+
   // Check if user is table creator and show shareable link
   useEffect(() => {
     if (hasShownAlert.current) return // Only show once per session
-    
+
     if (tableSession) {
       console.log('🔍 Order Success - Table session:', tableSession)
       // User is in a table command session
       const isCreator = tableSession.userEmail === tableSession.createdBy
       console.log('🔍 Order Success - Is creator:', isCreator)
-      
+
       if (isCreator && tableSession.tableName && tableSession.locationId) {
         // Generate shareable link (same format as backend)
         const tokenData = `${tableSession.tableName}|${tableSession.locationId}|${Date.now()}`
         const token = btoa(tokenData).replace(/\+/g, '-').replace(/\//g, '_')
         const shareLink = `${window.location.origin}/join-table?token=${token}`
-        
+
         setTableShareLink(shareLink)
         setTableName(tableSession.tableName)
         setShowTableLinkAlert(true)
         hasShownAlert.current = true
-        
+
         console.log('✅ Showing table share alert for:', tableSession.tableName)
-        
+
         // Auto-hide after 8 seconds
         const timer = setTimeout(() => {
           setShowTableLinkAlert(false)
         }, 8000)
-        
+
         return () => clearTimeout(timer)
       }
     }
   }, [tableSession])
-  
+
   const copyTableLink = async () => {
     try {
       await navigator.clipboard.writeText(tableShareLink)
@@ -98,18 +103,19 @@ export default function OrderSuccessPage() {
   }
 
   useEffect(() => {
-    if (!orderId) {
-      router.push("/")
+    if (!orderId && !trackToken) {
+      router.push(fromGrandma ? "/grandma" : "/")
       return
     }
 
     // Fetch order details to get product items
     async function fetchOrderDetails() {
       try {
+        const trackSlug = trackToken || orderId
         const res = await fetch("/api/orders/track", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ orderId }),
+          body: JSON.stringify({ orderId: trackSlug }),
           cache: "no-store",
         })
         const json = await res.json()
@@ -126,26 +132,31 @@ export default function OrderSuccessPage() {
     }
 
     fetchOrderDetails()
-  }, [orderId, router])
+  }, [orderId, trackToken, router, fromGrandma])
 
   useEffect(() => {
-    if (orderDetails && orderId && !hasCheckedRating && orderDetails.status === "delivered") {
+    if (orderDetails && (orderId || trackToken) && !hasCheckedRating && orderDetails.status === "delivered") {
       setHasCheckedRating(true)
       const items = orderDetails?.items || []
       setRatingItems(items)
       setShowRatingModal(true)
       console.log('[Order Success] Showing rating modal for delivered order')
     }
-  }, [orderDetails, orderId, hasCheckedRating])
+  }, [orderDetails, orderId, trackToken, hasCheckedRating])
 
-  if (!orderId) {
+  if (!orderId && !trackToken) {
     return null
   }
 
+  const displayOrderNo = String(orderDetails?.orderId ?? orderId ?? "")
+
   const siteBase = (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw").replace(/\/Trading\/?$/, "")
-  const trackingUrl = typeof window !== "undefined"
-    ? `${window.location.origin}/track-order/${orderId}`
-    : `${siteBase}/track-order/${orderId}`
+  const trackSlugForUrl = trackToken || orderId
+  const trackPath = `/track-order/${encodeURIComponent(trackSlugForUrl || "")}${fromGrandma ? "?from=grandma" : ""}`
+  const trackingUrl =
+    typeof window !== "undefined"
+      ? `${window.location.origin}${trackPath}`
+      : `${siteBase.replace(/\/$/, "")}${trackPath}`
 
   // Build WhatsApp message with product details - memoized to recalculate when orderDetails changes
   const { whatsappMessage, whatsappHref } = useMemo(() => {
@@ -181,7 +192,7 @@ export default function OrderSuccessPage() {
         '',
         `Shop: ${sellerName || orderDetails.sellerName}`,
         orderDetails.buyerLocation ? `Location: ${orderDetails.buyerLocation}` : '',
-        `Order ID: ${orderId}`,
+        `Order ID: ${displayOrderNo}`,
         '',
         '```',
         header,
@@ -194,7 +205,7 @@ export default function OrderSuccessPage() {
         `Paid: ${formatCurrency(paidAmount)}`,
         '',
         `Paid at: ${formatPaymentMethod(paymentMethod)}`,
-        `Message: ${orderId ? `ORDER ${orderId}` : '-'}`,
+        `Message: ${displayOrderNo ? `ORDER ${displayOrderNo}` : '-'}`,
         `My phone: ${buyerPhone}`,
         '',
         `Follow: ${trackingUrl}`
@@ -205,7 +216,7 @@ export default function OrderSuccessPage() {
         'Order',
         '',
         `Shop: ${sellerName}`,
-        `Order ID: ${orderId}`,
+        `Order ID: ${displayOrderNo}`,
         '',
         `Total: ${Number(total).toLocaleString()} RWF`,
         `My phone: ${buyerPhone}`,
@@ -218,7 +229,7 @@ export default function OrderSuccessPage() {
     const href = sellerPhoneNormalized ? waHrefFor(sellerPhoneNormalized, message) : ""
 
     return { whatsappMessage: message, whatsappHref: href }
-  }, [orderDetails, orderId, sellerName, sellerPhone, buyerPhone, total, trackingUrl])
+  }, [orderDetails, orderId, displayOrderNo, sellerName, sellerPhone, buyerPhone, total, trackingUrl])
 
   const copyTrackingUrl = async () => {
     try {
@@ -249,110 +260,100 @@ export default function OrderSuccessPage() {
     setShowRatingModal(false)
   }
 
+  const successShell =
+    "min-h-screen bg-gradient-to-b from-[#0369a1] via-[#0ea5e9] to-[#7dd3fc] text-white"
+
   const content = (
-    <div className="min-h-screen bg-slate-50">
-      <Header />
-      <main className="container mx-auto px-4 py-12">
-        <div className="max-w-2xl mx-auto space-y-6">
-          {/* Table Shareable Link Alert - Only for table creators */}
-          {showTableLinkAlert && (
-            <Alert className="border-2 border-blue-200 bg-blue-50 relative">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="absolute top-2 right-2 h-6 w-6 p-0"
-                onClick={() => setShowTableLinkAlert(false)}
-              >
-                <X className="h-4 w-4" />
-              </Button>
-              <Users className="h-5 w-5 text-blue-600" />
-              <AlertTitle className="text-blue-900">Share Your Table!</AlertTitle>
-              <AlertDescription className="text-blue-800 space-y-3">
-                <p>
-                  You created table <strong>{tableName}</strong>. Share this link so others can join and add their orders:
-                </p>
-                <div className="flex gap-2">
-                  <code className="flex-1 bg-white px-3 py-2 rounded text-sm break-all border border-blue-200">
-                    {tableShareLink}
-                  </code>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={copyTableLink}
-                    className="shrink-0"
-                  >
-                    {copied ? <CheckCircle className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                  </Button>
-                </div>
-                <p className="text-xs text-blue-600">
-                  This alert will auto-hide in 8 seconds
-                </p>
-              </AlertDescription>
-            </Alert>
-          )}
+    <div className={successShell}>
+      <header className="sticky top-0 z-40 border-b border-white/15 bg-gradient-to-r from-[#0369a1] to-[#0ea5e9] shadow-md">
+        <div className="mx-auto flex max-w-[430px] items-center gap-3 px-4 py-3">
+          <Link
+            href={homeHref}
+            className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-white/15 px-2 py-1.5 text-sm font-semibold text-white hover:bg-white/25"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </Link>
+          <div className="min-w-0 flex-1">
+            <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/80">Order placed</div>
+            <div className="truncate text-lg font-bold leading-tight">Order #{displayOrderNo || orderId || trackToken}</div>
+          </div>
+        </div>
+      </header>
 
-          {/* Success Message */}
-          <Card className="border-2 border-green-200 bg-green-50">
-            <CardHeader className="text-center pb-4">
-              <div className="flex justify-center mb-4">
-                <div className="h-16 w-16 rounded-full bg-green-600 flex items-center justify-center">
-                  <CheckCircle className="h-10 w-10 text-white" />
-                </div>
+      <main className="mx-auto max-w-[430px] space-y-4 px-4 py-6 pb-12">
+        <Card className="border-0 shadow-xl rounded-2xl bg-white text-slate-900">
+          <CardHeader className="text-center pb-4">
+            <div className="mb-4 flex justify-center">
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green-600 shadow-lg ring-4 ring-green-100">
+                <CheckCircle className="h-10 w-10 text-white" />
               </div>
-              <CardTitle className="text-2xl text-green-900">Order Placed Successfully!</CardTitle>
-              <p className="text-green-700 mt-2">
-                Your order has been received and is being processed
-              </p>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="bg-white rounded-lg p-4 space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Order ID:</span>
-                  <span className="font-mono font-bold">{orderId}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Seller:</span>
-                  <span className="font-medium">{sellerName}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Total:</span>
-                  <span className="font-bold">{Number(total).toLocaleString()} RWF</span>
-                </div>
+            </div>
+            <CardTitle className="text-2xl text-slate-900">Order placed successfully</CardTitle>
+            <p className="mt-2 text-slate-600">Processing — the shop will confirm your order</p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2 rounded-xl bg-slate-50 p-4">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Order ID</span>
+                <span className="font-mono font-bold">{displayOrderNo || orderId || trackToken}</span>
               </div>
-            </CardContent>
-          </Card>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Seller</span>
+                <span className="font-medium">{sellerName}</span>
+              </div>
+              {(sellerPhone?.trim() ||
+                orderDetails?.sellerPhone ||
+                orderDetails?.SELLER_PHONE) ? (
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Seller number</span>
+                  <span className="font-medium tabular-nums">
+                    {String(
+                      sellerPhone?.trim() ||
+                        orderDetails?.sellerPhone ||
+                        orderDetails?.SELLER_PHONE ||
+                        "",
+                    )}
+                  </span>
+                </div>
+              ) : null}
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Total</span>
+                <span className="font-bold">{Number(total).toLocaleString()} RWF</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
-          {/* Order Tracking */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Track Your Order</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="bg-slate-100 rounded-lg p-4">
-                <p className="text-xs text-muted-foreground mb-2">Order Tracking URL:</p>
-                <div className="flex gap-2">
-                  <code className="flex-1 bg-white px-3 py-2 rounded text-sm break-all border">
-                    {trackingUrl}
-                  </code>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={copyTrackingUrl}
-                    className="shrink-0"
-                  >
-                    {copied ? <CheckCircle className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                  </Button>
-                </div>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Save this link to track your order status anytime. You can also access it from the WhatsApp message sent to the seller.
+        <Card className="border-0 shadow-xl rounded-2xl bg-white text-slate-900">
+          <CardHeader>
+            <CardTitle className="text-lg">Track your order</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="rounded-xl bg-slate-100 p-4">
+              <p className="mb-2 text-xs font-medium text-slate-700">
+                If you don&apos;t sign in, track it here
               </p>
-            </CardContent>
-          </Card>
+              <div className="flex gap-2">
+                <code className="flex-1 break-all rounded border bg-white px-3 py-2 text-sm text-slate-800">
+                  {trackingUrl}
+                </code>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={copyTrackingUrl}
+                  className="shrink-0"
+                >
+                  {copied ? <CheckCircle className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
           {/* WhatsApp Notification */}
           {normalizePhone(sellerPhone) && (
-            <Card className="border-2 border-green-100">
+            <Card className="border-0 shadow-xl rounded-2xl border-2 border-green-100 bg-white text-slate-900">
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
                   <MessageCircle className="h-5 w-5 text-[#25D366]" />
@@ -392,73 +393,28 @@ export default function OrderSuccessPage() {
             </Card>
           )}
 
-          {/* Next Steps */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">What's Next?</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex gap-3">
-                <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
-                  <span className="text-sm font-bold text-blue-700">1</span>
-                </div>
-                <div>
-                  <p className="font-medium">Order Confirmation</p>
-                  <p className="text-sm text-muted-foreground">
-                    The seller will review your order and confirm availability
-                  </p>
-                </div>
-              </div>
-              <div className="flex gap-3">
-                <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
-                  <span className="text-sm font-bold text-blue-700">2</span>
-                </div>
-                <div>
-                  <p className="font-medium">Preparation & Packaging</p>
-                  <p className="text-sm text-muted-foreground">
-                    Your items will be carefully prepared for delivery
-                  </p>
-                </div>
-              </div>
-              <div className="flex gap-3">
-                <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
-                  <span className="text-sm font-bold text-blue-700">3</span>
-                </div>
-                <div>
-                  <p className="font-medium">Delivery</p>
-                  <p className="text-sm text-muted-foreground">
-                    The seller will contact you to arrange delivery
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
           {/* Action Buttons */}
-          <div className="flex gap-3">
+          <div className="flex gap-3 pt-2">
             <Button
-              variant="outline"
-              className="flex-1"
-              onClick={() => router.push("/")}
+              variant="secondary"
+              className="flex-1 bg-white text-slate-900 hover:bg-white/90"
+              onClick={() => router.push(homeHref)}
             >
-              Continue Shopping
+              {fromGrandma ? "Back to Grandma" : "Continue shopping"}
             </Button>
-            <Button
-              className="flex-1"
-              onClick={() => router.push(`/track-order/${orderId}`)}
-            >
-              Track Order
-              <ArrowRight className="h-4 w-4 ml-2" />
+            <Button className="flex-1 bg-white text-[#0369a1] hover:bg-white/90" asChild>
+              <Link href={trackPath} className="inline-flex items-center justify-center gap-2">
+                Track order
+                <ArrowRight className="h-4 w-4 shrink-0" aria-hidden />
+              </Link>
             </Button>
           </div>
-        </div>
       </main>
-      <Footer />
 
       {/* Rating Modal */}
       {orderDetails && showRatingModal && (
         <RatingModal
-          orderId={orderId!}
+          orderId={String(displayOrderNo || orderId || trackToken || "")}
           sellerId={orderDetails.sellerAccount || ""}
           sellerName={sellerName || orderDetails.sellerName || ""}
           buyerPhone={buyerPhone || orderDetails.buyerPhone || ""}
@@ -471,4 +427,18 @@ export default function OrderSuccessPage() {
     </div>
   )
   return content
+}
+
+export default function OrderSuccessPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-[#0369a1] to-[#7dd3fc] text-sm font-medium text-white">
+          Loading…
+        </div>
+      }
+    >
+      <OrderSuccessPageInner />
+    </Suspense>
+  )
 }

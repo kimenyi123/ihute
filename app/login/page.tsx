@@ -1,10 +1,9 @@
 "use client"
 
-import type React from "react"
-import { useState } from "react"
+import { Suspense } from "react"
+import Image from "next/image"
 import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
-import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -18,6 +17,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { ArrowLeft } from "lucide-react"
+import { useAuthStore, type User } from "@/lib/auth-store"
+import { IshyigaLoginCard } from "@/components/ishyiga-login-card"
+import { userCanAccessSellerSpace } from "@/lib/auth-login-client"
+import { APP_VERSION_DISPLAY } from "@/lib/app-version"
+import { GRANDMA_PATHS } from "@/lib/grandma-urls"
 import { useAuthStore } from "@/lib/auth-store"
 import type { User, UserRole } from "@/lib/auth-store"
 import { getStrongPasswordError } from "@/lib/password-policy"
@@ -34,6 +38,8 @@ const log = (tag: string, msg: string, data?: any) => {
   }
 }
 
+const shell =
+  "min-h-screen bg-[#eef4fb] text-[#17324d] flex flex-col bg-gradient-to-b from-[#f7fbff] to-[#eef4fb]"
 type ApiLoginOK = {
   ok: true
   role: "BUYER" | "SELLER" | "ADMIN" | "DRIVER" | "FINANCIER"
@@ -46,6 +52,7 @@ type ApiLoginOK = {
   user: { email: string; firstName: string; lastName: string; tel: string; location: string; owner: string }
 }
 
+function LoginPageInner() {
 /** Java/org.json may send boolean, 1/0, or snake_case; treat all as "must show change-password". */
 function parseMustChangePassword(json: Record<string, unknown> | null | undefined): boolean {
   if (!json || typeof json !== "object") return false
@@ -96,6 +103,7 @@ export default function LoginPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const redirectTo = searchParams?.get("redirect")
+  const phonePrefill = searchParams?.get("phone") ?? ""
   const login = useAuthStore((s) => s.login)
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -113,12 +121,17 @@ export default function LoginPage() {
     setLoading(true)
     setError(null)
 
-    const rid = crypto.randomUUID()
-    log("LOGIN", `START [RID ${rid}]`)
-    log("LOGIN", `Email: "${email}" (length=${email.length})`)
-    log("LOGIN", `Password length: ${password.length}`)
-
+  const backHomeHref = (() => {
+    if (!redirectTo) return "/"
     try {
+      const decoded = decodeURIComponent(redirectTo)
+      if (decoded.startsWith("/grandma")) return GRANDMA_PATHS.appRoot
+    } catch {
+      /* ignore */
+    }
+    return "/"
+  })()
+  const backHomeLabel = backHomeHref === GRANDMA_PATHS.appRoot ? "Back to Grandma" : "Back to Home"
       log("LOGIN", `Sending to /api/auth/login`)
 
       const emailTrimmed = email.trim()
@@ -143,6 +156,9 @@ export default function LoginPage() {
         throw new Error("Invalid credentials")
       }
 
+  const handleSuccess = async (user: User) => {
+    const decoded = redirectTo ? decodeURIComponent(redirectTo) : ""
+    const safeRedirect = decoded.startsWith("/") && !decoded.startsWith("//") && decoded.length > 0
       const payload = json as ApiLoginOK
       const mustChange = parseMustChangePassword(json as Record<string, unknown>)
 
@@ -159,8 +175,24 @@ export default function LoginPage() {
       const user: User = normalizeToStoreUser(payload)
       log("LOGIN", `User normalized:`, user)
 
-      login(user)
+    login(user)
 
+    // Grandma remembers buyer vs seller so /grandma opens the right space after sign-in.
+    if (safeRedirect && decoded.startsWith("/grandma") && typeof window !== "undefined") {
+      try {
+        localStorage.setItem(
+          "grandma:mode",
+          userCanAccessSellerSpace(user) ? "seller" : "buyer",
+        )
+      } catch {
+        /* ignore */
+      }
+    }
+
+    if (safeRedirect) {
+      router.push(decoded)
+      return
+    }
       const decoded = redirectTo ? decodeURIComponent(redirectTo) : ""
       const safeRedirect = decoded.startsWith("/") && !decoded.startsWith("//")
       if (safeRedirect && decoded.length > 0) {
@@ -182,6 +214,12 @@ export default function LoginPage() {
     } finally {
       setLoading(false)
       log("LOGIN", `END`)
+    if (user.role === "admin") {
+      router.push("/admin/dashboard")
+    } else if (user.role === "supplier") {
+      router.push("/supplier/dashboard")
+    } else {
+      router.push("/")
     }
   }
 
@@ -251,21 +289,42 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 p-4">
-      <div className="w-full max-w-md space-y-4">
-        {/* Back to Home Button */}
-        <Link href="/">
-          <Button variant="ghost" size="sm" className="gap-2">
-            <ArrowLeft className="h-4 w-4" />
-            Back to Home
-          </Button>
+    <div className={shell}>
+      <header className="sticky top-0 z-30 bg-gradient-to-r from-[#1897e0] via-[#30acef] to-[#127fc0] text-white shadow-[0_8px_20px_rgba(0,0,0,.1)]">
+        <div className="mx-auto flex max-w-[430px] items-center gap-2 px-3 py-3.5">
+          <Link
+            href={backHomeHref}
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-white/15 text-lg text-white hover:bg-white/25"
+            aria-label={backHomeLabel}
+          >
+            ←
+          </Link>
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center overflow-hidden rounded-[10px] border border-white/35 bg-white">
+              <Image src="/images/ishyiga-logo.png" alt="" width={34} height={34} className="object-contain" />
+            </div>
+            <div className="min-w-0">
+              <div className="truncate text-lg font-bold leading-tight">Sign in</div>
+              <div className="truncate text-xs text-white/90">Ishyiga Ihute</div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div className="mx-auto flex w-full max-w-[430px] flex-1 flex-col px-3 py-6">
+        <Link
+          href={backHomeHref}
+          className="mb-4 inline-flex items-center gap-2 text-sm font-medium text-[#1897e0] hover:underline"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          {backHomeLabel}
         </Link>
 
-        <Card className="w-full">
-          <CardHeader className="space-y-4 text-center">
-            <div className="flex justify-center">
-              <Image src="/images/ishyiga-logo.png" alt="Ishyiga Software" width={200} height={60} className="h-12 w-auto" />
-            </div>
+        <IshyigaLoginCard
+          onSuccess={handleSuccess}
+          defaultPhone={phonePrefill}
+          registerHref="/register/buyer"
+        />
             <CardTitle className="text-2xl">Welcome Back</CardTitle>
             <CardDescription>Sign in to your account to continue</CardDescription>
           </CardHeader>
@@ -368,6 +427,24 @@ export default function LoginPage() {
           </DialogContent>
         </Dialog>
       </div>
+
+      <footer className="mt-auto pb-6 pt-2 text-center text-xs font-medium tabular-nums text-[#6f8399]">
+        {APP_VERSION_DISPLAY}
+      </footer>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className={shell}>
+          <div className="flex flex-1 items-center justify-center px-4 text-sm text-[#6f8399]">Loading…</div>
+        </div>
+      }
+    >
+      <LoginPageInner />
+    </Suspense>
   )
 }
