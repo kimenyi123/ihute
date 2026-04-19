@@ -25,7 +25,6 @@ function normalizeOrders(input: any): any[] {
     BUYER_OWNER: order.BUYER_ACCOUNT_OWNER ?? order.BUYER_OWNER_NAME ?? order.BUYER_OWNER ?? order.OWNER ?? order.owner ?? "",
     BUYER_OWNER_NAME: order.BUYER_ACCOUNT_OWNER ?? order.BUYER_OWNER_NAME ?? order.OWNER ?? order.owner ?? "",
     BUYER_EMAIL: order.BUYER_ACCOUNT_EMAIL ?? order.BUYER_EMAIL ?? order.EMAIL ?? order.email ?? "",
-    BUYER_PHONE: order.BUYER_ACCOUNT_PHONE ?? order.BUYER_PHONE ?? order.PHONE ?? order.phone ?? "",
     
     // ✅ Remove ORDERED_BY field completely
     // ORDERED_BY: order.ORDERED_BY ?? order.ordered_by ?? "",  // REMOVED
@@ -40,6 +39,7 @@ function normalizeOrders(input: any): any[] {
       order.buyerOwnerName ??
       "",
     BUYER_PHONE:
+      order.BUYER_ACCOUNT_PHONE ??
       order.BUYER_PHONE ??
       order.buyer_phone ??
       order.BUYER_TEL ??

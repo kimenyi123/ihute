@@ -69,7 +69,7 @@ export default function SelfOrderMenuPage() {
 
           const products = Array.isArray(seller.products) ? seller.products : []
 
-          const mapped: KioskMenuItem[] = products.map((p) => ({
+          const mapped: KioskMenuItem[] = products.map((p: Record<string, unknown>) => ({
             item_code: String(p.ITEM_CODE ?? ""),
             item_commercial_name: String(p.item_commercial_name ?? "Product"),
             item_name: p.item_name,

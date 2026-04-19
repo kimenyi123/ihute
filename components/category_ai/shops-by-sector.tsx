@@ -62,7 +62,8 @@ function sectorSortIndex(categoryId: string): number {
   const i = SECTOR_ORDER.indexOf(id)
   if (i >= 0) return i
   if (BAR_RESTO_IDS.includes(id)) return SECTOR_ORDER.indexOf("bar-resto")
-  return 1000 + id.charCodeAt(0) ?? 9999
+  const c = id.charCodeAt(0)
+  return Number.isFinite(c) ? 1000 + c : 9999
 }
 
 /**

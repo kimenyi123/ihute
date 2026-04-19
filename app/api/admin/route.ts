@@ -41,12 +41,13 @@ export async function POST(req: Request) {
     }
     
     const { action, ...params } = body
+    const actionStr = typeof action === "string" ? action.trim() : ""
     const adminTokenFromBody =
       typeof (params as { adminToken?: unknown }).adminToken === "string"
         ? String((params as { adminToken?: string }).adminToken).trim()
         : ""
 
-    if (!action) {
+    if (!actionStr) {
       console.error("[admin/route] POST - Missing action parameter. Body was:", JSON.stringify(body))
       return NextResponse.json(
         { ok: false, error: "action parameter is required", received: body },
@@ -54,10 +55,10 @@ export async function POST(req: Request) {
       )
     }
     
-    console.log("[admin/route] POST - Action:", action, "Params:", JSON.stringify(params))
+    console.log("[admin/route] POST - Action:", actionStr, "Params:", JSON.stringify(params))
 
     const publicActions = ["getHomepageCategories"]
-    const needsAuth = !publicActions.includes(action)
+    const needsAuth = !publicActions.includes(actionStr)
 
     const headerEmail = req.headers.get("x-admin-email")?.trim() || ""
     const bodyEmail =
@@ -92,7 +93,7 @@ export async function POST(req: Request) {
     const tokenForJava = adminTokenFromBody || headerAdminToken
 
     const form = new URLSearchParams()
-    form.set("action", action)
+    form.set("action", actionStr)
 
     if (needsAuth && !adminEmail) {
       return NextResponse.json(
@@ -121,7 +122,7 @@ export async function POST(req: Request) {
 
     const url = `${BACKEND_URL}/AdminServlet`
     console.log("[admin/route] Calling backend:", url)
-    console.log("[admin/route] Action:", action)
+    console.log("[admin/route] Action:", actionStr)
 
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 30000)

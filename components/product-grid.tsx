@@ -52,13 +52,9 @@ type ServerProduct = {
   /** Brand from niki_items: item_fabricant or id_fabricant */
   brand?: string;
   momo?: string;
-  famille?: string;
   /** Catalogue / NIKI code for KAOS images and deduping */
   item_code?: string;
   ITEM_CODE?: string;
-  image_url?: string;
-  item_image_url?: string;
-  IMAGE_URL?: string;
 };
 
 function extractNumericPrice(value: any): number {
