@@ -1,16 +1,21 @@
 "use client"
 
-import { Suspense, useEffect, useState, useMemo } from "react"
+import { Suspense, useEffect, useState, useMemo, useRef } from "react"
 import Link from "next/link"
-import { useEffect, useState, useMemo, useRef } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { CheckCircle, MessageCircle, Copy, ArrowRight, ArrowLeft } from "lucide-react"
-import { formatPaymentMethod } from "@/lib/payment-utils" // ✅ IMPORTED
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { CheckCircle, MessageCircle, Copy, ArrowRight, Users, X } from "lucide-react"
+import {
+  CheckCircle,
+  MessageCircle,
+  Copy,
+  ArrowRight,
+  ArrowLeft,
+  Users,
+  X,
+} from "lucide-react"
 import { formatPaymentMethod } from "@/lib/payment-utils"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { RatingModal } from "@/components/RatingModal"
 import { useTableCommandStore } from "@/lib/table-command-store"
 

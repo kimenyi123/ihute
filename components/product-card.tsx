@@ -1,26 +1,25 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Image from "next/image"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { useCartStore } from "@/lib/cart-store"
 import { useFavoritesStore } from "@/lib/favorites-store"
 import { trackProductView, trackClick } from "@/lib/interaction-tracker"
-import { Heart, Eye, Store } from "lucide-react"
-import { Heart, ScanSearch, ShoppingCart } from "lucide-react"
+import { Heart, Eye, Store, ScanSearch, ShoppingCart } from "lucide-react"
 import { usePriceWatchStore } from "@/lib/price-watch-store"
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { useToast } from "@/components/ui/use-toast"
 import { PriceWatchButton } from "@/components/price-watch-button"
-import { getProductImageSrc, getProductImageUrl, isValidImageUrl, NO_IMAGE_URL } from "@/lib/image-utils"
 import { ErxPrescriptionDialog } from "@/components/erx-prescription-dialog"
 import { serializeErxForNotes } from "@/lib/erx-prescription"
 import { ProductBadges, ProductTrustSignals } from "@/components/product-badges"
 import type { ProductBadgeType } from "@/components/product-badges"
 import {
   getProductImageSrc,
+  getProductImageUrl,
   getProductImageCandidates,
   getNikiCodeFromSource,
   isValidImageUrl,
@@ -120,8 +119,14 @@ export function ProductCard({
 }) {
   const isSpotlight = layout === "spotlight"
   const isCompact = layout === "compact"
+  /** Buy + price watch (icon) + quick view — needs a fixed grid so narrow tiles do not overflow. */
+  const showTripleActionRow =
+    !isSpotlight && !isCompact && Boolean(onQuickView && !quickViewReplacesWatchPrice)
+  const showDoubleQuickRow =
+    !isSpotlight && !isCompact && Boolean(onQuickView && quickViewReplacesWatchPrice)
   const router = useRouter()
   const addOrInc = useCartStore((s) => s.addOrInc ?? s.addItem)
+  const cartItems = useCartStore((s) => s.items)
   const toggleFavorite = useFavoritesStore((s) => s.toggleFavorite)
   const isFavorite = useFavoritesStore((s) => s.isFavorite)
   const { toast } = useToast()
@@ -202,9 +207,9 @@ export function ProductCard({
       product.item_key_words,
       product.item_code,
       image,
-      image_url,
-      item_image_url,
-      IMAGE_URL,
+      product.image_url,
+      product.item_image_url,
+      (product as { IMAGE_URL?: string }).IMAGE_URL,
     ]
   )
   /** Stable string so we only reset fallback index when the URL list actually changes — NOT when candidateIdx changes. */
@@ -213,7 +218,6 @@ export function ProductCard({
   const [imgError, setImgError] = useState(false)
   const [fallbackSrc, setFallbackSrc] = useState<string | null>(null)
   const [erxOpen, setErxOpen] = useState(false)
-  const placeholder = "/placeholder.svg?height=300&width=300"
 
   // Primary: KAOS-based URL (famille + item_key_words, then flat NIKI code, then backend URL, then KAOS no_image)
   const resolvedUrl = getProductImageSrc(product, placeholder)
@@ -248,17 +252,20 @@ export function ProductCard({
           image_url: product.image_url,
           item_image_url: product.item_image_url,
           IMAGE_URL: (product as any).IMAGE_URL,
-          image: product.image
-        }
+          image: product.image,
+        },
       })
+    }
     // Debug log to inspect image resolution for this product
     try {
       // Only log in browser
       if (typeof window !== "undefined") {
-        // @ts-expect-error debug
         const famille = (product as any).famille ?? (product as any).FAMILLE
-        // @ts-expect-error debug
-        const niki = (product as any).item_key_words ?? (product as any).itemCode ?? (product as any).item_code ?? (product as any).ITEM_CODE
+        const niki =
+          (product as any).item_key_words ??
+          (product as any).itemCode ??
+          (product as any).item_code ??
+          (product as any).ITEM_CODE
         // eslint-disable-next-line no-console
         console.log("[ProductCard][image-debug]", {
           id,
@@ -325,7 +332,12 @@ export function ProductCard({
 
   return (
     <>
-    <Card className={cn("group h-full overflow-hidden transition-all hover:shadow-lg", compact && "border shadow-sm")}>
+    <Card
+      className={cn(
+        "group h-full min-w-0 overflow-hidden transition-all hover:shadow-lg",
+        compact && "border shadow-sm",
+      )}
+    >
       <div className={cn("relative w-full bg-muted", compact ? "aspect-[4/5]" : "aspect-square")}>
         {showPlaceholderIcon ? (
           <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">
@@ -430,7 +442,7 @@ export function ProductCard({
         </button>
       </div>
 
-      <CardContent className={cn("flex flex-col gap-2", compact ? "p-2" : "p-3")}>
+      <CardContent className={cn("flex min-w-0 flex-col gap-2", compact ? "p-2" : "p-3")}>
         <div className={compact ? "min-h-[32px]" : "min-h-[38px]"}>
           <h3 className={cn("font-semibold leading-tight line-clamp-2", compact ? "text-xs" : "text-sm")}>{name}</h3>
           {(searchPriority === "direct" || containsIngredient) && (
@@ -493,55 +505,110 @@ export function ProductCard({
           className={compact ? "mt-0.5" : "mt-1"}
         />
 
-        <div className={cn("flex flex-wrap gap-1", compact ? "mt-0.5" : "mt-1")}>
         <div
           className={cn(
-            "flex shrink-0 flex-col gap-2",
-            isSpotlight ? "mt-2" : "",
-            isCompact && "gap-1",
+            isSpotlight && "mt-2 flex gap-2",
+            isCompact && "mt-0 flex w-full flex-col gap-1",
+            showTripleActionRow &&
+              "mt-1 grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-stretch gap-1",
+            showDoubleQuickRow && "mt-1 grid w-full min-w-0 grid-cols-2 items-stretch gap-1",
+            !isSpotlight &&
+              !isCompact &&
+              !showTripleActionRow &&
+              !showDoubleQuickRow &&
+              "mt-1 flex w-full min-w-0 flex-wrap items-stretch gap-1",
           )}
         >
-        <div
-          className={cn(
-            "flex gap-2",
-            !isSpotlight && !isCompact && "mt-1 flex-wrap gap-1",
-            isCompact && "mt-0 w-full flex-col gap-1",
+          <Button
+            size={isSpotlight ? "default" : "sm"}
+            className={cn(
+              isSpotlight
+                ? "h-9 w-[40%] shrink-0 rounded-md border-0 bg-[#1a3d5f] px-2 text-sm text-white hover:bg-[#153550]"
+                : isCompact
+                  ? "h-8 w-full px-2 text-[11px] font-semibold"
+                  : showTripleActionRow || showDoubleQuickRow
+                    ? "h-9 w-full min-w-0 justify-center truncate px-1.5 text-xs sm:px-2 sm:text-sm"
+                    : "min-w-0 flex-1",
+              compact && "h-7 text-xs px-2",
+            )}
+            onClick={(e) => {
+              e.stopPropagation()
+              trackClick("product", id, name)
+              if (pharmacyErx) {
+                setErxOpen(true)
+                return
+              }
+              addProductToCart()
+            }}
+          >
+            ⚡ Buy Now
+          </Button>
+          {onQuickView && quickViewReplacesWatchPrice ? (
+            <Button
+              type="button"
+              variant="outline"
+              size={isSpotlight ? "default" : "sm"}
+              className={cn(
+                isSpotlight
+                  ? "h-9 min-w-0 flex-1 rounded-md border-gray-300 text-sm text-foreground"
+                  : isCompact
+                    ? "h-8 w-full px-2 text-[10px] leading-tight [&_svg]:mr-1 [&_svg]:h-3 [&_svg]:w-3"
+                    : showDoubleQuickRow
+                      ? "h-9 w-full min-w-0 justify-center truncate px-1.5 text-xs sm:px-2 sm:text-sm [&_svg]:mr-1 [&_svg]:shrink-0"
+                      : "min-w-0 flex-1",
+                compact && "h-7 text-xs px-2",
+              )}
+              onClick={(e) => {
+                e.stopPropagation()
+                onQuickView()
+              }}
+              title="Quick view"
+            >
+              <ScanSearch className="h-4 w-4 mr-1 shrink-0" />
+              <span className="min-w-0 truncate">Quick view</span>
+            </Button>
+          ) : (
+            <PriceWatchButton
+              productId={(itemCode ?? id).toString().trim()}
+              supplierId={(supplierId || "unknown").toString().trim()}
+              name={name}
+              currentPrice={displayPrice}
+              supplierName={supplierName}
+              image={image}
+              size={isSpotlight ? "default" : compact ? "sm" : "sm"}
+              variant="outline"
+              className={cn(
+                isSpotlight
+                  ? "h-9 min-w-0 flex-1 rounded-md border-gray-300 text-sm text-foreground"
+                  : isCompact
+                    ? "h-8 w-full px-2 text-[10px] leading-tight [&_svg]:mr-1 [&_svg]:h-3 [&_svg]:w-3"
+                    : "h-9 w-9 shrink-0 p-0",
+                compact && "h-7 text-xs px-2",
+              )}
+            />
           )}
-        >
-        <Button
-          size={isSpotlight ? "default" : "sm"}
-          className={cn(
-            isSpotlight
-              ? "h-9 w-[40%] shrink-0 rounded-md border-0 bg-[#1a3d5f] px-2 text-sm text-white hover:bg-[#153550]"
-              : isCompact
-                ? "h-8 w-full px-2 text-[11px] font-semibold"
-                : "min-w-0 flex-1",
+          {onQuickView && !quickViewReplacesWatchPrice && (
+            <Button
+              type="button"
+              variant="outline"
+              size={isSpotlight ? "default" : "sm"}
+              className={cn(
+                isSpotlight
+                  ? "h-9 w-full rounded-md border-gray-300 text-sm text-foreground"
+                  : isCompact
+                    ? "ml-auto h-6 w-auto rounded-md px-2 text-[10px] leading-none"
+                    : showTripleActionRow
+                      ? "h-9 min-w-0 w-full truncate px-1.5 text-xs sm:px-2 sm:text-sm"
+                      : "min-w-0 flex-1 px-2.5 text-xs",
+              )}
+              onClick={(e) => {
+                e.stopPropagation()
+                onQuickView()
+              }}
+            >
+              <span className="min-w-0 truncate">Quick view</span>
+            </Button>
           )}
-          size={compact ? "sm" : "sm"}
-          className={cn("flex-1 min-w-0", compact && "h-7 text-xs px-2")}
-          onClick={(e) => {
-            e.stopPropagation()
-            trackClick("product", id, name)
-            if (pharmacyErx) {
-              setErxOpen(true)
-              return
-            }
-            addProductToCart()
-          }}
-        >
-          ⚡ Buy Now
-        </Button>
-        <PriceWatchButton
-          productId={id}
-          supplierId={(supplierId || "unknown").toString().trim()}
-          name={name}
-          currentPrice={price}
-          supplierName={supplierName}
-          image={image}
-          size={compact ? "sm" : "sm"}
-          variant="outline"
-          className={compact ? "h-7 text-xs px-2" : undefined}
-        />
         </div>
       </CardContent>
     </Card>
@@ -583,106 +650,5 @@ export function ProductCard({
       />
     )}
     </>
-            addOrInc(
-              {
-                id,
-                itemCode: itemCode ?? id,
-                name,
-                price: displayPrice,
-                unit,
-                image: imageUrlForCart,
-                image_url,
-                item_image_url,
-                IMAGE_URL,
-                item_key_words: product.item_key_words,
-                famille: product.famille,
-                supplierId: (supplierId || "unknown").toString().trim(),
-                supplierName: supplierName || "Supplier",
-                supplierLocation,
-                momo,
-                selectedUnit: unit,
-                ...(itemEmballageForCart ? { itemEmballage: itemEmballageForCart } : {}),
-                ...(product.item_state ? { item_state: product.item_state } : {}),
-                ...(product.expiryLabel ? { expiryLabel: product.expiryLabel } : {}),
-              },
-              1
-            )
-            if (navigateAfterAdd) {
-              router.push("/cart")
-            } else {
-              toast({
-                title: "Added to cart",
-                description: name,
-                duration: 2000,
-              })
-            }
-          }}
-        >
-          Buy
-        </Button>
-        {onQuickView && quickViewReplacesWatchPrice ? (
-          <Button
-            type="button"
-            variant="outline"
-            size={isSpotlight ? "default" : "sm"}
-            className={
-              isSpotlight
-                ? "h-9 min-w-0 flex-1 rounded-md border-gray-300 text-sm text-foreground"
-                : isCompact
-                  ? "h-8 w-full px-2 text-[10px] leading-tight [&_svg]:mr-1 [&_svg]:h-3 [&_svg]:w-3"
-                  : "min-w-0 flex-1"
-            }
-            onClick={(e) => {
-              e.stopPropagation()
-              onQuickView()
-            }}
-            title="Quick view"
-          >
-            <ScanSearch className="h-4 w-4 mr-1 shrink-0" />
-            Quick view
-          </Button>
-        ) : (
-          <PriceWatchButton
-            productId={(itemCode ?? id).toString().trim()}
-            supplierId={(supplierId || "unknown").toString().trim()}
-            name={name}
-            currentPrice={displayPrice}
-            supplierName={supplierName}
-            image={imageUrlForCart}
-            size={isSpotlight ? "default" : "sm"}
-            variant="outline"
-            className={
-              isSpotlight
-                ? "h-9 min-w-0 flex-1 rounded-md border-gray-300 text-sm text-foreground"
-                : isCompact
-                  ? "h-8 w-full px-2 text-[10px] leading-tight [&_svg]:mr-1 [&_svg]:h-3 [&_svg]:w-3"
-                  : undefined
-            }
-          />
-        )}
-        </div>
-        {onQuickView && !quickViewReplacesWatchPrice && (
-          <Button
-            type="button"
-            variant="outline"
-            size={isSpotlight ? "default" : "sm"}
-            className={cn(
-              isSpotlight
-                ? "h-9 w-full rounded-md border-gray-300 text-sm text-foreground"
-                : isCompact
-                  ? "ml-auto h-6 w-auto rounded-md px-2 text-[10px] leading-none"
-                  : "ml-auto h-7 w-auto rounded-md px-2.5 text-xs",
-            )}
-            onClick={(e) => {
-              e.stopPropagation()
-              onQuickView()
-            }}
-          >
-            Quick view
-          </Button>
-        )}
-        </div>
-      </CardContent>
-    </Card>
   )
 }

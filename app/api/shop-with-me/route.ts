@@ -163,28 +163,6 @@ export async function GET(request: NextRequest) {
       // invalid cache, fall through to backend
     }
   }
-  const base = getShopWithMeUrl().replace(/\?.*$/, '').replace(/\/+$/, '');
-
-  for (const candidate of candidates) {
-    const params: Record<string, string> = { nickname: candidate };
-    if (productSearchTrimmed) params.productSearch = productSearchTrimmed;
-    const cacheKey = buildCacheKey('shop-with-me', params);
-
-    const cached = await getCached(cacheKey);
-    if (cached) {
-      console.log('[API shop-with-me] Redis cache hit for variant');
-      try {
-        const data = JSON.parse(cached);
-        stripExpiredFromShopWithMeBody(data);
-        const sellers = Array.isArray(data?.sellers) ? data.sellers : [];
-        if (data?.ok === true && sellers.length > 0) {
-          return NextResponse.json(data, { headers: { 'X-Cache': 'HIT' } });
-        }
-        // If cached result had 0 sellers, try next variant.
-      } catch {
-        // invalid cache, fall through
-      }
-    }
 
   try {
     const base = getShopWithMeUrl().replace(/\?.*$/, '').replace(/\/+$/, '');
@@ -218,17 +196,15 @@ export async function GET(request: NextRequest) {
         continue;
       }
 
-      const data = await response.json();
-      stripExpiredFromShopWithMeBody(data);
-      const sellers = Array.isArray(data?.sellers) ? data.sellers : [];
       const parsed = await response.json();
+      stripExpiredFromShopWithMeBody(parsed);
       if (shopWithMeResponseLooksGood(parsed)) {
         data = parsed;
         winningVariant = variant;
         break;
       }
       data = parsed;
-      lastStatus = 200;
+      lastStatus = response.status;
     }
 
     if (!shopWithMeResponseLooksGood(data)) {

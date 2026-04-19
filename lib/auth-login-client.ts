@@ -22,6 +22,26 @@ function toUserRoleFromAuth(auth: Pick<ApiLoginOK, "role" | "dualPharmacyRetail"
   return "customer"
 }
 
+/** Java/org.json may send boolean, 1/0, or snake_case; treat all as "must show change-password". */
+export function parseMustChangePassword(json: Record<string, unknown> | null | undefined): boolean {
+  if (!json || typeof json !== "object") return false
+  const v =
+    json.mustChangePassword ??
+    json.must_change_password ??
+    (json as { force_password_change?: unknown }).force_password_change
+  if (v === true || v === 1) return true
+  if (v === false || v === 0 || v == null) return false
+  if (typeof v === "string") {
+    const s = v.trim().toLowerCase()
+    return s === "1" || s === "true" || s === "yes"
+  }
+  return false
+}
+
+export type LoginWithCredentialsResult =
+  | { outcome: "user"; user: User }
+  | { outcome: "must_change"; payload: ApiLoginOK }
+
 export function normalizeJavaLoginToUser(payload: ApiLoginOK): User {
   const u = (payload as unknown as { user?: Record<string, string> }).user ?? {}
   const email = String(u.email ?? "").trim()
@@ -52,19 +72,34 @@ export function normalizeJavaLoginToUser(payload: ApiLoginOK): User {
   }
 }
 
-export async function loginWithCredentials(phoneOrEmail: string, password: string): Promise<User> {
+export async function loginWithCredentialsResult(
+  phoneOrEmail: string,
+  password: string,
+): Promise<LoginWithCredentialsResult> {
   const trimmed = phoneOrEmail.trim()
   const res = await fetch("/api/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email: trimmed, password }),
+    credentials: "include",
   })
-  const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null
+  const json = (await res.json().catch(() => null)) as Record<string, unknown> | null
   if (!res.ok || !json || !(json as { ok?: boolean }).ok) {
-    const msg = (json as { error?: string })?.error || "Invalid credentials"
+    const msg = String((json as { error?: string } | null)?.error || "Invalid credentials")
     throw new Error(msg)
   }
-  return normalizeJavaLoginToUser(json as ApiLoginOK)
+  if (parseMustChangePassword(json)) {
+    return { outcome: "must_change", payload: json as unknown as ApiLoginOK }
+  }
+  return { outcome: "user", user: normalizeJavaLoginToUser(json as unknown as ApiLoginOK) }
+}
+
+export async function loginWithCredentials(phoneOrEmail: string, password: string): Promise<User> {
+  const r = await loginWithCredentialsResult(phoneOrEmail, password)
+  if (r.outcome === "must_change") {
+    throw new Error("Password change required. Use the full sign-in page to set a new password.")
+  }
+  return r.user
 }
 
 /** Seller / supplier access for Grandma gate (SELLER role or dual pharmacy retail). */

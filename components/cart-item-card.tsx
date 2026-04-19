@@ -16,7 +16,6 @@ export function CartItemCard({ item }: { item: CartItem }) {
   const inc = useCartStore((s) => s.inc)
   const dec = useCartStore((s) => s.dec)
   const setQty = useCartStore((s) => s.setQty)
-  const setQty = useCartStore((s) => s.setQty)
   const remove = useCartStore((s) => s.remove)
   const [inputValue, setInputValue] = useState(String(item.qty))
 
@@ -130,6 +129,7 @@ export function CartItemCard({ item }: { item: CartItem }) {
                 Expiry: {item.expiryLabel}
               </div>
             ) : null}
+          </div>
           </div>
         </div>
       </div>

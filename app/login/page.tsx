@@ -1,13 +1,13 @@
 "use client"
 
-import { Suspense } from "react"
+import { Suspense, useState, type FormEvent } from "react"
 import Image from "next/image"
-import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
+import { useRouter, useSearchParams } from "next/navigation"
+import { ArrowLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Dialog,
   DialogContent,
@@ -16,19 +16,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { ArrowLeft } from "lucide-react"
-import { useAuthStore, type User } from "@/lib/auth-store"
+import { useAuthStore } from "@/lib/auth-store"
+import type { User } from "@/lib/auth-store"
+import type { ApiLoginOK } from "@/lib/auth-login-client"
+import { normalizeJavaLoginToUser, userCanAccessSellerSpace } from "@/lib/auth-login-client"
 import { IshyigaLoginCard } from "@/components/ishyiga-login-card"
-import { userCanAccessSellerSpace } from "@/lib/auth-login-client"
 import { APP_VERSION_DISPLAY } from "@/lib/app-version"
 import { GRANDMA_PATHS } from "@/lib/grandma-urls"
-import { useAuthStore } from "@/lib/auth-store"
-import type { User, UserRole } from "@/lib/auth-store"
 import { getStrongPasswordError } from "@/lib/password-policy"
 
-// --- LOGGING UTILITY (fully disabled to avoid leaking sensitive info) ---
 const isLoginDebugEnabled = false
-const log = (tag: string, msg: string, data?: any) => {
+const log = (tag: string, msg: string, data?: unknown) => {
   if (!isLoginDebugEnabled) return
   const timestamp = new Date().toISOString().split("T")[1].slice(0, 8)
   if (data !== undefined) {
@@ -40,86 +38,20 @@ const log = (tag: string, msg: string, data?: any) => {
 
 const shell =
   "min-h-screen bg-[#eef4fb] text-[#17324d] flex flex-col bg-gradient-to-b from-[#f7fbff] to-[#eef4fb]"
-type ApiLoginOK = {
-  ok: true
-  role: "BUYER" | "SELLER" | "ADMIN" | "DRIVER" | "FINANCIER"
-  ishyiga: string
-  dbRole?: string
-  dualPharmacyRetail?: boolean
-  pharmacySector?: boolean
-  /** Java: force_password_change after temporary password */
-  mustChangePassword?: boolean
-  user: { email: string; firstName: string; lastName: string; tel: string; location: string; owner: string }
-}
 
 function LoginPageInner() {
-/** Java/org.json may send boolean, 1/0, or snake_case; treat all as "must show change-password". */
-function parseMustChangePassword(json: Record<string, unknown> | null | undefined): boolean {
-  if (!json || typeof json !== "object") return false
-  const v =
-    json.mustChangePassword ?? json.must_change_password ?? (json as { force_password_change?: unknown }).force_password_change
-  if (v === true || v === 1) return true
-  if (v === false || v === 0 || v == null) return false
-  if (typeof v === "string") {
-    const s = v.trim().toLowerCase()
-    return s === "1" || s === "true" || s === "yes"
-  }
-  return false
-}
-
-function toUserRoleFromAuth(auth: Pick<ApiLoginOK, "role" | "dualPharmacyRetail">): UserRole {
-  const dbRole = auth.role?.toUpperCase()
-  if (dbRole === "ADMIN") return "admin"
-  if (auth.dualPharmacyRetail) return "supplier"
-  if (dbRole === "SELLER") return "supplier"
-  return "customer"
-}
-
-function normalizeToStoreUser(payload: ApiLoginOK): User {
-  const u = (payload as any).user ?? {}
-  const email = String(u.email ?? (payload as any).email ?? "").trim()
-  if (!email) {
-    throw new Error("Login succeeded but profile data is incomplete. Check Java user-auth JSON (user.email).")
-  }
-  return {
-    id: email,
-    email,
-    name:
-      [u.firstName, u.lastName].filter(Boolean).join(" ") ||
-      String(u.owner ?? "").trim() ||
-      email,
-    role: toUserRoleFromAuth(payload),
-    dbRole: payload.dbRole,
-    dualPharmacyRetail: !!payload.dualPharmacyRetail,
-    pharmacySector: !!payload.pharmacySector,
-    phone: String(u.tel ?? "").trim(),
-    location: String(u.location ?? "").trim(),
-    ishyigaAccount: payload.ishyiga || undefined,
-    businessName: u.owner ? String(u.owner).trim() : undefined,
-  }
-}
-
-export default function LoginPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const redirectTo = searchParams?.get("redirect")
   const phonePrefill = searchParams?.get("phone") ?? ""
-  const login = useAuthStore((s) => s.login)
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const loginStore = useAuthStore((s) => s.login)
+
   const [pendingLoginPayload, setPendingLoginPayload] = useState<ApiLoginOK | null>(null)
   const [existingPassword, setExistingPassword] = useState("")
   const [newPassword, setNewPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [pwChangeLoading, setPwChangeLoading] = useState(false)
   const [pwChangeError, setPwChangeError] = useState<string | null>(null)
-
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-    setError(null)
 
   const backHomeHref = (() => {
     if (!redirectTo) return "/"
@@ -132,107 +64,28 @@ export default function LoginPage() {
     return "/"
   })()
   const backHomeLabel = backHomeHref === GRANDMA_PATHS.appRoot ? "Back to Grandma" : "Back to Home"
-      log("LOGIN", `Sending to /api/auth/login`)
 
-      const emailTrimmed = email.trim()
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: emailTrimmed, password }),
-        credentials: "include",
-      })
-
-      log("LOGIN", `HTTP Status: ${res.status}`)
-
-      const json = await res.json().catch(async () => {
-        const text = await res.text()
-        log("LOGIN", `ERROR parsing JSON:`, text.substring(0, 300))
-        throw new Error("Bad JSON from auth server")
-      })
-
-      log("LOGIN", `Response:`, json)
-
-      if (!res.ok || !json?.ok) {
-        throw new Error("Invalid credentials")
-      }
-
-  const handleSuccess = async (user: User) => {
-    const decoded = redirectTo ? decodeURIComponent(redirectTo) : ""
-    const safeRedirect = decoded.startsWith("/") && !decoded.startsWith("//") && decoded.length > 0
-      const payload = json as ApiLoginOK
-      const mustChange = parseMustChangePassword(json as Record<string, unknown>)
-
-      if (mustChange) {
-        setPendingLoginPayload(payload)
-        setExistingPassword(password)
-        setNewPassword("")
-        setConfirmPassword("")
-        setPwChangeError(null)
-        log("LOGIN", "mustChangePassword — show set-password dialog")
-        return
-      }
-
-      const user: User = normalizeToStoreUser(payload)
-      log("LOGIN", `User normalized:`, user)
-
-    login(user)
-
-    // Grandma remembers buyer vs seller so /grandma opens the right space after sign-in.
-    if (safeRedirect && decoded.startsWith("/grandma") && typeof window !== "undefined") {
-      try {
-        localStorage.setItem(
-          "grandma:mode",
-          userCanAccessSellerSpace(user) ? "seller" : "buyer",
-        )
-      } catch {
-        /* ignore */
-      }
-    }
-
-    if (safeRedirect) {
-      router.push(decoded)
-      return
-    }
-      const decoded = redirectTo ? decodeURIComponent(redirectTo) : ""
-      const safeRedirect = decoded.startsWith("/") && !decoded.startsWith("//")
-      if (safeRedirect && decoded.length > 0) {
-        router.push(decoded)
-        return
-      }
-
-      if (user.role === "admin") {
-        router.push("/admin/dashboard")
-      } else if (user.role === "supplier") {
-        router.push("/supplier/dashboard")
-      } else {
-        router.push("/")
-      }
-    } catch (err: any) {
-      const errorMsg = err?.message || "Network error"
-      log("LOGIN", `ERROR: ${errorMsg}`)
-      setError(errorMsg)
-    } finally {
-      setLoading(false)
-      log("LOGIN", `END`)
-    if (user.role === "admin") {
-      router.push("/admin/dashboard")
-    } else if (user.role === "supplier") {
-      router.push("/supplier/dashboard")
-    } else {
-      router.push("/")
+  const applyGrandmaModeHint = (user: User, decodedRedirect: string) => {
+    if (typeof window === "undefined") return
+    if (!decodedRedirect.startsWith("/grandma")) return
+    try {
+      localStorage.setItem("grandma:mode", userCanAccessSellerSpace(user) ? "seller" : "buyer")
+    } catch {
+      /* ignore */
     }
   }
 
   const finishLoginAndRedirect = (payload: ApiLoginOK) => {
-    const user: User = normalizeToStoreUser(payload)
-    login(user)
+    const user: User = normalizeJavaLoginToUser(payload)
+    loginStore(user)
     setPendingLoginPayload(null)
     setExistingPassword("")
     setNewPassword("")
     setConfirmPassword("")
     const decoded = redirectTo ? decodeURIComponent(redirectTo) : ""
-    const safeRedirect = decoded.startsWith("/") && !decoded.startsWith("//")
-    if (safeRedirect && decoded.length > 0) {
+    const safeRedirect = decoded.startsWith("/") && !decoded.startsWith("//") && decoded.length > 0
+    applyGrandmaModeHint(user, decoded)
+    if (safeRedirect) {
       router.push(decoded)
       return
     }
@@ -245,7 +98,35 @@ export default function LoginPage() {
     }
   }
 
-  const handlePasswordChangeAfterLogin = async (e: React.FormEvent) => {
+  const handleSuccess = async (user: User) => {
+    log("LOGIN", "success", user)
+    loginStore(user)
+    const decoded = redirectTo ? decodeURIComponent(redirectTo) : ""
+    const safeRedirect = decoded.startsWith("/") && !decoded.startsWith("//") && decoded.length > 0
+    applyGrandmaModeHint(user, decoded)
+    if (safeRedirect) {
+      router.push(decoded)
+      return
+    }
+    if (user.role === "admin") {
+      router.push("/admin/dashboard")
+    } else if (user.role === "supplier") {
+      router.push("/supplier/dashboard")
+    } else {
+      router.push("/")
+    }
+  }
+
+  const handleMustChangePassword = (payload: ApiLoginOK, password: string) => {
+    setPendingLoginPayload(payload)
+    setExistingPassword(password)
+    setNewPassword("")
+    setConfirmPassword("")
+    setPwChangeError(null)
+    log("LOGIN", "mustChangePassword — show set-password dialog")
+  }
+
+  const handlePasswordChangeAfterLogin = async (e: FormEvent) => {
     e.preventDefault()
     setPwChangeError(null)
     const current = existingPassword.trim()
@@ -275,7 +156,7 @@ export default function LoginPage() {
         credentials: "include",
         body: JSON.stringify({ currentPassword: current, newPassword }),
       })
-      const j = await res.json().catch(() => ({}))
+      const j = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string }
       if (!res.ok || !j?.ok) {
         setPwChangeError(j?.error || "Could not update password")
         return
@@ -322,54 +203,17 @@ export default function LoginPage() {
 
         <IshyigaLoginCard
           onSuccess={handleSuccess}
+          onMustChangePassword={handleMustChangePassword}
           defaultPhone={phonePrefill}
           registerHref="/register/buyer"
         />
-            <CardTitle className="text-2xl">Welcome Back</CardTitle>
-            <CardDescription>Sign in to your account to continue</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleLogin} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                />
-              </div>
-              {error && <p className="text-sm text-destructive">{error}</p>}
-              <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? "Signing in..." : "Sign In"}
-              </Button>
-            </form>
-            <div className="mt-6 text-center space-y-3">
-              <p className="text-sm">
-                <Link href="/forgot-password" className="text-primary hover:underline font-medium">
-                  Forgot password?
-                </Link>
-              </p>
-              <p className="text-sm text-muted-foreground">
-                Don&apos;t have an account? <Link href="/register" className="text-primary hover:underline font-medium">Register here</Link>
-              </p>
-            </div>
-          </CardContent>
-        </Card>
 
         <Dialog open={!!pendingLoginPayload} onOpenChange={() => {}}>
-          <DialogContent className="sm:max-w-md" onPointerDownOutside={(ev) => ev.preventDefault()} onEscapeKeyDown={(ev) => ev.preventDefault()}>
+          <DialogContent
+            className="sm:max-w-md"
+            onPointerDownOutside={(ev) => ev.preventDefault()}
+            onEscapeKeyDown={(ev) => ev.preventDefault()}
+          >
             <DialogHeader>
               <DialogTitle>Set a new password</DialogTitle>
               <DialogDescription>

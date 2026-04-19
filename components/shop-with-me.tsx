@@ -677,9 +677,7 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
   const [itemsPerPage, setItemsPerPage] = useState(12);
   const [categoryPages, setCategoryPages] = useState<Record<string, number>>({});
 
-  const cartItems = useCartStore((s) => s.items);
   const addItem = useCartStore((s) => s.addItem);
-  const cartItemCount = cartItems.reduce((sum, item) => sum + item.qty, 0);
   const setTableInfo = useCartStore((s) => s.setTableInfo);
   const clearTableInfo = useCartStore((s) => s.clearTableInfo);
   const joinTableCommand = useTableCommandStore((s) => s.joinTableCommand);
@@ -1206,81 +1204,8 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
-      <Header />
-      {/* Header – same alignment as main site (omit when embedInMainLayout, main site Header is used) */}
-      {!embedInMainLayout && (
-      <header className="sticky top-0 z-50 w-full border-b bg-white shadow-sm">
-        <div className="container mx-auto px-4">
-          <div className="flex h-16 items-center justify-between gap-2 md:gap-4">
-            {/* Logo – left, link to home */}
-            <Link href="/" className="flex items-center shrink-0">
-              <Image
-                src="/images/ishyiga-logo.png"
-                alt="Ishyiga Software"
-                width={100}
-                height={35}
-                className="h-8 w-auto md:h-10"
-              />
-            </Link>
-
-            {/* Center: product search + location + filters (when seller selected) – same line as main site */}
-            {currentSeller && (
-              <div className="hidden lg:flex flex-1 max-w-xl items-center gap-2">
-                <div className="relative min-w-0 flex-1">
-                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                  <Input
-                    type="search"
-                    placeholder="Search products..."
-                    value={productSearchQuery}
-                    onChange={(e) => setProductSearchQuery(e.target.value)}
-                    className="h-9 pl-9 min-w-0"
-                  />
-                </div>
-                <LocationBadge compact />
-                {showFilterButton && (
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    className="h-9 w-9 shrink-0 relative"
-                    onClick={() => setFilterSheetOpen(true)}
-                    title="Sort, price range & category"
-                  >
-                    <SlidersHorizontal className="h-4 w-4" />
-                    {hasActiveFilters && (
-                      <span className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-primary text-[10px] font-medium text-primary-foreground flex items-center justify-center">
-                        {[categoryFilter, priceMin.trim(), priceMax.trim(), moodPreference].filter(Boolean).length}
-                      </span>
-                    )}
-                  </Button>
-                )}
-              </div>
-            )}
-
-            {/* Actions – right side, same as main site */}
-            <div className="flex items-center gap-1 md:gap-2">
-              <Button variant="ghost" size="sm" className="hidden md:flex">
-                English
-              </Button>
-              <Button variant="ghost" size="sm" className="hidden sm:flex">
-                Login
-              </Button>
-              <Button variant="ghost" size="icon" className="hidden sm:flex">
-                <Heart className="h-5 w-5" />
-              </Button>
-              <Button variant="ghost" size="icon" className="relative" onClick={() => router.push("/cart")}>
-                <ShoppingCart className="h-5 w-5" />
-                {cartItemCount > 0 && (
-                  <span className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-green-500 text-white text-xs flex items-center justify-center">
-                    {cartItemCount}
-                  </span>
-                )}
-              </Button>
-            </div>
-          </div>
-        </div>
-      </header>
-      )}
+      {/* Main site header (layout provides it when embedInMainLayout) */}
+      {!embedInMainLayout && <Header />}
 
       {/* Main Content – same container as main site */}
       <div className="container mx-auto px-4 py-6">
@@ -1447,8 +1372,8 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
               )}
             </div>
 
-            {/* Mobile: search + filters (desktop has them in header). When embedInMainLayout always show here. */}
-            <div className={cn("flex flex-col sm:flex-row gap-3 sm:items-center", !embedInMainLayout && "lg:hidden")}>
+            {/* Shop-scoped search + filters (single header: main Header above; no duplicate nav bar) */}
+            <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -2016,7 +1941,6 @@ function ProductCard({
     embRaw != null && String(embRaw).trim() !== "" ? String(embRaw) : null;
   /** Line total is in RWF; suffix is pack size (e.g. `1 pcs`), not a second currency. Default multiplier 1 when missing. */
   const unitLabel = itemEmballageDisplaySuffix(embStr ?? "1") ?? "1 pcs";
-  const price = extractNumericPrice(priceRaw);
   const moodMeta = moodMetaType ? getMoodMetaText(product, moodMetaType) : { text: null };
 
   /** Try KAOS famille → flat NIKI → each backend URL → no_image (same order as getProductImageSrc, but advance on 404). */

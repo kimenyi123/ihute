@@ -37,7 +37,9 @@ export function sumProductsInListSuppliersPayload(rows: unknown[]): number {
 export async function fetchSectorStatsFromApi(sectorId: string): Promise<{ shops: number; items: number }> {
   const sid = sectorId.trim().toLowerCase()
   if (!sid) return { shops: 0, items: 0 }
-  const url = `/api/fetchSuggestions?sectorStats=${encodeURIComponent(sid)}`
+  const debugSql =
+    typeof process !== "undefined" && process.env.NEXT_PUBLIC_SECTOR_STATS_DEBUG === "1"
+  const url = `/api/fetchSuggestions?sectorStats=${encodeURIComponent(sid)}${debugSql ? "&debugSql=1" : ""}`
   const r = await fetch(url, { cache: "no-store" })
   const j = (await r.json().catch(() => null)) as Record<string, unknown> | null
   if (!j || typeof j !== "object") {

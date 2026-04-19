@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server"
 
 const RID_HEADER = "x-request-id"
 import { getOrdersUrl, getSellerOrdersUrl } from "@/lib/backend-config"
-import { getOrdersUrl } from "@/lib/backend-config"
 import { getOrderMeta } from "@/lib/order-client-meta-store"
 import {
   getOrCreatePublicTokenForOrderId,

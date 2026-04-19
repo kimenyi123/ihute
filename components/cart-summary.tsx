@@ -595,14 +595,6 @@ function CartSummaryBody() {
             : {}),
         }
       })
-      const items = g.items.map(it => ({
-        name: it.name,
-        qty: it.qty,
-        unitPrice: it.price,
-        unit: it.unit ?? "",
-        itemCode: it.itemCode ?? it.id,
-        notes: it.notes ?? "",
-      }))
 
       const paymentId = opts.paymentId || `${opts.paymentName}_${Date.now()}`
 

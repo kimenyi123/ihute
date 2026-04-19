@@ -420,15 +420,16 @@ export function GlobalSearch({
       return
     }
 
-    const id = setTimeout(async () => {
-    const requestId = ++searchRequestIdRef.current
-    const abortController = new AbortController()
-    /** Hard cap so the dropdown never spins until the browser default if the proxy hangs. */
-    /** Must allow Redis scan + DB fallback on slow local Kaos; stay under typical browser limits. */
-    const CLIENT_SEARCH_TIMEOUT_MS = 40000
-    const clientTimeout = setTimeout(() => abortController.abort(), CLIENT_SEARCH_TIMEOUT_MS)
+    let debounceTimer: ReturnType<typeof setTimeout> | undefined
+    const id = setTimeout(() => {
+      const requestId = ++searchRequestIdRef.current
+      const abortController = new AbortController()
+      /** Hard cap so the dropdown never spins until the browser default if the proxy hangs. */
+      /** Must allow Redis scan + DB fallback on slow local Kaos; stay under typical browser limits. */
+      const CLIENT_SEARCH_TIMEOUT_MS = 40000
+      const clientTimeout = setTimeout(() => abortController.abort(), CLIENT_SEARCH_TIMEOUT_MS)
 
-    const debounceTimer = setTimeout(async () => {
+      debounceTimer = setTimeout(async () => {
       setLoading(true)
       setErr(null)
       setSearchWarning(null)
@@ -621,9 +622,13 @@ export function GlobalSearch({
           setLoading(false)
         }
       }
-    }, 300)
+      }, 300)
+    }, 0)
 
-    return () => clearTimeout(id)
+    return () => {
+      clearTimeout(id)
+      if (debounceTimer !== undefined) clearTimeout(debounceTimer)
+    }
   }, [q, maxSuggestions, sector, categoryBrowseMode, location, isCategoryAi])
 
   // Click outside detection

@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { PasswordInputWithToggle } from "@/components/password-input-with-toggle"
-import { loginWithCredentials } from "@/lib/auth-login-client"
+import { loginWithCredentialsResult, type ApiLoginOK } from "@/lib/auth-login-client"
 import type { User } from "@/lib/auth-store"
 import { cn } from "@/lib/utils"
 
@@ -39,6 +39,8 @@ export type IshyigaLoginCardProps = {
   showLogo?: boolean
   className?: string
   onSuccess: (user: User) => void | Promise<void>
+  /** Java returned `mustChangePassword` — caller shows set-password UI (e.g. `/login` dialog). */
+  onMustChangePassword?: (payload: ApiLoginOK, password: string) => void | Promise<void>
 }
 
 export function IshyigaLoginCard({
@@ -52,6 +54,7 @@ export function IshyigaLoginCard({
   showLogo = true,
   className,
   onSuccess,
+  onMustChangePassword,
 }: IshyigaLoginCardProps) {
   const initialPhone = defaultPhone ?? defaultPhoneOrEmail ?? ""
   const [phone, setPhone] = useState(initialPhone)
@@ -81,8 +84,16 @@ export function IshyigaLoginCard({
         setLoading(false)
         return
       }
-      const user = await loginWithCredentials(id, password)
-      await onSuccess(user)
+      const result = await loginWithCredentialsResult(id, password)
+      if (result.outcome === "must_change") {
+        if (onMustChangePassword) {
+          await onMustChangePassword(result.payload, password)
+        } else {
+          setError("This account must set a new password. Open ihute on a browser and sign in again.")
+        }
+      } else {
+        await onSuccess(result.user)
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Network error")
     } finally {

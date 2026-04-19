@@ -1,3 +1,4 @@
+import Image from "next/image"
 import Link from "next/link"
 import { Facebook, Twitter, Instagram, Mail, Phone, MapPin } from "lucide-react"
 import { APP_VERSION_DISPLAY } from "@/lib/app-version"
@@ -73,9 +74,6 @@ export function Footer({ showIshyigaIntelligenceTagline = false }: FooterProps) 
 
         {/* Desktop: Grid layout */}
         <div className="hidden md:grid gap-8 md:grid-cols-2 lg:grid-cols-4">
-          {/* Brand Section */}
-      <div className="container mx-auto px-4 py-12">
-        <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-4">
           {/* Social */}
           <div className="space-y-4">
             <h4 className="text-sm font-semibold text-foreground">Follow us</h4>

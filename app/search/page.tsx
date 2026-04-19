@@ -89,6 +89,7 @@ type Product = {
   IMAGE_URL?: string
   famille?: string
   FAMILLE?: string
+  item_fabricant?: string
   relevance_score?: number
 }
 
@@ -478,8 +479,9 @@ function normalizeSupplierProductsResponse(
           cost_price: q.cost_price,
           currency: q.currency,
           momo: q.momo,
-          famille: (q as any).famille ?? (q as any).FAMILLE,
-          item_fabricant: (q as any).item_fabricant ?? (q as any).id_fabricant,
+          ...(((q as any).item_fabricant ?? (q as any).id_fabricant)
+            ? { item_fabricant: String((q as any).item_fabricant ?? (q as any).id_fabricant) }
+            : {}),
         })
       }
     }
@@ -548,6 +550,8 @@ export default function SearchPage() {
 
   function toQuickViewProduct(p: Product): QuickViewProduct {
     const price = extractNumericPrice(p.selling_price) || extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) || extractNumericPrice((p as any).price) || 0
+    const embRaw = productItemEmballageRaw(p)
+    const itemEmballage = normalizeItemEmballageForCart(embRaw)
     return {
       id: p.item_code || p.item_key_words || "",
       name: p.item_commercial_name || "Product",
@@ -558,8 +562,7 @@ export default function SearchPage() {
       itemCode: p.item_code || p.item_key_words,
       supplierId: p.supplier_account,
       supplierName: p.supplier_name,
-      itemEmballage: normalizeItemEmballageForCart(emb),
-      image: p.image,
+      ...(itemEmballage ? { itemEmballage } : {}),
       image_url: p.image_url,
       item_image_url: p.item_image_url,
       IMAGE_URL: p.IMAGE_URL,
@@ -1006,21 +1009,13 @@ export default function SearchPage() {
   const priceMinNum = useMemo(() => (priceMinParam ? parseInt(priceMinParam, 10) : 0), [priceMinParam])
   const priceMaxNum = useMemo(() => (priceMaxParam ? parseInt(priceMaxParam, 10) : 0), [priceMaxParam])
 
-  // Main search products (global): apply client-side category + price filter (API has no support), exclude 0 price, then sort
+  // Main search products (global): category + price filter, exclude 0 line price, sort, optional item deep-link match
   const searchProductsWithPrice = useMemo(() => {
     const list = searchResult?.products ?? []
-    let filtered = list.filter(p => {
-      const price = extractNumericPrice(p.selling_price) || extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) || extractNumericPrice((p as any).price)
-      if (price <= 0) return false
+    const filtered = list.filter((p) => {
+      if (productLinePrice(p) <= 0) return false
       return productMatchesCategoryAndPrice(p, categoryParam, priceMinNum, priceMaxNum)
     })
-    const priceNum = (p: Product) => extractNumericPrice(p.selling_price) || extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) || extractNumericPrice((p as any).price)
-    if (productSort === "price-asc") return [...filtered].sort((a, b) => priceNum(a) - priceNum(b))
-    if (productSort === "price-desc") return [...filtered].sort((a, b) => priceNum(b) - priceNum(a))
-    return filtered
-  }, [searchResult?.products, productSort, categoryParam, priceMinNum, priceMaxNum])
-    // Same as supplier-scoped: prefer `final_selling_price` when backend provides it.
-    const filtered = list.filter((p) => productLinePrice(p) > 0)
     let ordered: Product[]
     if (productSort === "price-asc")
       ordered = [...filtered].sort((a, b) => productLinePrice(a) - productLinePrice(b))
@@ -1040,7 +1035,7 @@ export default function SearchPage() {
       if (matches.length > 0) ordered = matches
     }
     return ordered
-  }, [searchResult?.products, productSort, itemParam, debouncedQ])
+  }, [searchResult?.products, productSort, categoryParam, priceMinNum, priceMaxNum, itemParam, debouncedQ])
 
   // Group products by supplier so the page is ordered (not a mix of many suppliers)
   const productsBySupplier = useMemo(() => {

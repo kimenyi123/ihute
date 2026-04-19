@@ -1,7 +1,6 @@
 "use client"
 
 import { Header } from "@/components/header"
-import { Footer } from "@/components/footer"
 import { BuyerOrdersPanel } from "@/components/buyer-orders-panel"
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
@@ -15,8 +14,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Header } from "@/components/header"
-import { Footer } from "@/components/footer"
 import { SdcInfoCell, sdcRaw } from "@/components/sdc-info-cell"
 import { Loader2 } from "lucide-react"
 import { ResponsiveTable } from "@/components/ui/responsive-table"
@@ -404,11 +401,10 @@ export default function BuyerOrdersPage() {
     return (
       <div className="min-h-screen w-full flex flex-col bg-slate-50">
         <Header />
-        <main className="flex-1 flex flex-col items-center justify-center gap-2 text-slate-600">
+        <main className="flex flex-1 flex-col items-center justify-center gap-2 text-slate-600">
           <Loader2 className="h-8 w-8 animate-spin" aria-hidden />
           <p className="text-sm">Checking session…</p>
         </main>
-        <Footer />
       </div>
     )
   }
@@ -479,9 +475,7 @@ export default function BuyerOrdersPage() {
     <div className="min-h-screen w-full flex flex-col bg-slate-50">
       <Header />
       <BuyerOrdersPanel variant="buyer" loginRedirect="/login" />
-      <Footer />
-    </div>
-    <main className="w-full max-w-7xl mx-auto p-6">
+      <main className="mx-auto w-full max-w-7xl flex-1 p-6">
         <h1 className="text-2xl font-bold mb-4 text-slate-800">Order Reports</h1>
 
         <div className="mb-4 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2">
@@ -623,6 +617,7 @@ export default function BuyerOrdersPage() {
             Next
           </Button>
         </div>
-    </main>
+      </main>
+    </div>
   )
 }

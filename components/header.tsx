@@ -256,7 +256,6 @@ export function Header() {
                       </Link>
                     </Button>
                   )}
-                </div>
               </>
             ) : (
               <Button asChild variant="ghost" size="sm" className="h-9">

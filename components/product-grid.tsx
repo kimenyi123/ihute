@@ -447,7 +447,6 @@ export function ProductGrid({
       cancelled = true;
     };
   }, [browseMode, selectedSupplier, preloadedSectorListSuppliers, categoryId]);
-  }, [searchQuery, categoryId, selectedSupplier]);
 
   useEffect(() => {
     let isMounted = true;
@@ -466,16 +465,9 @@ export function ProductGrid({
         const base = getApiBase();
         const sectorListUrl = `${base}/api/sector-list-suppliers?sector=${encodeURIComponent(categoryId)}&Currency=RWF&limit=${LIST_SECTOR_SUPPLIERS_LIMIT}`;
 
-        if (selectedSupplier === "all") {
-          // show random products from sellers in this category
-          const res = await fetch(
-            `${base}/api/fetchSuggestions?listSuppliersWithProducts=${encodeURIComponent(categoryId)}&limit=10000&Currency=RWF`,
-            { cache: "no-store" }
-          );
         const loadAllSectorProducts = async (shuffle: boolean) => {
           const res = await fetch(sectorListUrl, { cache: "no-store" });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const sellers = (await res.json()) as Array<any>;
           const raw = await res.json();
           const sellers = extractSuppliersWithProducts(raw);
 
@@ -529,11 +521,10 @@ export function ProductGrid({
   const allProducts = useMemo(() => {
     // Use global search results if searching, otherwise use server products
     const sourceProducts = effectiveSearchQuery.trim() ? globalSearchResults : serverProducts;
-    const sourceProducts = searchQuery.trim() ? globalSearchResults : serverProducts;
 
     console.log("[ProductGrid] allProducts update:", {
-      searchQuery: searchQuery,
-      usingGlobalResults: !!searchQuery.trim(),
+      searchQuery: effectiveSearchQuery,
+      usingGlobalResults: !!effectiveSearchQuery.trim(),
       sourceProductsCount: sourceProducts.length,
       globalResultsCount: globalSearchResults.length,
       serverProductsCount: serverProducts.length
@@ -583,23 +574,13 @@ export function ProductGrid({
         item_code: p.item_code,
         ITEM_CODE: p.ITEM_CODE,
         item_key_words: p.item_key_words,
-        // Preserve all image fields for KAOS URL construction
-        image: p.image,
-        image_url: p.image_url,
-        item_image_url: p.item_image_url,
-        IMAGE_URL: p.IMAGE_URL,
-        // Also preserve famille for KAOS paths
-        famille: p.famille,
-        FAMILLE: p.FAMILLE,
-        item_key_words: p.item_key_words,
-        item_code: p.item_key_words,
+        famille: (p as { famille?: string }).famille ?? (p as { FAMILLE?: string }).FAMILLE ?? "",
+        FAMILLE: (p as { FAMILLE?: string }).FAMILLE,
         momo: p.momo,
         _routeCategory: firstCategoryHint,
-        famille: p.famille || "",
       };
     });
-  }, [serverProducts, globalSearchResults, effectiveSearchQuery, categoryId]);
-  }, [serverProducts, globalSearchResults, searchQuery, categoryId, selectedSupplier]);
+  }, [serverProducts, globalSearchResults, effectiveSearchQuery, categoryId, selectedSupplier]);
 
   const suppliers = useMemo(() => {
     const uniq = new Map<string, { id: string; name: string; location?: string }>();
@@ -710,6 +691,7 @@ export function ProductGrid({
   }
 
   return (
+    <>
     <div className="space-y-6">
       <div className="flex flex-col gap-4">
         {!slimCategoryItemHeader && (
