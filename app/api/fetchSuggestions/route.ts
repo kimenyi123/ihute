@@ -53,6 +53,8 @@ async function forward(req: NextRequest) {
   const incoming = new URL(req.url)
   const sectorStatsParam = incoming.searchParams.get("sectorStats")
   const debugSql = isDebugSql(incoming.searchParams)
+  /** Sector totals (`shops` / `items`) must track stock syncs; do not serve a 5‑min cached snapshot here. */
+  const skipSuggestionsCache = Boolean(sectorStatsParam?.trim()) || debugSql
   const target = new URL(getFetchSuggestionsUrl())
 
   // Copy query params. Backend must always search Redis first, then DB (see docs/backend-redis-search.md).
@@ -62,7 +64,7 @@ async function forward(req: NextRequest) {
 
   // Redis first (this app): check our response cache before calling backend (DB)
   const cacheKey = buildCacheKey("fetchSuggestions", paramsToRecord(incoming.searchParams))
-  const cached = debugSql ? null : await getCached(cacheKey)
+  const cached = skipSuggestionsCache ? null : await getCached(cacheKey)
   if (cached) {
     console.log("[fetchSuggestions] Redis cache hit")
     try {
@@ -275,8 +277,8 @@ async function forward(req: NextRequest) {
 
     enrichFetchSuggestionsProducts(parsed ?? {})
 
-    // Store in Redis for next time (Redis first, then DB) — skip when debugSql so each hit refreshes upstream + logs
-    if (!debugSql) {
+    // Store in Redis for next time (Redis first, then DB) — skip sectorStats (fresh counts) and debugSql
+    if (!skipSuggestionsCache) {
       await setCached(cacheKey, JSON.stringify(parsed ?? {}), SUGGESTIONS_TTL_SEC)
     }
 

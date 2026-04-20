@@ -124,6 +124,11 @@ export function ProductCard({
     !isSpotlight && !isCompact && Boolean(onQuickView && !quickViewReplacesWatchPrice)
   const showDoubleQuickRow =
     !isSpotlight && !isCompact && Boolean(onQuickView && quickViewReplacesWatchPrice)
+  /** Single-product / deep-link layout: Buy + eye (watch) + Quick view — needs a grid so labels are not truncated. */
+  const spotlightWatchAndQuick =
+    isSpotlight && Boolean(onQuickView) && !quickViewReplacesWatchPrice
+  const spotlightQuickOnlyRow =
+    isSpotlight && Boolean(onQuickView) && quickViewReplacesWatchPrice
   const router = useRouter()
   const addOrInc = useCartStore((s) => s.addOrInc ?? s.addItem)
   const cartItems = useCartStore((s) => s.items)
@@ -470,9 +475,9 @@ export function ProductCard({
         <div className={compact ? "text-xs" : "text-sm"}>
           <div className="flex items-baseline gap-2">
             <span className="font-semibold">
-              {price.toLocaleString()} {currency}
+              {displayPrice.toLocaleString()} {currency}
             </span>
-            {oldPrice != null && oldPrice > price && (
+            {oldPrice != null && oldPrice > displayPrice && (
               <span className="text-[10px] text-muted-foreground line-through">
                 {oldPrice.toLocaleString()}
               </span>
@@ -507,7 +512,10 @@ export function ProductCard({
 
         <div
           className={cn(
-            isSpotlight && "mt-2 flex gap-2",
+            spotlightWatchAndQuick &&
+              "mt-2 grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-stretch gap-2",
+            spotlightQuickOnlyRow && "mt-2 grid w-full min-w-0 grid-cols-2 items-stretch gap-2",
+            isSpotlight && !spotlightWatchAndQuick && !spotlightQuickOnlyRow && "mt-2 flex w-full min-w-0 flex-wrap gap-2",
             isCompact && "mt-0 flex w-full flex-col gap-1",
             showTripleActionRow &&
               "mt-1 grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-stretch gap-1",
@@ -523,7 +531,12 @@ export function ProductCard({
             size={isSpotlight ? "default" : "sm"}
             className={cn(
               isSpotlight
-                ? "h-9 w-[40%] shrink-0 rounded-md border-0 bg-[#1a3d5f] px-2 text-sm text-white hover:bg-[#153550]"
+                ? cn(
+                    "h-10 min-h-10 rounded-md border-0 bg-[#1a3d5f] px-3 text-sm font-semibold text-white hover:bg-[#153550] sm:h-9 sm:min-h-9",
+                    spotlightWatchAndQuick || spotlightQuickOnlyRow
+                      ? "w-full min-w-0"
+                      : "min-w-0 flex-1",
+                  )
                 : isCompact
                   ? "h-8 w-full px-2 text-[11px] font-semibold"
                   : showTripleActionRow || showDoubleQuickRow
@@ -550,7 +563,7 @@ export function ProductCard({
               size={isSpotlight ? "default" : "sm"}
               className={cn(
                 isSpotlight
-                  ? "h-9 min-w-0 flex-1 rounded-md border-gray-300 text-sm text-foreground"
+                  ? "inline-flex h-10 min-h-10 w-full min-w-0 items-center justify-center gap-2 rounded-md border-gray-300 px-3 text-sm text-foreground sm:h-9 sm:min-h-9"
                   : isCompact
                     ? "h-8 w-full px-2 text-[10px] leading-tight [&_svg]:mr-1 [&_svg]:h-3 [&_svg]:w-3"
                     : showDoubleQuickRow
@@ -562,10 +575,10 @@ export function ProductCard({
                 e.stopPropagation()
                 onQuickView()
               }}
-              title="Quick view"
+              title="Quick view — details & add to cart"
             >
-              <ScanSearch className="h-4 w-4 mr-1 shrink-0" />
-              <span className="min-w-0 truncate">Quick view</span>
+              <ScanSearch className="h-4 w-4 shrink-0" aria-hidden />
+              <span className="min-w-0 text-center leading-tight">Quick view</span>
             </Button>
           ) : (
             <PriceWatchButton
@@ -579,7 +592,7 @@ export function ProductCard({
               variant="outline"
               className={cn(
                 isSpotlight
-                  ? "h-9 min-w-0 flex-1 rounded-md border-gray-300 text-sm text-foreground"
+                  ? "h-10 w-11 shrink-0 justify-center px-0 sm:h-9 sm:w-10"
                   : isCompact
                     ? "h-8 w-full px-2 text-[10px] leading-tight [&_svg]:mr-1 [&_svg]:h-3 [&_svg]:w-3"
                     : "h-9 w-9 shrink-0 p-0",
@@ -594,19 +607,21 @@ export function ProductCard({
               size={isSpotlight ? "default" : "sm"}
               className={cn(
                 isSpotlight
-                  ? "h-9 w-full rounded-md border-gray-300 text-sm text-foreground"
+                  ? "inline-flex h-10 min-h-10 w-full min-w-0 items-center justify-center gap-2 rounded-md border-gray-300 px-3 text-sm font-medium text-foreground sm:h-9 sm:min-h-9"
                   : isCompact
                     ? "ml-auto h-6 w-auto rounded-md px-2 text-[10px] leading-none"
                     : showTripleActionRow
-                      ? "h-9 min-w-0 w-full truncate px-1.5 text-xs sm:px-2 sm:text-sm"
+                      ? "h-9 min-w-0 w-full justify-center px-1.5 text-xs sm:px-2 sm:text-sm"
                       : "min-w-0 flex-1 px-2.5 text-xs",
               )}
               onClick={(e) => {
                 e.stopPropagation()
                 onQuickView()
               }}
+              title="Quick view — details & add to cart"
             >
-              <span className="min-w-0 truncate">Quick view</span>
+              <ScanSearch className="h-4 w-4 shrink-0" aria-hidden />
+              <span className="min-w-0 text-center leading-tight">Quick view</span>
             </Button>
           )}
         </div>

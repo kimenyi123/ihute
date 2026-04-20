@@ -119,6 +119,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
     const rawInput = String(body?.orderId ?? body?.token ?? "").trim()
+    const buyerAccount = String(body?.buyerAccount ?? "").trim()
 
     if (!rawInput) {
       return NextResponse.json(

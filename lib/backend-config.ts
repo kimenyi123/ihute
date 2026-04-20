@@ -12,34 +12,35 @@ function noTrailingSlash(s: string): string {
 
 const LOCAL_JAVA_BACKEND_DEFAULT = "http://localhost:8082/Trading"
 
-/** Java backend base URL (no trailing slash). Uses NEXT_PUBLIC_API_URL or JAVA_BACKEND_BASE from env. */
+/**
+ * Same URL resolution as {@link getBackendBase}; used by server API routes that proxy to Java.
+ * Prefer {@link getBackendBase} in new code; kept for imports from merged branches.
+ */
+export function getServerProxyBackendBase(): string {
+  return getBackendBase()
+}
+
 /**
  * Java backend base URL (no trailing slash).
- * Uses BACKEND_URL, JAVA_BACKEND_BASE, or NEXT_PUBLIC_API_URL from env.
- *
- * The path segment must match Tomcat’s **context path** (the `webapps/<Context>` name):
- * `Trading.war` → `/Trading`; `trading_ai.war` → `/trading_ai`.
- *
- * **Local `next dev`:** if nothing is set, defaults to `http://127.0.0.1:8080/trading_ai` (Kaos WAR name in this repo).
- * If you only pass `http://localhost:8080` with no path, development appends `/trading_ai`, production appends `/Trading`.
+ * Priority: `BACKEND_URL` → `JAVA_BACKEND_BASE` → `NEXT_PUBLIC_API_URL`, then local / production defaults.
  */
 export function getBackendBase(): string {
-  const raw = noTrailingSlash(
-    process.env.JAVA_BACKEND_BASE ||
-      process.env.NEXT_PUBLIC_API_URL ||
-      process.env.BACKEND_URL ||
-      (process.env.NODE_ENV === "development" ? LOCAL_JAVA_BACKEND_DEFAULT : "https://ihute.rw/Trading")
-  )
   const explicit =
-    process.env.BACKEND_URL || process.env.JAVA_BACKEND_BASE || process.env.NEXT_PUBLIC_API_URL
+    process.env.BACKEND_URL?.trim() ||
+    process.env.JAVA_BACKEND_BASE?.trim() ||
+    process.env.NEXT_PUBLIC_API_URL?.trim()
 
   let raw: string
-  if (explicit && String(explicit).trim()) {
-    raw = noTrailingSlash(String(explicit).trim())
+  if (explicit) {
+    raw = noTrailingSlash(explicit)
   } else if (process.env.NODE_ENV === "development") {
-    raw = "https://ihute.rw/trading_ai/"
+    raw = LOCAL_JAVA_BACKEND_DEFAULT
   } else {
     raw = "https://ihute.rw/Trading"
+  }
+
+  if (!raw.toLowerCase().includes("/trading")) {
+    raw = noTrailingSlash(`${raw}/Trading`)
   }
 
   try {
@@ -49,7 +50,7 @@ export function getBackendBase(): string {
       u.pathname = process.env.NODE_ENV === "development" ? "/trading_ai" : "/Trading"
       return noTrailingSlash(u.toString())
     }
-    return raw
+    return noTrailingSlash(raw)
   } catch {
     return raw
   }
@@ -243,6 +244,18 @@ export function getPublicSiteUrl(): string {
   return noTrailingSlash(
     process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw"
   )
+}
+
+/**
+ * Java servlet for Umuriro payment create/health (GET/POST JSON).
+ * Override with `JAVA_UMURIRO_PAYMENT_URL` or `UMURIRO_PAYMENT_URL` if your WAR uses another path.
+ */
+export function getUmuriroPaymentUrl(): string {
+  const explicit =
+    process.env.JAVA_UMURIRO_PAYMENT_URL?.trim() ||
+    process.env.UMURIRO_PAYMENT_URL?.trim()
+  if (explicit) return noTrailingSlash(explicit)
+  return `${getBackendBase()}/Kaos/UmuriroPaymentServlet`
 }
 
 /**
