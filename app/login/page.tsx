@@ -205,6 +205,7 @@ function LoginPageInner() {
           onSuccess={handleSuccess}
           onMustChangePassword={handleMustChangePassword}
           defaultPhone={phonePrefill}
+          loginMode="phoneOrEmail"
           registerHref="/register/buyer"
         />
 

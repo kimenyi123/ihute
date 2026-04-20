@@ -38,6 +38,7 @@ export type IshyigaLoginCardProps = {
   forgotHref?: string
   showLogo?: boolean
   className?: string
+  loginMode?: "phoneOnly" | "phoneOrEmail"
   onSuccess: (user: User) => void | Promise<void>
   /** Java returned `mustChangePassword` — caller shows set-password UI (e.g. `/login` dialog). */
   onMustChangePassword?: (payload: ApiLoginOK, password: string) => void | Promise<void>
@@ -53,6 +54,7 @@ export function IshyigaLoginCard({
   forgotHref = "/forgot-password",
   showLogo = true,
   className,
+  loginMode = "phoneOrEmail",
   onSuccess,
   onMustChangePassword,
 }: IshyigaLoginCardProps) {
@@ -74,15 +76,17 @@ export function IshyigaLoginCard({
     setError(null)
     try {
       const id = phone.trim()
-      if (id.includes("@")) {
-        setError("Sign in with your phone number only, not email.")
-        setLoading(false)
-        return
-      }
-      if (!isValidPhoneLogin(id)) {
-        setError("Enter a valid phone number (e.g. 0788123456).")
-        setLoading(false)
-        return
+      if (loginMode === "phoneOnly") {
+        if (id.includes("@")) {
+          setError("Sign in with your phone number only, not email.")
+          setLoading(false)
+          return
+        }
+        if (!isValidPhoneLogin(id)) {
+          setError("Enter a valid phone number (e.g. 0788123456).")
+          setLoading(false)
+          return
+        }
       }
       const result = await loginWithCredentialsResult(id, password)
       if (result.outcome === "must_change") {
@@ -122,14 +126,14 @@ export function IshyigaLoginCard({
         <form onSubmit={handleLogin} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="ishyiga-login-phone" className="text-[#17324d]">
-              Phone number
+              {loginMode === "phoneOnly" ? "Phone number" : "Phone number or email"}
             </Label>
             <Input
               id="ishyiga-login-phone"
               type="tel"
               inputMode="tel"
               autoComplete="tel"
-              placeholder="e.g. 0788123456"
+              placeholder={loginMode === "phoneOnly" ? "e.g. 0788123456" : "Phone number or email"}
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
               className="border-[#dbe7f3] bg-white"

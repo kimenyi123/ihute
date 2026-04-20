@@ -9,8 +9,8 @@ export const GRANDMA_PATHS = {
   appRoot: "/grandma",
   /** Buyer order list inside the Grandma UI (not the main-site Buyer Panel). */
   buyerOrders: "/grandma/orders",
-  /** Single app sign-in — use `?redirect=` (e.g. `/grandma`) to return after login. */
-  login: "/login",
+  /** Grandma sign-in entry — use `?redirect=` (e.g. `/grandma`) to return after login. */
+  login: "/grandma/login",
 } as const
 
 /** Pages outside the Grandma UI that we link to (shared app or external). */

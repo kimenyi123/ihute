@@ -38,20 +38,8 @@ export default function BuyerDashboardPage() {
     }
   }, [authHydrated, isAuthenticated, router])
 
-  if (!authHydrated) {
-    return (
-      <div className="min-h-screen flex flex-col bg-slate-50">
-        <Header />
-        <main className="flex-1 flex flex-col items-center justify-center gap-2 text-slate-600">
-          <Loader2 className="h-8 w-8 animate-spin" aria-hidden />
-          <p className="text-sm">Checking session…</p>
-        </main>
-        <Footer />
-      </div>
-    )
-  }
-
   useEffect(() => {
+    if (!authHydrated) return
     const acct = user?.ishyigaAccount?.trim()
     if (!acct) {
       setTopup(null)
@@ -99,7 +87,20 @@ export default function BuyerDashboardPage() {
     return () => {
       cancelled = true
     }
-  }, [user?.ishyigaAccount, topupPeriod])
+  }, [authHydrated, user?.ishyigaAccount, topupPeriod])
+
+  if (!authHydrated) {
+    return (
+      <div className="min-h-screen flex flex-col bg-slate-50">
+        <Header />
+        <main className="flex-1 flex flex-col items-center justify-center gap-2 text-slate-600">
+          <Loader2 className="h-8 w-8 animate-spin" aria-hidden />
+          <p className="text-sm">Checking session…</p>
+        </main>
+        <Footer />
+      </div>
+    )
+  }
 
   if (!isAuthenticated) return null
 
