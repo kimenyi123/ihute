@@ -215,7 +215,7 @@ export async function POST(req: NextRequest) {
       usingFallback = true
     }
 
-    // Fallback to existing buyerOrderDetails endpoint
+    // Fallback: OrdersServlet buyerOrderDetails (GET — same pattern as getOrderDetails)
     if (!data || usingFallback) {
       const url = new URL(getOrdersUrl())
       url.searchParams.set("action", "buyerOrderDetails")
@@ -224,9 +224,9 @@ export async function POST(req: NextRequest) {
       log(requestId, `Fallback: Calling ${url.toString()}`)
 
       const response = await fetch(url.toString(), {
-        method: "POST",
+        method: "GET",
         headers: {
-          "Content-Type": "application/json",
+          Accept: "application/json",
         },
         cache: "no-store",
       })

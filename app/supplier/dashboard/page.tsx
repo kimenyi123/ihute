@@ -241,6 +241,13 @@ function SupplierDashboard() {
         };
 
         // Map products - handle Redis format (your format)
+        const buildBatchState = (product: any): string => {
+          const batch = String(product?.BATCH ?? product?.batch ?? "").trim();
+          const exp = String(product?.DATE_EXP ?? product?.date_exp ?? product?.EXPIRE_DATE ?? "").trim();
+          if (!batch && !exp) return "";
+          return `Ba:${batch || "NA"}| Ex:${exp || "NA"}`;
+        };
+
         const mappedProducts = products.map((p: any, index: number) => {
           console.log(`Product ${index}:`, p);
 
@@ -272,8 +279,8 @@ function SupplierDashboard() {
               COST_PRICE_INCLUSIVE: Number(p.cost_price ?? p.cost ?? 0),
               category: p.item_category || p.category || "uncategorized",
               sales: 0,
-              batchInfo: p.item_state || "",
-              DESCRIPTION: p.item_description || p.item_state || "",
+              batchInfo: p.item_state || buildBatchState(p) || "",
+              DESCRIPTION: p.item_description || p.item_state || buildBatchState(p) || "",
               UNIT: p.item_unit || "PCS",
               currency: p.currency ?? "RWF",
               imageUrl:
@@ -313,7 +320,7 @@ function SupplierDashboard() {
                 p.itemCode ||
                 p.item_key_words ||
                 "",
-              batchInfo: p.item_state || p.DESCRIPTION || "",
+              batchInfo: p.item_state || buildBatchState(p) || p.DESCRIPTION || "",
               category: p.category || "uncategorized",
               sales: 0,
               currency: p.currency ?? "RWF",
@@ -424,10 +431,16 @@ function SupplierDashboard() {
 
   // Filter products
   const filteredProducts = supplierProducts.filter((p) => {
-    const stateHay =
-      String(p.item_state ?? p.batchInfo ?? p.DESCRIPTION ?? "").toLowerCase();
+    const stateFromBatchColumns =
+      p.BATCH || p.DATE_EXP ? `Ba:${p.BATCH || "NA"}| Ex:${p.DATE_EXP || "NA"}` : "";
+    const stateRaw = String(
+      p.item_state ??
+      p.batchInfo ??
+      (stateFromBatchColumns || p.DESCRIPTION || "")
+    );
+    const stateHay = stateRaw.toLowerCase();
     const { batch, expiryLabel } = parseItemStateBatchExpiry(
-      p.item_state ?? p.batchInfo ?? p.DESCRIPTION ?? ""
+      stateRaw
     );
     const batchHay = (batch ?? "").toLowerCase();
     const expHay = (expiryLabel ?? "").toLowerCase();
@@ -1110,8 +1123,14 @@ function SupplierDashboard() {
                         const emballageDisplay =
                           formatItemEmballageMultiplierOnly(emballageRaw);
 
+                        const stateFromBatchColumns =
+                          p.BATCH || p.DATE_EXP
+                            ? `Ba:${p.BATCH || "NA"}| Ex:${p.DATE_EXP || "NA"}`
+                            : "";
                         const itemStateRaw =
-                          p.item_state ?? p.batchInfo ?? p.DESCRIPTION ?? "";
+                          p.item_state ??
+                          p.batchInfo ??
+                          (stateFromBatchColumns || p.DESCRIPTION || "");
                         const {
                           batch,
                           expiryLabel,

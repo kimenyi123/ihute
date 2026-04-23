@@ -1,7 +1,6 @@
 "use client"
 
 import { Header } from "@/components/header"
-import { BuyerOrdersPanel } from "@/components/buyer-orders-panel"
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useAuthStore } from "@/lib/auth-store"
@@ -27,6 +26,7 @@ type RawTxn = {
   BUYER_NAME?: string
   BUYER_NAMES?: string
   SELLER_NAMES?: string
+  SELLER_OWNER?: string
   SELLER_ISHYIGA_ACCOUNT?: string
   AMOUNT?: number
   SERVED_AMOUNT?: number | string
@@ -240,7 +240,7 @@ export default function BuyerOrdersPage() {
 
   useEffect(() => {
     async function load() {
-      if (!authHydrated || !isAuthenticated || !user?.email) return
+      if (!authHydrated || !isAuthenticated || !user?.ishyigaAccount) return
 
       setLoading(true)
       setErr(null)
@@ -250,7 +250,6 @@ export default function BuyerOrdersPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            email: user.email,
             buyerAccount: user.ishyigaAccount,
             CLIENT: search.trim() || undefined,
             START: dateFrom ? `${dateFrom} 00:00:00` : undefined,
@@ -289,8 +288,8 @@ export default function BuyerOrdersPage() {
             buyerAccount: raw.BUYER_ISHYIGA_ACCOUNT || "",
             sellerAccount: raw.SELLER_ISHYIGA_ACCOUNT || "",
             sellerId: raw.SELLER_ISHYIGA_ACCOUNT || "",
-            sellerName: raw.SELLER_NAMES || "Unknown Seller",
-            seller: raw.SELLER_NAMES || "Unknown Seller",
+            sellerName: raw.SELLER_OWNER || raw.SELLER_NAMES || "Unknown Seller",
+            seller: raw.SELLER_OWNER || raw.SELLER_NAMES || "Unknown Seller",
             amount: raw.AMOUNT ?? 0,
             orderStatus: (raw.ORDER_STATUS ?? "").toString().trim() || "—",
             status: mapOrderStatus(raw.ORDER_STATUS),
@@ -328,7 +327,6 @@ export default function BuyerOrdersPage() {
   }, [
     authHydrated,
     isAuthenticated,
-    user?.email,
     user?.ishyigaAccount,
     search,
     dateFrom,
@@ -424,8 +422,8 @@ export default function BuyerOrdersPage() {
     return canRequestInvoiceFinancing(o.orderStatus, financed)
   }
 
-  const exportOrderRowCsv = (o: Order) => {
-    const servedAmount = Number((o as any).servedAmount ?? 0)
+  const exportOrdersCsv = (rows: Order[]) => {
+    if (rows.length === 0) return
     const fields = [
       "Order ID",
       "Buyer",
@@ -443,30 +441,34 @@ export default function BuyerOrdersPage() {
       "SDC_INTERNAL_DATA",
       "RECEIPT_SIGNATURE",
     ]
-    const values = [
-      String(o.id),
-      String(o.buyerName ?? ""),
-      String((o as any).buyerOwner ?? ""),
-      String(o.seller ?? ""),
-      String((o.amount ?? o.subtotal ?? 0)),
-      String(Number.isFinite(servedAmount) ? servedAmount : ""),
-      String(Number((o as any).servedQty ?? 0) || 0),
-      String(o.orderStatus ?? ""),
-      new Date(o.createdAt).toISOString(),
-      String((o as any).orderNote ?? ""),
-      String((o as any).timeSdc ?? "").trim(),
-      String((o as any).sdcId ?? "").trim(),
-      String((o as any).receiptNumber ?? "").trim(),
-      String((o as any).sdcInternalData ?? "").trim(),
-      String((o as any).receiptSignature ?? "").trim(),
-    ]
     const esc = (v: string) => `"${v.replace(/"/g, '""')}"`
-    const csv = `${fields.map(esc).join(",")}\n${values.map(esc).join(",")}\n`
+    const lines = rows.map((o) => {
+      const servedAmount = Number((o as any).servedAmount ?? 0)
+      const values = [
+        String(o.id),
+        String(o.buyerName ?? ""),
+        String((o as any).buyerOwner ?? ""),
+        String(o.seller ?? ""),
+        String((o.amount ?? o.subtotal ?? 0)),
+        String(Number.isFinite(servedAmount) ? servedAmount : ""),
+        String(Number((o as any).servedQty ?? 0) || 0),
+        String(o.orderStatus ?? ""),
+        new Date(o.createdAt).toISOString(),
+        String((o as any).orderNote ?? ""),
+        String((o as any).timeSdc ?? "").trim(),
+        String((o as any).sdcId ?? "").trim(),
+        String((o as any).receiptNumber ?? "").trim(),
+        String((o as any).sdcInternalData ?? "").trim(),
+        String((o as any).receiptSignature ?? "").trim(),
+      ]
+      return values.map(esc).join(",")
+    })
+    const csv = `${fields.map(esc).join(",")}\n${lines.join("\n")}\n`
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
-    a.download = `order-${o.id}.csv`
+    a.download = `orders-${new Date().toISOString().slice(0, 10)}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -474,7 +476,6 @@ export default function BuyerOrdersPage() {
   return (
     <div className="min-h-screen w-full flex flex-col bg-slate-50">
       <Header />
-      <BuyerOrdersPanel variant="buyer" loginRedirect="/login" />
       <main className="mx-auto w-full max-w-7xl flex-1 p-6">
         <h1 className="text-2xl font-bold mb-4 text-slate-800">Order Reports</h1>
 
@@ -516,6 +517,13 @@ export default function BuyerOrdersPage() {
               ))}
             </SelectContent>
           </Select>
+          <Button
+            variant="outline"
+            onClick={() => exportOrdersCsv(filteredOrders)}
+            disabled={filteredOrders.length === 0}
+          >
+            Export list
+          </Button>
         </div>
 
         {loading && <p className="text-slate-600">Loading...</p>}
@@ -569,9 +577,6 @@ export default function BuyerOrdersPage() {
                     <td className="px-4 py-3 align-middle flex gap-2">
                       <Button size="sm" variant="default" onClick={() => router.push(`/orders/${o.id}`)}>
                         View
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => exportOrderRowCsv(o)}>
-                        Export
                       </Button>
 
                         <Button

@@ -23,18 +23,31 @@ function toUserRoleFromAuth(auth: Pick<ApiLoginOK, "role" | "dualPharmacyRetail"
   return "customer"
 }
 
-/** Java/org.json may send boolean, 1/0, or snake_case; treat all as "must show change-password". */
-export function parseMustChangePassword(json: Record<string, unknown> | null | undefined): boolean {
-  if (!json || typeof json !== "object") return false
-  const v =
-    json.mustChangePassword ??
-    json.must_change_password ??
-    (json as { force_password_change?: unknown }).force_password_change
+function truthyMustChangeFlag(v: unknown): boolean {
   if (v === true || v === 1) return true
   if (v === false || v === 0 || v == null) return false
   if (typeof v === "string") {
     const s = v.trim().toLowerCase()
     return s === "1" || s === "true" || s === "yes"
+  }
+  return false
+}
+
+/** Java/org.json may send boolean, 1/0, or snake_case; treat all as "must show change-password". */
+export function parseMustChangePassword(json: Record<string, unknown> | null | undefined): boolean {
+  if (!json || typeof json !== "object") return false
+  const candidates: unknown[] = [
+    json.mustChangePassword,
+    json.must_change_password,
+    (json as { force_password_change?: unknown }).force_password_change,
+  ]
+  const user = json.user
+  if (user && typeof user === "object") {
+    const u = user as Record<string, unknown>
+    candidates.push(u.force_password_change, u.forcePasswordChange, u.mustChangePassword)
+  }
+  for (const v of candidates) {
+    if (truthyMustChangeFlag(v)) return true
   }
   return false
 }

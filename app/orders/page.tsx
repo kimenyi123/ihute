@@ -126,7 +126,7 @@ export default function OrdersPage() {
 
   useEffect(() => {
     async function load() {
-      if (!authHydrated || !isAuthenticated || !user?.email) return
+      if (!authHydrated || !isAuthenticated || !user?.ishyigaAccount) return
 
       setLoading(true)
       setErr(null)
@@ -135,7 +135,11 @@ export default function OrdersPage() {
         const res = await fetch("/api/orders", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: user.email, page, pageSize }),
+          body: JSON.stringify({
+            buyerAccount: user.ishyigaAccount,
+            page,
+            pageSize,
+          }),
           cache: "no-store",
         })
 
@@ -188,7 +192,7 @@ export default function OrdersPage() {
     }
 
     load()
-  }, [authHydrated, isAuthenticated, user?.email, page, pageSize, setOrders, user?.owner])
+  }, [authHydrated, isAuthenticated, user?.ishyigaAccount, page, pageSize, setOrders, user?.owner])
 
   const filteredOrders = useMemo(() => {
     if (!search) return orders

@@ -1,6 +1,7 @@
 "use client"
 
 import { Suspense } from "react"
+import Image from "next/image"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { ArrowLeft } from "lucide-react"
@@ -9,6 +10,9 @@ import type { User } from "@/lib/auth-store"
 import { IshyigaLoginCard } from "@/components/ishyiga-login-card"
 import { GRANDMA_PATHS } from "@/lib/grandma-urls"
 import { userCanAccessSellerSpace } from "@/lib/auth-login-client"
+
+const shell =
+  "min-h-screen bg-[#eef4fb] text-[#17324d] flex flex-col bg-gradient-to-b from-[#f7fbff] to-[#eef4fb]"
 
 function GrandmaLoginInner() {
   const router = useRouter()
@@ -33,37 +37,58 @@ function GrandmaLoginInner() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f5f1ea] text-[#3e342c]">
-      <div className="mx-auto flex min-h-screen w-full max-w-[430px] flex-col px-4 py-6">
+    <div className={shell}>
+      <header className="sticky top-0 z-30 bg-gradient-to-r from-[#1897e0] via-[#30acef] to-[#127fc0] text-white shadow-[0_8px_20px_rgba(0,0,0,.1)]">
+        <div className="mx-auto flex max-w-[430px] items-center gap-2 px-3 py-3.5">
+          <Link
+            href={GRANDMA_PATHS.appRoot}
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-white/15 text-lg text-white hover:bg-white/25"
+            aria-label="Back to Grandma"
+          >
+            ←
+          </Link>
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center overflow-hidden rounded-[10px] border border-white/35 bg-white">
+              <Image src="/images/ishyiga-logo.png" alt="" width={34} height={34} className="object-contain" />
+            </div>
+            <div className="min-w-0">
+              <div className="truncate text-lg font-bold leading-tight">Sign in</div>
+              <div className="truncate text-xs text-white/90">Ishyiga Ihute</div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div className="mx-auto flex w-full max-w-[430px] flex-1 flex-col px-3 py-6">
         <Link
           href={GRANDMA_PATHS.appRoot}
-          className="mb-4 inline-flex items-center gap-2 text-sm font-medium text-[#8b5e3c] hover:underline"
+          className="mb-4 inline-flex items-center gap-2 text-sm font-medium text-[#1897e0] hover:underline"
         >
           <ArrowLeft className="h-4 w-4" />
-          Back to Grandma
+          Back to Home
         </Link>
 
         <IshyigaLoginCard
-          title="Grandma sign in"
+          title="Welcome back"
           description="Sign in with your phone number"
-          submitLabel="Sign in to Grandma"
+          submitLabel="Sign in"
           defaultPhone={phonePrefill}
           registerHref="/register/buyer"
           forgotHref="/forgot-password"
-          loginMode="phoneOnly"
+          loginMode="phoneOrEmail"
+          uiVariant="ihute"
           onSuccess={handleSuccess}
-          className="border-[#e7d8c9] bg-[#fffdf9] shadow-[0_8px_18px_rgba(80,52,35,.08)]"
         />
       </div>
     </div>
   )
 }
 
-export default function GrandmaLoginRedirectPage() {
+export default function GrandmaLoginPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-screen items-center justify-center bg-[#f5f1ea] text-[#6b5e52] text-sm">
+        <div className="flex min-h-screen items-center justify-center bg-[#eef4fb] text-[#6f8399] text-sm">
           Loading…
         </div>
       }

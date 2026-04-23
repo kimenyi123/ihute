@@ -342,7 +342,7 @@ export function BuyerOrdersPanel({
 
   useEffect(() => {
     async function load() {
-      if (!user?.email) return
+      if (!user?.ishyigaAccount) return
 
       setLoading(true)
       setErr(null)
@@ -351,7 +351,11 @@ export function BuyerOrdersPanel({
         const res = await fetch("/api/orders", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: user.email, page, pageSize }),
+          body: JSON.stringify({
+            buyerAccount: user.ishyigaAccount,
+            page,
+            pageSize,
+          }),
           cache: "no-store",
         })
 
@@ -407,7 +411,7 @@ export function BuyerOrdersPanel({
     }
 
     load()
-  }, [user?.email, page, pageSize, setOrders, user?.owner])
+  }, [user?.ishyigaAccount, page, pageSize, setOrders, user?.owner])
 
   const distinctStatuses = useMemo(() => {
     const set = new Set<string>()

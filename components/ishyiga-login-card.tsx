@@ -39,6 +39,7 @@ export type IshyigaLoginCardProps = {
   showLogo?: boolean
   className?: string
   loginMode?: "phoneOnly" | "phoneOrEmail"
+  uiVariant?: "ihute" | "grandma"
   onSuccess: (user: User) => void | Promise<void>
   /** Java returned `mustChangePassword` — caller shows set-password UI (e.g. `/login` dialog). */
   onMustChangePassword?: (payload: ApiLoginOK, password: string) => void | Promise<void>
@@ -55,6 +56,7 @@ export function IshyigaLoginCard({
   showLogo = true,
   className,
   loginMode = "phoneOrEmail",
+  uiVariant = "ihute",
   onSuccess,
   onMustChangePassword,
 }: IshyigaLoginCardProps) {
@@ -69,6 +71,14 @@ export function IshyigaLoginCard({
     setPassword("")
     setError(null)
   }, [defaultPhone, defaultPhoneOrEmail])
+
+  const isGrandmaUi = uiVariant === "grandma"
+  const cardThemeClass = isGrandmaUi
+    ? "w-full rounded-2xl border border-[#dbe7f3] bg-white shadow-[0_8px_18px_rgba(24,151,224,.08)]"
+    : defaultCardClass
+  const submitBtnClass = isGrandmaUi
+    ? "w-full rounded-xl bg-[#194b79] hover:bg-[#163f66] text-white shadow-[0_4px_12px_rgba(25,75,121,.3)] border-0 h-11 font-semibold"
+    : btnPrimary
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -106,7 +116,7 @@ export function IshyigaLoginCard({
   }
 
   return (
-    <Card className={cn(defaultCardClass, className)}>
+    <Card className={cn(cardThemeClass, className)}>
       <CardHeader className="space-y-4 text-center">
         {showLogo ? (
           <div className="flex justify-center">
@@ -156,7 +166,7 @@ export function IshyigaLoginCard({
             />
           </div>
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
-          <Button type="submit" className={btnPrimary} disabled={loading}>
+          <Button type="submit" className={submitBtnClass} disabled={loading}>
             {loading ? "Signing in…" : submitLabel}
           </Button>
         </form>

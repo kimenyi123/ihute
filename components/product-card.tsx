@@ -313,7 +313,8 @@ export function ProductCard({
         id,
         itemCode: itemCode ?? id,
         name,
-        price,
+        // Keep cart line price identical to what the card shows.
+        price: displayPrice,
         unit,
         image,
         supplierId: (supplierId || "unknown").toString().trim(),
@@ -321,6 +322,7 @@ export function ProductCard({
         supplierLocation,
         momo,
         selectedUnit: unit,
+        ...(itemEmballageForCart ? { itemEmballage: itemEmballageForCart } : {}),
       },
       1
     )
@@ -450,18 +452,11 @@ export function ProductCard({
       <CardContent className={cn("flex min-w-0 flex-col gap-2", compact ? "p-2" : "p-3")}>
         <div className={compact ? "min-h-[32px]" : "min-h-[38px]"}>
           <h3 className={cn("font-semibold leading-tight line-clamp-2", compact ? "text-xs" : "text-sm")}>{name}</h3>
-          {(searchPriority === "direct" || containsIngredient) && (
+          {containsIngredient && searchPriority !== "direct" && (
             <div className="mt-1 flex flex-wrap gap-1">
-              {searchPriority === "direct" && (
-                <span className="inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
-                  Main Ingredient
-                </span>
-              )}
-              {containsIngredient && searchPriority !== "direct" && (
-                <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-700">
-                  Contains: {containsIngredient}
-                </span>
-              )}
+              <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-700">
+                Contains: {containsIngredient}
+              </span>
             </div>
           )}
         </div>
@@ -518,7 +513,7 @@ export function ProductCard({
             isSpotlight && !spotlightWatchAndQuick && !spotlightQuickOnlyRow && "mt-2 flex w-full min-w-0 flex-wrap gap-2",
             isCompact && "mt-0 flex w-full flex-col gap-1",
             showTripleActionRow &&
-              "mt-1 grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-stretch gap-1",
+              "mt-1 grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-stretch gap-1",
             showDoubleQuickRow && "mt-1 grid w-full min-w-0 grid-cols-2 items-stretch gap-1",
             !isSpotlight &&
               !isCompact &&
@@ -611,7 +606,7 @@ export function ProductCard({
                   : isCompact
                     ? "ml-auto h-6 w-auto rounded-md px-2 text-[10px] leading-none"
                     : showTripleActionRow
-                      ? "h-9 min-w-0 w-full justify-center px-1.5 text-xs sm:px-2 sm:text-sm"
+                      ? "col-span-2 h-9 min-w-0 w-full justify-center px-1.5 text-xs sm:px-2 sm:text-sm"
                       : "min-w-0 flex-1 px-2.5 text-xs",
               )}
               onClick={(e) => {
@@ -639,7 +634,8 @@ export function ProductCard({
               id,
               itemCode: itemCode ?? id,
               name,
-              price,
+              // Keep ERx add path consistent with visible card price.
+              price: displayPrice,
               unit,
               image,
               supplierId: (supplierId || "unknown").toString().trim(),
@@ -647,6 +643,7 @@ export function ProductCard({
               supplierLocation,
               momo,
               selectedUnit: unit,
+              ...(itemEmballageForCart ? { itemEmballage: itemEmballageForCart } : {}),
               erx,
               notes: serializeErxForNotes(erx),
             },
