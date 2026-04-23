@@ -1,7 +1,6 @@
 "use client"
 
-import { Suspense, useState, type FormEvent } from "react"
-import Image from "next/image"
+import { Suspense, useEffect, useState, type FormEvent } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { ArrowLeft } from "lucide-react"
@@ -64,6 +63,21 @@ function LoginPageInner() {
     return "/"
   })()
   const backHomeLabel = backHomeHref === GRANDMA_PATHS.appRoot ? "Back to Grandma" : "Back to Home"
+
+  useEffect(() => {
+    if (!redirectTo) return
+    let decoded = ""
+    try {
+      decoded = decodeURIComponent(redirectTo)
+    } catch {
+      decoded = redirectTo
+    }
+    if (!decoded.startsWith("/grandma")) return
+    const qs = new URLSearchParams()
+    qs.set("redirect", redirectTo)
+    if (phonePrefill) qs.set("phone", phonePrefill)
+    router.replace(`/grandma/login?${qs.toString()}`)
+  }, [redirectTo, phonePrefill, router])
 
   const applyGrandmaModeHint = (user: User, decodedRedirect: string) => {
     if (typeof window === "undefined") return
@@ -171,27 +185,6 @@ function LoginPageInner() {
 
   return (
     <div className={shell}>
-      <header className="sticky top-0 z-30 bg-gradient-to-r from-[#1897e0] via-[#30acef] to-[#127fc0] text-white shadow-[0_8px_20px_rgba(0,0,0,.1)]">
-        <div className="mx-auto flex max-w-[430px] items-center gap-2 px-3 py-3.5">
-          <Link
-            href={backHomeHref}
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-white/15 text-lg text-white hover:bg-white/25"
-            aria-label={backHomeLabel}
-          >
-            ←
-          </Link>
-          <div className="flex min-w-0 flex-1 items-center gap-2">
-            <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center overflow-hidden rounded-[10px] border border-white/35 bg-white">
-              <Image src="/images/ishyiga-logo.png" alt="" width={34} height={34} className="object-contain" />
-            </div>
-            <div className="min-w-0">
-              <div className="truncate text-lg font-bold leading-tight">Sign in</div>
-              <div className="truncate text-xs text-white/90">Ishyiga Ihute</div>
-            </div>
-          </div>
-        </div>
-      </header>
-
       <div className="mx-auto flex w-full max-w-[430px] flex-1 flex-col px-3 py-6">
         <Link
           href={backHomeHref}
@@ -205,6 +198,8 @@ function LoginPageInner() {
           onSuccess={handleSuccess}
           onMustChangePassword={handleMustChangePassword}
           defaultPhone={phonePrefill}
+          loginMode="phoneOrEmail"
+          uiVariant="grandma"
           registerHref="/register/buyer"
         />
 

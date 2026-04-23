@@ -38,6 +38,8 @@ export type IshyigaLoginCardProps = {
   forgotHref?: string
   showLogo?: boolean
   className?: string
+  loginMode?: "phoneOnly" | "phoneOrEmail"
+  uiVariant?: "ihute" | "grandma"
   onSuccess: (user: User) => void | Promise<void>
   /** Java returned `mustChangePassword` — caller shows set-password UI (e.g. `/login` dialog). */
   onMustChangePassword?: (payload: ApiLoginOK, password: string) => void | Promise<void>
@@ -53,6 +55,8 @@ export function IshyigaLoginCard({
   forgotHref = "/forgot-password",
   showLogo = true,
   className,
+  loginMode = "phoneOrEmail",
+  uiVariant = "ihute",
   onSuccess,
   onMustChangePassword,
 }: IshyigaLoginCardProps) {
@@ -68,21 +72,31 @@ export function IshyigaLoginCard({
     setError(null)
   }, [defaultPhone, defaultPhoneOrEmail])
 
+  const isGrandmaUi = uiVariant === "grandma"
+  const cardThemeClass = isGrandmaUi
+    ? "w-full rounded-2xl border border-[#dbe7f3] bg-white shadow-[0_8px_18px_rgba(24,151,224,.08)]"
+    : defaultCardClass
+  const submitBtnClass = isGrandmaUi
+    ? "w-full rounded-xl bg-[#194b79] hover:bg-[#163f66] text-white shadow-[0_4px_12px_rgba(25,75,121,.3)] border-0 h-11 font-semibold"
+    : btnPrimary
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setError(null)
     try {
       const id = phone.trim()
-      if (id.includes("@")) {
-        setError("Sign in with your phone number only, not email.")
-        setLoading(false)
-        return
-      }
-      if (!isValidPhoneLogin(id)) {
-        setError("Enter a valid phone number (e.g. 0788123456).")
-        setLoading(false)
-        return
+      if (loginMode === "phoneOnly") {
+        if (id.includes("@")) {
+          setError("Sign in with your phone number only, not email.")
+          setLoading(false)
+          return
+        }
+        if (!isValidPhoneLogin(id)) {
+          setError("Enter a valid phone number (e.g. 0788123456).")
+          setLoading(false)
+          return
+        }
       }
       const result = await loginWithCredentialsResult(id, password)
       if (result.outcome === "must_change") {
@@ -102,7 +116,7 @@ export function IshyigaLoginCard({
   }
 
   return (
-    <Card className={cn(defaultCardClass, className)}>
+    <Card className={cn(cardThemeClass, className)}>
       <CardHeader className="space-y-4 text-center">
         {showLogo ? (
           <div className="flex justify-center">
@@ -122,14 +136,14 @@ export function IshyigaLoginCard({
         <form onSubmit={handleLogin} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="ishyiga-login-phone" className="text-[#17324d]">
-              Phone number
+              {loginMode === "phoneOnly" ? "Phone number" : "Phone number or email"}
             </Label>
             <Input
               id="ishyiga-login-phone"
               type="tel"
               inputMode="tel"
               autoComplete="tel"
-              placeholder="e.g. 0788123456"
+              placeholder={loginMode === "phoneOnly" ? "e.g. 0788123456" : "Phone number or email"}
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
               className="border-[#dbe7f3] bg-white"
@@ -152,7 +166,7 @@ export function IshyigaLoginCard({
             />
           </div>
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
-          <Button type="submit" className={btnPrimary} disabled={loading}>
+          <Button type="submit" className={submitBtnClass} disabled={loading}>
             {loading ? "Signing in…" : submitLabel}
           </Button>
         </form>

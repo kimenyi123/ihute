@@ -20,7 +20,7 @@ export interface ShopInfo {
   seller_account: string
   seller_name: string
   seller_location?: string
-  /** Only when Java sends nickname / NICKNAME — required to open Shop With Me. */
+  /** Only when Java / listing sends a nickname — used for Shop With Me link and @handle display. */
   officialNickname: string | null
   /** Lines / SKUs from seller listing (product_count or products.length from backend). */
   stockLineCount?: number
@@ -392,6 +392,8 @@ export function ShopsForSingleSector({
 }) {
   const { t } = useTranslation()
   const locationPref = usePrefsStore((s) => s.location)
+  const [shopPage, setShopPage] = useState(1)
+  const SHOPS_PER_PAGE = 15
 
   const filteredShops = useMemo(() => {
     let list = shops
@@ -410,6 +412,21 @@ export function ShopsForSingleSector({
     return list
   }, [shops, locationPref, filterQuery])
 
+  const totalShopPages = useMemo(
+    () => Math.max(1, Math.ceil(filteredShops.length / SHOPS_PER_PAGE)),
+    [filteredShops.length]
+  )
+
+  useEffect(() => {
+    setShopPage(1)
+  }, [locationPref, filterQuery, shops])
+
+  const pagedShops = useMemo(() => {
+    const safePage = Math.min(shopPage, totalShopPages)
+    const start = (safePage - 1) * SHOPS_PER_PAGE
+    return filteredShops.slice(start, start + SHOPS_PER_PAGE)
+  }, [filteredShops, shopPage, totalShopPages])
+
   return (
     <div className={cn("space-y-4", className)}>
       {loading && (
@@ -423,8 +440,9 @@ export function ShopsForSingleSector({
       )}
 
       {!loading && filteredShops.length > 0 && (
+        <>
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-          {filteredShops.map((shop) => {
+          {pagedShops.map((shop) => {
             const canLink = Boolean((shop.officialNickname || "").trim())
             const href = canLink
               ? `/shop-with-me/${encodeURIComponent((shop.officialNickname || "").trim().toLowerCase())}`
@@ -490,6 +508,30 @@ export function ShopsForSingleSector({
             )
           })}
         </div>
+        {totalShopPages > 1 && (
+          <div className="flex items-center justify-center gap-2 pt-1">
+            <button
+              type="button"
+              className="h-8 px-3 rounded border text-sm disabled:opacity-40"
+              disabled={shopPage <= 1}
+              onClick={() => setShopPage((p) => Math.max(1, p - 1))}
+            >
+              Prev
+            </button>
+            <span className="text-xs text-muted-foreground tabular-nums">
+              Page {Math.min(shopPage, totalShopPages)} / {totalShopPages}
+            </span>
+            <button
+              type="button"
+              className="h-8 px-3 rounded border text-sm disabled:opacity-40"
+              disabled={shopPage >= totalShopPages}
+              onClick={() => setShopPage((p) => Math.min(totalShopPages, p + 1))}
+            >
+              Next
+            </button>
+          </div>
+        )}
+        </>
       )}
     </div>
   )

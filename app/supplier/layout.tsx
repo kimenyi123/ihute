@@ -10,7 +10,7 @@ import { useAuthStore } from "@/lib/auth-store";
 import { isRestoBarPreferredCategories } from "@/lib/supplier-sector";
 
 export default function SupplierLayout({ children }: { children: React.ReactNode }) {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -81,8 +81,8 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
     setSidebarOpen(false);
   }, []);
 
-  // Keep supplier navigation reachable on all devices:
-  // desktop starts open, smaller screens start closed.
+  // Desktop: keep sidebar visible (like classic dashboard layout).
+  // Mobile/tablet: keep it closed by default and use drawer behavior.
   useEffect(() => {
     const mql = window.matchMedia("(min-width: 1024px)");
     const syncSidebar = () => setSidebarOpen(mql.matches);

@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
-import { CheckCircle, XCircle, Eye, AlertCircle, Search } from 'lucide-react'
+import { CheckCircle, XCircle, Eye, AlertCircle, Search, Trash2 } from 'lucide-react'
 import { postAdminApi } from '@/lib/admin-client'
+import { CredentialSellersPanel } from '@/app/admin/sellers/CredentialSellersPanel'
 
 interface Seller {
   id: number
@@ -20,8 +21,10 @@ interface Seller {
   totalSales?: number
 }
 
+type SellersTab = 'applications' | 'active' | 'suspended' | 'credentials'
+
 export default function SellersPage() {
-  const [activeTab, setActiveTab] = useState<'applications' | 'active' | 'suspended'>('applications')
+  const [activeTab, setActiveTab] = useState<SellersTab>('applications')
   const [applications, setApplications] = useState<Seller[]>([])
   const [activeSellers, setActiveSellers] = useState<Seller[]>([])
   const [suspendedSellers, setSuspendedSellers] = useState<Seller[]>([])
@@ -37,6 +40,8 @@ export default function SellersPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const pageSize = 10
 
+  const [credRefreshTrigger, setCredRefreshTrigger] = useState(0)
+
   // Debounced search - updates after 300ms of no typing
   const debouncedSearch = useMemo(() => {
     const timer = setTimeout(() => searchTerm, 300)
@@ -51,6 +56,10 @@ export default function SellersPage() {
   }, [activeTab])
 
   useEffect(() => {
+    if (activeTab === 'credentials') {
+      setLoading(false)
+      return
+    }
     loadSellers()
   }, [activeTab, pageApps, pageActive, pageSuspended, searchTerm])
 
@@ -148,6 +157,44 @@ export default function SellersPage() {
     }
   }
 
+  const handlePurgeSeller = async (sellerAccount: string) => {
+    if (
+      !confirm(
+        `Permanently purge seller ${sellerAccount}? This deletes seller_add_stock rows, account_buyer (same ishyiga or seller email), legacy account_signup row, and account_seller. Orders are NOT removed.`,
+      )
+    ) {
+      return
+    }
+    const typed = window.prompt('Type DELETE in capitals to confirm:')
+    if (typed !== 'DELETE') return
+    try {
+      setActionLoading(sellerAccount)
+      const res = await postAdminApi({
+        action: 'purgeSellerAccount',
+        sellerAccount,
+        confirmPurge: 'DELETE',
+      })
+      const data = await res.json()
+      if (!data.ok) {
+        alert('Purge failed: ' + (data.error || 'Unknown error'))
+        return
+      }
+      alert(
+        `Purge OK. Stock rows: ${data.deletedSellerAddStockRows ?? 0}, buyer: ${data.deletedBuyerRows ?? 0}, signup: ${data.deletedSignupRows ?? 0}, seller: ${data.deletedSellerRows ?? 0}`,
+      )
+      if (activeTab === 'credentials') {
+        setCredRefreshTrigger((n) => n + 1)
+      } else {
+        loadSellers()
+      }
+    } catch (e) {
+      console.error(e)
+      alert('Purge request failed')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
   const handleReinstate = async (sellerAccount: string) => {
     if (!confirm('Reinstate this seller?')) return
 
@@ -188,7 +235,7 @@ export default function SellersPage() {
   }, [activeSellers, searchTerm, activeTab])
 
   const currentSellers = activeTab === 'applications' ? applications :
-    activeTab === 'active' ? filteredActiveSellers : suspendedSellers
+    activeTab === 'active' ? filteredActiveSellers : activeTab === 'suspended' ? suspendedSellers : []
   const currentPage = activeTab === 'applications' ? pageApps : activeTab === 'active' ? pageActive : pageSuspended
   const currentTotal = activeTab === 'applications' ? totalApps : activeTab === 'active' ? totalActive : totalSuspended
 
@@ -196,20 +243,24 @@ export default function SellersPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold text-gray-900">Sellers Management</h1>
-        <p className="text-gray-600 mt-1">Manage seller applications and accounts</p>
+        <p className="text-gray-600 mt-1">
+          Manage seller accounts. The first tab lists <strong className="font-medium text-gray-800">LIVE</strong>{' '}
+          registrations (same status as Trading signups).
+        </p>
       </div>
 
       {/* Tabs */}
       <div className="border-b border-gray-200">
         <nav className="-mb-px flex space-x-8">
           {[
-            { id: 'applications', label: 'Pending Applications', count: totalApps },
+            { id: 'applications', label: 'LIVE registrations', count: totalApps },
             { id: 'active', label: 'Active Sellers', count: totalActive },
             { id: 'suspended', label: 'Suspended Sellers', count: totalSuspended },
+            { id: 'credentials', label: 'Credentials', count: 0 },
           ].map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
+              onClick={() => setActiveTab(tab.id as SellersTab)}
               className={`
                 py-4 px-1 border-b-2 font-medium text-sm
                 ${activeTab === tab.id
@@ -228,6 +279,15 @@ export default function SellersPage() {
           ))}
         </nav>
       </div>
+
+      {activeTab === 'credentials' && (
+        <CredentialSellersPanel
+          active={activeTab === 'credentials'}
+          onPurgeSeller={handlePurgeSeller}
+          actionLoadingKey={actionLoading}
+          refreshTrigger={credRefreshTrigger}
+        />
+      )}
 
       {/* Search Input - Active Sellers Only */}
       {activeTab === 'active' && (
@@ -276,7 +336,7 @@ export default function SellersPage() {
       )}
 
       {/* Sellers Table */}
-      {loading ? (
+      {activeTab === 'credentials' ? null : loading ? (
         <div className="text-center py-12 text-gray-500">Loading sellers...</div>
       ) : error ? (
         <div className="text-center py-12 text-red-500">{error}</div>
@@ -369,12 +429,12 @@ export default function SellersPage() {
                         >
                           <Eye size={18} />
                         </Link>
-                        {activeTab === 'applications' && (
+                        {activeTab === 'applications' && seller.status?.toUpperCase() === 'PENDING' && (
                           <button
                             onClick={() => handleApprove(seller.ishyigaAccount)}
                             disabled={actionLoading === seller.ishyigaAccount}
                             className="text-green-600 hover:text-green-900 disabled:opacity-50"
-                            title="Approve"
+                            title="Approve (PENDING only)"
                           >
                             <CheckCircle size={18} />
                           </button>
@@ -384,7 +444,7 @@ export default function SellersPage() {
                             onClick={() => handleSuspend(seller.ishyigaAccount)}
                             disabled={actionLoading === seller.ishyigaAccount}
                             className="text-red-600 hover:text-red-900 disabled:opacity-50"
-                            title="Reject"
+                            title="Suspend seller"
                           >
                             <XCircle size={18} />
                           </button>
@@ -409,6 +469,15 @@ export default function SellersPage() {
                             <XCircle size={18} />
                           </button>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => void handlePurgeSeller(seller.ishyigaAccount)}
+                          disabled={actionLoading === seller.ishyigaAccount}
+                          className="text-red-900 hover:text-red-950 disabled:opacity-50"
+                          title="Purge seller (stock + buyer + signup + seller; not orders)"
+                        >
+                          <Trash2 size={18} />
+                        </button>
                       </div>
                     </td>
                   </tr>

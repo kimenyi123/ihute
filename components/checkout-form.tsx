@@ -236,11 +236,11 @@ export function CheckoutForm() {
           items: items.map((it) => {
             const rawCode = (it.itemCode ?? it.id).toString().trim()
             const itemCode = rawCode.replace(/__p\d+$/i, "") || rawCode
-            const catalogBase = kaosCatalogBaseUnitPrice(it.price, it.itemEmballage)
             return {
               name: it.name,
               qty: it.qty,
-              unitPrice: catalogBase,
+              // Persist the exact line unit price shown in cart/product cards.
+              unitPrice: it.price,
               unit: it.unit || "pcs",
               itemCode,
               ...(it.itemEmballage

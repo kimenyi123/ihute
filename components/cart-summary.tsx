@@ -38,7 +38,6 @@ import { CartSuggestionsPopup } from "@/components/cart-suggestions-popup"
 import { itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
 import { orderErrorMessageWithProductNames } from "@/lib/order-error-display"
 import { flushCartToServer } from "@/lib/flush-cart-server"
-import { kaosCatalogBaseUnitPrice } from "@/lib/kaos-catalog-price"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -583,11 +582,11 @@ function CartSummaryBody() {
           String(it.itemCode ?? "").trim() ||
           String(it.item_key_words ?? "").trim() ||
           String(it.id ?? "").trim()
-        const catalogBase = kaosCatalogBaseUnitPrice(it.price, it.itemEmballage)
         return {
           name: it.name,
           qty: it.qty,
-          unitPrice: catalogBase,
+          // Send the same line unit price the buyer sees in cart.
+          unitPrice: it.price,
           unit: it.unit ?? "",
           itemCode: code,
           ...(it.itemEmballage

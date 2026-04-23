@@ -1,6 +1,6 @@
 // app/api/orders/route.ts
 import { NextResponse } from "next/server"
-import { getOrdersUrl, getFetchSuggestionsUrl, getProxyTimeoutMs, getSellerOrdersUrl } from "@/lib/backend-config"
+import { getOrdersUrl, getProxyTimeoutMs, getSellerOrdersUrl } from "@/lib/backend-config"
 
 const DEBUG = process.env.DEBUG_ORDERS === 'true'
 const TIMEOUT_MS = getProxyTimeoutMs()
@@ -9,7 +9,7 @@ const TIMEOUT_MS = getProxyTimeoutMs()
  * Smart routing: Determines which servlet to use based on request
  */
 function determineServlet(body: any): { url: string; payload: any; mode: string; contentType: string } {
-  const { email, action, buyerAccount } = body
+  const { action, buyerAccount } = body
 
   // If action is explicitly provided → Use OrdersServlet
   if (action) {
@@ -43,20 +43,8 @@ function determineServlet(body: any): { url: string; payload: any; mode: string;
     }
   }
 
-  // Legacy fallback using fetchSuggestions when only email exists
-  if (email && !action) {
-    console.log('🎯 Mode: LEGACY → fetchSuggestions')
-    return {
-      url: getFetchSuggestionsUrl(),
-      // Forward full body so pagination and any extra flags reach Java; do not strip fields.
-      payload: body,
-      mode: 'legacy',
-      contentType: "application/json"
-    }
-  }
-
   // Invalid request
-  throw new Error('Request must include either "action" or one of: "email", "buyerAccount"')
+  throw new Error('Request must include either "action" or "buyerAccount"')
 }
 
 export async function POST(req: Request) {
@@ -132,24 +120,7 @@ export async function POST(req: Request) {
     // Handle response based on mode
     let result: any
 
-    if (mode === 'legacy') {
-      // Legacy mode: Extract transactions array
-      console.log('\n🔄 Processing LEGACY response...')
-      let transactions: any[] = []
-
-      if (Array.isArray(data)) {
-        transactions = data
-      } else if (Array.isArray(data?.transactions)) {
-        transactions = data.transactions
-      } else if (typeof data?.transactions === "string") {
-        transactions = []
-      } else {
-        transactions = []
-      }
-
-      console.log('   Transactions count:', transactions.length)
-      result = { transactions }
-    } else if (mode === "buyer-list") {
+    if (mode === "buyer-list") {
       const orders = Array.isArray(data?.orders) ? data.orders : []
       result = {
         ok: data?.ok ?? true,

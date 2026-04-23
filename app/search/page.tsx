@@ -322,13 +322,16 @@ function toCardProduct(p: Product & { search_priority?: string; contains_ingredi
   const itemStateRaw = String((p as { item_state?: string }).item_state ?? "").trim()
   const { expiryLabel } = parseItemStateBatchExpiry(itemStateRaw || undefined)
 
+  const embRaw = productItemEmballageRaw(p)
+  const itemEmballage = normalizeItemEmballageForCart(embRaw)
   return {
     id: p.item_code || p.item_key_words || `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`,
     name: p.item_commercial_name || "Product",
     description: undefined,
     price,
     currency: p.currency || "RWF",
-    unit: p.item_packet ?? "",
+    // Cart/display packs should follow item_emballage (pcs), not raw stock packet.
+    unit: "pcs",
     inStock: true,
     rating: 4,
     supplierId: p.supplier_account,
@@ -345,7 +348,7 @@ function toCardProduct(p: Product & { search_priority?: string; contains_ingredi
     IMAGE_URL: (p as any).IMAGE_URL,
     searchPriority: (p.search_priority === "direct" || p.search_priority === "contains" ? p.search_priority : undefined) as "direct" | "contains" | undefined,
     containsIngredient: typeof p.contains_ingredient === "string" ? p.contains_ingredient : undefined,
-    itemEmballage: productItemEmballageRaw(p) as string | number | undefined,
+    ...(itemEmballage ? { itemEmballage } : {}),
     ...(itemStateRaw ? { item_state: itemStateRaw } : {}),
     ...(expiryLabel ? { expiryLabel } : {}),
     brand: (p as any).item_fabricant ?? (p as any).id_fabricant ?? (p as any).brand,
@@ -558,7 +561,7 @@ export default function SearchPage() {
       price,
       currency: p.currency || "RWF",
       image: getProductImageSrc(p),
-      unit: p.item_packet ?? "",
+      unit: "pcs",
       itemCode: p.item_code || p.item_key_words,
       supplierId: p.supplier_account,
       supplierName: p.supplier_name,
@@ -594,7 +597,7 @@ export default function SearchPage() {
 
     const itemCode = (p.item_code || p.item_key_words || "").toString().trim()
     const id = itemCode || `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`
-    const unit = p.item_packet || ""
+    const unit = "pcs"
     const embRaw = productItemEmballageRaw(p)
     const price = productLinePrice(p)
     const itemEmballage = normalizeItemEmballageForCart(embRaw)
@@ -1231,6 +1234,8 @@ export default function SearchPage() {
 
   /** Title, main query box, location/sector bar, and global-result hints — not when already scoped to a supplier. */
   const showGlobalSearchUI = !isFocusedProductView && !isBrowsingSupplierInventory
+  /** User requested a cleaner search page: hide the top controls strip. */
+  const showGlobalSearchTopStrip = false
 
   const focusedSupplierLabel =
     selectedShop?.supplier_name ?? supplierNameParam ?? supplierParam ?? ""
@@ -1256,7 +1261,7 @@ export default function SearchPage() {
           isBrowsingSupplierInventory && "bg-gradient-to-b from-slate-100/50 via-slate-50/40 to-white",
         )}
       >
-        {showGlobalSearchUI ? (
+        {showGlobalSearchUI && showGlobalSearchTopStrip ? (
           <div className="flex items-center justify-between mb-4">
             <h1 className="text-2xl font-semibold">Global Search</h1>
             <LocationBadge />
@@ -1320,7 +1325,7 @@ export default function SearchPage() {
           </div>
         )}
 
-        {showGlobalSearchUI && (
+        {showGlobalSearchUI && showGlobalSearchTopStrip && (
           <>
         {/* Search Row — quick search: backend hit after 200ms debounce */}
         <div className="flex gap-2 items-center mb-3">

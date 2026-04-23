@@ -419,8 +419,16 @@ export const useCartStore = create<CartState>()(
             const matching = state.items.filter(keyMatch)
             const totalQty = matching.reduce((sum, x) => sum + x.qty, 0) + qty
             const first = matching[0]
+            const incomingPrice =
+              typeof item.price === "number" && Number.isFinite(item.price) ? item.price : 0
+            const bestPrice = matching.reduce((max, x) => {
+              const p = typeof x.price === "number" && Number.isFinite(x.price) ? x.price : 0
+              return p > max ? p : max
+            }, incomingPrice)
             const mergedLine: CartItem = {
               ...first,
+              // Keep displayed/cart price when old lines were added with legacy base-unit price.
+              price: bestPrice,
               qty: totalQty,
               itemCode: (first.itemCode ?? item.itemCode ?? first.id ?? item.id).toString().trim() || first.itemCode,
               notes: first.notes ?? item.notes,
