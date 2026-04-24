@@ -12,7 +12,7 @@ import { GRANDMA_PATHS } from "@/lib/grandma-urls"
 import { userCanAccessSellerSpace } from "@/lib/auth-login-client"
 
 const shell =
-  "min-h-screen bg-[#eef4fb] text-[#17324d] flex flex-col bg-gradient-to-b from-[#f7fbff] to-[#eef4fb]"
+  "min-h-screen bg-[#eef4fb] text-[#17324d] flex flex-col bg-gradient-to-b from-[#e8f5ff] to-[#dff0ff]"
 
 function GrandmaLoginInner() {
   const router = useRouter()

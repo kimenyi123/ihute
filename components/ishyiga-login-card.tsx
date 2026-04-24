@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils"
 const defaultCardClass =
   "w-full rounded-2xl border border-[#dbe7f3] bg-white shadow-[0_8px_18px_rgba(24,151,224,.08)]"
 const btnPrimary =
-  "w-full rounded-xl bg-gradient-to-r from-[#1897e0] to-[#127fc0] hover:from-[#1589cc] hover:to-[#0f6ba3] text-white shadow-[0_4px_12px_rgba(24,151,224,.25)] border-0 h-11 font-semibold"
+  "w-full rounded-xl bg-[#1e3a5f] hover:bg-[#2c4f7c] text-white shadow-[0_4px_12px_rgba(30,58,95,.3)] border-0 h-11 font-semibold"
 
 /** Digits only count; Rwanda mobile typically 9–12 digits with or without country code. */
 function isValidPhoneLogin(raw: string): boolean {
@@ -92,7 +92,7 @@ export function IshyigaLoginCard({
     ? "w-full rounded-2xl border border-[#dbe7f3] bg-white shadow-[0_8px_18px_rgba(24,151,224,.08)]"
     : defaultCardClass
   const submitBtnClass = isGrandmaUi
-    ? "w-full rounded-xl bg-[#194b79] hover:bg-[#163f66] text-white shadow-[0_4px_12px_rgba(25,75,121,.3)] border-0 h-11 font-semibold"
+    ? "w-full rounded-xl bg-gradient-to-r from-[#1897e0] via-[#30acef] to-[#127fc0] hover:from-[#1589cc] hover:via-[#229fe6] hover:to-[#0f6ba3] text-white shadow-[0_4px_12px_rgba(24,151,224,.35)] border-0 h-11 font-semibold"
     : btnPrimary
 
   const handleLogin = async (e: React.FormEvent) => {

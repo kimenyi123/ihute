@@ -152,9 +152,11 @@ export const useAuthStore = create<AuthState>()(
         }
         queueMicrotask(() => {
           try {
-            const p = persisted as
-              | { state?: { user?: { email?: string | null } | null } }
-              | undefined
+            const raw =
+              typeof window !== "undefined" ? localStorage.getItem("auth-storage") : null
+            const p = raw
+              ? (JSON.parse(raw) as { state?: { user?: { email?: string | null } | null } })
+              : undefined
             const em =
               typeof p?.state?.user?.email === "string" ? p.state!.user!.email!.trim().toLowerCase() : ""
             if (em && LEGACY_DISCARD_EMAILS.has(em)) {

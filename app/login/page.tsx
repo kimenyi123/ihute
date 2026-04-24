@@ -36,7 +36,7 @@ const log = (tag: string, msg: string, data?: unknown) => {
 }
 
 const shell =
-  "min-h-screen bg-[#eef4fb] text-[#17324d] flex flex-col bg-gradient-to-b from-[#f7fbff] to-[#eef4fb]"
+  "min-h-screen bg-[#eef4fb] text-[#17324d] flex flex-col bg-gradient-to-b from-[#e8f5ff] to-[#dff0ff]"
 
 function LoginPageInner() {
   const router = useRouter()
@@ -199,7 +199,7 @@ function LoginPageInner() {
           onMustChangePassword={handleMustChangePassword}
           defaultPhone={phonePrefill}
           loginMode="phoneOrEmail"
-          uiVariant="ihute"
+          uiVariant="grandma"
           registerHref="/register/buyer"
         />
 
