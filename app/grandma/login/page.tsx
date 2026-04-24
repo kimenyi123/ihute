@@ -70,13 +70,13 @@ function GrandmaLoginInner() {
 
         <IshyigaLoginCard
           title="Welcome back"
-          description="Sign in with your phone number"
+          description="Sign in with your phone number or email"
           submitLabel="Sign in"
           defaultPhone={phonePrefill}
           registerHref="/register/buyer"
           forgotHref="/forgot-password"
           loginMode="phoneOrEmail"
-          uiVariant="ihute"
+          uiVariant="grandma"
           onSuccess={handleSuccess}
         />
       </div>

@@ -35,7 +35,6 @@ import {
 import { TableCommandDialog } from "@/components/table-command-dialog"
 import { TableCommandShareModal } from "@/components/table-command-share-modal"
 import { CartSuggestionsPopup } from "@/components/cart-suggestions-popup"
-import { itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
 import { orderErrorMessageWithProductNames } from "@/lib/order-error-display"
 import { flushCartToServer } from "@/lib/flush-cart-server"
 import {
@@ -53,6 +52,7 @@ const QRCode = dynamic(() => import("react-qr-code"), { ssr: false })
 const CUR = "RWF"
 import { buildMoMoUssd } from "@/lib/momo-ussd"
 import { parseErxFromNotes } from "@/lib/erx-prescription"
+import { itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
 
 // ---------- helpers ----------
 function formatErxLinesForShare(it: CartItem): string[] {
@@ -221,6 +221,8 @@ function CartSummaryBody() {
   const { toast } = useToast()
   const getGroupsBySeller = useCartStore((s) => s.getGroupsBySeller)
   const getGrandTotal    = useCartStore((s) => s.getGrandTotal)
+  const cartItems        = useCartStore((s) => s.items)
+  const removeGroupBySeller = useCartStore((s) => s.removeGroupBySeller)
   const clear            = useCartStore((s) => s.clear)
   const getPaymentStatus = useCartStore((s) => s.getPaymentStatus)
   const setPaymentStatus = useCartStore((s) => s.setPaymentStatus)
@@ -324,6 +326,14 @@ function CartSummaryBody() {
   const groups = getGroupsBySeller()
   const grandTotal = Math.round(getGrandTotal())
 
+  const clearSubmittedSupplier = async (supplierId: string) => {
+    const sid = (supplierId ?? "").toString().trim()
+    if (!sid) return
+    const remaining = cartItems.filter((x) => ((x.supplierId ?? "").toString().trim() !== sid))
+    removeGroupBySeller(sid)
+    await flushCartToServer(user?.email ?? "", remaining)
+  }
+
   // Resolve MoMo for a group: from cart items first, then fallback from profile API
   const getMomoForGroup = (g: { supplierId: string; momo?: string | null }) =>
     (g.momo ?? "").trim() || (supplierMomoFallback[g.supplierId] ?? "").trim()
@@ -341,27 +351,56 @@ function CartSummaryBody() {
   const getSellerTelForOrder = (g: { supplierId: string; phone?: string | null }) =>
     (supplierAccountTel[g.supplierId] ?? "").trim() || (g.phone ?? "").trim() || ""
 
-  // One profile fetch per supplier: MoMo fallback + TEL (account_signup)
-  const requestedProfileRef = useRef<Set<string>>(new Set())
+  // Supplier profile hydration for checkout contact data.
+  // Retry a few times so transient backend/network failures do not leave seller phone empty.
+  const profileFetchInFlightRef = useRef<Set<string>>(new Set())
+  const profileFetchAttemptsRef = useRef<Record<string, number>>({})
+  const PROFILE_FETCH_MAX_ATTEMPTS = 3
+  const PROFILE_FETCH_RETRY_MS = 1200
   useEffect(() => {
-    groups.forEach((g) => {
-      const account = (g.supplierId ?? "").trim()
+    const fetchSupplierProfile = (account: string) => {
       if (!account) return
-      if (requestedProfileRef.current.has(account)) return
-      requestedProfileRef.current.add(account)
+      if (profileFetchInFlightRef.current.has(account)) return
+      const attempt = profileFetchAttemptsRef.current[account] ?? 0
+      if (attempt >= PROFILE_FETCH_MAX_ATTEMPTS) return
+      profileFetchInFlightRef.current.add(account)
+      profileFetchAttemptsRef.current[account] = attempt + 1
+
       fetch(`/api/account/profile?account=${encodeURIComponent(account)}`)
         .then((res) => res.json())
         .then((data) => {
-          if (!data?.ok || !data?.profile) return
+          if (!data?.ok || !data?.profile) {
+            throw new Error("Profile not available")
+          }
           const p = data.profile as { momo?: string; phone?: string }
           const momo = String(p.momo ?? "").trim()
           const tel = String(p.phone ?? "").trim()
           if (momo) setSupplierMomoFallback((prev) => ({ ...prev, [account]: momo }))
-          if (tel) setSupplierAccountTel((prev) => ({ ...prev, [account]: tel }))
+          if (tel) {
+            setSupplierAccountTel((prev) => ({ ...prev, [account]: tel }))
+          } else if ((profileFetchAttemptsRef.current[account] ?? 0) < PROFILE_FETCH_MAX_ATTEMPTS) {
+            setTimeout(() => fetchSupplierProfile(account), PROFILE_FETCH_RETRY_MS)
+          }
         })
-        .catch(() => {})
+        .catch(() => {
+          if ((profileFetchAttemptsRef.current[account] ?? 0) < PROFILE_FETCH_MAX_ATTEMPTS) {
+            setTimeout(() => fetchSupplierProfile(account), PROFILE_FETCH_RETRY_MS)
+          }
+        })
+        .finally(() => {
+          profileFetchInFlightRef.current.delete(account)
+        })
+    }
+
+    groups.forEach((g) => {
+      const account = (g.supplierId ?? "").trim()
+      if (!account) return
+      const alreadyHaveTel = Boolean((supplierAccountTel[account] ?? "").trim())
+      const alreadyHaveMomo = Boolean((supplierMomoFallback[account] ?? "").trim())
+      if (alreadyHaveTel && alreadyHaveMomo) return
+      fetchSupplierProfile(account)
     })
-  }, [groups])
+  }, [groups, supplierAccountTel, supplierMomoFallback])
 
   // Prefetch shared guest pool account (ISHYIGA_ACCOUNT) so checkout is fast and order servlet can resolve buyer
   useEffect(() => {
@@ -710,8 +749,7 @@ function CartSummaryBody() {
             shareableToken: json.tableCommand.shareableToken,
           })
           setShareModalOpen(true)
-          clear()
-          await flushCartToServer(user?.email ?? "", [])
+          await clearSubmittedSupplier(g.supplierId)
           return
         }
 
@@ -737,15 +775,13 @@ function CartSummaryBody() {
         // Lock table command if in table mode for bar/resto flow:
         // clear cart but stay on page so user can add more items.
         if (isInTableCommand() && activeSession?.isCreator && currentOrderIsBarTable) {
-          clear()
-          await flushCartToServer(user?.email ?? "", [])
+          await clearSubmittedSupplier(g.supplierId)
           alert(`Order #${orderId} added to table "${activeSession.tableName}". Add more items or send the complete table order.`)
           return
         }
 
-        // Clear cart (but table session persists in its own store)
-        clear()
-        await flushCartToServer(user?.email ?? "", [])
+        // Remove only the supplier that was just submitted.
+        await clearSubmittedSupplier(g.supplierId)
 
         // Redirect to order success page with WhatsApp details
         if (orderId) {

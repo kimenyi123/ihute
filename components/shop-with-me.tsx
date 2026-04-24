@@ -1939,8 +1939,7 @@ function ProductCard({
   const itemEmballageCart = normalizeItemEmballageForCart(embRaw);
   const embStr =
     embRaw != null && String(embRaw).trim() !== "" ? String(embRaw) : null;
-  /** Line total is in RWF; suffix is pack size (e.g. `1 pcs`), not a second currency. Default multiplier 1 when missing. */
-  const unitLabel = itemEmballageDisplaySuffix(embStr ?? "1") ?? "1 pcs";
+  const unitLabel = itemEmballageDisplaySuffix(embStr ?? "1") ?? "1 Pkg";
   const moodMeta = moodMetaType ? getMoodMetaText(product, moodMetaType) : { text: null };
 
   /** Try KAOS famille → flat NIKI → each backend URL → no_image (same order as getProductImageSrc, but advance on 404). */
@@ -1982,7 +1981,6 @@ function ProductCard({
     dosage: pickField("dosage", "DOSAGE"),
     inn: pickField("inn", "INN", "item_name"),
     form: pickField("form", "FORM", "measurement", "MEASUREMENT"),
-    pack: pickField("package", "PACKAGE", "item_emballage"),
   };
 
   useEffect(() => {
@@ -2162,7 +2160,6 @@ function ProductCard({
               {pharmacyViewFields.dosage && <p>Dosage: {pharmacyViewFields.dosage}</p>}
               {pharmacyViewFields.inn && <p>INN: {pharmacyViewFields.inn}</p>}
               {pharmacyViewFields.form && <p>Form: {pharmacyViewFields.form}</p>}
-              {pharmacyViewFields.pack && <p>Package: {pharmacyViewFields.pack}</p>}
             </div>
           )}
           {moodMeta.text && moodMetaType !== "discounted" && (

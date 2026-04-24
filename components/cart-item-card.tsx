@@ -39,6 +39,7 @@ export function CartItemCard({ item }: { item: CartItem }) {
 
   const erx = item.erx ?? parseErxFromNotes(item.notes ?? undefined)
   const lineSig = item.lineSignature ?? prescriptionLineKey({ erx: item.erx, notes: item.notes })
+  const unitLabel = itemEmballageDisplaySuffix(item.itemEmballage ?? item.unit ?? item.selectedUnit)
 
   useEffect(() => {
     setCandidateIdx(0)
@@ -48,10 +49,6 @@ export function CartItemCard({ item }: { item: CartItem }) {
   useEffect(() => {
     setInputValue(String(item.qty))
   }, [item.qty])
-
-  const unitLabel = itemEmballageDisplaySuffix(
-    item.itemEmballage ?? item.unit ?? item.selectedUnit,
-  )
 
   return (
     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2.5 sm:gap-4 rounded-lg border p-2.5 sm:p-3">
@@ -120,7 +117,7 @@ export function CartItemCard({ item }: { item: CartItem }) {
                   {Number(item.price).toLocaleString()} {DEFAULT_CART_CURRENCY}
                 </span>
                 {unitLabel ? (
-                  <span className="text-muted-foreground"> · {unitLabel}</span>
+                  <span className="text-muted-foreground"> ({unitLabel})</span>
                 ) : null}
               </>
             ) : (

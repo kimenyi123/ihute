@@ -199,7 +199,7 @@ function LoginPageInner() {
           onMustChangePassword={handleMustChangePassword}
           defaultPhone={phonePrefill}
           loginMode="phoneOrEmail"
-          uiVariant="grandma"
+          uiVariant="ihute"
           registerHref="/register/buyer"
         />
 

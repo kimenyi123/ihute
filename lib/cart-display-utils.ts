@@ -25,41 +25,41 @@ function stripCurrencyNoiseFromEmballage(raw: string): string {
     .trim()
 }
 
-/** Bare `pcs` / `pc` (e.g. from `/pcs` in Redis) → `1 pcs` so price lines never show `(pcs)` without a count. */
+/** Bare `pcs` / `pc` (e.g. from `/pcs` in Redis) → `1 Pkg` so price lines never show unit without a count. */
 function normalizeBarePieceSuffix(label: string | null): string | null {
-  if (label == null) return "1 pcs"
+  if (label == null) return "1 Pkg"
   const t = label.trim()
-  if (/^(pcs|pc)$/i.test(t)) return "1 pcs"
-  return label
+  if (/^(pcs|pc)$/i.test(t)) return "1 Pkg"
+  return t.replace(/\bpcs?\b/gi, "Pkg")
 }
 
 /**
- * Same wording as product cards: numeric `item_emballage` → `N pcs`; text units use `displayUnitForPrice` (e.g. `/pcs` → `1 pcs`).
- * Missing or empty raw defaults to **`1 pcs`** (matches pack multiplier default of 1).
+ * Same wording as product cards: numeric `item_emballage` → `N Pkg`; text units use `displayUnitForPrice`.
+ * Missing or empty raw defaults to **`1 Pkg`** (matches pack multiplier default of 1).
  */
 export function itemEmballageDisplaySuffix(raw?: string | null): string | null {
-  if (raw == null || String(raw).trim() === "") return "1 pcs"
+  if (raw == null || String(raw).trim() === "") return "1 Pkg"
   const s = stripCurrencyNoiseFromEmballage(String(raw).trim())
-  if (!s) return "1 pcs"
+  if (!s) return "1 Pkg"
   if (isNumericEmballageOnly(s)) {
     const n = parseFloat(s.replace(/,/g, ""))
     if (!Number.isFinite(n) || n <= 0) {
       return normalizeBarePieceSuffix(displayUnitForPrice(s))
     }
     return Number.isInteger(n) || Math.abs(n - Math.round(n)) < 1e-9
-      ? `${Math.round(n)} pcs`
-      : `${n} pcs`
+      ? `${Math.round(n)} Pkg`
+      : `${n} Pkg`
   }
   return normalizeBarePieceSuffix(displayUnitForPrice(s))
 }
 
 /**
- * Supplier "Package" column: multiplier + `pcs` when numeric, else unit text.
+ * Supplier "Pkg" column: multiplier + `Pkg` when numeric, else unit text.
  */
 export function formatItemEmballagePackageCell(raw: unknown): string {
-  if (raw == null) return "1 pcs"
+  if (raw == null) return "1 Pkg"
   const s = stripCurrencyNoiseFromEmballage(String(raw).trim())
-  if (s === "") return "1 pcs"
+  if (s === "") return "1 Pkg"
   if (isNumericEmballageOnly(s)) {
     const n = parseFloat(s.replace(/,/g, ""))
     if (!Number.isFinite(n) || n <= 0) return s
@@ -67,9 +67,9 @@ export function formatItemEmballagePackageCell(raw: unknown): string {
       Number.isInteger(n) || Math.abs(n - Math.round(n)) < 1e-9
         ? String(Math.round(n))
         : String(n)
-    return `${qtyStr} pcs`
+    return `${qtyStr} Pkg`
   }
-  return displayUnitForPrice(s) ?? s
+  return (displayUnitForPrice(s) ?? s).replace(/\bpcs?\b/gi, "Pkg")
 }
 
 /** Supplier tables: show `item_emballage` multiplier only (no `pcs` suffix). */

@@ -47,7 +47,7 @@ export type IshyigaLoginCardProps = {
 
 export function IshyigaLoginCard({
   title = "Welcome back",
-  description = "Sign in with your phone number",
+  description = "Sign in with your email",
   submitLabel = "Sign in",
   defaultPhone,
   defaultPhoneOrEmail,
@@ -73,6 +73,21 @@ export function IshyigaLoginCard({
   }, [defaultPhone, defaultPhoneOrEmail])
 
   const isGrandmaUi = uiVariant === "grandma"
+  const isPhoneOnly = loginMode === "phoneOnly"
+  const isIhuteEmailUi = !isPhoneOnly && !isGrandmaUi
+  const loginFieldLabel = isPhoneOnly ? "Phone number" : isIhuteEmailUi ? "Email" : "Phone number or email"
+  const loginFieldPlaceholder = isPhoneOnly
+    ? "e.g. 0788123456"
+    : isIhuteEmailUi
+      ? "Email address"
+      : "e.g. 0788123456 or name@example.com"
+  const loginFieldType = isPhoneOnly ? "tel" : isIhuteEmailUi ? "email" : "text"
+  const loginFieldInputMode: React.HTMLAttributes<HTMLInputElement>["inputMode"] = isPhoneOnly
+    ? "tel"
+    : isIhuteEmailUi
+      ? "email"
+      : "text"
+  const loginFieldAutoComplete = isPhoneOnly ? "tel" : isIhuteEmailUi ? "email" : "username"
   const cardThemeClass = isGrandmaUi
     ? "w-full rounded-2xl border border-[#dbe7f3] bg-white shadow-[0_8px_18px_rgba(24,151,224,.08)]"
     : defaultCardClass
@@ -136,14 +151,14 @@ export function IshyigaLoginCard({
         <form onSubmit={handleLogin} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="ishyiga-login-phone" className="text-[#17324d]">
-              {loginMode === "phoneOnly" ? "Phone number" : "Phone number or email"}
+              {loginFieldLabel}
             </Label>
             <Input
               id="ishyiga-login-phone"
-              type="tel"
-              inputMode="tel"
-              autoComplete="tel"
-              placeholder={loginMode === "phoneOnly" ? "e.g. 0788123456" : "Phone number or email"}
+              type={loginFieldType}
+              inputMode={loginFieldInputMode}
+              autoComplete={loginFieldAutoComplete}
+              placeholder={loginFieldPlaceholder}
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
               className="border-[#dbe7f3] bg-white"

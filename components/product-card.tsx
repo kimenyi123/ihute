@@ -472,6 +472,11 @@ export function ProductCard({
             <span className="font-semibold">
               {displayPrice.toLocaleString()} {currency}
             </span>
+            {displayUnitLabel ? (
+              <span className="text-[10px] text-muted-foreground">
+                ({displayUnitLabel})
+              </span>
+            ) : null}
             {oldPrice != null && oldPrice > displayPrice && (
               <span className="text-[10px] text-muted-foreground line-through">
                 {oldPrice.toLocaleString()}
