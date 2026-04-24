@@ -32,6 +32,7 @@ export default function BuyerLayout({ children }: { children: React.ReactNode })
   const pathname = usePathname()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const logout = useAuthStore((s) => s.logout)
+  const user = useAuthStore((s) => s.user)
   const cartCount = useCartStore((s) => s.getTotalItems())
 
   const closeSidebar = useCallback(() => setSidebarOpen(false), [])
@@ -48,6 +49,12 @@ export default function BuyerLayout({ children }: { children: React.ReactNode })
   const buyerNav: NavItem[] = [
     { name: "Dashboard", href: "/buyer/dashboard", icon: LayoutDashboard },
     { name: "Order Reports", href: "/buyer/orders", icon: ShoppingBag },
+    ...(user?.dualPharmacyRetail
+      ? [
+          { name: "Seller Dashboard", href: "/supplier/dashboard", icon: LayoutDashboard },
+          { name: "Seller Reports", href: "/supplier/orders", icon: ShoppingBag },
+        ]
+      : []),
     // { name: "Umusada upload", href: "/buyer/umusada/upload", icon: FileSpreadsheet },
   ]
 

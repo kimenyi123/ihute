@@ -20,7 +20,6 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 import { generalSellingPrice, parsePackageMultiplier, resolveItemEmballageRaw } from "@/lib/package-price"
-import { formatItemEmballageMultiplierOnly, itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
 
 type ProductStatus = "active" | "inactive" | "out-of-stock"
 
@@ -342,7 +341,6 @@ export default function MyProductsPage() {
                       {/* <th className="text-left p-3 text-sm font-semibold">Category</th> */}
                       <th className="text-right p-3 text-sm font-semibold">Selling Price</th>
                       <th className="text-right p-3 text-sm font-semibold">Cost Price</th>
-                      <th className="text-left p-3 text-sm font-semibold">Package</th>
                       <th className="text-right p-3 text-sm font-semibold">Stock</th>
                       <th className="text-center p-3 text-sm font-semibold">Status</th>
                       <th className="text-right p-3 text-sm font-semibold">Sales</th>
@@ -360,8 +358,6 @@ export default function MyProductsPage() {
                         product.costPrice,
                         product.itemEmballage
                       )
-                      const sellingSuffix =
-                        itemEmballageDisplaySuffix(product.itemEmballage ?? "1") ?? "1 pcs"
                       return (
                       <tr key={product.id} className="border-b hover:bg-muted/50 transition-colors">
                         <td className="p-3">
@@ -383,10 +379,6 @@ export default function MyProductsPage() {
                             <span>
                               {displaySelling.toLocaleString()}{" "}
                               {product.currency || "RWF"}
-                              <span className="text-xs font-normal text-muted-foreground">
-                                {" "}
-                                ({sellingSuffix})
-                              </span>
                             </span>
                           ) : (
                             "—"
@@ -397,11 +389,6 @@ export default function MyProductsPage() {
                             minimumFractionDigits: 1,
                             maximumFractionDigits: 1,
                           })} ${product.currency || "RWF"}`}
-                        </td>
-                        <td className="p-3 text-sm text-muted-foreground max-w-[160px]">
-                          <span className="break-words">
-                            {formatItemEmballageMultiplierOnly(product.itemEmballage)}
-                          </span>
                         </td>
                         <td className="p-3 text-right">
                           <span

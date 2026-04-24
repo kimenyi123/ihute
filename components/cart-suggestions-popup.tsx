@@ -7,7 +7,7 @@
  *   (Redis/`fetchSuggestions`) and returns up to 6 rows.
  * - **Each row:** thumbnail via {@link getProductImageSrc} (passes `image_url`, `item_key_words`, `famille`, …
  *   when the API includes them — missing fields → KAOS fallbacks or placeholder).
- * - **Price:** base `price` × `item_emballage` once; `(N pcs)` via {@link itemEmballageDisplaySuffix}.
+ * - **Price:** base `price` × `item_emballage` once, with pack suffix `(N Pkg)`.
  * - **Actions:** per-row add to cart; “View more” reveals up to {@link MAX_SHOW}; link to search scoped by supplier;
  *   “No thanks” / “Continue to checkout” both invoke {@link CartSuggestionsPopupProps.onContinue} (parent closes modal).
  */
@@ -27,9 +27,9 @@ import { useCartStore } from "@/lib/cart-store"
 import { DEFAULT_CURRENCY, DEFAULT_PLACEHOLDER_IMAGE } from "@/lib/constants"
 import { getProductImageSrc } from "@/lib/image-utils"
 import { Loader2, Plus, Check, ChevronDown, ExternalLink } from "lucide-react"
-import { itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
 import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price"
 import Image from "next/image"
+import { itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
 
 export type CartSuggestionItem = {
   product_id: string

@@ -58,7 +58,10 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
       { name: "Orders", href: "/supplier/orders" },
     ];
     if (showDualPurchases) {
-      items.push({ name: "My purchases", href: "/buyer/orders" });
+      items.push(
+        { name: "Buyer Dashboard", href: "/buyer/dashboard" },
+        { name: "My purchases", href: "/buyer/orders" },
+      );
     }
     if (showRestoSupplierLinks) {
       items.push(

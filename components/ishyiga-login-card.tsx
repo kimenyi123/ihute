@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils"
 const defaultCardClass =
   "w-full rounded-2xl border border-[#dbe7f3] bg-white shadow-[0_8px_18px_rgba(24,151,224,.08)]"
 const btnPrimary =
-  "w-full rounded-xl bg-gradient-to-r from-[#1897e0] to-[#127fc0] hover:from-[#1589cc] hover:to-[#0f6ba3] text-white shadow-[0_4px_12px_rgba(24,151,224,.25)] border-0 h-11 font-semibold"
+  "w-full rounded-xl bg-[#1e3a5f] hover:bg-[#2c4f7c] text-white shadow-[0_4px_12px_rgba(30,58,95,.3)] border-0 h-11 font-semibold"
 
 /** Digits only count; Rwanda mobile typically 9–12 digits with or without country code. */
 function isValidPhoneLogin(raw: string): boolean {
@@ -47,7 +47,7 @@ export type IshyigaLoginCardProps = {
 
 export function IshyigaLoginCard({
   title = "Welcome back",
-  description = "Sign in with your phone number",
+  description = "Sign in with your email",
   submitLabel = "Sign in",
   defaultPhone,
   defaultPhoneOrEmail,
@@ -73,11 +73,26 @@ export function IshyigaLoginCard({
   }, [defaultPhone, defaultPhoneOrEmail])
 
   const isGrandmaUi = uiVariant === "grandma"
+  const isPhoneOnly = loginMode === "phoneOnly"
+  const isIhuteEmailUi = !isPhoneOnly && !isGrandmaUi
+  const loginFieldLabel = isPhoneOnly ? "Phone number" : isIhuteEmailUi ? "Email" : "Phone number or email"
+  const loginFieldPlaceholder = isPhoneOnly
+    ? "e.g. 0788123456"
+    : isIhuteEmailUi
+      ? "Email address"
+      : "e.g. 0788123456 or name@example.com"
+  const loginFieldType = isPhoneOnly ? "tel" : isIhuteEmailUi ? "email" : "text"
+  const loginFieldInputMode: React.HTMLAttributes<HTMLInputElement>["inputMode"] = isPhoneOnly
+    ? "tel"
+    : isIhuteEmailUi
+      ? "email"
+      : "text"
+  const loginFieldAutoComplete = isPhoneOnly ? "tel" : isIhuteEmailUi ? "email" : "username"
   const cardThemeClass = isGrandmaUi
     ? "w-full rounded-2xl border border-[#dbe7f3] bg-white shadow-[0_8px_18px_rgba(24,151,224,.08)]"
     : defaultCardClass
   const submitBtnClass = isGrandmaUi
-    ? "w-full rounded-xl bg-[#194b79] hover:bg-[#163f66] text-white shadow-[0_4px_12px_rgba(25,75,121,.3)] border-0 h-11 font-semibold"
+    ? "w-full rounded-xl bg-gradient-to-r from-[#1897e0] via-[#30acef] to-[#127fc0] hover:from-[#1589cc] hover:via-[#229fe6] hover:to-[#0f6ba3] text-white shadow-[0_4px_12px_rgba(24,151,224,.35)] border-0 h-11 font-semibold"
     : btnPrimary
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -136,14 +151,14 @@ export function IshyigaLoginCard({
         <form onSubmit={handleLogin} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="ishyiga-login-phone" className="text-[#17324d]">
-              {loginMode === "phoneOnly" ? "Phone number" : "Phone number or email"}
+              {loginFieldLabel}
             </Label>
             <Input
               id="ishyiga-login-phone"
-              type="tel"
-              inputMode="tel"
-              autoComplete="tel"
-              placeholder={loginMode === "phoneOnly" ? "e.g. 0788123456" : "Phone number or email"}
+              type={loginFieldType}
+              inputMode={loginFieldInputMode}
+              autoComplete={loginFieldAutoComplete}
+              placeholder={loginFieldPlaceholder}
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
               className="border-[#dbe7f3] bg-white"

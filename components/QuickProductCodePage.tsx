@@ -139,7 +139,7 @@ export default function QuickProductCodePage() {
   /** Currency from account_signup (product.currency). */
   const getCurrency = (product: QuickProductItem) => product.currency || 'RWF';
 
-  /** Final line price: `selling_price × item_emballage` (default mult 1); pack shown as `(50 pcs)` to avoid clashing with strengths in names (e.g. 50mg). */
+  /** Final line price: `selling_price × item_emballage` (default mult 1). */
   const formatPrice = (product: QuickProductItem) => {
     const embRaw = product.item_emballage ?? (product as { ITEM_EMBALLAGE?: string }).ITEM_EMBALLAGE;
     const display = generalSellingPrice(getPrice(product), embRaw);
@@ -148,7 +148,7 @@ export default function QuickProductCodePage() {
     const unit =
       itemEmballageDisplaySuffix(
         embRaw != null && String(embRaw).trim() !== "" ? String(embRaw) : "1"
-      ) ?? "1 pcs";
+      ) ?? "1 Pkg";
     return `${Number(display).toLocaleString()} ${curr} (${unit})`;
   };
 
