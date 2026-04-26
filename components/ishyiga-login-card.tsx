@@ -15,8 +15,11 @@ import { cn } from "@/lib/utils"
 
 const defaultCardClass =
   "w-full rounded-2xl border border-[#dbe7f3] bg-white shadow-[0_8px_18px_rgba(24,151,224,.08)]"
-const btnPrimary =
-  "w-full rounded-xl bg-[#1e3a5f] hover:bg-[#2c4f7c] text-white shadow-[0_4px_12px_rgba(30,58,95,.3)] border-0 h-11 font-semibold"
+/** Main ihute sign-in: full-width navy, strong radius (matches marketing login reference). */
+const btnPrimaryNavy =
+  "w-full rounded-[10px] bg-[#1a4a7a] hover:bg-[#153d68] active:bg-[#123a5c] text-white border-0 h-12 px-4 text-base font-semibold shadow-[0_2px_8px_rgba(26,74,122,.25)]"
+const btnGrandmaGradient =
+  "w-full rounded-xl bg-gradient-to-r from-[#1897e0] via-[#30acef] to-[#127fc0] hover:from-[#1589cc] hover:via-[#229fe6] hover:to-[#0f6ba3] text-white shadow-[0_4px_12px_rgba(24,151,224,.35)] border-0 h-11 font-semibold"
 
 /** Digits only count; Rwanda mobile typically 9–12 digits with or without country code. */
 function isValidPhoneLogin(raw: string): boolean {
@@ -40,6 +43,8 @@ export type IshyigaLoginCardProps = {
   className?: string
   loginMode?: "phoneOnly" | "phoneOrEmail"
   uiVariant?: "ihute" | "grandma"
+  /** When set, overrides the default tie between `uiVariant` and submit button look. */
+  primaryButtonStyle?: "navy" | "gradient"
   onSuccess: (user: User) => void | Promise<void>
   /** Java returned `mustChangePassword` — caller shows set-password UI (e.g. `/login` dialog). */
   onMustChangePassword?: (payload: ApiLoginOK, password: string) => void | Promise<void>
@@ -57,6 +62,7 @@ export function IshyigaLoginCard({
   className,
   loginMode = "phoneOrEmail",
   uiVariant = "ihute",
+  primaryButtonStyle,
   onSuccess,
   onMustChangePassword,
 }: IshyigaLoginCardProps) {
@@ -91,9 +97,9 @@ export function IshyigaLoginCard({
   const cardThemeClass = isGrandmaUi
     ? "w-full rounded-2xl border border-[#dbe7f3] bg-white shadow-[0_8px_18px_rgba(24,151,224,.08)]"
     : defaultCardClass
-  const submitBtnClass = isGrandmaUi
-    ? "w-full rounded-xl bg-gradient-to-r from-[#1897e0] via-[#30acef] to-[#127fc0] hover:from-[#1589cc] hover:via-[#229fe6] hover:to-[#0f6ba3] text-white shadow-[0_4px_12px_rgba(24,151,224,.35)] border-0 h-11 font-semibold"
-    : btnPrimary
+  const resolvedPrimaryButton =
+    primaryButtonStyle ?? (isGrandmaUi ? "gradient" : "navy")
+  const submitBtnClass = resolvedPrimaryButton === "gradient" ? btnGrandmaGradient : btnPrimaryNavy
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()

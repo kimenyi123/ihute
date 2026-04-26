@@ -209,7 +209,14 @@ async function forward(req: NextRequest) {
       })
     }
 
-    if (parsed && Array.isArray(parsed.products)) {
+    const supplierProductsParam = incoming.searchParams.get("supplierProducts") || ""
+    if (Array.isArray(parsed)) {
+      console.log(
+        "[fetchSuggestions] Data source: array payload | rows:",
+        parsed.length,
+        supplierProductsParam ? `| supplierProducts=${supplierProductsParam}` : "",
+      )
+    } else if (parsed && Array.isArray(parsed.products)) {
       const sources = parsed.products
         .map((p: any) => String(p?.source || "").toLowerCase() || "unknown")
       const total = sources.length
@@ -245,7 +252,11 @@ async function forward(req: NextRequest) {
       }
     } else if (parsed) {
       const supplierParam = incoming.searchParams.get("supplier") || ""
-      console.log("[fetchSuggestions] Data source: unknown (no products array) | supplier=" + (supplierParam || "n/a"))
+      console.log(
+        "[fetchSuggestions] Data source: unknown (no products array) | supplier=" +
+          (supplierParam || "n/a") +
+          (supplierProductsParam ? " | supplierProducts=" + supplierProductsParam : ""),
+      )
     }
 
     if (sectorStatsParam && debugSql && parsed && typeof parsed === "object" && parsed._debugSql != null) {

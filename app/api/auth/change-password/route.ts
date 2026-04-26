@@ -12,6 +12,7 @@ export async function POST(req: Request) {
   const rid = crypto.randomUUID()
   try {
     const body = await req.json()
+    const email = String(body?.email ?? "").trim()
     const currentPassword = String(body?.currentPassword ?? "")
     const newPassword = String(body?.newPassword ?? "")
     if (!currentPassword) {
@@ -27,7 +28,7 @@ export async function POST(req: Request) {
     }
 
     const cookie = req.headers.get("cookie") || ""
-    if (!cookie) {
+    if (!cookie && !email) {
       return NextResponse.json(
         { ok: false, error: "Not logged in. Sign in again and retry.", rid },
         { status: 401 },
@@ -45,6 +46,7 @@ export async function POST(req: Request) {
     form.set("action", "change_password")
     form.set("currentPassword", currentPassword)
     form.set("newPassword", newPassword)
+    if (email) form.set("email", email)
 
     const res = await fetch(JAVA_AUTH_URL, {
       method: "POST",
