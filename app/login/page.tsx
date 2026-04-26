@@ -143,7 +143,7 @@ function LoginPageInner() {
   const handlePasswordChangeAfterLogin = async (e: FormEvent) => {
     e.preventDefault()
     setPwChangeError(null)
-    const current = existingPassword.trim()
+    const current = existingPassword
     if (!current) {
       setPwChangeError("Enter the password you used to sign in (temporary password)")
       return
@@ -168,7 +168,11 @@ function LoginPageInner() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ currentPassword: current, newPassword }),
+        body: JSON.stringify({
+          email: pendingLoginPayload?.user?.email,
+          currentPassword: current,
+          newPassword,
+        }),
       })
       const j = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string }
       if (!res.ok || !j?.ok) {
@@ -195,11 +199,14 @@ function LoginPageInner() {
         </Link>
 
         <IshyigaLoginCard
+          title="Welcome back"
+          description="Sign in with your phone number"
           onSuccess={handleSuccess}
           onMustChangePassword={handleMustChangePassword}
           defaultPhone={phonePrefill}
           loginMode="phoneOrEmail"
           uiVariant="grandma"
+          primaryButtonStyle="navy"
           registerHref="/register/buyer"
         />
 
@@ -212,22 +219,12 @@ function LoginPageInner() {
             <DialogHeader>
               <DialogTitle>Set a new password</DialogTitle>
               <DialogDescription>
-                Confirm the temporary password you used to sign in, then choose a strong new password (10+ characters with
-                uppercase, lowercase, number, and symbol).
+                Choose a strong new password (10+ characters with uppercase, lowercase, number, and symbol).
+                We will use the same password you just used to sign in as your current password.
               </DialogDescription>
             </DialogHeader>
             <form onSubmit={handlePasswordChangeAfterLogin} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="existing-pw">Current password</Label>
-                <Input
-                  id="existing-pw"
-                  type="password"
-                  value={existingPassword}
-                  onChange={(e) => setExistingPassword(e.target.value)}
-                  required
-                  autoComplete="current-password"
-                />
-              </div>
+              <input type="hidden" value={existingPassword} readOnly />
               <div className="space-y-2">
                 <Label htmlFor="new-pw">New password</Label>
                 <Input

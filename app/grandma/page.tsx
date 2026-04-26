@@ -15,7 +15,7 @@ import { Slider } from "@/components/ui/slider"
 import { useLocationStoreEnhanced, type LocationData } from "@/lib/location-store-enhanced"
 import { getProductImageSrc, NO_IMAGE_URL } from "@/lib/image-utils"
 import { cn } from "@/lib/utils"
-import { Loader2, SlidersHorizontal } from "lucide-react"
+import { Loader2, SlidersHorizontal, Trash2 } from "lucide-react"
 import { grandmaApiService } from "@/lib/grandma-api-service"
 import { getUserPreferences, toggleUserPreference, saveUserPreferences, getCurrentUserId, loadUserPreferences } from "@/lib/user-preferences-api"
 import { GRANDMA_APP_VERSION, GRANDMA_OUTBOUND, GRANDMA_PATHS } from "@/lib/grandma-urls"
@@ -24,7 +24,7 @@ import {
   type GrandmaReorderPayload,
 } from "@/lib/grandma-reorder"
 import { GRANDMA_CATEGORY_TO_SECTOR_SLUG } from "@/lib/seller-category-sector"
-import { fetchSectorStatsFromApi } from "@/lib/fetch-suggestions-helpers"
+import { fetchSectorStatsFromApi, productCountFromSupplierRow } from "@/lib/fetch-suggestions-helpers"
 import { useAuthStore } from "@/lib/auth-store"
 import { userCanAccessSellerSpace } from "@/lib/auth-login-client"
 import { GrandmaSellerDashboard } from "@/components/grandma-seller-dashboard"
@@ -141,6 +141,8 @@ type ShopEntry = {
   reviewCount?: number
   /** under `public/` — e.g. `/img/shops/sawa.png` */
   logoSrc: string
+  /** Stock / catalog lines for this supplier row from browse API (home card totals). */
+  stockLineCount?: number
   /** merchant payout — demo; replace with API */
   bankName?: string
   payoutAccount?: string
@@ -160,6 +162,49 @@ function sameGrandmaSeller(a: string | null | undefined, b: string | null | unde
 
 function isPreferredGrandmaShop(shopId: string, preferredIds: string[]): boolean {
   return preferredIds.some((pid) => pid === shopId || sameGrandmaSeller(pid, shopId))
+}
+
+/**
+ * Supplier-products endpoint can return multiple JSON shapes depending on servlet branch:
+ * - { products: [...] }
+ * - [...]
+ * - { data: [...] } / { supplierProducts: [...] }
+ * - [{ products: [...] }, ...] with optional product_count hints
+ */
+function extractSupplierProductsCount(payload: unknown): number {
+  const fromNumericField = (o: Record<string, unknown>): number | null => {
+    const raw = o.total ?? o.totalCount ?? o.count ?? o.product_count ?? o.productCount ?? o.PRODUCT_COUNT
+    const n = Number(raw)
+    if (!Number.isFinite(n)) return null
+    return Math.max(0, Math.floor(n))
+  }
+  const countRows = (rows: unknown[]): number => {
+    if (!rows.length) return 0
+    const hasNestedProducts = rows.some((r) => {
+      if (!r || typeof r !== "object") return false
+      return Array.isArray((r as Record<string, unknown>).products)
+    })
+    if (!hasNestedProducts) return rows.length
+    return rows.reduce<number>((sum, row) => {
+      if (!row || typeof row !== "object") return sum
+      const o = row as Record<string, unknown>
+      if (Array.isArray(o.products)) return sum + o.products.length
+      const pc = Number(o.product_count ?? o.productCount ?? o.PRODUCT_COUNT ?? 0)
+      return sum + (Number.isFinite(pc) ? Math.max(0, Math.floor(pc)) : 0)
+    }, 0)
+  }
+
+  if (Array.isArray(payload)) return countRows(payload)
+  if (payload && typeof payload === "object") {
+    const o = payload as Record<string, unknown>
+    const hinted = fromNumericField(o)
+    if (hinted !== null) return hinted
+    if (Array.isArray(o.products)) return countRows(o.products)
+    if (Array.isArray(o.data)) return countRows(o.data)
+    if (Array.isArray(o.supplierProducts)) return countRows(o.supplierProducts)
+    if (Array.isArray(o.items)) return countRows(o.items)
+  }
+  return 0
 }
 
 type OfferRow = {
@@ -1516,28 +1561,25 @@ export default function GrandmaPage() {
   const [allAvailableShops, setAllAvailableShops] = useState<ShopEntry[]>([])
   const [allShopsLoading, setAllShopsLoading] = useState(false)
   const [allShopsError, setAllShopsError] = useState<string | null>(null)
-
-  /** Per-sector shop + stock-line counts (same `/api/fetchSuggestions?sectorStats=` as main home). */
-  const [sectorStatsByCategory, setSectorStatsByCategory] = useState<
-    Partial<Record<Category, { shops: number; items: number }>>
-  >({})
-  const [sectorStatsLoading, setSectorStatsLoading] = useState(false)
+  /** Full per-sector item totals (Kaos `sectorStats`) for Home cards. */
+  const [homeSectorItemsByCategory, setHomeSectorItemsByCategory] = useState<Partial<Record<Category, number>>>({})
+  const [homeSectorItemsLoading, setHomeSectorItemsLoading] = useState(false)
 
   useEffect(() => {
     let cancelled = false
-    setSectorStatsLoading(true)
+    setHomeSectorItemsLoading(true)
     void (async () => {
-      const next: Partial<Record<Category, { shops: number; items: number }>> = {}
+      const next: Partial<Record<Category, number>> = {}
       await Promise.all(
         CATEGORIES.map(async (c) => {
           const slug = GRANDMA_CATEGORY_TO_SECTOR_SLUG[c.name]
           const s = await fetchSectorStatsFromApi(slug)
-          if (!cancelled) next[c.name] = s
-        })
+          if (!cancelled) next[c.name] = s.items
+        }),
       )
       if (!cancelled) {
-        setSectorStatsByCategory(next)
-        setSectorStatsLoading(false)
+        setHomeSectorItemsByCategory(next)
+        setHomeSectorItemsLoading(false)
       }
     })()
     return () => {
@@ -1547,17 +1589,38 @@ export default function GrandmaPage() {
 
   // Combine API products with existing products, preserving quantities - FIXED FOR API INTEGRATION
   const combinedProducts = useMemo(() => {
-    // If we have API products for selected shop, use them directly
-    if (apiProducts.length > 0 && selectedShopId) {
-      return apiProducts // API products already have quantities updated by changeQty
-    }
-    
-    return [] // Return empty if no API products
+    if (apiProducts.length === 0) return []
+    if (selectedShopId) return apiProducts
+    // Sector / home navigation can clear selection before a new shop is chosen — still count cart lines.
+    if (apiProducts.some((p) => p.qty > 0)) return apiProducts
+    return []
   }, [apiProducts, selectedShopId])
 
   const selectedProducts = useMemo(() => combinedProducts.filter((p) => p.qty > 0), [combinedProducts])
   const itemsCount = useMemo(() => selectedProducts.reduce((a, p) => a + p.qty, 0), [selectedProducts])
   const itemsTotal = useMemo(() => selectedProducts.reduce((a, p) => a + p.qty * p.price, 0), [selectedProducts])
+
+  /** Home grid counts: shops from browse rows, items from full `sectorStats` totals. */
+  const grandmaHomeSectorCounts = useMemo(() => {
+    const next = {} as Record<Category, { shops: number; items: number }>
+    for (const { name } of CATEGORIES) {
+      next[name] = { shops: 0, items: 0 }
+    }
+    for (const s of allAvailableShops) {
+      const bucket = next[s.category]
+      if (!bucket) continue
+      bucket.shops += 1
+      bucket.items += s.stockLineCount ?? 0
+    }
+    for (const { name } of CATEGORIES) {
+      const fullItems = homeSectorItemsByCategory[name]
+      if (Number.isFinite(fullItems)) {
+        // Prefer full DB item totals so card "ibintu" matches what users see in category flows.
+        next[name].items = Math.max(0, Math.floor(Number(fullItems)))
+      }
+    }
+    return next
+  }, [allAvailableShops, homeSectorItemsByCategory])
 
   const selectedShop = useMemo(
     () => {
@@ -1784,14 +1847,13 @@ export default function GrandmaPage() {
 
             const qs = new URLSearchParams({
               sector,
-              sellerLimit: "48",
-              productsPerSeller: "2",
+              limit: "500",
               Currency: "RWF",
             })
-            const browseUrl = `/api/grandma/suppliers/browse?${qs.toString()}`
+            const sectorUrl = `/api/sector-list-suppliers?${qs.toString()}`
             console.log(`=== Fetching ${cat} ===`)
-            console.log(`Browse URL: ${browseUrl}`)
-            const res = await fetch(browseUrl, { cache: "no-store" })
+            console.log(`Sector list URL: ${sectorUrl}`)
+            const res = await fetch(sectorUrl, { cache: "no-store" })
 
             if (res.ok) {
               const data = await res.json()
@@ -1803,7 +1865,7 @@ export default function GrandmaPage() {
               }
             } else {
               browseFailures++
-              console.warn(`Browse failed for ${cat}: HTTP ${res.status}`)
+              console.warn(`Sector list failed for ${cat}: HTTP ${res.status}`)
             }
 
             // Same SQL family as browse, different servlet path — helps if Grandma browse404/503 or returns [].
@@ -1818,12 +1880,14 @@ export default function GrandmaPage() {
                     seller_name: row.SELLER_NAMES || row.OWNER,
                     seller_momo: row.momo ?? row.MOMO,
                     seller_location: row.LOCATION,
+                    product_count: row.product_count ?? row.productCount ?? row.PRODUCT_COUNT ?? row.items_count ?? row.ITEMS_COUNT,
+                    products: Array.isArray(row.products) ? row.products : undefined,
                   }))
                   console.log(`${cat} suppliers (listSuppliersBySector fallback):`, suppliers.length)
                 }
               }
             } else {
-              console.log(`${cat} suppliers (browse):`, suppliers.length)
+              console.log(`${cat} suppliers (sector-list):`, suppliers.length)
             }
 
             allShops.push(
@@ -1882,6 +1946,7 @@ export default function GrandmaPage() {
             rating: 4.0,
             reviewCount: 0,
             logoSrc: "/placeholder.jpg",
+            stockLineCount: productCountFromSupplierRow(supplier),
           }
         })
         
@@ -2986,6 +3051,7 @@ export default function GrandmaPage() {
         .shop-row-meta{flex:1;min-width:0;}
         .shop-row-name{font-size:16px;font-weight:700;}
         .shop-row-tag{color:var(--muted);font-size:13px;margin-top:4px;line-height:1.3;}
+        .shop-row-items{color:var(--muted);font-size:12px;margin-top:4px;font-weight:700;}
         .shop-row-badges{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
         .shop-badge{font-size:11px;font-weight:700;padding:4px 8px;border-radius:8px;background:#f1f8ff;color:var(--blue-dark);}
         .shop-badge.sale{background:#fef3c7;color:#92400e;}
@@ -3014,6 +3080,12 @@ export default function GrandmaPage() {
         .summary-row:last-child{border-bottom:none;}
         .summary-left{font-weight:700;}
         .summary-sub{color:var(--muted);font-size:13px;margin-top:4px;}
+        .summary-item-row{align-items:flex-start;}
+        .summary-item-main{flex:1;min-width:0;padding-right:4px;}
+        .summary-item-end{display:flex;flex-direction:column;align-items:flex-end;gap:8px;flex-shrink:0;}
+        .summary-remove-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:none;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:12px;font-weight:700;color:#b42318;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.04);}
+        .summary-remove-btn svg{width:16px;height:16px;flex-shrink:0;}
+        .summary-remove-btn:active{transform:scale(.98);background:#fff5f5;}
         .logistics-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px;}
         .log-option{background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px 8px;text-align:center;cursor:pointer;box-shadow:0 8px 18px rgba(24,151,224,.06);}
         .log-option.active{border:2px solid var(--blue);background:#f2f9ff;}
@@ -3575,7 +3647,7 @@ export default function GrandmaPage() {
       <section className={`page ${page === 1 ? "active" : ""}`} id="page1">
         <div className="grid">
           {CATEGORIES.map((c) => {
-            const stat = sectorStatsByCategory[c.name]
+            const stat = grandmaHomeSectorCounts[c.name]
             return (
               <div
                 key={c.name}
@@ -3605,13 +3677,13 @@ export default function GrandmaPage() {
                 <div className="cat-icon">{c.icon}</div>
                 <div className="cat-name">{categoryLabel(c.name, language)}</div>
                 <div className="cat-card-footer">
-                  {sectorStatsLoading ? (
+                  {allShopsLoading || homeSectorItemsLoading ? (
                     <span>…</span>
                   ) : (
                     <>
-                      <strong>{stat?.shops ?? 0}</strong> {tPay.sectorPanelShops}
+                      <strong>{stat.shops}</strong> {tPay.sectorPanelShops}
                       <span aria-hidden> · </span>
-                      <strong>{stat?.items ?? 0}</strong> {tPay.sectorPanelItems}
+                      <strong>{stat.items}</strong> {tPay.sectorPanelItems}
                     </>
                   )}
                 </div>
@@ -3726,6 +3798,9 @@ export default function GrandmaPage() {
                 <div className="shop-row-meta">
                   <div className="shop-row-name">{s.name}</div>
                   <div className="shop-row-tag">{s.tagline}</div>
+                  <div className="shop-row-items">
+                    {`${Math.max(0, Math.floor(Number(s.stockLineCount ?? 0)))} ${tPay.sectorPanelItems}`}
+                  </div>
                   <div className="shop-row-rating">
                     <span className="shop-stars" aria-hidden>
                       ★
@@ -3953,14 +4028,25 @@ export default function GrandmaPage() {
           <div id="summaryItems">
             {selectedProducts.length ? (
               selectedProducts.map((p) => (
-                <div className="summary-row" key={p.id}>
-                  <div>
+                <div className="summary-row summary-item-row" key={p.id}>
+                  <div className="summary-item-main">
                     <div className="summary-left">
                       {p.name} x{p.qty}
                     </div>
                     <div className="summary-sub">{formatRwf(p.price)} each</div>
                   </div>
-                  <strong>{formatRwf(p.qty * p.price)}</strong>
+                  <div className="summary-item-end">
+                    <button
+                      type="button"
+                      className="summary-remove-btn"
+                      aria-label={`Remove ${p.name} from cart`}
+                      onClick={() => setQtyDirect(p.id, 0)}
+                    >
+                      <Trash2 aria-hidden />
+                      Remove
+                    </button>
+                    <strong>{formatRwf(p.qty * p.price)}</strong>
+                  </div>
                 </div>
               ))
             ) : (

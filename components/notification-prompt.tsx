@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { usePathname } from "next/navigation"
 import { Bell, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { subscribeToPushNotifications } from "@/lib/notification-service"
@@ -15,6 +16,7 @@ import { subscribeToPushNotifications } from "@/lib/notification-service"
  * - If user hasn't dismissed the prompt recently
  */
 export function NotificationPrompt() {
+  const pathname = usePathname()
   const [showPrompt, setShowPrompt] = useState(false)
   const [isSubscribing, setIsSubscribing] = useState(false)
   const [showBlockedHint, setShowBlockedHint] = useState(false)
@@ -36,13 +38,18 @@ export function NotificationPrompt() {
       if (daysSinceDismissed < 7) return
     }
 
+    // Never show on login flows (avoid overlapping password/login dialogs).
+    if (pathname === "/login" || pathname === "/grandma/login") {
+      return
+    }
+
     // Show prompt 2 minutes (120 seconds) after page load to avoid conflict with location popup
     const timer = setTimeout(() => {
       setShowPrompt(true)
     }, 120000) // 2 minutes = 120,000ms
 
     return () => clearTimeout(timer)
-  }, [])
+  }, [pathname])
 
   async function handleEnable() {
     setIsSubscribing(true)
