@@ -38,8 +38,6 @@ import {
   Share2,
   Copy,
   User,
-  Smartphone,
-  ArrowRight,
 } from "lucide-react";
 import Link from "next/link";
 import AddProductModal, { ProductFormData } from "@/components/supplier/AddProductModal";
@@ -85,17 +83,6 @@ function formatSupplierProductLastSync(p: Record<string, unknown>): string {
 
 const QRCode = dynamic(() => import("react-qr-code"), { ssr: false });
 
-type TopupPeriodParam = 30 | 90 | "all";
-
-type TopupSummary = {
-  topupSalesTotal: number;
-  topupLineCount: number;
-  topupOrdersCount: number;
-  period: "all" | "range";
-  rangeDays: number | null;
-  ordersScanned: number;
-};
-
 function SupplierDashboard() {
   const router = useRouter();
   const { user, isAuthenticated, logout } = useAuthStore();
@@ -127,10 +114,6 @@ function SupplierDashboard() {
     dailyOrdersCount: number;
     bestSelling: Array<{ name: string; quantity: number; total: number }>;
   } | null>(null);
-  const [topup, setTopup] = useState<TopupSummary | null>(null);
-  const [topupLoading, setTopupLoading] = useState(false);
-  const [topupErr, setTopupErr] = useState<string | null>(null);
-  const [topupPeriod, setTopupPeriod] = useState<TopupPeriodParam>(30);
   const [bulkPriceOpen, setBulkPriceOpen] = useState(false);
   const [bulkPriceSelected, setBulkPriceSelected] = useState<Set<string>>(new Set());
   const [bulkPricePercent, setBulkPricePercent] = useState("");
@@ -376,54 +359,6 @@ function SupplierDashboard() {
     }
   }, [user?.ishyigaAccount, user?.role])
 
-  useEffect(() => {
-    if (!user?.ishyigaAccount || user?.role !== "supplier") return;
-
-    let cancelled = false;
-    setTopupLoading(true);
-    setTopupErr(null);
-
-    const daysQ = topupPeriod === "all" ? "all" : String(topupPeriod);
-    fetch(
-      `/api/supplier/topup-sales?account=${encodeURIComponent(user.ishyigaAccount)}&days=${daysQ}`,
-      { cache: "no-store" }
-    )
-      .then((r) => r.json())
-      .then((data) => {
-        if (cancelled) return;
-        if (!data?.ok) {
-          setTopupErr(data?.error || "Could not load top-up summary");
-          setTopup(null);
-          return;
-        }
-        const period = data.period === "all" ? "all" : "range";
-        const rangeDays =
-          period === "all"
-            ? null
-            : typeof data.rangeDays === "number" && !Number.isNaN(data.rangeDays)
-              ? data.rangeDays
-              : Number(data.days) || 30;
-        setTopup({
-          topupSalesTotal: Number(data.topupSalesTotal) || 0,
-          topupLineCount: Number(data.topupLineCount) || 0,
-          topupOrdersCount: Number(data.topupOrdersCount) || 0,
-          period,
-          rangeDays,
-          ordersScanned: Number(data.ordersScanned) || 0,
-        });
-      })
-      .catch(() => {
-        if (!cancelled) setTopupErr("Could not load top-up summary");
-      })
-      .finally(() => {
-        if (!cancelled) setTopupLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.ishyigaAccount, user?.role, topupPeriod]);
-
   const handleLogout = () => {
     logout();
     router.push("/");
@@ -622,73 +557,31 @@ function SupplierDashboard() {
               </Button>
             </div>
           </div>
-
-          {/* Top-up sales — top of page (header) so it stays visible above the fold */}
-          <Card className="border-2 border-emerald-200 bg-gradient-to-br from-emerald-50/90 to-white shadow-sm">
-            <CardHeader className="pb-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4 space-y-0">
-              <div className="space-y-1 min-w-0">
-                <CardTitle className="flex items-center gap-2 text-lg text-slate-900 ">
-                  <Smartphone className="h-6 w-6 shrink-0 text-emerald-600 " />
-                  Top-up sales
-                </CardTitle>
-                <CardDescription className="text-slate-600 ">
-                  Airtime, bundles, and similar lines on your orders
-                  {topup?.period === "all"
-                    ? " (all time, within scan limit)."
-                    : topup?.rangeDays != null
-                      ? ` (last ${topup.rangeDays} days).`
-                      : " (last 30 days)."}
-                </CardDescription>
-              </div>
-              <div className="flex flex-wrap gap-2 shrink-0 pt-1 sm:pt-0">
-                {([30, 90, "all"] as const).map((p) => (
-                  <Button
-                    key={String(p)}
-                    type="button"
-                    variant={topupPeriod === p ? "default" : "outline"}
-                    size="sm"
-                    className="h-8"
-                    onClick={() => setTopupPeriod(p)}
-                  >
-                    {p === "all" ? "All" : `${p}d`}
-                  </Button>
-                ))}
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3 pt-0">
-              {topupLoading ? (
-                <p className="text-sm text-slate-500">Loading top-up summary…</p>
-              ) : topupErr ? (
-                <p className="text-sm text-red-600">{topupErr}</p>
-              ) : topup ? (
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                  <div>
-                    <p className="text-3xl font-bold tabular-nums leading-tight text-emerald-900  sm:text-4xl">
-                      {topup.topupSalesTotal.toLocaleString()} RWF
-                    </p>
-                    <p className="mt-1 text-xs text-slate-600 ">
-                      {topup.topupOrdersCount} order{topup.topupOrdersCount === 1 ? "" : "s"} with top-up lines ·{" "}
-                      {topup.topupLineCount} line{topup.topupLineCount === 1 ? "" : "s"}
-                      {topup.ordersScanned > 0 ? ` · ${topup.ordersScanned} orders scanned` : ""}
-                      {topup.period === "all" ? " (capped for speed)" : ""}
-                    </p>
-                  </div>
-                  <Button variant="outline" size="sm" asChild className="gap-2 w-fit shrink-0">
-                    <Link href="/supplier/orders">
-                      View orders
-                      <ArrowRight className="h-4 w-4" />
-                    </Link>
-                  </Button>
-                </div>
-              ) : null}
-            </CardContent>
-          </Card>
         </div>
       </header>
 
       <div className="container mx-auto px-4 sm:px-6 py-6 sm:py-8">
         {/* Stats Section */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+          <Card className="bg-card shadow-md transition-shadow hover:shadow-lg">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-slate-600 ">
+                Daily Sales
+              </CardTitle>
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 ">
+                <TrendingUp className="h-5 w-5 text-emerald-600 " />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-slate-900 ">
+                {Number(analytics?.dailySalesTotal ?? 0).toLocaleString()} RWF
+              </div>
+              <p className="mt-1 text-xs text-slate-500 ">
+                {Number(analytics?.dailyOrdersCount ?? 0)} orders today
+              </p>
+            </CardContent>
+          </Card>
+
           <Card className="bg-card shadow-md transition-shadow hover:shadow-lg">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-slate-600 ">
@@ -801,20 +694,9 @@ function SupplierDashboard() {
           );
         })()}
 
-        {/* Daily sales & best-selling */}
+        {/* Best-selling today */}
         {analytics && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-            <Card className="bg-card shadow-md">
-              <CardHeader>
-                <CardTitle className="text-sm font-medium text-slate-600 ">Today&apos;s sales</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-slate-900 ">
-                  {analytics.dailySalesTotal.toLocaleString()} RWF
-                </div>
-                <p className="mt-1 text-xs text-slate-500 ">{analytics.dailyOrdersCount} orders today</p>
-              </CardContent>
-            </Card>
+          <div className="grid grid-cols-1 gap-6 mb-8">
             <Card className="bg-card shadow-md">
               <CardHeader>
                 <CardTitle className="text-sm font-medium text-slate-600 ">Best selling</CardTitle>
