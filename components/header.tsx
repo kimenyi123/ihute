@@ -112,9 +112,9 @@ export function Header() {
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-white shadow-sm">
       <div className="container mx-auto px-4">
-        <div className="flex h-16 items-center justify-between gap-2 md:gap-4">
+        <div className="flex h-16 items-center justify-between gap-1.5 sm:gap-2 md:gap-4">
           {/* Logo — full Ishyiga Software wordmark (icon + ISHYIGA / SOFTWARE) */}
-          <Link href="/" className="flex items-center shrink-0 min-w-0">
+          <Link href="/" className="flex min-w-0 max-w-[42%] shrink-0 items-center sm:max-w-none">
             <Image
               src="/images/ishyiga-logo-brand.png"
               alt="Ishyiga Software"
@@ -122,7 +122,7 @@ export function Header() {
               height={93}
               priority
               sizes="(max-width: 768px) 38vw, 220px"
-              className="h-7 w-auto max-w-[min(38vw,200px)] md:h-9 md:max-w-[240px]"
+              className="h-7 w-auto max-w-full md:h-9 md:max-w-[240px]"
             />
           </Link>
 
@@ -142,17 +142,23 @@ export function Header() {
             </Button>
           </div>
 
-          {/* Actions */}
-          <div className="flex items-center gap-1 md:gap-2">
-            <LanguageSelector />
+          {/* Actions — below md, toolbar only shows items also in the sheet + cart + menu so ~320px fits */}
+          <div className="flex min-w-0 flex-1 items-center justify-end gap-0.5 sm:gap-1 md:min-w-0 md:flex-none md:gap-2 lg:flex-initial">
+            <div className="shrink-0">
+              <LanguageSelector />
+            </div>
 
             {/* Notification Bell - Shows for buyers only (suppliers have unified notification) */}
-            {isAuthenticated && (user?.role !== "supplier" || user?.dualPharmacyRetail) && <NotificationBell />}
+            {isAuthenticated && (user?.role !== "supplier" || user?.dualPharmacyRetail) && (
+              <div className="shrink-0">
+                <NotificationBell />
+              </div>
+            )}
 
             {isAuthenticated ? (
               <>
                 {/* User Dropdown - wrapper so profile is on top and clickable */}
-                <div className="relative z-[60]">
+                <div className="relative z-[60] shrink-0">
                   <DropdownMenu modal={false}>
                     <DropdownMenuTrigger
                       asChild
@@ -206,7 +212,13 @@ export function Header() {
 
                 {/* Supplier Orders */}
                 {user?.role === "supplier" && (
-                  <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Orders (Seller)">
+                  <Button
+                    asChild
+                    variant="ghost"
+                    size="icon"
+                    className="relative hidden h-9 w-9 md:inline-flex"
+                    title="My Orders (Seller)"
+                  >
                     <Link href="/supplier/orders">
                       <PackageSearch className="h-5 w-5" />
                       {mounted && sellerCount > 0 && (
@@ -221,7 +233,13 @@ export function Header() {
                 {/* Customer Orders */}
             {(user?.role !== "supplier" || user?.dualPharmacyRetail) && (
                   <>
-                    <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Orders">
+                    <Button
+                      asChild
+                      variant="ghost"
+                      size="icon"
+                      className="relative hidden h-9 w-9 md:inline-flex"
+                      title="My Orders"
+                    >
                       <Link href="/buyer/orders">
                         <ScrollText className="h-5 w-5" />
                         {mounted && pendingCount > 0 && (
@@ -233,14 +251,26 @@ export function Header() {
                     </Button>
 
                       {/* Deliveries */}
-                      <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Deliveries">
+                      <Button
+                        asChild
+                        variant="ghost"
+                        size="icon"
+                        className="relative hidden h-9 w-9 md:inline-flex"
+                        title="My Deliveries"
+                      >
                         <Link href="/deliveries">
                           <PackageCheck className="h-5 w-5" />
                         </Link>
                       </Button>
 
                       {/* Table Commands */}
-                      <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Table Commands">
+                      <Button
+                        asChild
+                        variant="ghost"
+                        size="icon"
+                        className="relative hidden h-9 w-9 md:inline-flex"
+                        title="Table Commands"
+                      >
                         <Link href="/tables">
                           <Users className="h-5 w-5" />
                         </Link>
@@ -250,7 +280,13 @@ export function Header() {
 
                   {/* Payment Dashboard - Admin/Staff only */}
                   {(user?.role === "admin" || user?.role === "staff") && (
-                    <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Payment Dashboard">
+                    <Button
+                      asChild
+                      variant="ghost"
+                      size="icon"
+                      className="relative hidden h-9 w-9 md:inline-flex"
+                      title="Payment Dashboard"
+                    >
                       <Link href="/payment/dashboard">
                         <BarChart3 className="h-5 w-5" />
                       </Link>
@@ -258,7 +294,7 @@ export function Header() {
                   )}
               </>
             ) : (
-              <Button asChild variant="ghost" size="sm" className="h-9">
+              <Button asChild variant="ghost" size="sm" className="h-9 shrink-0">
                 <Link href="/login">
                   <User className="h-4 w-4 md:mr-2" />
                   <span className="hidden md:inline">{t("login")}</span>
@@ -267,7 +303,13 @@ export function Header() {
             )}
 
             {/* Favorites */}
-            <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Favorites">
+            <Button
+              asChild
+              variant="ghost"
+              size="icon"
+              className="relative hidden h-9 w-9 md:inline-flex"
+              title="Favorites"
+            >
               <Link href="/favorites">
                 <Heart className="h-5 w-5" />
                 {mounted && favoritesCount > 0 && (
@@ -278,13 +320,25 @@ export function Header() {
               </Link>
             </Button>
             {/* Watched prices */}
-            <Button asChild variant="ghost" size="icon" className="h-9 w-9" title="Watched prices">
+            <Button
+              asChild
+              variant="ghost"
+              size="icon"
+              className="hidden h-9 w-9 md:inline-flex"
+              title="Watched prices"
+            >
               <Link href="/price-watch">
                 <Eye className="h-5 w-5" />
               </Link>
             </Button>
             {/* Reorder (use orders-style icon) */}
-            <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Reorder Items">
+            <Button
+              asChild
+              variant="ghost"
+              size="icon"
+              className="relative hidden h-9 w-9 md:inline-flex"
+              title="Reorder Items"
+            >
               <Link href="/reorder">
                 <PackageSearch className="h-5 w-5" />
               </Link>
@@ -292,7 +346,13 @@ export function Header() {
 
 
             {/* Ratings */}
-            <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="My Ratings">
+            <Button
+              asChild
+              variant="ghost"
+              size="icon"
+              className="relative hidden h-9 w-9 md:inline-flex"
+              title="My Ratings"
+            >
               <Link href="/ratings">
                 <Star className="h-5 w-5" />
               </Link>
@@ -303,7 +363,13 @@ export function Header() {
               <Barcode className="h-5 w-5" />
             </Button>
             {/* Cart */}
-            <Button asChild variant="ghost" size="icon" className="relative h-9 w-9" title="Cart">
+            <Button
+              asChild
+              variant="ghost"
+              size="icon"
+              className="relative inline-flex h-9 w-9 shrink-0"
+              title="Cart"
+            >
               <Link href="/cart">
                 <ShoppingCart className="h-5 w-5" />
                 {mounted && totalItems > 0 && (
@@ -317,7 +383,13 @@ export function Header() {
             {/* Mobile Menu Button - shows Menu or X depending on state */}
             <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
               <SheetTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-9 w-9 md:hidden" title={mobileMenuOpen ? "Close menu" : "Menu"}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="inline-flex h-9 w-9 shrink-0 md:hidden"
+                  title={mobileMenuOpen ? "Close menu" : "Menu"}
+                  aria-expanded={mobileMenuOpen}
+                >
                   {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
                 </Button>
               </SheetTrigger>
@@ -336,6 +408,21 @@ export function Header() {
                       <p className="px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
                         Quick Links
                       </p>
+
+                      <SheetClose asChild>
+                        <Link
+                          href="/cart"
+                          className="flex items-center gap-3 rounded-lg border border-primary/20 bg-primary/5 px-3 py-3 font-medium hover:bg-primary/10 transition-colors"
+                        >
+                          <ShoppingCart className="h-5 w-5" />
+                          <span>Cart</span>
+                          {mounted && totalItems > 0 && (
+                            <span className="ml-auto rounded-full bg-green-600 px-2 py-0.5 text-xs font-bold text-white">
+                              {totalItems}
+                            </span>
+                          )}
+                        </Link>
+                      </SheetClose>
 
                       {/* Favorites */}
                       <SheetClose asChild>
@@ -468,6 +555,18 @@ export function Header() {
                             <span>My Dashboard</span>
                           </Link>
                         </SheetClose>
+
+                        {(user?.role === "admin" || user?.role === "staff") && (
+                          <SheetClose asChild>
+                            <Link
+                              href="/payment/dashboard"
+                              className="flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-accent transition-colors"
+                            >
+                              <BarChart3 className="h-5 w-5" />
+                              <span>Payment Dashboard</span>
+                            </Link>
+                          </SheetClose>
+                        )}
 
                         {user?.role === "supplier" && (
                           <SheetClose asChild>
