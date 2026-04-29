@@ -89,6 +89,28 @@ function LoginPageInner() {
     }
   }
 
+  const isAdminUser = (user: User): boolean =>
+    user.role === "admin" || String(user.dbRole ?? "").toUpperCase() === "ADMIN"
+
+  const redirectAfterLogin = (user: User, decoded: string, safeRedirect: boolean) => {
+    const redirectIsGrandma = decoded.startsWith("/grandma")
+    if (isAdminUser(user) && redirectIsGrandma) {
+      router.push("/admin/dashboard")
+      return
+    }
+    if (safeRedirect) {
+      router.push(decoded)
+      return
+    }
+    if (isAdminUser(user)) {
+      router.push("/admin/dashboard")
+    } else if (user.role === "supplier") {
+      router.push("/supplier/dashboard")
+    } else {
+      router.push("/")
+    }
+  }
+
   const finishLoginAndRedirect = (payload: ApiLoginOK) => {
     const user: User = normalizeJavaLoginToUser(payload)
     loginStore(user)
@@ -99,17 +121,7 @@ function LoginPageInner() {
     const decoded = redirectTo ? decodeURIComponent(redirectTo) : ""
     const safeRedirect = decoded.startsWith("/") && !decoded.startsWith("//") && decoded.length > 0
     applyGrandmaModeHint(user, decoded)
-    if (safeRedirect) {
-      router.push(decoded)
-      return
-    }
-    if (user.role === "admin") {
-      router.push("/admin/dashboard")
-    } else if (user.role === "supplier") {
-      router.push("/supplier/dashboard")
-    } else {
-      router.push("/")
-    }
+    redirectAfterLogin(user, decoded, safeRedirect)
   }
 
   const handleSuccess = async (user: User) => {
@@ -118,17 +130,7 @@ function LoginPageInner() {
     const decoded = redirectTo ? decodeURIComponent(redirectTo) : ""
     const safeRedirect = decoded.startsWith("/") && !decoded.startsWith("//") && decoded.length > 0
     applyGrandmaModeHint(user, decoded)
-    if (safeRedirect) {
-      router.push(decoded)
-      return
-    }
-    if (user.role === "admin") {
-      router.push("/admin/dashboard")
-    } else if (user.role === "supplier") {
-      router.push("/supplier/dashboard")
-    } else {
-      router.push("/")
-    }
+    redirectAfterLogin(user, decoded, safeRedirect)
   }
 
   const handleMustChangePassword = (payload: ApiLoginOK, password: string) => {
