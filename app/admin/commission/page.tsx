@@ -29,6 +29,7 @@ import {
   YAxis,
 } from "recharts"
 import { useAuthStore } from "@/lib/auth-store"
+import { postAdminApi } from "@/lib/admin-client"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -247,12 +248,7 @@ function clearSellerRowMatchesQuery(rawQuery: string): boolean {
 }
 
 async function adminPost(body: Record<string, unknown>) {
-  const res = await fetch("/api/admin", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    cache: "no-store",
-  })
+  const res = await postAdminApi(body)
   const data = await res.json().catch(() => ({}))
   return { ok: res.ok && data?.ok === true, data, status: res.status, rawError: data?.error }
 }

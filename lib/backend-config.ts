@@ -12,6 +12,22 @@ function noTrailingSlash(s: string): string {
 
 const LOCAL_JAVA_BACKEND_DEFAULT = "http://localhost:8082/Trading"
 
+/** NEXT_PUBLIC_API_URL is often set to frontend origin; only use it for Java proxying when it clearly targets Trading. */
+function looksLikeJavaTradingBase(raw: string): boolean {
+  const t = noTrailingSlash(raw.trim())
+  if (!t) return false
+  try {
+    const u = new URL(t)
+    const path = u.pathname.toLowerCase()
+    if (path.includes("/trading")) return true
+    if (u.hostname === "localhost" || u.hostname === "127.0.0.1") return true
+    if (u.port === "8080" || u.port === "8082") return true
+    return false
+  } catch {
+    return /trading/i.test(t)
+  }
+}
+
 /**
  * Same URL resolution as {@link getBackendBase}; used by server API routes that proxy to Java.
  * Prefer {@link getBackendBase} in new code; kept for imports from merged branches.
@@ -25,10 +41,13 @@ export function getServerProxyBackendBase(): string {
  * Priority: `BACKEND_URL` → `JAVA_BACKEND_BASE` → `NEXT_PUBLIC_API_URL`, then local / production defaults.
  */
 export function getBackendBase(): string {
+  const backendUrl = process.env.BACKEND_URL?.trim() || ""
+  const javaBackendBase = process.env.JAVA_BACKEND_BASE?.trim() || ""
+  const publicApiUrl = process.env.NEXT_PUBLIC_API_URL?.trim() || ""
   const explicit =
-    process.env.BACKEND_URL?.trim() ||
-    process.env.JAVA_BACKEND_BASE?.trim() ||
-    process.env.NEXT_PUBLIC_API_URL?.trim()
+    backendUrl ||
+    javaBackendBase ||
+    (looksLikeJavaTradingBase(publicApiUrl) ? publicApiUrl : "")
 
   let raw: string
   if (explicit) {
