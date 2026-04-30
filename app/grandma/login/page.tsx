@@ -21,6 +21,9 @@ function GrandmaLoginInner() {
   const redirectTo = searchParams?.get("redirect")
   const phonePrefill = searchParams?.get("phone") ?? ""
 
+  const isAdminUser = (user: User): boolean =>
+    user.role === "admin" || String(user.dbRole ?? "").toUpperCase() === "ADMIN"
+
   const handleSuccess = async (user: User) => {
     loginStore(user)
     try {
@@ -29,6 +32,11 @@ function GrandmaLoginInner() {
       /* ignore */
     }
     const decoded = redirectTo ? decodeURIComponent(redirectTo) : ""
+    // Admin should always land on admin workspace, even if arriving from grandma redirects.
+    if (isAdminUser(user)) {
+      router.push("/admin/dashboard")
+      return
+    }
     if (decoded.startsWith("/") && !decoded.startsWith("//")) {
       router.push(decoded)
       return
