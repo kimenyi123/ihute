@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useCartStore, CartItem } from "@/lib/cart-store"
 import { parseErxFromNotes, prescriptionLineKey } from "@/lib/erx-prescription"
-import { Trash2 } from "lucide-react"
+import { Minus, Plus, Trash2 } from "lucide-react"
 import { getProductImageCandidates, isValidImageUrl, NO_IMAGE_URL } from "@/lib/image-utils"
 import { DEFAULT_CART_CURRENCY, itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
 
@@ -134,23 +134,58 @@ export function CartItemCard({ item }: { item: CartItem }) {
       </div>
 
       <div className="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center rounded-lg border bg-background shadow-sm overflow-hidden">
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            onClick={() => dec(item.id, item.selectedUnit, lineSig)}
+            aria-label="Decrease quantity"
+            className="h-9 w-9 rounded-none border-r hover:bg-muted"
+          >
+            <Minus className="h-4 w-4" />
+          </Button>
           <Input
             type="number"
             min={1}
             step={1}
-            value={item.qty}
+            value={inputValue}
             onChange={(e) => {
-              const parsed = Number.parseInt(e.target.value, 10)
-              if (Number.isFinite(parsed)) setQty(item.id, parsed, item.selectedUnit, lineSig)
+              const raw = e.target.value
+              setInputValue(raw)
+              const parsed = Number.parseInt(raw, 10)
+              if (Number.isFinite(parsed) && parsed >= 1) {
+                setQty(item.id, parsed, item.selectedUnit, lineSig)
+              }
+            }}
+            onFocus={(e) => e.currentTarget.select()}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter") return
+              const parsed = Number.parseInt(inputValue, 10)
+              const nextQty = Number.isFinite(parsed) ? parsed : item.qty
+              setQty(item.id, nextQty, item.selectedUnit, lineSig)
+              setInputValue(String(nextQty))
+              e.currentTarget.blur()
             }}
             onBlur={(e) => {
               const parsed = Number.parseInt(e.target.value, 10)
-              setQty(item.id, Number.isFinite(parsed) ? parsed : item.qty, item.selectedUnit, lineSig)
+              const nextQty = Number.isFinite(parsed) ? parsed : item.qty
+              setQty(item.id, nextQty, item.selectedUnit, lineSig)
+              setInputValue(String(nextQty))
             }}
             aria-label="Quantity"
-            className="h-8 w-20 text-center font-medium [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+            className="h-9 w-16 border-0 rounded-none text-center font-semibold shadow-none [appearance:textfield] focus-visible:ring-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
           />
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            onClick={() => inc(item.id, item.selectedUnit, lineSig)}
+            aria-label="Increase quantity"
+            className="h-9 w-9 rounded-none border-l hover:bg-muted"
+          >
+            <Plus className="h-4 w-4" />
+          </Button>
         </div>
 
         <div className="flex items-center justify-between sm:justify-end gap-2 pt-1">

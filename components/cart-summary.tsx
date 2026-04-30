@@ -957,10 +957,10 @@ function CartSummaryBody() {
                       setSuggestionsPopupOpen(true)
                     }
                   }}
-                  disabled={busy === g.supplierId || status === "paid"}
+                  disabled={busy === g.supplierId}
                 >
                   <CreditCard className="h-4 w-4 mr-2" />
-                  {status === "paid" ? "Order Placed" : "Proceed to Checkout"}
+                  Proceed to Checkout
                 </Button>
 
                 {/* Share this cart: copy link / WhatsApp / X */}

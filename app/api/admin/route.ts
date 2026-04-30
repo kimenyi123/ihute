@@ -8,6 +8,23 @@ import { getBackendBase } from "@/lib/backend-config"
 
 const BACKEND_URL = getBackendBase()
 
+function noTrailingSlash(s: string): string {
+  return s.replace(/\/+$/, "")
+}
+
+function getAdminServletCandidates(base: string): string[] {
+  const trimmed = noTrailingSlash(base.trim())
+  const out: string[] = []
+  const add = (u: string) => {
+    if (!out.includes(u)) out.push(u)
+  }
+
+  add(`${trimmed}/AdminServlet`)
+  add(`${trimmed}/Kaos/AdminServlet`)
+
+  return out
+}
+
 export async function POST(req: Request) {
   try {
     let body: Record<string, unknown> = {}
@@ -120,49 +137,69 @@ export async function POST(req: Request) {
       }
     })
 
-    const url = `${BACKEND_URL}/AdminServlet`
-    console.log("[admin/route] Calling backend:", url)
+    const urls = getAdminServletCandidates(BACKEND_URL)
+    console.log("[admin/route] POST - Candidate URLs:", urls.join(" | "))
     console.log("[admin/route] Action:", actionStr)
 
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 30000)
-
     const inboundCookie = req.headers.get("cookie") || ""
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Accept: "application/json",
-        ...(inboundCookie ? { Cookie: inboundCookie } : {}),
-        ...(tokenForJava ? { "X-Admin-Token": tokenForJava } : {}),
-      },
-      body: form.toString(),
-      signal: controller.signal,
-      cache: "no-store",
-    })
-    
-    clearTimeout(timeoutId)
+    let res: Response | null = null
+    let text = ""
+    let json: any = null
+    let url = urls[0]
 
-    const text = await res.text()
-    console.log("[admin/route] POST - Backend response status:", res.status)
-    console.log("[admin/route] POST - Backend response (first 500 chars):", text.substring(0, 500))
-    
-    let json
-    try {
-      json = JSON.parse(text)
-    } catch (e) {
-      console.error("[admin/route] POST - Failed to parse JSON:", e)
+    for (const candidate of urls) {
+      url = candidate
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 30000)
+      try {
+        const attemptRes = await fetch(candidate, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Accept: "application/json",
+            ...(inboundCookie ? { Cookie: inboundCookie } : {}),
+            ...(tokenForJava ? { "X-Admin-Token": tokenForJava } : {}),
+          },
+          body: form.toString(),
+          signal: controller.signal,
+          cache: "no-store",
+        })
+        const attemptText = await attemptRes.text()
+        clearTimeout(timeoutId)
+        console.log("[admin/route] POST - Attempt:", candidate, "status:", attemptRes.status)
+        res = attemptRes
+        text = attemptText
+        try {
+          json = JSON.parse(attemptText)
+          break
+        } catch {
+          // Try next candidate when endpoint returns HTML/plain text (common for wrong servlet mapping)
+          continue
+        }
+      } catch (attemptErr: any) {
+        clearTimeout(timeoutId)
+        console.error("[admin/route] POST - Attempt failed:", candidate, attemptErr?.message)
+        res = null
+        text = ""
+        json = null
+      }
+    }
+
+    if (!res || !json) {
       return NextResponse.json(
-        { 
-          ok: false, 
-          error: "Invalid JSON response from backend", 
+        {
+          ok: false,
+          error: "Invalid JSON response from backend",
           raw: text.substring(0, 500),
-          status: res.status,
-          url
+          status: res?.status ?? 502,
+          url,
         },
         { status: 500 }
       )
     }
+
+    console.log("[admin/route] POST - Backend response status:", res.status)
+    console.log("[admin/route] POST - Backend response (first 500 chars):", text.substring(0, 500))
 
     if (!json.ok) {
       const st =
@@ -269,47 +306,67 @@ export async function GET(req: Request) {
       params.set("adminToken", tokenForJava)
     }
 
-    const url = `${BACKEND_URL}/AdminServlet?${params.toString()}`
-    console.log("[admin/route] GET - Calling backend:", url)
+    const baseUrls = getAdminServletCandidates(BACKEND_URL)
+    const urls = baseUrls.map((u) => `${u}?${params.toString()}`)
+    console.log("[admin/route] GET - Candidate URLs:", urls.join(" | "))
     console.log("[admin/route] GET - Action:", action)
 
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 30000)
-
     const inboundCookie = req.headers.get("cookie") || ""
-    const res = await fetch(url, {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        ...(inboundCookie ? { Cookie: inboundCookie } : {}),
-        ...(tokenForJava ? { "X-Admin-Token": tokenForJava } : {}),
-      },
-      signal: controller.signal,
-      cache: "no-store",
-    })
-    
-    clearTimeout(timeoutId)
+    let res: Response | null = null
+    let text = ""
+    let json: any = null
+    let url = urls[0]
 
-    const text = await res.text()
-    console.log("[admin/route] GET - Backend response status:", res.status)
-    console.log("[admin/route] GET - Backend response (first 500 chars):", text.substring(0, 500))
-    
-    let json
-    try {
-      json = JSON.parse(text)
-    } catch (e) {
-      console.error("[admin/route] GET - Failed to parse JSON:", e)
+    for (const candidate of urls) {
+      url = candidate
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 30000)
+      try {
+        const attemptRes = await fetch(candidate, {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+            ...(inboundCookie ? { Cookie: inboundCookie } : {}),
+            ...(tokenForJava ? { "X-Admin-Token": tokenForJava } : {}),
+          },
+          signal: controller.signal,
+          cache: "no-store",
+        })
+        const attemptText = await attemptRes.text()
+        clearTimeout(timeoutId)
+        console.log("[admin/route] GET - Attempt:", candidate, "status:", attemptRes.status)
+        res = attemptRes
+        text = attemptText
+        try {
+          json = JSON.parse(attemptText)
+          break
+        } catch {
+          continue
+        }
+      } catch (attemptErr: any) {
+        clearTimeout(timeoutId)
+        console.error("[admin/route] GET - Attempt failed:", candidate, attemptErr?.message)
+        res = null
+        text = ""
+        json = null
+      }
+    }
+
+    if (!res || !json) {
       return NextResponse.json(
-        { 
-          ok: false, 
-          error: "Invalid JSON response from backend", 
+        {
+          ok: false,
+          error: "Invalid JSON response from backend",
           raw: text.substring(0, 500),
-          status: res.status,
-          url
+          status: res?.status ?? 502,
+          url,
         },
         { status: 500 }
       )
     }
+
+    console.log("[admin/route] GET - Backend response status:", res.status)
+    console.log("[admin/route] GET - Backend response (first 500 chars):", text.substring(0, 500))
 
     if (!json.ok) {
       const st =
