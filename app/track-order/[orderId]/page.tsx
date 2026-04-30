@@ -266,9 +266,9 @@ function waHrefFor(phone: string, text: string) {
   return `https://wa.me/${p}?text=${encoded}`
 }
 
-function isInvoiceLikeStatus(rawStatus?: string): boolean {
+function canShowInvoiceActions(rawStatus?: string): boolean {
   const s = (rawStatus || "").trim().toUpperCase()
-  return s.includes("INVOICE") || s.includes("FACTURE")
+  return s !== "" && s !== "OPEN"
 }
 
 function formatInvoiceAmount(amount: number): string {
@@ -576,7 +576,7 @@ function TrackOrderPageInner() {
 
   const steps = buildTracking(order.status)
   const sellerPhoneNormalized = normalizePhone(order.sellerPhone)
-  const canShowInvoice = isInvoiceLikeStatus(order.ORDER_STATUS)
+  const canShowInvoice = canShowInvoiceActions(order.ORDER_STATUS)
   const displayBuyerLocation =
     buyerAddressOverride !== undefined ? buyerAddressOverride : (order.buyerLocation ?? "")
   const canEditDeliveryAddress = order.status !== "delivered" && order.status !== "cancelled"

@@ -314,6 +314,7 @@ export const useCartStore = create<CartState>()(
             }
             return {
               items: state.items.filter((x) => !keyMatch(x)).concat([mergedLine]),
+              payment: { ...state.payment, [sid]: "unpaid" },
             }
           }
           // Ensure price is always a number (API may send string or omit)
@@ -327,7 +328,10 @@ export const useCartStore = create<CartState>()(
             itemCode: (item.itemCode ?? item.id).toString().trim() || undefined,
             lineSignature: incomingSig,
           }
-          return { items: [...state.items, withCode] }
+          return {
+            items: [...state.items, withCode],
+            payment: { ...state.payment, [sid]: "unpaid" },
+          }
         })
 
         // Track cart activity for abandoned cart reminders (throttled: max once per 10s to avoid load)
@@ -464,6 +468,7 @@ export const useCartStore = create<CartState>()(
             }
             return {
               items: state.items.filter((x) => !keyMatch(x)).concat([mergedLine]),
+              payment: { ...state.payment, [sid]: "unpaid" },
             }
           }
           const withCode: CartItem = {
@@ -473,7 +478,10 @@ export const useCartStore = create<CartState>()(
             itemCode: (item.itemCode ?? item.id).toString().trim() || undefined,
             lineSignature: incomingSig,
           }
-          return { items: [...state.items, withCode] }
+          return {
+            items: [...state.items, withCode],
+            payment: { ...state.payment, [sid]: "unpaid" },
+          }
         }),
 
       inc: (id, selectedUnit, lineSignature) =>
@@ -533,7 +541,9 @@ export const useCartStore = create<CartState>()(
         const sid = (supplierId ?? "").toString().trim()
         set((s) => ({
           items: s.items.filter((x) => (x.supplierId ?? "").toString().trim() !== sid),
-          payment: { ...s.payment, [supplierId]: "paid" },
+          payment: Object.fromEntries(
+            Object.entries(s.payment).filter(([k]) => k !== sid),
+          ),
         }))
       },
 
