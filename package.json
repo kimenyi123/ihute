@@ -68,6 +68,7 @@
     "immer": "10.1.1",
     "input-otp": "1.4.1",
     "ioredis": "5.8.1",
+    "jspdf": "^4.2.1",
     "leaflet": "^1.9.4",
     "lucide-react": "0.454.0",
     "mongodb": "^6.21.0",
