@@ -88,6 +88,9 @@ function SupplierLocationSettings() {
     const [preferredSellerNickname, setPreferredSellerNickname] = useState<string>("");
     const [ratingStar, setRatingStar] = useState<number>(0);
     const [nickname, setNickname] = useState<string>("");
+    const [shopImageUrl, setShopImageUrl] = useState<string>("");
+    const [shopImageFile, setShopImageFile] = useState<File | null>(null);
+    const [uploadingImage, setUploadingImage] = useState(false);
     
     const [categories, setCategories] = useState<any[]>([]);
 
@@ -268,6 +271,20 @@ out body 15;
         fetchHistory();
         fetchCategories();
     }, [isAuthenticated, user, router, hasHydrated]);
+
+    useEffect(() => {
+        if (!user?.ishyigaAccount) return;
+        fetch(`/api/images/overrides?scope=shop&account=${encodeURIComponent(user.ishyigaAccount)}`, {
+            cache: "no-store",
+        })
+            .then((res) => res.json())
+            .then((data) => {
+                if (data?.ok && typeof data.imageUrl === "string") {
+                    setShopImageUrl(data.imageUrl);
+                }
+            })
+            .catch(() => {});
+    }, [user?.ishyigaAccount]);
 
     const fetchLocation = async () => {
         if (!user?.ishyigaAccount) return;
@@ -462,6 +479,32 @@ out body 15;
             setError("Failed to save profile");
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleShopImageUpload = async () => {
+        if (!user?.ishyigaAccount || !shopImageFile) return;
+        setUploadingImage(true);
+        setError(null);
+        try {
+            const fd = new FormData();
+            fd.append("scope", "shop");
+            fd.append("account", user.ishyigaAccount);
+            fd.append("file", shopImageFile);
+            const res = await fetch("/api/images/overrides", {
+                method: "POST",
+                body: fd,
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data?.ok) {
+                throw new Error(data?.error || "Failed to upload shop image");
+            }
+            setShopImageUrl(String(data.imageUrl || ""));
+            setShopImageFile(null);
+        } catch (e: unknown) {
+            setError(e instanceof Error ? e.message : "Failed to upload shop image");
+        } finally {
+            setUploadingImage(false);
         }
     };
 
@@ -737,6 +780,33 @@ out body 15;
                                             ⚠️ No business name saved yet
                                         </p>
                                     )}
+                                </div>
+                                <div>
+                                    <label className="text-xs font-medium text-slate-600">Shop profile image</label>
+                                    <div className="mt-2 flex items-center gap-3">
+                                        <img
+                                            src={shopImageUrl || "/img/shops/default.png"}
+                                            alt="Shop profile"
+                                            className="h-16 w-16 rounded-md border border-slate-200 bg-white object-cover"
+                                        />
+                                        <div className="flex-1 space-y-2">
+                                            <input
+                                                type="file"
+                                                accept="image/*"
+                                                onChange={(e) => setShopImageFile(e.target.files?.[0] ?? null)}
+                                                className="w-full mt-1 px-3 py-2 border rounded-lg text-sm"
+                                            />
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={handleShopImageUpload}
+                                                disabled={!shopImageFile || uploadingImage}
+                                            >
+                                                {uploadingImage ? "Uploading..." : "Upload image"}
+                                            </Button>
+                                        </div>
+                                    </div>
                                 </div>
                                 <div>
                                     <label className="text-xs font-medium text-slate-600">Preferred Categories</label>

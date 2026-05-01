@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { LanguageSelector } from "@/components/language-selector";
 import { useAuthStore } from "@/lib/auth-store";
@@ -28,6 +28,8 @@ import {
   Plus,
   Package,
   TrendingUp,
+  Trophy,
+  Sparkles,
   LogOut,
   AlertTriangle,
   Edit,
@@ -52,6 +54,7 @@ import { formatItemEmballageMultiplierOnly } from "@/lib/cart-display-utils";
 import { parseItemStateBatchExpiry } from "@/lib/item-state-display";
 import { SupplierProductTableImage } from "@/components/supplier-product-table-image";
 import { ResponsiveTable } from "@/components/ui/responsive-table";
+import { cn } from "@/lib/utils";
 
 /** Redis / API may send last_sync_time, LAST_SYNC_TIME, or lastSyncTime */
 function parseSupplierProductLastSyncMs(p: Record<string, unknown>): number | null {
@@ -94,6 +97,8 @@ function SupplierDashboard() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /** Bump to refetch stock silently (interval / tab visible) without full-page spinner */
+  const [stockRefreshKey, setStockRefreshKey] = useState(0);
 
   // Add Product Modal state
   const [showAddModal, setShowAddModal] = useState(false);
@@ -128,7 +133,7 @@ function SupplierDashboard() {
     if (!user?.ishyigaAccount || user?.role !== "supplier") return;
     fetch(`/api/supplier/profile?account=${encodeURIComponent(user.ishyigaAccount)}`)
       .then((res) => res.json())
-      .then((data) => {
+      .then(async (data) => {
         const isRestoBar = isRestoBarPreferredCategories(data?.preferredCategories);
         if (isRestoBar) {
           setShowBarOrRestaurantOption(true);
@@ -166,17 +171,22 @@ function SupplierDashboard() {
       return;
     }
 
-    setLoading(true);
-    setError(null);
+    const showFullLoading = stockRefreshKey === 0;
+    if (showFullLoading) {
+      setLoading(true);
+      setError(null);
+    }
 
-    fetch(`/api/supplier/stock?account=${user.ishyigaAccount}`)
+    fetch(`/api/supplier/stock?account=${encodeURIComponent(user.ishyigaAccount)}&_=${Date.now()}`, {
+      cache: "no-store",
+    })
       .then((res) => {
         if (!res.ok) {
           throw new Error(`HTTP error! status: ${res.status}`);
         }
         return res.json();
       })
-      .then((data) => {
+      .then(async (data) => {
         console.log("=== API Response ===");
         console.log("Full data:", data);
         console.log("Products array:", data.products);
@@ -186,6 +196,8 @@ function SupplierDashboard() {
         if (!data.ok) {
           throw new Error(data.error || "API returned ok: false");
         }
+
+        setError(null);
 
         const products = data.products || [];
         console.log(`Received ${products.length} products from ${data.source}`);
@@ -323,8 +335,35 @@ function SupplierDashboard() {
         console.log(mappedProducts);
         console.log(`Total: ${mappedProducts.length}`);
 
+        let finalProducts = mappedProducts;
+        try {
+          const mapRes = await fetch(
+            `/api/images/overrides?scope=product&account=${encodeURIComponent(user.ishyigaAccount ?? "")}`,
+            { cache: "no-store" }
+          );
+          const mapData = await mapRes.json().catch(() => ({}));
+          const imageMap = (mapData?.map ?? {}) as Record<string, string>;
+          if (imageMap && typeof imageMap === "object" && Object.keys(imageMap).length > 0) {
+            finalProducts = mappedProducts.map((row: any) => {
+              const code = String(row.itemCode || row.ITEM_CODE || "").trim().toUpperCase();
+              const override = code ? imageMap[code] : "";
+              if (!override) return row;
+              return {
+                ...row,
+                imageUrl: override,
+                image_url: override,
+                item_image_url: override,
+                IMAGE_URL: override,
+                image: override,
+              };
+            });
+          }
+        } catch {
+          // keep backend-provided images when overrides fetch fails
+        }
+
         // Don't filter by stock > 0, show ALL products
-        setSupplierProducts(mappedProducts);
+        setSupplierProducts(finalProducts);
         setLoading(false);
       })
       .catch((err) => {
@@ -332,7 +371,20 @@ function SupplierDashboard() {
         setError(err.message);
         setLoading(false);
       });
-  }, [isAuthenticated, user?.ishyigaAccount, user?.role, router]);
+  }, [isAuthenticated, user?.ishyigaAccount, user?.role, router, stockRefreshKey]);
+
+  useEffect(() => {
+    if (!user?.ishyigaAccount || user?.role !== "supplier") return;
+    const id = window.setInterval(() => setStockRefreshKey((k) => k + 1), 45_000);
+    const onVis = () => {
+      if (document.visibilityState === "visible") setStockRefreshKey((k) => k + 1);
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [user?.ishyigaAccount, user?.role]);
 
   useEffect(() => {
     if (!user?.ishyigaAccount || user?.role !== "supplier") return;
@@ -432,6 +484,51 @@ function SupplierDashboard() {
     });
   })();
 
+  const bestSellingHero = useMemo(() => {
+    if (!analytics?.bestSelling?.length) return null;
+    const top = analytics.bestSelling[0];
+    const lineTotal = analytics.bestSelling.reduce((s, x) => s + Number(x.total ?? 0), 0);
+    const pct =
+      lineTotal > 0 ? Math.min(100, Math.round((Number(top.total ?? 0) / lineTotal) * 100)) : null;
+    return { top, pct, lineTotal };
+  }, [analytics]);
+
+  const topUpSaleBullets = useMemo(() => {
+    const bullets: string[] = [];
+    if (analytics?.bestSelling?.[0]) {
+      const b = analytics.bestSelling[0];
+      bullets.push(
+        `Restock priority: “${b.name}” led today with ${b.quantity} units sold (${Number(b.total ?? 0).toLocaleString()} RWF).`,
+      );
+    }
+    if (analytics?.bestSelling?.[1]) {
+      const b = analytics.bestSelling[1];
+      bullets.push(
+        `Runner-up: “${b.name}” · ${b.quantity} units · ${Number(b.total ?? 0).toLocaleString()} RWF.`,
+      );
+    }
+    const low = supplierProducts.filter((p) => p.stock <= 10 && p.stock > 0).slice(0, 2);
+    for (const p of low) {
+      const nm = String(p.itemName || p.ITEM_NAME || "Product").trim();
+      bullets.push(`Low stock: ${nm} — only ${p.stock} left. Top up before it runs out.`);
+    }
+    if (
+      analytics &&
+      analytics.dailyOrdersCount > 0 &&
+      (!analytics.bestSelling || analytics.bestSelling.length === 0)
+    ) {
+      bullets.push(
+        "Orders are recorded for today, but line items were empty. Deploy the latest backend (SellerOrdersServlet fix) and refresh — best-selling names will appear here.",
+      );
+    }
+    if (bullets.length === 0) {
+      bullets.push(
+        "Fulfill orders and keep fast movers in stock — tailored tips appear here from your live sales and inventory.",
+      );
+    }
+    return bullets.slice(0, 4);
+  }, [analytics, supplierProducts]);
+
   const handleDelete = async (product: any) => {
     const itemName = product.ITEM_NAME || product.itemName || "this product";
     if (!confirm(`Are you sure you want to delete ${itemName}?`)) return;
@@ -466,6 +563,7 @@ function SupplierDashboard() {
     try {
       const action = editingProduct ? "updateProduct" : "addProduct";
 
+      const { imageFile: _imageFile, ...productJson } = productData;
       const res = await fetch("/api/supplier/stock", {
         method: "POST",
         headers: {
@@ -474,13 +572,32 @@ function SupplierDashboard() {
         body: JSON.stringify({
           action,
           account: user.ishyigaAccount,
-          ...productData,
+          ...productJson,
         }),
       });
 
       const data = await res.json();
 
       if (data.ok) {
+        if (productData.imageFile) {
+          const normalizedCode = String(productData.itemCode || "").trim().toUpperCase();
+          if (!normalizedCode) {
+            throw new Error("Product code is required before image upload");
+          }
+          const fd = new FormData();
+          fd.append("scope", "product");
+          fd.append("account", user.ishyigaAccount);
+          fd.append("itemCode", normalizedCode);
+          fd.append("file", productData.imageFile);
+          const imgRes = await fetch("/api/images/overrides", {
+            method: "POST",
+            body: fd,
+          });
+          const imgJson = await imgRes.json().catch(() => ({}));
+          if (!imgRes.ok || !imgJson?.ok) {
+            throw new Error(imgJson?.error || "Product saved but image upload failed");
+          }
+        }
         // Refresh the products list
         window.location.reload();
       } else {
@@ -694,30 +811,120 @@ function SupplierDashboard() {
           );
         })()}
 
-        {/* Best-selling today */}
+        {/* Best selling + Top-up sale — shop insights */}
         {analytics && (
-          <div className="grid grid-cols-1 gap-6 mb-8">
-            <Card className="bg-card shadow-md">
-              <CardHeader>
-                <CardTitle className="text-sm font-medium text-slate-600 ">Best selling</CardTitle>
+          <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Card
+              className={cn(
+                "relative overflow-hidden border-amber-200/90 bg-gradient-to-br from-amber-50 via-white to-orange-50 shadow-md",
+              )}
+            >
+              <div
+                className="pointer-events-none absolute -right-8 -top-8 h-28 w-28 rounded-full bg-amber-200/25 blur-2xl"
+                aria-hidden
+              />
+              <CardHeader className="pb-2">
+                <div className="flex items-start gap-3">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 text-white shadow-md shadow-amber-500/20">
+                    <Trophy className="h-5 w-5" strokeWidth={2.2} aria-hidden />
+                  </span>
+                  <div className="min-w-0">
+                    <CardTitle className="text-xs font-extrabold uppercase tracking-[0.12em] text-amber-900/80">
+                      Best selling today
+                    </CardTitle>
+                    <CardDescription className="mt-0.5 text-[11px] font-medium text-slate-600">
+                      {analytics.dailyOrdersCount} orders today · ranked by units sold
+                    </CardDescription>
+                  </div>
+                </div>
               </CardHeader>
-              <CardContent>
-                <p className="mb-2 text-xs text-slate-500 ">{analytics.dailyOrdersCount} orders today</p>
-                {analytics.bestSelling.length === 0 ? (
-                  <p className="text-sm text-slate-500 ">No orders today</p>
-                ) : (
-                  <ul className="text-sm space-y-1">
-                    {analytics.bestSelling.slice(0, 5).map((item, i) => (
-                      <li key={i} className="flex justify-between gap-4">
-                        <span className="truncate">{item.name}</span>
-                        <span className="text-right">
-                          <span className="font-medium">{item.quantity} sold</span>
-                          <span className="block text-xs text-slate-500">{Number(item.total ?? 0).toLocaleString()} RWF</span>
+              <CardContent className="pt-0">
+                {bestSellingHero ? (
+                  <>
+                    <h3 className="line-clamp-3 text-xl font-black leading-snug tracking-tight text-slate-900">
+                      {bestSellingHero.top.name}
+                    </h3>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <span className="inline-flex items-center rounded-full border border-amber-200 bg-white/95 px-2.5 py-1 text-[11px] font-bold text-amber-950 shadow-sm">
+                        {bestSellingHero.top.quantity.toLocaleString()}{" "}
+                        <span className="ml-1 font-semibold opacity-80">units sold</span>
+                      </span>
+                      {bestSellingHero.pct != null ? (
+                        <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-950">
+                          {bestSellingHero.pct}% of today&apos;s line revenue ·{" "}
+                          {Number(bestSellingHero.top.total ?? 0).toLocaleString()} RWF
                         </span>
-                      </li>
-                    ))}
-                  </ul>
+                      ) : (
+                        <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-bold text-slate-800">
+                          {Number(bestSellingHero.top.total ?? 0).toLocaleString()} RWF line total
+                        </span>
+                      )}
+                    </div>
+                    {analytics.bestSelling.length > 1 ? (
+                      <ul className="mt-4 space-y-2 border-t border-amber-100/90 pt-3 text-sm">
+                        {analytics.bestSelling.slice(1, 5).map((item, i) => (
+                          <li key={i} className="flex justify-between gap-3 text-slate-700">
+                            <span className="min-w-0 truncate font-medium">{item.name}</span>
+                            <span className="shrink-0 text-right text-xs font-semibold text-slate-600">
+                              {item.quantity} · {Number(item.total ?? 0).toLocaleString()} RWF
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </>
+                ) : (
+                  <div className="space-y-2">
+                    {analytics.dailyOrdersCount > 0 ? (
+                      <p className="text-sm font-medium leading-relaxed text-amber-900/90">
+                        We see {analytics.dailyOrdersCount} orders today, but no product lines were returned for
+                        aggregation. After updating the backend, pull to refresh — your #1 product name will show
+                        here.
+                      </p>
+                    ) : (
+                      <p className="text-sm text-slate-600">No orders yet today — best seller appears when you have sales.</p>
+                    )}
+                  </div>
                 )}
+              </CardContent>
+            </Card>
+
+            <Card className="border-emerald-200/80 bg-gradient-to-b from-emerald-50/90 to-white shadow-md">
+              <CardHeader className="pb-2">
+                <div className="flex items-start gap-3">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-md shadow-emerald-600/20">
+                    <Sparkles className="h-5 w-5" strokeWidth={2.2} aria-hidden />
+                  </span>
+                  <div className="min-w-0">
+                    <CardTitle className="text-xs font-extrabold uppercase tracking-[0.12em] text-emerald-900/80">
+                      Top-up sale
+                    </CardTitle>
+                    <CardDescription className="mt-0.5 text-[11px] font-medium text-slate-600">
+                      Stock and revenue actions for your shop
+                    </CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3 pt-0">
+                <ul className="space-y-2">
+                  {topUpSaleBullets.map((line, i) => (
+                    <li key={i} className="flex gap-2 text-[13px] leading-snug text-slate-900">
+                      <span
+                        className="mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500 ring-4 ring-emerald-100"
+                        aria-hidden
+                      />
+                      <span className="font-medium">{line}</span>
+                    </li>
+                  ))}
+                </ul>
+                <div className="flex flex-wrap gap-2 border-t border-emerald-100 pt-3">
+                  <Button variant="outline" size="sm" className="border-emerald-200 bg-white text-emerald-900" asChild>
+                    <a href="#supplier-products">Stock &amp; catalog</a>
+                  </Button>
+                  <Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700" asChild>
+                    <Link href="/supplier/orders">Open orders</Link>
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           </div>
@@ -842,7 +1049,7 @@ function SupplierDashboard() {
         </Card>
 
         {/* Product Management Card */}
-        <Card className="bg-card shadow-md">
+        <Card id="supplier-products" className="bg-card scroll-mt-24 shadow-md">
           <CardHeader className="border-b bg-slate-50">
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>

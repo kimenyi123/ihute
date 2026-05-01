@@ -45,6 +45,7 @@ export default function SupplierEditProductPage() {
   const [price, setPrice] = useState("")
   const [stock, setStock] = useState("")
   const [imageUrl, setImageUrl] = useState("")
+  const [imageFile, setImageFile] = useState<File | null>(null)
 
   // Fetch product from API
   useEffect(() => {
@@ -155,6 +156,25 @@ export default function SupplierEditProductPage() {
       const json = await res.json()
 
       if (json.ok) {
+        if (imageFile) {
+          const normalizedCode = String(product.id || "").trim().toUpperCase()
+          if (!normalizedCode) {
+            throw new Error("Product code is required before image upload")
+          }
+          const fd = new FormData()
+          fd.append("scope", "product")
+          fd.append("account", user.ishyigaAccount)
+          fd.append("itemCode", normalizedCode)
+          fd.append("file", imageFile)
+          const imgRes = await fetch("/api/images/overrides", {
+            method: "POST",
+            body: fd,
+          })
+          const imgJson = await imgRes.json().catch(() => ({}))
+          if (!imgRes.ok || !imgJson?.ok) {
+            throw new Error(imgJson?.error || "Product updated but image upload failed")
+          }
+        }
         toast({
           title: "Product updated",
           description: "Your changes have been saved.",
@@ -277,6 +297,16 @@ export default function SupplierEditProductPage() {
               placeholder="https://..."
               value={imageUrl} 
               onChange={(e) => setImageUrl(e.target.value)}
+              disabled={saving || deleting}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Upload image</Label>
+            <Input
+              type="file"
+              accept="image/*"
+              onChange={(e) => setImageFile(e.target.files?.[0] ?? null)}
               disabled={saving || deleting}
             />
           </div>

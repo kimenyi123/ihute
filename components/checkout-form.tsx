@@ -171,13 +171,16 @@ export function CheckoutForm() {
       const sellerAccount = items[0]?.supplierId || ""
       if (sellerAccount) {
         const stockItems = items.map((it) => {
-          const rawCode = (it.itemCode ?? it.id).toString().trim()
+          const row = it as Record<string, unknown>
+          const rawCode = String(it.itemCode ?? row.item_key_words ?? row.ITEM_CODE ?? it.id ?? "").trim()
           const itemCode = rawCode.replace(/__p\d+$/i, "") || rawCode
           const emb = it.itemEmballage
           const mult = parsePackageMultiplier(emb)
           const embStr = String(mult > 0 ? mult : 1)
           return {
             itemCode,
+            item_key_words: itemCode,
+            ITEM_CODE: itemCode,
             itemName: it.name,
             quantity: it.qty,
             unitPrice: kaosCatalogBaseUnitPrice(it.price, emb),
@@ -234,7 +237,8 @@ export function CheckoutForm() {
           currency: "RWF",
 
           items: items.map((it) => {
-            const rawCode = (it.itemCode ?? it.id).toString().trim()
+            const row = it as Record<string, unknown>
+            const rawCode = String(it.itemCode ?? row.item_key_words ?? row.ITEM_CODE ?? it.id ?? "").trim()
             const itemCode = rawCode.replace(/__p\d+$/i, "") || rawCode
             return {
               name: it.name,
@@ -243,6 +247,8 @@ export function CheckoutForm() {
               unitPrice: it.price,
               unit: it.unit || "pcs",
               itemCode,
+              item_key_words: itemCode,
+              ITEM_CODE: itemCode,
               ...(it.itemEmballage
                 ? { item_emballage: it.itemEmballage, ITEM_EMBALLAGE: it.itemEmballage }
                 : {}),
