@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getAuthUrl } from "@/lib/backend-config"
+import { getJavaSetCookieValues, rewriteForwardedSetCookie } from "@/lib/java-proxy-cookies"
 
 const JAVA_AUTH_URL = getAuthUrl()
 
@@ -26,19 +27,34 @@ export async function POST(req: Request) {
     form.set("email", emailTrimmed)
     form.set("password", String(password || ""))
 
-    console.log(`[api/auth/login][proxyRid=${rid}] → Java POST ${JAVA_AUTH_URL}`)
+    const loginTimeoutMs = Math.min(
+      300_000,
+      Math.max(8_000, Number(process.env.JAVA_AUTH_TIMEOUT_MS) || 90_000)
+    )
+    console.log(
+      `[api/auth/login][proxyRid=${rid}] → Java POST ${JAVA_AUTH_URL} (loginTimeoutMs=${loginTimeoutMs})`
+    )
 
+    const ac = new AbortController()
+    const to = setTimeout(() => ac.abort(), loginTimeoutMs)
+
+    const inboundCookie = req.headers.get("cookie") || ""
     const res = await fetch(JAVA_AUTH_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        ...(inboundCookie ? { Cookie: inboundCookie } : {}),
+      },
       body: form.toString(),
       cache: "no-store",
+      signal: ac.signal,
     })
+    clearTimeout(to)
 
     console.log(`[api/auth/login][proxyRid=${rid}] ← Java HTTP ${res.status}`)
 
     const text = await res.text()
-    console.log(`[api/auth/login][proxyRid=${rid}] body (500): ${text.slice(0, 500)}`)
+    console.log(`[api/auth/login][proxyRid=${rid}] body (first 500 chars): ${text.slice(0, 500)}`)
 
     let json: any
     try {
@@ -91,24 +107,28 @@ export async function POST(req: Request) {
       )
     }
 
+    const mcp = json?.mustChangePassword ?? json?.must_change_password
+    const okEmail =
+      typeof json?.user?.email === "string"
+        ? json.user.email.trim()
+        : typeof json?.email === "string"
+          ? String(json.email).trim()
+          : emailTrimmed
     console.log(
-      `[api/auth/login][proxyRid=${rid}] SUCCESS role=${json?.role} ishyiga=${json?.ishyiga ?? "n/a"} javaRid=${javaMeta.javaRid ?? "n/a"}`
+      `[user-auth] logged in as ${okEmail || emailTrimmed} role=${String(json?.role ?? "").toLowerCase() || "n/a"}`
+    )
+    console.log(
+      `[api/auth/login][proxyRid=${rid}] SUCCESS role=${json?.role} ishyiga=${json?.ishyiga ?? "n/a"} javaRid=${javaMeta.javaRid ?? "n/a"} mustChangePassword=${String(mcp)} (type=${typeof mcp})`
     )
 
     // Forward Set-Cookie headers from Java backend to client
     const response = NextResponse.json({ ...json, rid, javaRid: javaMeta.javaRid })
 
-    // Try to read multiple Set-Cookie headers if available
-    // Some fetch implementations expose a single combined header, others provide get('set-cookie')
-    const setCookieHeader = res.headers.get("set-cookie")
-    if (setCookieHeader) {
-      // Rewrite Path=/Trading -> Path=/ so cookie is sent for all frontend routes
-      let rewritten = setCookieHeader.replace(/Path=\/Trading/gi, "Path=/")
-      // Ensure SameSite is present for modern browsers
-      if (!/samesite=/i.test(rewritten)) {
-        rewritten += "; SameSite=Lax"
+    const setCookies = getJavaSetCookieValues(res.headers)
+    if (setCookies.length > 0) {
+      for (const raw of setCookies) {
+        response.headers.append("Set-Cookie", rewriteForwardedSetCookie(raw))
       }
-      response.headers.append("Set-Cookie", rewritten)
     } else {
       console.warn(`[api/auth/login][proxyRid=${rid}] no Set-Cookie from Java`)
     }
@@ -116,6 +136,17 @@ export async function POST(req: Request) {
     return response
   } catch (e: any) {
     console.error(`[api/auth/login][proxyRid=${rid}] EXCEPTION`, e?.constructor?.name, e?.message, e?.stack)
+    if (e?.name === "AbortError") {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Auth server did not respond in time. Check Tomcat and DB, or raise JAVA_AUTH_TIMEOUT_MS (default 90s, max 300s).",
+          rid,
+        },
+        { status: 504 },
+      )
+    }
     return NextResponse.json({ ok: false, error: e?.message || "Unexpected error", rid }, { status: 400 })
   } finally {
     const ms = Date.now() - t0

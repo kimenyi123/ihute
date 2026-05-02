@@ -56,12 +56,20 @@ export async function GET(req: NextRequest) {
 
     console.log(`[SUPPLIER-STOCK] Found ${products.length} products (source: ${data.source || 'unknown'})`)
 
-    return NextResponse.json({
-      ok: true,
-      products,
-      count: products.length,
-      source: data.source || 'unknown'
-    }, { status: 200 })
+    return NextResponse.json(
+      {
+        ok: true,
+        products,
+        count: products.length,
+        source: data.source || "unknown",
+      },
+      {
+        status: 200,
+        headers: {
+          "Cache-Control": "private, no-store, max-age=0, must-revalidate",
+        },
+      },
+    )
 
   } catch (e: any) {
     console.error("[SUPPLIER-STOCK] Error:", e)
@@ -98,7 +106,7 @@ export async function POST(req: NextRequest) {
     const contentType = req.headers.get('content-type') || ''
 
     let body: any
-    let headers: HeadersInit = {}
+    const headers: HeadersInit = {}
 
     // Handle multipart/form-data (Excel upload)
     if (contentType.includes('multipart/form-data')) {

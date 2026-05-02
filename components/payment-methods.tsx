@@ -1,7 +1,7 @@
 "use client"
 
 import { Card, CardContent } from "@/components/ui/card"
-import { Smartphone, Banknote, CreditCard, Wallet } from "lucide-react"
+import { Smartphone, Banknote, CreditCard } from "lucide-react"
 
 export function PaymentMethods() {
 

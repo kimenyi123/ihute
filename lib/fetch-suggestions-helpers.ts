@@ -9,26 +9,35 @@ export function normalizeListSuppliersPayload(raw: unknown): unknown[] {
   return []
 }
 
+/** Per-supplier stock-line / product count from browse or listSuppliers rows (Kaos). */
+export function productCountFromSupplierRow(row: unknown): number {
+  if (!row || typeof row !== "object") return 0
+  const o = row as Record<string, unknown>
+  const toFiniteNumber = (v: unknown): number | undefined => {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : undefined
+  }
+  const pc =
+    toFiniteNumber(o.product_count) ??
+    toFiniteNumber(o.productCount) ??
+    toFiniteNumber(o.PRODUCT_COUNT) ??
+    toFiniteNumber(o.items_count) ??
+    toFiniteNumber(o.itemsCount) ??
+    toFiniteNumber(o.ITEMS_COUNT)
+  if (pc !== undefined && Number.isFinite(Number(pc))) {
+    const n = Number(pc)
+    return n >= 0 ? Math.round(n) : 0
+  }
+  const products = o.products
+  if (Array.isArray(products)) return products.length
+  return 0
+}
+
 /** Sum per-seller line counts (prefer {@code product_count} from Kaos; not sample {@code products.length}). */
 export function sumProductsInListSuppliersPayload(rows: unknown[]): number {
   let n = 0
   for (const row of rows) {
-    if (!row || typeof row !== "object") continue
-    const o = row as Record<string, unknown>
-    const pc =
-      typeof o.product_count === "number"
-        ? o.product_count
-        : typeof o.productCount === "number"
-          ? o.productCount
-          : typeof o.PRODUCT_COUNT === "number"
-            ? o.PRODUCT_COUNT
-            : undefined
-    if (pc !== undefined && Number.isFinite(pc) && pc >= 0) {
-      n += Math.round(pc)
-      continue
-    }
-    const products = o.products
-    if (Array.isArray(products)) n += products.length
+    n += productCountFromSupplierRow(row)
   }
   return n
 }
@@ -37,7 +46,9 @@ export function sumProductsInListSuppliersPayload(rows: unknown[]): number {
 export async function fetchSectorStatsFromApi(sectorId: string): Promise<{ shops: number; items: number }> {
   const sid = sectorId.trim().toLowerCase()
   if (!sid) return { shops: 0, items: 0 }
-  const url = `/api/fetchSuggestions?sectorStats=${encodeURIComponent(sid)}`
+  const debugSql =
+    typeof process !== "undefined" && process.env.NEXT_PUBLIC_SECTOR_STATS_DEBUG === "1"
+  const url = `/api/fetchSuggestions?sectorStats=${encodeURIComponent(sid)}${debugSql ? "&debugSql=1" : ""}`
   const r = await fetch(url, { cache: "no-store" })
   const j = (await r.json().catch(() => null)) as Record<string, unknown> | null
   if (!j || typeof j !== "object") {

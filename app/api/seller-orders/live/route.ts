@@ -54,8 +54,7 @@ export async function GET(req: NextRequest) {
 
       if (!baseRedis) {
         send({ type: "NO_REDIS" })
-        // @ts-ignore
-        req.signal?.addEventListener?.("abort", close)
+        req.signal?.addEventListener?.("abort", close as EventListener)
         return
       }
 
@@ -81,8 +80,7 @@ export async function GET(req: NextRequest) {
         }
       })()
 
-      // @ts-ignore
-      req.signal?.addEventListener?.("abort", close)
+      req.signal?.addEventListener?.("abort", close as EventListener)
     },
     cancel() { try { closeRef?.() } catch {} },
   })

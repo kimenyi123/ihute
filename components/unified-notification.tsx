@@ -6,8 +6,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Bell, X, ShoppingCart, Pin, PinOff, Star } from "lucide-react"
-import { useRouter } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { RatingModal } from "./RatingModal"
+import { cn } from "@/lib/utils"
+import { mapBackendOrderStatusToTrack, type TrackOrderStatus } from "@/lib/order-status-map"
 
 type OrderNotification = {
   id: string
@@ -17,6 +19,8 @@ type OrderNotification = {
   amount: number
   timestamp: string
   isNew: boolean
+  status: TrackOrderStatus
+  statusLabel: string
 }
 
 type RatingNotification = {
@@ -45,6 +49,12 @@ type RawOrder = {
   HEURE?: unknown
   CREATED_AT?: unknown
   createdAt?: unknown
+  ORDER_STATUS?: string
+  orderStatus?: string
+  status?: string
+  STATUS?: string
+  PAYMENT_STATUS?: string
+  paymentStatus?: string
 }
 
 function toEpochMs(v: unknown): number | null {
@@ -81,9 +91,47 @@ function getBuyerName(o: {
   )
 }
 
+function getOrderStatusLabel(status: TrackOrderStatus): string {
+  switch (status) {
+    case "pending":
+      return "Pending"
+    case "open":
+      return "Open"
+    case "processing":
+      return "Processing"
+    case "invoice":
+      return "Invoice"
+    case "in-transit":
+      return "Out for Delivery"
+    case "delivered":
+      return "Delivered"
+    default:
+      return "Open"
+  }
+}
+
+function getOrderStatusBadgeClass(status: TrackOrderStatus): string {
+  switch (status) {
+    case "delivered":
+      return "bg-emerald-100 text-emerald-800 hover:bg-emerald-100"
+    case "in-transit":
+      return "bg-sky-100 text-sky-800 hover:bg-sky-100"
+    case "invoice":
+      return "bg-violet-100 text-violet-800 hover:bg-violet-100"
+    case "processing":
+      return "bg-amber-100 text-amber-800 hover:bg-amber-100"
+    case "pending":
+      return "bg-slate-100 text-slate-800 hover:bg-slate-100"
+    case "open":
+    default:
+      return "bg-blue-100 text-blue-800 hover:bg-blue-100"
+  }
+}
+
 export function UnifiedNotification() {
   const { user, isAuthenticated } = useAuthStore()
   const router = useRouter()
+  const pathname = usePathname()
   const [notifications, setNotifications] = useState<UnifiedNotification[]>([])
   const [showNotifications, setShowNotifications] = useState(true)
   const [pinned, setPinned] = useState(true)
@@ -134,6 +182,16 @@ export function UnifiedNotification() {
               const tsMs = toEpochMs(order.heure ?? order.HEURE ?? order.CREATED_AT ?? order.createdAt)
               if (tsMs == null) return null
               const buyerName = getBuyerName(order)
+              const rawOrderStatus =
+                order.ORDER_STATUS ??
+                order.orderStatus ??
+                order.status ??
+                order.STATUS
+              const rawPaymentStatus = order.PAYMENT_STATUS ?? order.paymentStatus
+              const status = mapBackendOrderStatusToTrack(
+                rawOrderStatus ? String(rawOrderStatus) : undefined,
+                rawPaymentStatus ? String(rawPaymentStatus) : undefined,
+              )
               return {
                 id: `order-${String(order.ID_ORDER ?? "")}`,
                 type: "order",
@@ -142,6 +200,8 @@ export function UnifiedNotification() {
                 amount: Number(order.AMOUNT ?? order.total ?? 0),
                 timestamp: new Date(tsMs).toISOString(),
                 isNew: true,
+                status,
+                statusLabel: getOrderStatusLabel(status),
               }
             })
             .filter((x: OrderNotification | null): x is OrderNotification => x !== null)
@@ -190,7 +250,15 @@ export function UnifiedNotification() {
         const data = await res.json()
 
         if (data.ok && Array.isArray(data.notifications)) {
-          const ratingNotifs: RatingNotification[] = data.notifications.map((n: any) => ({
+          // Only keep rating-related backend notifications in this supplier popup.
+          // Generic order updates are represented by the supplier order cards above.
+          const ratingNotifs: RatingNotification[] = data.notifications
+            .filter((n: any) => {
+              const notificationType = String(n?.type ?? "").toLowerCase()
+              const actionUrl = String(n?.actionUrl ?? "")
+              return notificationType.includes("rating") || actionUrl.includes("/products/rate")
+            })
+            .map((n: any) => ({
             id: n.id,
             type: "rating" as const,
             title: n.title,
@@ -301,9 +369,17 @@ export function UnifiedNotification() {
   // Always show the bell for authenticated suppliers
   if (!isAuthenticated) return null
 
+  const isSupplierRoute = pathname?.startsWith("/supplier")
+
   return (
     <>
-      <div className="fixed top-4 right-4 z-50">
+      <div
+        className={cn(
+          "fixed right-4 z-50",
+          // Keep the floating bell below supplier header/hamburger.
+          isSupplierRoute ? "top-20" : "top-4",
+        )}
+      >
         <Button
           variant="outline"
           size="sm"
@@ -320,7 +396,7 @@ export function UnifiedNotification() {
         </Button>
 
         {showNotifications && (
-          <Card className="absolute top-12 right-0 w-80 max-h-96 overflow-y-auto">
+          <Card className="absolute top-12 right-0 w-[min(20rem,calc(100vw-2rem))] max-h-96 overflow-y-auto">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm flex items-center justify-between w-full">
                 <span className="flex items-center gap-2">
@@ -375,6 +451,9 @@ export function UnifiedNotification() {
                             <ShoppingCart className="h-4 w-4" />
                             <span className="font-medium text-sm">Order #{n.orderId}</span>
                             {n.isNew && <Badge variant="default" className="text-xs">New</Badge>}
+                            <Badge variant="secondary" className={cn("text-xs", getOrderStatusBadgeClass(n.status))}>
+                              {n.statusLabel}
+                            </Badge>
                           </div>
                           <p className="text-sm text-gray-600 mt-1">{n.buyerName}</p>
                           <p className="text-sm font-semibold">{n.amount.toLocaleString()} RWF</p>

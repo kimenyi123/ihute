@@ -6,7 +6,10 @@ import { useAuthStore } from '@/lib/auth-store'
  * This ensures users are logged out when their session expires
  */
 export function useSession() {
-  const { isAuthenticated, checkSession, logout } = useAuthStore()
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+  const checkSession = useAuthStore((s) => s.checkSession)
+  const logout = useAuthStore((s) => s.logout)
+  const touchSession = useAuthStore((s) => s.touchSession)
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
@@ -21,15 +24,14 @@ export function useSession() {
       intervalRef.current = setInterval(() => {
         if (!checkSession()) {
           // Session expired, user will be logged out automatically
-          console.log('Session expired, user logged out')
         }
       }, 60000) // Check every minute
 
-      // Also check on page visibility change (when user comes back to tab)
+      // When user returns to the tab: validate first; if still valid, bump sliding window
       const handleVisibilityChange = () => {
-        if (document.visibilityState === 'visible' && !checkSession()) {
-          console.log('Session expired on tab focus, user logged out')
-        }
+        if (document.visibilityState !== "visible") return
+        if (!checkSession()) return
+        touchSession()
       }
 
       document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -48,7 +50,7 @@ export function useSession() {
         intervalRef.current = null
       }
     }
-  }, [isAuthenticated, checkSession])
+  }, [isAuthenticated, checkSession, touchSession])
 
   // Cleanup on unmount
   useEffect(() => {
@@ -63,5 +65,6 @@ export function useSession() {
     isAuthenticated,
     logout,
     checkSession,
+    touchSession,
   }
 }

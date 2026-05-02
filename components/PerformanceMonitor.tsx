@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Activity, Zap, Database, TrendingUp, X } from 'lucide-react';
+import { Activity, Zap, TrendingUp, X } from 'lucide-react';
 
 interface PerformanceStats {
   totalSearches: number;

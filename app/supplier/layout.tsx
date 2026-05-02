@@ -10,7 +10,7 @@ import { useAuthStore } from "@/lib/auth-store";
 import { isRestoBarPreferredCategories } from "@/lib/supplier-sector";
 
 export default function SupplierLayout({ children }: { children: React.ReactNode }) {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -58,7 +58,10 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
       { name: "Orders", href: "/supplier/orders" },
     ];
     if (showDualPurchases) {
-      items.push({ name: "My purchases", href: "/buyer/orders" });
+      items.push(
+        { name: "Buyer Dashboard", href: "/buyer/dashboard" },
+        { name: "My purchases", href: "/buyer/orders" },
+      );
     }
     if (showRestoSupplierLinks) {
       items.push(
@@ -79,6 +82,16 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
 
   const closeSidebar = useCallback(() => {
     setSidebarOpen(false);
+  }, []);
+
+  // Desktop: keep sidebar visible (like classic dashboard layout).
+  // Mobile/tablet: keep it closed by default and use drawer behavior.
+  useEffect(() => {
+    const mql = window.matchMedia("(min-width: 1024px)");
+    const syncSidebar = () => setSidebarOpen(mql.matches);
+    syncSidebar();
+    mql.addEventListener("change", syncSidebar);
+    return () => mql.removeEventListener("change", syncSidebar);
   }, []);
 
   // Close sidebar with Escape key when open
@@ -163,8 +176,10 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Mobile Header */}
-      <div className="lg:hidden bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between">
-        <h1 className="text-xl font-bold text-slate-900">Supplier Panel</h1>
+      <div className="sticky top-0 z-40 bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between">
+        <h1 className="text-lg font-bold text-slate-900 truncate pr-2">
+          {user?.businessName || "Supplier Panel"}
+        </h1>
         <button
           onClick={() => setSidebarOpen((open) => !open)}
           className="p-2 rounded-md text-slate-600 hover:bg-slate-100"
@@ -181,8 +196,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
             fixed inset-y-0 left-0 z-50
             w-64 bg-white border-r border-slate-200
             transform transition-transform duration-300 ease-in-out
-            ${sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
-            lg:translate-x-0
+            ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}
           `}
         >
           <div className="h-full flex flex-col">
@@ -233,16 +247,18 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                   closeSidebar();
                 }}
                 className={cn(
-                  "flex w-full items-center gap-3 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-semibold text-sky-950 shadow-sm transition-colors hover:bg-sky-100",
+                  "flex w-full flex-col gap-0.5 rounded-xl border border-sky-200 bg-gradient-to-br from-sky-50 to-white px-4 py-3 text-left text-sm font-semibold text-sky-950 shadow-sm transition-colors hover:border-sky-300 hover:bg-sky-50/90",
                   pathname?.startsWith("/grandma") && "border-sky-400 bg-sky-100 ring-2 ring-sky-200",
                 )}
               >
-                <Smartphone className="h-5 w-5 shrink-0 text-sky-700" aria-hidden />
-                <span className="leading-tight">Grandma app</span>
+                <span className="flex items-center gap-2">
+                  <Smartphone className="h-5 w-5 shrink-0 text-sky-700" aria-hidden />
+                  <span className="leading-tight">Grandma</span>
+                </span>
+                <span className="pl-7 text-[11px] font-normal leading-snug text-slate-600">
+                  Mobile shop, best seller &amp; top-up tips (seller mode)
+                </span>
               </Link>
-              <p className="mt-1.5 px-1 text-[11px] leading-snug text-slate-500">
-                Shop and orders in the Grandma experience
-              </p>
             </div>
 
             {/* Footer / Logout */}
@@ -272,7 +288,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
         )}
 
         {/* Main Content */}
-        <main className="flex-1 lg:ml-64 lg:overflow-y-auto">
+        <main className={cn("flex-1 min-w-0 lg:overflow-y-auto transition-[padding] duration-300", sidebarOpen && "lg:pl-64")}>
           <div className="p-4 lg:p-8">
             {children}
           </div>

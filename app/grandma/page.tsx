@@ -15,20 +15,24 @@ import { Slider } from "@/components/ui/slider"
 import { useLocationStoreEnhanced, type LocationData } from "@/lib/location-store-enhanced"
 import { getProductImageSrc, NO_IMAGE_URL } from "@/lib/image-utils"
 import { cn } from "@/lib/utils"
-import { Loader2, SlidersHorizontal } from "lucide-react"
+import { LayoutDashboard, Loader2, SlidersHorizontal, Trash2 } from "lucide-react"
 import { grandmaApiService } from "@/lib/grandma-api-service"
 import { getUserPreferences, toggleUserPreference, saveUserPreferences, getCurrentUserId, loadUserPreferences } from "@/lib/user-preferences-api"
-import { GRANDMA_APP_VERSION, GRANDMA_OUTBOUND, GRANDMA_PATHS } from "@/lib/grandma-urls"
+import {
+  GRANDMA_APP_VERSION,
+  GRANDMA_OUTBOUND,
+  GRANDMA_PATHS,
+  writeGrandmaSignupRole,
+} from "@/lib/grandma-urls"
 import {
   GRANDMA_REORDER_STORAGE_KEY,
   type GrandmaReorderPayload,
 } from "@/lib/grandma-reorder"
 import { GRANDMA_CATEGORY_TO_SECTOR_SLUG } from "@/lib/seller-category-sector"
-import { fetchSectorStatsFromApi } from "@/lib/fetch-suggestions-helpers"
+import { fetchSectorStatsFromApi, productCountFromSupplierRow } from "@/lib/fetch-suggestions-helpers"
 import { useAuthStore } from "@/lib/auth-store"
-import { userCanAccessSellerSpace } from "@/lib/auth-login-client"
+import { grandmaUserCanUseSellerWorkspace } from "@/lib/auth-login-client"
 import { GrandmaSellerDashboard } from "@/components/grandma-seller-dashboard"
-import { GrandmaRequestStatsPanel } from "@/components/grandma-request-stats-panel"
 import { GrandmaSellerItemsPanel } from "@/components/grandma-seller-items-panel"
 import { digitsOnly, normalizePhoneDigitsForAuth, normalizeRwandaMobileE164 } from "@/lib/rwanda-phone"
 import { Input } from "@/components/ui/input"
@@ -52,6 +56,11 @@ type Product = {
   price: number
   emoji: string
   imageUrl?: string
+  /**
+   * Kaos `ITEM_CODE` / `item_key_words` for stock decrement — must match `seller_add_stock`, not `liveKey`
+   * (e.g. Burrows uses `liveKey` like `nickname:dedupe…` which must never be sent as `itemCode`).
+   */
+  stockLineCode?: string
   /** Stable key for live-catalog rows (dedupe + React keys) */
   liveKey?: string
   /** Live API `in_stock` — only set for injected catalog rows */
@@ -78,6 +87,8 @@ type BurrowsApiProduct = {
   ITEM_CODE?: string
   item_code?: string
   item_key_words?: string
+  NIKI_CODE?: string
+  niki_code?: string
   item_state?: string
   item_packet?: string
   stock?: number | string
@@ -100,6 +111,9 @@ type BurrowsApiResponse = { ok: boolean; sellers?: BurrowsApiSeller[] }
 
 type LogisticsId = "human" | "bike" | "moto"
 type LogisticsOption = { id: LogisticsId; icon: string; label: string; baseRwf: number; rwfPerKm: number }
+
+/** Buyer chooses delivery vs collecting at shop — avoids mixing modes. */
+type FulfillmentMode = "delivery" | "pickup"
 
 type PaymentId = "momo" | "airtel" | "bk" | "cash"
 type PaymentMode = { id: PaymentId; label: string; iconSrc: string }
@@ -141,6 +155,8 @@ type ShopEntry = {
   reviewCount?: number
   /** under `public/` — e.g. `/img/shops/sawa.png` */
   logoSrc: string
+  /** Stock / catalog lines for this supplier row from browse API (home card totals). */
+  stockLineCount?: number
   /** merchant payout — demo; replace with API */
   bankName?: string
   payoutAccount?: string
@@ -160,6 +176,49 @@ function sameGrandmaSeller(a: string | null | undefined, b: string | null | unde
 
 function isPreferredGrandmaShop(shopId: string, preferredIds: string[]): boolean {
   return preferredIds.some((pid) => pid === shopId || sameGrandmaSeller(pid, shopId))
+}
+
+/**
+ * Supplier-products endpoint can return multiple JSON shapes depending on servlet branch:
+ * - { products: [...] }
+ * - [...]
+ * - { data: [...] } / { supplierProducts: [...] }
+ * - [{ products: [...] }, ...] with optional product_count hints
+ */
+function extractSupplierProductsCount(payload: unknown): number {
+  const fromNumericField = (o: Record<string, unknown>): number | null => {
+    const raw = o.total ?? o.totalCount ?? o.count ?? o.product_count ?? o.productCount ?? o.PRODUCT_COUNT
+    const n = Number(raw)
+    if (!Number.isFinite(n)) return null
+    return Math.max(0, Math.floor(n))
+  }
+  const countRows = (rows: unknown[]): number => {
+    if (!rows.length) return 0
+    const hasNestedProducts = rows.some((r) => {
+      if (!r || typeof r !== "object") return false
+      return Array.isArray((r as Record<string, unknown>).products)
+    })
+    if (!hasNestedProducts) return rows.length
+    return rows.reduce<number>((sum, row) => {
+      if (!row || typeof row !== "object") return sum
+      const o = row as Record<string, unknown>
+      if (Array.isArray(o.products)) return sum + o.products.length
+      const pc = Number(o.product_count ?? o.productCount ?? o.PRODUCT_COUNT ?? 0)
+      return sum + (Number.isFinite(pc) ? Math.max(0, Math.floor(pc)) : 0)
+    }, 0)
+  }
+
+  if (Array.isArray(payload)) return countRows(payload)
+  if (payload && typeof payload === "object") {
+    const o = payload as Record<string, unknown>
+    const hinted = fromNumericField(o)
+    if (hinted !== null) return hinted
+    if (Array.isArray(o.products)) return countRows(o.products)
+    if (Array.isArray(o.data)) return countRows(o.data)
+    if (Array.isArray(o.supplierProducts)) return countRows(o.supplierProducts)
+    if (Array.isArray(o.items)) return countRows(o.items)
+  }
+  return 0
 }
 
 type OfferRow = {
@@ -211,6 +270,10 @@ const GRANDMA_LABELS: Record<
     yourLocation: string
     yourPhone: string
     yourPhoneHint: string
+    paymentGuestPhoneLabel: string
+    paymentGuestPhonePlaceholder: string
+    paymentGuestPhoneNote: string
+    orderSubmitNeedPhone: string
     eta: string
     etaSub: string
     etaSubNoMode: string
@@ -224,6 +287,23 @@ const GRANDMA_LABELS: Record<
     footerItems: string
     footerSummary: string
     footerPay: string
+    footerDashboard: string
+    footerDashboardShort: string
+    sectionLogistics: string
+    logisticsNote: string
+    logisticsNotePickup: string
+    fulfillmentSectionTitle: string
+    fulfillmentDeliveryTitle: string
+    fulfillmentDeliverySub: string
+    fulfillmentPickupTitle: string
+    fulfillmentPickupSub: string
+    fulfillmentDeliveryModesHint: string
+    etaAtShop: string
+    etaPickupSub: string
+    summaryLineItems: string
+    summaryLineItemsTotal: string
+    summaryLineLogisticsRow: string
+    summaryLineGrandTotal: string
     preferredBadge: string
     logHuman: string
     logBike: string
@@ -249,10 +329,32 @@ const GRANDMA_LABELS: Record<
     reorderSplashTitle: string
     reorderSplashSub: string
     versionLabel: string
-    requestStatsTitle: string
-    requestStatsNone: string
-    requestStatsLine: string
-    requestStatsLastFail: string
+    settingsModeHint: string
+    settingsFormBuyerTitle: string
+    settingsFormSellerTitle: string
+    settingsSellerIntro: string
+    settingsApplyClose: string
+    settingsOpenSellerHome: string
+    settingsOpenSellerOrders: string
+    settingsOpenSellerItems: string
+    settingsSellerNeedLogin: string
+    settingsSellerTapDenied: string
+    /** Seller home — best seller card & top-up panel */
+    sellerDashBestSelling: string
+    sellerDashBestSellingSubtitle: string
+    sellerDashBestSellingEmpty: string
+    sellerDashUnitsSold: string
+    sellerDashLineRevenue: string
+    sellerDashShareRevenue: string
+    sellerDashTopUpTitle: string
+    sellerDashTopUpSubtitle: string
+    sellerDashBulletRestock: string
+    sellerDashBulletPopular: string
+    sellerDashBulletFulfillQueue: string
+    sellerDashGrowthIdle: string
+    sellerDashCtaStock: string
+    sellerDashCtaOrders: string
+    sellerDashDeliveredTail: string
   }
 > = {
   en: {
@@ -279,6 +381,12 @@ const GRANDMA_LABELS: Record<
     yourLocation: "Your location",
     yourPhone: "Your phone (delivery)",
     yourPhoneHint: "The shop uses this to reach you. Leave blank to use your Ihute account phone when signed in.",
+    paymentGuestPhoneLabel: "Phone (for SMS about your order)",
+    paymentGuestPhonePlaceholder: "e.g. 0788 123 456",
+    paymentGuestPhoneNote:
+      "We use this number for SMS about your order (status, pickup, delivery). If you are signed in and your account already has a phone, you do not need to type it again.",
+    orderSubmitNeedPhone:
+      "Add your phone number — we send order updates and confirmations by SMS to this number.",
     eta: "Estimated time of arrival",
     etaSub: "From ~{km} km · {mode} delivery",
     etaSubNoMode: "~{km} km from the shop. Choose a delivery option on Summary to see arrival time.",
@@ -293,12 +401,31 @@ const GRANDMA_LABELS: Record<
     footerItems: "Items",
     footerSummary: "Summary",
     footerPay: "Pay",
+    footerDashboard: "Open supplier dashboard",
+    footerDashboardShort: "Dashboard",
+    sectionLogistics: "Shipment · Logistics",
+    logisticsNote:
+      "Delivery fee uses distance to this shop ({km} km) and the option you pick (demo — replace with your pricing API).",
+    logisticsNotePickup:
+      "Self pickup: you collect the order at this shop. No delivery fee — logistics is RWF 0.",
+    fulfillmentSectionTitle: "How do you want to receive this order?",
+    fulfillmentDeliveryTitle: "Delivery",
+    fulfillmentDeliverySub: "Bring it to my address (delivery fee applies).",
+    fulfillmentPickupTitle: "Self pickup",
+    fulfillmentPickupSub: "I will collect at the shop (no delivery fee).",
+    fulfillmentDeliveryModesHint: "Choose how it travels to you:",
+    etaAtShop: "At shop",
+    etaPickupSub: "Pickup at the shop — no courier ETA. Coordinate with the seller after ordering.",
+    summaryLineItems: "Items",
+    summaryLineItemsTotal: "Items total",
+    summaryLineLogisticsRow: "Logistics",
+    summaryLineGrandTotal: "Grand total",
     preferredBadge: "Preferred",
     logHuman: "Human",
     logBike: "Bike",
     logMoto: "Moto",
     amountShop: "Amount to shop",
-    ihuteFees: "Ihute fees (1%)",
+    ihuteFees: "Ihute fee (1%, from shop — not on your total)",
     taxes: "Taxes",
     amountLogistics: "Amount to logistics",
     totalPay: "Total amount to pay",
@@ -318,41 +445,69 @@ const GRANDMA_LABELS: Record<
     reorderSplashTitle: "Adding to your cart…",
     reorderSplashSub: "Loading this shop’s items.",
     versionLabel: "Version",
-    requestStatsTitle: "API requests (this session)",
-    requestStatsNone: "No requests to /api yet in this tab.",
-    requestStatsLine: "This session: {total} requests — {pct}% succeeded ({ok} ok, {fail} failed).",
-    requestStatsLastFail: "Last failed: HTTP {status} — {url}",
+    settingsModeHint: "Choose Buyer or Seller to show the matching form below. Tap Done when finished.",
+    settingsFormBuyerTitle: "Buyer preferences",
+    settingsFormSellerTitle: "Seller / shop",
+    settingsSellerIntro: "Jump to a screen, then tap Done to close settings.",
+    settingsApplyClose: "Done",
+    settingsOpenSellerHome: "Dashboard",
+    settingsOpenSellerOrders: "Orders queue",
+    settingsOpenSellerItems: "Items & stock",
+    settingsSellerNeedLogin: "Sign in with your shop account to use seller mode.",
+    settingsSellerTapDenied: "Sign in with a shop account to switch to Seller.",
+    sellerDashBestSelling: "Best selling",
+    sellerDashBestSellingSubtitle: "Live from delivered orders",
+    sellerDashBestSellingEmpty:
+      "Mark orders as delivered to see your #1 product, units sold, and tailored restock ideas.",
+    sellerDashUnitsSold: "units sold",
+    sellerDashLineRevenue: "Line revenue",
+    sellerDashShareRevenue: "{{pct}}% of line revenue · {{rwf}}",
+    sellerDashTopUpTitle: "Top-up sale",
+    sellerDashTopUpSubtitle: "Short actions that keep your shop stocked and your queue moving.",
+    sellerDashBulletRestock: "Restock priority: {{name}} — {{units}} units on delivered orders.",
+    sellerDashBulletPopular: "Also selling well: {{name}} ({{units}} units).",
+    sellerDashBulletFulfillQueue: "{{n}} open orders — fulfilling updates these insights faster.",
+    sellerDashGrowthIdle: "Deliver orders with line items to unlock best-seller and top-up tips here.",
+    sellerDashCtaStock: "Stock & catalog",
+    sellerDashCtaOrders: "Open orders",
+    sellerDashDeliveredTail: "{{n}} delivered",
   },
   rw: {
-    demoLocation: "Kacyiru, Gasabo — inyigo (shyiraho aderesi mu buryo)",
+    demoLocation: "Kacyiru, Gasabo (inyigo). Shyiraho aho uri mu buryo.",
     titleHome: "Ishyiga Ihute",
     shopsPrefix: "Amaduka ·",
-    titleSummary: "Incamake y'icyo ugiye gutumiza",
-    titlePayment: "Uburyo bwo kwishyura",
+    titleSummary: "Incamake",
+    titlePayment: "Kwishyura",
     settings: "Igenamiterere",
-    settingsSub: "Ururimi, aho uherereye, amaduka n'uburyo bwo kwishyura",
+    settingsSub: "Ururimi, aho uri, amaduka n'ishyura.",
     language: "Ururimi",
     langEn: "English",
     langRw: "Ikinyarwanda",
     langFr: "Igifaransa",
-    setLocation: "Shyiraho aho uherereye",
+    setLocation: "Shyiraho aho uri",
     locationCurrent: "Ubu",
-    noLocationYet: "Ntacyo cyashyizweho — kanda uhitemo GPS cyangwa akarere",
+    noLocationYet: "Ntabwo byanditse. Kanda uhitemo aho uri.",
     preferredShops: "Amaduka ukunda",
-    preferredHint: "Dutanga aya mbere mu rutonde rw'amaduka.",
-    paymentMode: "Uburyo bwo kwishyura wifuza",
-    payingTo: "Wishyura",
-    bankName: "Izina rya banki",
+    preferredHint: "Aya ni yo abanza.",
+    paymentMode: "Uburyo bwo kwishyura",
+    payingTo: "Wishyura kuri",
+    bankName: "Banki",
     account: "Konti",
-    yourLocation: "Aho uherereye",
-    yourPhone: "Telefoni yawe (kohereza)",
-    yourPhoneHint: "Iduka rikoresha iyi kugufata. Siga ubusa ukoreshe telefoni ya konti yawe Ihute niba winjiye.",
-    eta: "Igihe cyateganyijwe cyo kugera",
-    etaSub: "Kuva kuri km ~{km} · {mode}",
-    etaSubNoMode: "Km ~{km} kuva ku iduka. Hitamo uburyo bwo kohereza ku incamake kugira ngo ubone igihe cyo kugera.",
-    paymentModeSection: "Uburyo bwo kwishyura",
-    sortDistance: " Byagenwe ku ntambwe.",
-    shopsIntro: "Hitamo iduka muri {cat}. Ukunda n'ibyakoreshejwe mbere biri ku rutonde rwa mbere.{sort}",
+    yourLocation: "Aho uri",
+    yourPhone: "Telefoni",
+    yourPhoneHint: "Iduka riguhamagare kuri iyi numero. Niba winjiye birahagije.",
+    paymentGuestPhoneLabel: "Telefoni (SMS z'amakuru y'komande)",
+    paymentGuestPhonePlaceholder: "Urugero: 0788 123 456",
+    paymentGuestPhoneNote:
+      "Dukoresha iyi numero kohereza SMS z'amakuru y'komande (imiterere, koherezwa, n'ibindi). Niba winjiye kandi telefoni yawe iri ku konti, ntacyo usaba.",
+    orderSubmitNeedPhone:
+      "Wibagiwe shyiramo telefoni — aho tuboherezaho SMS z'amakuru n'icyo komande.",
+    eta: "Igihe cyo kugera",
+    etaSub: "Km ~{km} · {mode}",
+    etaSubNoMode: "Hitamo uburyo bwo kohereza ku incamake.",
+    paymentModeSection: "Kwishyura",
+    sortDistance: " Ku ntambwe.",
+    shopsIntro: "Hitamo iduka muri {cat}. Ukunda ni uwa mbere.{sort}",
     sectorPanelShops: "amaduka",
     sectorPanelItems: "ibintu",
     footerHome: "Ahabanza",
@@ -360,35 +515,74 @@ const GRANDMA_LABELS: Record<
     footerItems: "Ibintu",
     footerSummary: "Incamake",
     footerPay: "Kwishyura",
+    footerDashboard: "Konti y'iduka",
+    footerDashboardShort: "Konti",
+    sectionLogistics: "Kohereza",
+    logisticsNote: "Amafaranga bishingiye ku intera kugeza ku iduka ({km} km) n'uburyo watoranyije.",
+    logisticsNotePickup: "Wakira ku iduka. Nta mafaranga y'ihanyura.",
+    fulfillmentSectionTitle: "Wifuza ite?",
+    fulfillmentDeliveryTitle: "Koherezwa",
+    fulfillmentDeliverySub: "Binkugeza aho uri. Wishyura kugenda.",
+    fulfillmentPickupTitle: "Kwakira ku iduka",
+    fulfillmentPickupSub: "Nzakira ku iduka. Nta mafaranga y'ihanyura.",
+    fulfillmentDeliveryModesHint: "Hitamo uburyo:",
+    etaAtShop: "Ku iduka",
+    etaPickupSub: "Wakira ku iduka. Vugana n'iduka nyuma.",
+    summaryLineItems: "Ibintu",
+    summaryLineItemsTotal: "Igiciro cy'ibintu",
+    summaryLineLogisticsRow: "Kohereza",
+    summaryLineGrandTotal: "Byose hamwe",
     preferredBadge: "Ukunda",
-    logHuman: "Umuntu",
-    logBike: "Igare",
-    logMoto: "Moto",
+    logHuman: "Ku maguru",
+    logBike: "Ku igare",
+    logMoto: "Ku moto",
     amountShop: "Amafaranga y'iduka",
-    ihuteFees: "Amafaranga ya Ihute (1%)",
+    ihuteFees: "Ihute 1% — ku iduka, ntibinjiye ku wishyura wawe",
     taxes: "Imisoro",
-    amountLogistics: "Amafaranga y'uboherezi",
-    totalPay: "Amafaranga yose",
-    sendOrder: "Ohereza komande",
-    deliveryPerson: "Uwohereza",
-    hobbies: "Ibikundwa",
-    kmToShop: "km kugera ku iduka",
-    reviewers: "abasesenguzi",
-    tapCouriers: "Kanda urebe aboherezi 5 ba mbere buri hafi y'iduka",
-    closestToShop: "Bari hafi y'iduka",
-    top5Available: "5 ba mbere bahari",
+    amountLogistics: "Kohereza",
+    totalPay: "Byose",
+    sendOrder: "Ohereza",
+    deliveryPerson: "Uwatwara",
+    hobbies: "Akunda",
+    kmToShop: "Km kugeza ku iduka",
+    reviewers: "bareba",
+    tapCouriers: "Kanda urebe abatwara",
+    closestToShop: "Bari hafi",
+    top5Available: "Ba 5",
     myOrders: "Komande zanjye",
-    viewMyOrders: "Reba komande zawe",
-    signInForOrders: "Injira urebe komande zawe",
+    viewMyOrders: "Reba komande",
+    signInForOrders: "Injira urebe komande",
     signIn: "Injira",
     logOut: "Sohoka",
-    reorderSplashTitle: "Bishyiraho mu iduka…",
-    reorderSplashSub: "Dukurikira ibintu by'iduka.",
+    reorderSplashTitle: "Biri mu iduka…",
+    reorderSplashSub: "Turimo kubona ibintu.",
     versionLabel: "Verisiyo",
-    requestStatsTitle: "Ibyifuzo kuri API (iki gice)",
-    requestStatsNone: "Nta bisubizo kuri /api muri iki tab.",
-    requestStatsLine: "Iki gice: ibisubizo {total} — {pct}% byagenze neza ({ok} byiza, {fail} bitari byiza).",
-    requestStatsLastFail: "Iheruka kutagenwa: HTTP {status} — {url}",
+    settingsModeHint: "Hitamo Buyer cyangwa Seller ngo urebe form ijyanye. Kanda Funga nimara.",
+    settingsFormBuyerTitle: "Amahitamo y'umuguzi",
+    settingsFormSellerTitle: "Iduka / seller",
+    settingsSellerIntro: "Hitamo kimwe mu bikurikira, hanyuma kanda Funga ngo ufunge ibi buryo.",
+    settingsApplyClose: "Funga",
+    settingsOpenSellerHome: "Ahabanza",
+    settingsOpenSellerOrders: "Komande",
+    settingsOpenSellerItems: "Ibintu",
+    settingsSellerNeedLogin: "Injira ukoresheje konti y'iduka ngo ukore uburyo bwa Seller.",
+    settingsSellerTapDenied: "Injira ukoresheje konti y'iduka ngo uhindure uburyo bwa Seller.",
+    sellerDashBestSelling: "Gicuruzwa cy'agurishwa cyane",
+    sellerDashBestSellingSubtitle: "Bivuye muri komande zoherejwe",
+    sellerDashBestSellingEmpty:
+      "Imenyeshe komande ko zageze ngo ubone izina ry'icyagurishwa cyane, ingano, n'ubwita ku stock.",
+    sellerDashUnitsSold: "ibiceri byagurishwe",
+    sellerDashLineRevenue: "Amafaranga ku murongo",
+    sellerDashShareRevenue: "{{pct}}% y'amafaranga ku murongo · {{rwf}}",
+    sellerDashTopUpTitle: "Top-up sale",
+    sellerDashTopUpSubtitle: "Ibikorwa bigufasha kuguma ufite stock neza n'urubanza rw'ibicuruzwa.",
+    sellerDashBulletRestock: "Ongeraho stock: {{name}} — ingano {{units}} ku komande zageze.",
+    sellerDashBulletPopular: "Nacyo gikunzwe: {{name}} ({{units}}).",
+    sellerDashBulletFulfillQueue: "Ufite komande {{n}} zitarahera — zishyira mubereho kugira ngo umenye byihuse.",
+    sellerDashGrowthIdle: "Kugeza komande zifite ibicuruzwa kandi zigeze wabona hano amakuru y'ubucuruzi.",
+    sellerDashCtaStock: "Stock n'ibirimo",
+    sellerDashCtaOrders: "Komande",
+    sellerDashDeliveredTail: "{{n}} zegezwemo",
   },
   fr: {
     demoLocation: "Kacyiru, Gasabo — démo (définissez l'adresse dans les réglages)",
@@ -414,6 +608,12 @@ const GRANDMA_LABELS: Record<
     yourLocation: "Votre position",
     yourPhone: "Votre téléphone (livraison)",
     yourPhoneHint: "Le magasin vous joint sur ce numéro. Laissez vide pour utiliser le téléphone de votre compte Ihute si vous êtes connecté.",
+    paymentGuestPhoneLabel: "Téléphone (SMS sur la commande)",
+    paymentGuestPhonePlaceholder: "ex. 0788 123 456",
+    paymentGuestPhoneNote:
+      "Nous utilisons ce numéro pour les SMS sur votre commande (statut, livraison, etc.). Si vous êtes connecté et que votre compte a déjà un téléphone, vous pouvez laisser vide.",
+    orderSubmitNeedPhone:
+      "Indiquez votre numéro de téléphone — nous y envoyons les mises à jour et confirmations de commande par SMS.",
     eta: "Heure d'arrivée estimée",
     etaSub: "Depuis ~{km} km · livraison {mode}",
     etaSubNoMode: "À ~{km} km du magasin. Choisissez une livraison sur le récapitulatif pour voir l’heure d’arrivée.",
@@ -427,12 +627,31 @@ const GRANDMA_LABELS: Record<
     footerItems: "Articles",
     footerSummary: "Récapitulatif",
     footerPay: "Payer",
+    footerDashboard: "Ouvrir le tableau vendeur",
+    footerDashboardShort: "Tableau",
+    sectionLogistics: "Livraison · Logistique",
+    logisticsNote:
+      "Les frais utilisent la distance jusqu’à ce magasin ({km} km) et le mode choisi (démo — branchez votre API tarifs).",
+    logisticsNotePickup:
+      "Retrait au magasin : vous récupérez la commande sur place. Pas de frais de livraison (0 RWF).",
+    fulfillmentSectionTitle: "Comment souhaitez-vous recevoir cette commande ?",
+    fulfillmentDeliveryTitle: "Livraison",
+    fulfillmentDeliverySub: "À mon adresse (frais de livraison).",
+    fulfillmentPickupTitle: "Retrait au magasin",
+    fulfillmentPickupSub: "Je viens chercher au magasin (sans frais de livraison).",
+    fulfillmentDeliveryModesHint: "Choisissez le mode de transport :",
+    etaAtShop: "Au magasin",
+    etaPickupSub: "Retrait sur place — pas d’ETA coursier. Coordonnez-vous avec le vendeur après commande.",
+    summaryLineItems: "Articles",
+    summaryLineItemsTotal: "Total articles",
+    summaryLineLogisticsRow: "Logistique",
+    summaryLineGrandTotal: "Total général",
     preferredBadge: "Favori",
     logHuman: "À pied",
     logBike: "Vélo",
     logMoto: "Moto",
     amountShop: "Montant au magasin",
-    ihuteFees: "Frais Ihute (1 %)",
+    ihuteFees: "Frais Ihute (1 %) — payés par la boutique, pas sur votre total",
     taxes: "Taxes",
     amountLogistics: "Montant logistique",
     totalPay: "Total à payer",
@@ -452,11 +671,46 @@ const GRANDMA_LABELS: Record<
     reorderSplashTitle: "Ajout au panier…",
     reorderSplashSub: "Chargement des articles du magasin.",
     versionLabel: "Version",
-    requestStatsTitle: "Requêtes API (cette session)",
-    requestStatsNone: "Aucune requête /api pour l’instant.",
-    requestStatsLine: "Session : {total} requêtes — {pct}% réussies ({ok} ok, {fail} échouées).",
-    requestStatsLastFail: "Dernier échec : HTTP {status} — {url}",
+    settingsModeHint:
+      "Choisissez Acheteur ou Vendeur pour afficher le formulaire correspondant. Terminé pour revenir à l’app.",
+    settingsFormBuyerTitle: "Préférences acheteur",
+    settingsFormSellerTitle: "Boutique / vendeur",
+    settingsSellerIntro: "Ouvrez un écran ci-dessous, ou Terminé puis utilisez la barre du bas.",
+    settingsApplyClose: "Terminé",
+    settingsOpenSellerHome: "Accueil boutique",
+    settingsOpenSellerOrders: "File des commandes",
+    settingsOpenSellerItems: "Articles & stock",
+    settingsSellerNeedLogin: "Connectez-vous avec un compte boutique pour le mode vendeur.",
+    settingsSellerTapDenied: "Compte boutique requis pour passer en mode vendeur.",
+    sellerDashBestSelling: "Meilleure vente",
+    sellerDashBestSellingSubtitle: "Données des commandes livrées",
+    sellerDashBestSellingEmpty:
+      "Marquez des commandes comme livrées pour voir votre produit n°1, les quantités et des idées de réassort.",
+    sellerDashUnitsSold: "unités vendues",
+    sellerDashLineRevenue: "CA lignes",
+    sellerDashShareRevenue: "{{pct}}% du CA lignes · {{rwf}}",
+    sellerDashTopUpTitle: "Top-up vente",
+    sellerDashTopUpSubtitle: "Actions courtes pour garder le stock et fluidifier la file commandes.",
+    sellerDashBulletRestock: "Réassort prioritaire : {{name}} — {{units}} unités sur commandes livrées.",
+    sellerDashBulletPopular: "Bien vendu aussi : {{name}} ({{units}} unités).",
+    sellerDashBulletFulfillQueue: "{{n}} commandes ouvertes — les traiter actualise ces indicateurs.",
+    sellerDashGrowthIdle: "Livrez des commandes avec lignes produit pour activer ce panneau.",
+    sellerDashCtaStock: "Stock & catalogue",
+    sellerDashCtaOrders: "Commandes ouvertes",
+    sellerDashDeliveredTail: "{{n}} livrée(s)",
   },
+}
+
+function humanizeGrandmaOrderBackendError(raw: string, lang: GrandmaLang): string {
+  if (!raw?.trim()) return raw
+  const low = raw.toLowerCase()
+  if (low.includes("buyer") && low.includes("null") && low.includes("ishyiga")) {
+    return GRANDMA_LABELS[lang].orderSubmitNeedPhone
+  }
+  if (low.includes("cannot read field") && low.includes("ishyiga_account") && low.includes("buyer")) {
+    return GRANDMA_LABELS[lang].orderSubmitNeedPhone
+  }
+  return raw
 }
 
 function readGrandmaPrefs(): { lang: GrandmaLang; payment: PaymentId; preferred: string[]; mode: AppMode } {
@@ -876,7 +1130,7 @@ const PAYMENTS: PaymentMode[] = [
   { id: "cash", label: "Cash on Delivery", iconSrc: "/img/cash.png" },
 ]
 
-/** 1% platform fee on items subtotal */
+/** 1% platform fee on items subtotal — shown for transparency; buyer total excludes it (seller settlement). */
 const IHUTE_FEE_RATE = 0.01
 const TAXES_PLACEHOLDER = 0
 
@@ -1369,6 +1623,36 @@ function sellerOrderWhatsAppHref(phone: string): string {
   return "#"
 }
 
+type ServedSkuAgg = { name: string; units: number; revenueRwf: number }
+
+function aggregateServedOrderProducts(orders: SellerOrder[]): {
+  ranked: ServedSkuAgg[]
+  totalLineRevenue: number
+} {
+  const served = orders.filter((o) => o.status === "sent")
+  const byKey = new Map<string, ServedSkuAgg>()
+  let totalLineRevenue = 0
+  for (const o of served) {
+    for (const L of o.lines) {
+      const name = (L.name || "Item").trim() || "Item"
+      const qty = Math.max(0, Number(L.qty) || 0)
+      const lineRev = Math.max(0, L.totalRwf ?? 0)
+      totalLineRevenue += lineRev
+      const key = name.toLowerCase()
+      const cur = byKey.get(key) ?? { name, units: 0, revenueRwf: 0 }
+      cur.name = name
+      cur.units += qty
+      cur.revenueRwf += lineRev
+      byKey.set(key, cur)
+    }
+  }
+  const ranked = [...byKey.values()].sort((a, b) => {
+    if (b.units !== a.units) return b.units - a.units
+    return b.revenueRwf - a.revenueRwf
+  })
+  return { ranked, totalLineRevenue }
+}
+
 function mapRawSellerOrderToGrandma(raw: Record<string, unknown>): SellerOrder {
   const id = String(raw.ID_ORDER ?? raw.id_order ?? raw.id ?? "").trim() || `tmp-${Date.now()}`
   const createdRaw =
@@ -1465,7 +1749,8 @@ export default function GrandmaPage() {
   const [imagePreviewOpen, setImagePreviewOpen] = useState(false)
   const [imagePreviewSrc, setImagePreviewSrc] = useState<string>("")
   const [imagePreviewTitle, setImagePreviewTitle] = useState<string>("")
-  const [selectedLogistics, setSelectedLogistics] = useState<LogisticsId | null>(null)
+  const [selectedLogistics, setSelectedLogistics] = useState<LogisticsId>("moto")
+  const [fulfillmentMode, setFulfillmentMode] = useState<FulfillmentMode>("delivery")
   const [appMode, setAppMode] = useState<AppMode>("buyer")
   const [sellerView, setSellerView] = useState<SellerView>("home")
   const [language, setLanguage] = useState<GrandmaLang>("rw")
@@ -1473,6 +1758,7 @@ export default function GrandmaPage() {
   const [selectedPayment, setSelectedPayment] = useState<PaymentId>("momo")
   const [prefsHydrated, setPrefsHydrated] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsSellerGuardMsg, setSettingsSellerGuardMsg] = useState<string | null>(null)
   const [filterSheetOpen, setFilterSheetOpen] = useState(false)
   const [itemsSort, setItemsSort] = useState<ItemsSortId>("default")
   const [liveInStockOnly, setLiveInStockOnly] = useState(false)
@@ -1516,28 +1802,25 @@ export default function GrandmaPage() {
   const [allAvailableShops, setAllAvailableShops] = useState<ShopEntry[]>([])
   const [allShopsLoading, setAllShopsLoading] = useState(false)
   const [allShopsError, setAllShopsError] = useState<string | null>(null)
-
-  /** Per-sector shop + stock-line counts (same `/api/fetchSuggestions?sectorStats=` as main home). */
-  const [sectorStatsByCategory, setSectorStatsByCategory] = useState<
-    Partial<Record<Category, { shops: number; items: number }>>
-  >({})
-  const [sectorStatsLoading, setSectorStatsLoading] = useState(false)
+  /** Full per-sector item totals (Kaos `sectorStats`) for Home cards. */
+  const [homeSectorItemsByCategory, setHomeSectorItemsByCategory] = useState<Partial<Record<Category, number>>>({})
+  const [homeSectorItemsLoading, setHomeSectorItemsLoading] = useState(false)
 
   useEffect(() => {
     let cancelled = false
-    setSectorStatsLoading(true)
+    setHomeSectorItemsLoading(true)
     void (async () => {
-      const next: Partial<Record<Category, { shops: number; items: number }>> = {}
+      const next: Partial<Record<Category, number>> = {}
       await Promise.all(
         CATEGORIES.map(async (c) => {
           const slug = GRANDMA_CATEGORY_TO_SECTOR_SLUG[c.name]
           const s = await fetchSectorStatsFromApi(slug)
-          if (!cancelled) next[c.name] = s
-        })
+          if (!cancelled) next[c.name] = s.items
+        }),
       )
       if (!cancelled) {
-        setSectorStatsByCategory(next)
-        setSectorStatsLoading(false)
+        setHomeSectorItemsByCategory(next)
+        setHomeSectorItemsLoading(false)
       }
     })()
     return () => {
@@ -1547,17 +1830,38 @@ export default function GrandmaPage() {
 
   // Combine API products with existing products, preserving quantities - FIXED FOR API INTEGRATION
   const combinedProducts = useMemo(() => {
-    // If we have API products for selected shop, use them directly
-    if (apiProducts.length > 0 && selectedShopId) {
-      return apiProducts // API products already have quantities updated by changeQty
-    }
-    
-    return [] // Return empty if no API products
+    if (apiProducts.length === 0) return []
+    if (selectedShopId) return apiProducts
+    // Sector / home navigation can clear selection before a new shop is chosen — still count cart lines.
+    if (apiProducts.some((p) => p.qty > 0)) return apiProducts
+    return []
   }, [apiProducts, selectedShopId])
 
   const selectedProducts = useMemo(() => combinedProducts.filter((p) => p.qty > 0), [combinedProducts])
   const itemsCount = useMemo(() => selectedProducts.reduce((a, p) => a + p.qty, 0), [selectedProducts])
   const itemsTotal = useMemo(() => selectedProducts.reduce((a, p) => a + p.qty * p.price, 0), [selectedProducts])
+
+  /** Home grid counts: shops from browse rows, items from full `sectorStats` totals. */
+  const grandmaHomeSectorCounts = useMemo(() => {
+    const next = {} as Record<Category, { shops: number; items: number }>
+    for (const { name } of CATEGORIES) {
+      next[name] = { shops: 0, items: 0 }
+    }
+    for (const s of allAvailableShops) {
+      const bucket = next[s.category]
+      if (!bucket) continue
+      bucket.shops += 1
+      bucket.items += s.stockLineCount ?? 0
+    }
+    for (const { name } of CATEGORIES) {
+      const fullItems = homeSectorItemsByCategory[name]
+      if (Number.isFinite(fullItems)) {
+        // Prefer full DB item totals so card "ibintu" matches what users see in category flows.
+        next[name].items = Math.max(0, Math.floor(Number(fullItems)))
+      }
+    }
+    return next
+  }, [allAvailableShops, homeSectorItemsByCategory])
 
   const selectedShop = useMemo(
     () => {
@@ -1593,14 +1897,17 @@ export default function GrandmaPage() {
   const deliveryKm = selectedShop?.distanceKm ?? 0
 
   const logisticsTotal = useMemo(() => {
-    if (!selectedLogistics) return 0
+    if (fulfillmentMode === "pickup") return 0
     const opt = LOGISTICS.find((x) => x.id === selectedLogistics)
     return opt ? logisticsQuote(opt, deliveryKm) : 0
-  }, [selectedLogistics, deliveryKm])
+  }, [fulfillmentMode, selectedLogistics, deliveryKm])
 
   const etaRange = useMemo(
-    () => deliveryEtaRange(deliveryKm, selectedLogistics),
-    [deliveryKm, selectedLogistics]
+    () =>
+      fulfillmentMode === "pickup"
+        ? { lo: 0, hi: 0 }
+        : deliveryEtaRange(deliveryKm, selectedLogistics),
+    [deliveryKm, selectedLogistics, fulfillmentMode]
   )
 
   const couriersByDistance = useMemo(() => {
@@ -1634,27 +1941,28 @@ export default function GrandmaPage() {
   }, [courierModalOpen])
 
   useEffect(() => {
-    if (!selectedLogistics) setCourierModalOpen(false)
-  }, [selectedLogistics])
-
-  useEffect(() => {
     const prefs = readGrandmaPrefs()
     setLanguage(prefs.lang)
     setPreferredShopIds(prefs.preferred)
     setSelectedPayment(prefs.payment)
     setAppMode(prefs.mode)
+    writeGrandmaSignupRole(prefs.mode === "seller" ? "seller" : "buyer")
+    try {
+      const lsLog = localStorage.getItem("grandma:buyerLogistics")
+      if (lsLog === "human" || lsLog === "bike" || lsLog === "moto") setSelectedLogistics(lsLog)
+      else setSelectedLogistics("moto")
+    } catch {
+      setSelectedLogistics("moto")
+    }
+    try {
+      const lsFul = localStorage.getItem("grandma:fulfillmentMode")
+      if (lsFul === "delivery" || lsFul === "pickup") setFulfillmentMode(lsFul)
+      else setFulfillmentMode("delivery")
+    } catch {
+      setFulfillmentMode("delivery")
+    }
     setPrefsHydrated(true)
   }, [])
-
-  /** S1: persisted "seller" mode without a valid seller session → fall back to buyer */
-  useEffect(() => {
-    if (!prefsHydrated) return
-    const st = useAuthStore.getState()
-    if (appMode === "seller" && (!st.isAuthenticated || !userCanAccessSellerSpace(st.user))) {
-      setAppMode("buyer")
-      setSellerView("home")
-    }
-  }, [prefsHydrated, appMode])
 
   useEffect(() => {
     if (typeof window === "undefined" || !prefsHydrated) return
@@ -1672,6 +1980,28 @@ export default function GrandmaPage() {
     if (typeof window === "undefined" || !prefsHydrated) return
     localStorage.setItem("grandma:mode", appMode)
   }, [appMode, prefsHydrated])
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !prefsHydrated) return
+    try {
+      localStorage.setItem("grandma:buyerLogistics", selectedLogistics)
+    } catch {
+      /* ignore */
+    }
+  }, [selectedLogistics, prefsHydrated])
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !prefsHydrated) return
+    try {
+      localStorage.setItem("grandma:fulfillmentMode", fulfillmentMode)
+    } catch {
+      /* ignore */
+    }
+  }, [fulfillmentMode, prefsHydrated])
+
+  useEffect(() => {
+    if (fulfillmentMode === "pickup") setCourierModalOpen(false)
+  }, [fulfillmentMode])
 
   useEffect(() => {
     if (appMode === "seller" || (page !== 2 && page !== 3)) setFilterSheetOpen(false)
@@ -1722,6 +2052,9 @@ export default function GrandmaPage() {
             const thumb = liveCatalogThumbUrl(p, targetCategory, nickname, key, name)
             const sectionLabel = resolveLiveMenuSectionCategory(p)
             const menuCat = menuCategoryTitleFromCanon(menuCategoryCanon(sectionLabel))
+            const stockLineCode = String(
+              p.ITEM_CODE ?? p.item_code ?? p.item_key_words ?? p.NIKI_CODE ?? p.niki_code ?? ""
+            ).trim()
             return {
               id,
               category: targetCategory,
@@ -1730,6 +2063,7 @@ export default function GrandmaPage() {
               emoji: emojiForLiveCategory(targetCategory, name),
               imageUrl: thumb,
               liveKey: `${nickname}:${key}`,
+              stockLineCode: stockLineCode || undefined,
               liveInStock: p.in_stock === true,
               liveCategory: menuCat,
               qty: 0,
@@ -1784,14 +2118,13 @@ export default function GrandmaPage() {
 
             const qs = new URLSearchParams({
               sector,
-              sellerLimit: "48",
-              productsPerSeller: "2",
+              limit: "500",
               Currency: "RWF",
             })
-            const browseUrl = `/api/grandma/suppliers/browse?${qs.toString()}`
+            const sectorUrl = `/api/sector-list-suppliers?${qs.toString()}`
             console.log(`=== Fetching ${cat} ===`)
-            console.log(`Browse URL: ${browseUrl}`)
-            const res = await fetch(browseUrl, { cache: "no-store" })
+            console.log(`Sector list URL: ${sectorUrl}`)
+            const res = await fetch(sectorUrl, { cache: "no-store" })
 
             if (res.ok) {
               const data = await res.json()
@@ -1803,7 +2136,7 @@ export default function GrandmaPage() {
               }
             } else {
               browseFailures++
-              console.warn(`Browse failed for ${cat}: HTTP ${res.status}`)
+              console.warn(`Sector list failed for ${cat}: HTTP ${res.status}`)
             }
 
             // Same SQL family as browse, different servlet path — helps if Grandma browse404/503 or returns [].
@@ -1818,12 +2151,14 @@ export default function GrandmaPage() {
                     seller_name: row.SELLER_NAMES || row.OWNER,
                     seller_momo: row.momo ?? row.MOMO,
                     seller_location: row.LOCATION,
+                    product_count: row.product_count ?? row.productCount ?? row.PRODUCT_COUNT ?? row.items_count ?? row.ITEMS_COUNT,
+                    products: Array.isArray(row.products) ? row.products : undefined,
                   }))
                   console.log(`${cat} suppliers (listSuppliersBySector fallback):`, suppliers.length)
                 }
               }
             } else {
-              console.log(`${cat} suppliers (browse):`, suppliers.length)
+              console.log(`${cat} suppliers (sector-list):`, suppliers.length)
             }
 
             allShops.push(
@@ -1882,10 +2217,27 @@ export default function GrandmaPage() {
             rating: 4.0,
             reviewCount: 0,
             logoSrc: "/placeholder.jpg",
+            stockLineCount: productCountFromSupplierRow(supplier),
           }
         })
         
-        setAllAvailableShops(transformedShops)
+        let shopsWithImages = transformedShops
+        try {
+          const imageRes = await fetch("/api/images/overrides?scope=shop", { cache: "no-store" })
+          const imageData = await imageRes.json().catch(() => ({}))
+          const imageMap = (imageData?.map ?? {}) as Record<string, string>
+          if (imageMap && typeof imageMap === "object") {
+            shopsWithImages = transformedShops.map((shop) => {
+              const account = sellerAccountFromGrandmaShopId(shop.id).toUpperCase()
+              const img = account ? imageMap[account] : ""
+              return img ? { ...shop, logoSrc: img } : shop
+            })
+          }
+        } catch {
+          // keep default logos if override fetch fails
+        }
+
+        setAllAvailableShops(shopsWithImages)
         console.log('setAllAvailableShops called with:', transformedShops.length, 'shops')
         console.log('Shop IDs in allAvailableShops:', transformedShops.map(s => s.id))
         console.log('Current preferredShopIds:', preferredShopIds)
@@ -2009,23 +2361,52 @@ export default function GrandmaPage() {
           imageUrl: products[0]?.imageUrl
         })
         
+        let productImageMap: Record<string, string> = {}
+        try {
+          const mapRes = await fetch(
+            `/api/images/overrides?scope=product&account=${encodeURIComponent(baseSupplierId)}`,
+            { cache: "no-store" }
+          )
+          const mapData = await mapRes.json().catch(() => ({}))
+          if (mapData?.ok && mapData?.map && typeof mapData.map === "object") {
+            productImageMap = mapData.map as Record<string, string>
+          }
+        } catch {
+          // keep backend product images when override fetch fails
+        }
+
         // Transform products to Product format - fix field mapping based on actual Redis data
         const transformedProducts = products.map((product: any, index: number) => {
           // Extract numeric price from '9000 RWF' format
           const priceString = product.selling_price || product.SALE_PRICE_INCLUSIVE || product.price || '0'
           const numericPrice = Number(String(priceString).replace(/[^\d.]/g, '')) || 0
           const itemCode = String(
-            product.ITEM_CODE || product.item_code || product.item_key_words || ""
+            product.ITEM_CODE ||
+              product.item_code ||
+              product.item_key_words ||
+              product.NIKI_CODE ||
+              product.niki_code ||
+              ""
           ).trim()
 
+          const overrideImage = itemCode ? productImageMap[itemCode.toUpperCase()] : ""
           return {
             id: 2000 + index,
             category: selectedShop.category,
             name: String(product.item_commercial_name || product.ITEM_NAME || product.item_name || product.name || "Product"),
             price: numericPrice,
             emoji: "ð¦",
-            imageUrl: product.image_url || product.item_image_url || product.IMAGE_URL || product.image || product.img || product.imageUrl || "/img/shops/default.png",
+            imageUrl:
+              overrideImage ||
+              product.image_url ||
+              product.item_image_url ||
+              product.IMAGE_URL ||
+              product.image ||
+              product.img ||
+              product.imageUrl ||
+              "/img/shops/default.png",
             qty: 0,
+            stockLineCode: itemCode || undefined,
             liveKey: itemCode || undefined,
           }
         })
@@ -2054,7 +2435,7 @@ export default function GrandmaPage() {
     }
   }, [selectedShopId, selectedShop])
 
-  /** Pay page (page 5) only — other screens stay English */
+  /** Summary (page 4) + Pay (page 5) — follows selected language */
   const tPay = GRANDMA_LABELS[language]
 
   /** Pay page (last screen) — fallback line follows selected language */
@@ -2073,12 +2454,12 @@ export default function GrandmaPage() {
 
   const ihuteFees = useMemo(() => Math.round(itemsTotal * IHUTE_FEE_RATE), [itemsTotal])
   const grandTotal = useMemo(
-    () => itemsTotal + logisticsTotal + ihuteFees + TAXES_PLACEHOLDER,
-    [itemsTotal, logisticsTotal, ihuteFees]
+    () => itemsTotal + logisticsTotal + TAXES_PLACEHOLDER,
+    [itemsTotal, logisticsTotal]
   )
 
-  const toggleLogistics = (id: LogisticsId) => {
-    setSelectedLogistics((prev) => (prev === id ? null : id))
+  const selectLogisticsMode = (id: LogisticsId) => {
+    setSelectedLogistics(id)
   }
 
   const addPrescriptionFiles = (list: FileList | null) => {
@@ -2103,6 +2484,9 @@ export default function GrandmaPage() {
 
   const grandmaBuyerSession = useAuthStore((s) => s.user)
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+  /** Must be true before treating `user` as final — avoids seller mode snapping back to buyer on load. */
+  const authHasHydrated = useAuthStore((s) => s.hasHydrated)
+
   const sellerShopLabel = useAuthStore((s) => {
     const u = s.user
     if (!u) return ""
@@ -2121,6 +2505,35 @@ export default function GrandmaPage() {
     return u.phone?.trim() ?? ""
   })
   const logout = useAuthStore((s) => s.logout)
+
+  /** S1: persisted "seller" mode without a valid seller session → fall back to buyer (after auth rehydrate). */
+  useEffect(() => {
+    if (!prefsHydrated) return
+    if (!authHasHydrated) return
+    const st = useAuthStore.getState()
+    if (appMode === "seller" && (!st.isAuthenticated || !grandmaUserCanUseSellerWorkspace(st.user))) {
+      setAppMode("buyer")
+      setSellerView("home")
+      try {
+        localStorage.setItem("grandma:mode", "buyer")
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [
+    prefsHydrated,
+    appMode,
+    authHasHydrated,
+    isAuthenticated,
+    grandmaBuyerSession?.id,
+    grandmaBuyerSession?.role,
+    grandmaBuyerSession?.dualPharmacyRetail,
+    grandmaBuyerSession?.dbRole,
+    grandmaBuyerSession?.ishyigaAccount,
+  ])
+
+  const showSupplierDashboardNav =
+    isAuthenticated && grandmaUserCanUseSellerWorkspace(grandmaBuyerSession) && appMode === "buyer"
 
   const sellerAccountForOrders = sellerIshyigaAccount.trim()
   const loadSellerOrders = useCallback(async () => {
@@ -2596,6 +3009,29 @@ export default function GrandmaPage() {
     })
   }
 
+  const setQtyDirect = (id: number, nextQty: number) => {
+    const safeQty = Math.max(0, Math.floor(Number(nextQty) || 0))
+    setProducts((prev) => prev.map((p) => (p.id === id ? { ...p, qty: safeQty } : p)))
+    setApiProducts((prev) => prev.map((p) => (p.id === id ? { ...p, qty: safeQty } : p)))
+  }
+
+  /** Cart qty field: blank when 0 (no leading “0”), digits only in onChange. */
+  const qtyInputDisplay = (q: number) => {
+    const n = Math.max(0, Math.floor(Number(q) || 0))
+    return n === 0 ? "" : String(n)
+  }
+
+  const applyQtyFromInput = (id: number, raw: string) => {
+    const digits = raw.replace(/\D/g, "")
+    const stripped = digits.replace(/^0+/, "")
+    if (stripped === "") {
+      setQtyDirect(id, 0)
+      return
+    }
+    const parsed = Number.parseInt(stripped, 10)
+    if (Number.isFinite(parsed)) setQtyDirect(id, parsed)
+  }
+
   useEffect(() => {
     if (typeof window === "undefined") return
     try {
@@ -2766,20 +3202,50 @@ export default function GrandmaPage() {
     }
   }, [sellerOrders, sellerInventoryKpi])
 
+  const sellerRetailInsights = useMemo(() => {
+    const dash = GRANDMA_LABELS[language]
+    const { ranked, totalLineRevenue } = aggregateServedOrderProducts(sellerOrders)
+    const best = ranked[0] ?? null
+    const runners = ranked.slice(1, 3)
+    let pctOfLines: number | null = null
+    if (best && totalLineRevenue > 0) {
+      pctOfLines = Math.min(100, Math.round((best.revenueRwf / totalLineRevenue) * 100))
+    }
+
+    const bullets: string[] = []
+    if (best) {
+      bullets.push(
+        dash.sellerDashBulletRestock.replace("{{name}}", best.name).replace("{{units}}", String(best.units)),
+      )
+    }
+    for (const r of runners) {
+      if (bullets.length >= 3) break
+      bullets.push(dash.sellerDashBulletPopular.replace("{{name}}", r.name).replace("{{units}}", String(r.units)))
+    }
+    if (sellerDashboard.open.count > 0 && bullets.length < 4) {
+      bullets.push(dash.sellerDashBulletFulfillQueue.replace("{{n}}", String(sellerDashboard.open.count)))
+    }
+    if (!best && bullets.length === 0) {
+      bullets.push(dash.sellerDashGrowthIdle)
+    }
+
+    return { best, pctOfLines, totalLineRevenue, bullets }
+  }, [sellerOrders, sellerDashboard.open.count, language])
+
   const etaSubText = useMemo(() => {
     const tr = GRANDMA_LABELS[language]
+    if (fulfillmentMode === "pickup") return tr.etaPickupSub
     const km = deliveryKm.toFixed(1)
-    if (!selectedLogistics) return tr.etaSubNoMode.replace("{km}", km)
     const mode =
       selectedLogistics === "human" ? tr.logHuman : selectedLogistics === "bike" ? tr.logBike : tr.logMoto
     return tr.etaSub.replace("{km}", km).replace("{mode}", mode)
-  }, [language, deliveryKm, selectedLogistics])
+  }, [language, deliveryKm, selectedLogistics, fulfillmentMode])
 
   const submitGrandmaOrder = useCallback(async () => {
     if (!selectedShop || selectedProducts.length === 0) {
       const msg =
         language === "rw"
-          ? "Shyiramo ibintu mbere yo kohereza komande."
+          ? "Tangaho ibintu mbere."
           : language === "fr"
             ? "Ajoutez des articles avant de payer."
             : "Add items before sending your order."
@@ -2803,6 +3269,12 @@ export default function GrandmaPage() {
       const phoneFromInput = normalizePhoneDigitsForAuth(grandmaBuyerPhoneInput.trim()).slice(0, 15)
       const buyerPhone = (phoneFromAccount || phoneFromInput).slice(0, 15)
 
+      const trSubmit = GRANDMA_LABELS[language]
+      if (!buyerPhone) {
+        setGrandmaOrderSubmitError(trSubmit.orderSubmitNeedPhone)
+        return
+      }
+
       const locParts = [
         locationData?.province,
         locationData?.district,
@@ -2819,12 +3291,23 @@ export default function GrandmaPage() {
       const momoDigits = selectedShop.momo.replace(/\D/g, "").slice(-12)
       const sellerPhone = momoDigits ? (momoDigits.startsWith("250") ? momoDigits : `250${momoDigits}`) : ""
 
-      const items = selectedProducts.map((p) => ({
-        itemCode: String(p.liveKey ?? p.id),
-        name: p.name,
-        qty: p.qty,
-        unitPrice: p.price,
-      }))
+      const items = selectedProducts.map((p) => {
+        const code = String(p.stockLineCode ?? p.liveKey ?? p.id).trim()
+        return {
+          itemCode: code,
+          item_key_words: code,
+          ITEM_CODE: code,
+          name: p.name,
+          qty: p.qty,
+          unitPrice: p.price,
+        }
+      })
+
+      const referenceParts =
+        fulfillmentMode === "pickup"
+          ? ["SELF-PICKUP", orderNotes.trim()].filter(Boolean)
+          : [`DELIVERY-${selectedLogistics}`, orderNotes.trim()].filter(Boolean)
+      const reference = referenceParts.length ? referenceParts.join(" | ").slice(0, 500) : undefined
 
       const res = await fetch("/api/grandma/order", {
         method: "POST",
@@ -2840,7 +3323,7 @@ export default function GrandmaPage() {
           paymentName: grandmaPaymentToOrdersPaymentName(selectedPayment),
           currency: "RWF",
           items,
-          reference: orderNotes.trim() || undefined,
+          reference,
         }),
       })
       const data = (await res.json().catch(() => ({}))) as {
@@ -2851,7 +3334,9 @@ export default function GrandmaPage() {
       }
 
       if (!res.ok || data.ok === false) {
-        setGrandmaOrderSubmitError(data.error || `Order failed (${res.status})`)
+        setGrandmaOrderSubmitError(
+          humanizeGrandmaOrderBackendError(data.error || `Order failed (${res.status})`, language)
+        )
         return
       }
 
@@ -2895,7 +3380,8 @@ export default function GrandmaPage() {
       if (sellerPhoneParam) q.set("sellerPhone", sellerPhoneParam)
       router.push(`/order-success?${q.toString()}`)
     } catch (e: unknown) {
-      setGrandmaOrderSubmitError(e instanceof Error ? e.message : "Order request failed")
+      const raw = e instanceof Error ? e.message : "Order request failed"
+      setGrandmaOrderSubmitError(humanizeGrandmaOrderBackendError(raw, language))
     } finally {
       setGrandmaOrderSubmitting(false)
     }
@@ -2906,6 +3392,8 @@ export default function GrandmaPage() {
     selectedProducts,
     selectedShop,
     selectedPayment,
+    selectedLogistics,
+    fulfillmentMode,
     locationData,
     displayUserLocationEn,
     grandTotal,
@@ -2980,6 +3468,7 @@ export default function GrandmaPage() {
         .shop-row-meta{flex:1;min-width:0;}
         .shop-row-name{font-size:16px;font-weight:700;}
         .shop-row-tag{color:var(--muted);font-size:13px;margin-top:4px;line-height:1.3;}
+        .shop-row-items{color:var(--muted);font-size:12px;margin-top:4px;font-weight:700;}
         .shop-row-badges{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
         .shop-badge{font-size:11px;font-weight:700;padding:4px 8px;border-radius:8px;background:#f1f8ff;color:var(--blue-dark);}
         .shop-badge.sale{background:#fef3c7;color:#92400e;}
@@ -2995,9 +3484,9 @@ export default function GrandmaPage() {
         .emoji{font-size:28px;text-align:center;}
         .p-name{font-size:16px;font-weight:700;}
         .p-price{margin-top:4px;color:var(--muted);font-size:14px;}
-        .qty{display:flex;align-items:center;gap:8px;background:#f1f8ff;border-radius:12px;padding:6px;}
-        .qty button{width:30px;height:30px;border:none;border-radius:9px;background:#d8edfb;color:var(--blue-dark);font-size:20px;cursor:pointer;}
-        .qty span{min-width:18px;text-align:center;font-weight:700;}
+        .qty{display:flex;align-items:center;gap:10px;background:#f1f8ff;border-radius:14px;padding:8px 10px;}
+        .qty input{width:min(32vw,112px);min-width:88px;height:48px;border:2px solid var(--line);border-radius:12px;background:#fff;color:var(--text);font-weight:800;font-size:20px;text-align:center;padding:0 8px;outline:none;}
+        .qty input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(24,151,224,.18);}
         .bottom-bar{position:sticky;bottom:74px;margin-top:12px;background:linear-gradient(90deg,var(--blue),var(--blue-dark));color:#fff;border-radius:16px;padding:14px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-weight:700;box-shadow:0 10px 20px rgba(24,151,224,.22);cursor:pointer;}
         .bottom-bar:active{transform:scale(.995);}
         .bottom-bar-left{display:flex;align-items:center;gap:8px;}
@@ -3008,10 +3497,18 @@ export default function GrandmaPage() {
         .summary-row:last-child{border-bottom:none;}
         .summary-left{font-weight:700;}
         .summary-sub{color:var(--muted);font-size:13px;margin-top:4px;}
+        .summary-item-row{align-items:flex-start;}
+        .summary-item-main{flex:1;min-width:0;padding-right:4px;}
+        .summary-item-end{display:flex;flex-direction:column;align-items:flex-end;gap:8px;flex-shrink:0;}
+        .summary-remove-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:none;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:12px;font-weight:700;color:#b42318;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.04);}
+        .summary-remove-btn svg{width:16px;height:16px;flex-shrink:0;}
+        .summary-remove-btn:active{transform:scale(.98);background:#fff5f5;}
+        .fulfillment-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;}
+        .fulfill-sub{font-size:12px;font-weight:600;color:var(--muted);margin-top:6px;line-height:1.3;text-align:center;padding:0 4px;}
         .logistics-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px;}
         .log-option{background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px 8px;text-align:center;cursor:pointer;box-shadow:0 8px 18px rgba(24,151,224,.06);}
         .log-option.active{border:2px solid var(--blue);background:#f2f9ff;}
-        .log-icon{font-size:24px;display:block;margin-bottom:6px;}
+        .log-icon{font-size:28px;display:block;margin-bottom:6px;line-height:1;}
         .log-label{font-weight:700;font-size:14px;}
         .log-price{color:var(--muted);margin-top:4px;font-size:13px;font-weight:700;}
         .shop-box{display:flex;align-items:flex-start;gap:12px;padding:14px;margin-bottom:12px;}
@@ -3079,9 +3576,12 @@ export default function GrandmaPage() {
         .courier-modal-row.selected{border-color:var(--blue);background:#eef6fc;}
         .courier-modal-rank{font-size:12px;font-weight:800;color:var(--muted);width:22px;flex-shrink:0;}
         .stars{color:#f4b400;font-weight:700;}
-        .footer{position:fixed;left:50%;transform:translateX(-50%);bottom:0;width:100%;max-width:430px;background:rgba(255,255,255,.96);border-top:1px solid var(--line);display:flex;justify-content:space-around;padding:10px 6px calc(18px + env(safe-area-inset-bottom));z-index:20;}
-        .footer button{border:none;background:none;color:var(--muted);font-size:10px;display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;flex:1;min-width:0;padding:4px 2px;}
+        .footer{position:fixed;left:50%;transform:translateX(-50%);bottom:0;width:100%;max-width:430px;background:rgba(255,255,255,.96);border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:2px;padding:10px 6px calc(18px + env(safe-area-inset-bottom));z-index:20;}
+        .footer.footer--supplier-6{grid-template-columns:repeat(6,minmax(0,1fr));}
+        .footer button{border:none;background:none;color:var(--muted);font-size:10px;display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;min-width:0;padding:4px 2px;}
         .footer button.active{color:var(--blue-dark);font-weight:700;}
+        .footer .footer-dash-icon{width:22px;height:22px;color:var(--blue-dark);}
+        .footer.footer--supplier-6 button{font-size:9px;}
         .seller-mode .page,.seller-mode .footer{display:none!important;}
         .seller-screen{padding:14px;}
         .seller-shop-head{display:flex;align-items:flex-start;justify-content:space-between;padding:12px 14px;margin-bottom:10px;gap:12px;}
@@ -3256,6 +3756,30 @@ export default function GrandmaPage() {
           itemsStockValueRwf={sellerHomeKpis.itemsStockValueRwf}
           salesDeliveredCount={sellerHomeKpis.salesDeliveredCount}
           salesDeliveredRwf={sellerHomeKpis.salesDeliveredRwf}
+          bestSelling={
+            sellerRetailInsights.best
+              ? {
+                  name: sellerRetailInsights.best.name,
+                  unitsSold: sellerRetailInsights.best.units,
+                  revenueRwf: sellerRetailInsights.best.revenueRwf,
+                  pctOfLineRevenue: sellerRetailInsights.pctOfLines,
+                }
+              : null
+          }
+          topUpBullets={sellerRetailInsights.bullets}
+          copy={{
+            bestTitle: GRANDMA_LABELS[language].sellerDashBestSelling,
+            bestSubtitle: GRANDMA_LABELS[language].sellerDashBestSellingSubtitle,
+            bestEmpty: GRANDMA_LABELS[language].sellerDashBestSellingEmpty,
+            unitsSold: GRANDMA_LABELS[language].sellerDashUnitsSold,
+            lineRevenue: GRANDMA_LABELS[language].sellerDashLineRevenue,
+            shareTemplate: GRANDMA_LABELS[language].sellerDashShareRevenue,
+            topUpTitle: GRANDMA_LABELS[language].sellerDashTopUpTitle,
+            topUpSubtitle: GRANDMA_LABELS[language].sellerDashTopUpSubtitle,
+            ctaStock: GRANDMA_LABELS[language].sellerDashCtaStock,
+            ctaOrders: GRANDMA_LABELS[language].sellerDashCtaOrders,
+            deliveredTail: GRANDMA_LABELS[language].sellerDashDeliveredTail,
+          }}
           formatRwf={formatRwf}
           onOrders={() => setSellerView("orders")}
           onClients={() => window.alert("Clients — coming soon")}
@@ -3569,7 +4093,7 @@ export default function GrandmaPage() {
       <section className={`page ${page === 1 ? "active" : ""}`} id="page1">
         <div className="grid">
           {CATEGORIES.map((c) => {
-            const stat = sectorStatsByCategory[c.name]
+            const stat = grandmaHomeSectorCounts[c.name]
             return (
               <div
                 key={c.name}
@@ -3599,13 +4123,13 @@ export default function GrandmaPage() {
                 <div className="cat-icon">{c.icon}</div>
                 <div className="cat-name">{categoryLabel(c.name, language)}</div>
                 <div className="cat-card-footer">
-                  {sectorStatsLoading ? (
+                  {allShopsLoading || homeSectorItemsLoading ? (
                     <span>…</span>
                   ) : (
                     <>
-                      <strong>{stat?.shops ?? 0}</strong> {tPay.sectorPanelShops}
+                      <strong>{stat.shops}</strong> {tPay.sectorPanelShops}
                       <span aria-hidden> · </span>
-                      <strong>{stat?.items ?? 0}</strong> {tPay.sectorPanelItems}
+                      <strong>{stat.items}</strong> {tPay.sectorPanelItems}
                     </>
                   )}
                 </div>
@@ -3720,6 +4244,9 @@ export default function GrandmaPage() {
                 <div className="shop-row-meta">
                   <div className="shop-row-name">{s.name}</div>
                   <div className="shop-row-tag">{s.tagline}</div>
+                  <div className="shop-row-items">
+                    {`${Math.max(0, Math.floor(Number(s.stockLineCount ?? 0)))} ${tPay.sectorPanelItems}`}
+                  </div>
                   <div className="shop-row-rating">
                     <span className="shop-stars" aria-hidden>
                       ★
@@ -3812,11 +4339,20 @@ export default function GrandmaPage() {
                       {o.shopDistanceKm.toFixed(1)} km
                     </div>
                   </div>
-                  <div className="qty" aria-label="Add to cart">
-                    <button onClick={(e) => { e.stopPropagation(); if (o.shopId) setSelectedShopId(o.shopId); changeQty(o.productId, 1) }} aria-label="Add">
-                      +
-                    </button>
-                    <span> </span>
+                  <div className="qty" aria-label="Set quantity">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      value={qtyInputDisplay(products.find((p) => p.id === o.productId)?.qty ?? 0)}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => {
+                        e.stopPropagation()
+                        if (o.shopId) setSelectedShopId(o.shopId)
+                        applyQtyFromInput(o.productId, e.target.value)
+                      }}
+                      aria-label="Quantity"
+                    />
                   </div>
                 </div>
               ))
@@ -3846,13 +4382,14 @@ export default function GrandmaPage() {
                     <div className="p-price">{formatRwf(p.price)}</div>
                   </div>
                   <div className="qty">
-                    <button onClick={() => changeQty(p.id, -1)} aria-label="Decrease">
-                      −
-                    </button>
-                    <span>{p.qty}</span>
-                    <button onClick={() => changeQty(p.id, 1)} aria-label="Increase">
-                      +
-                    </button>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      value={qtyInputDisplay(p.qty)}
+                      onChange={(e) => applyQtyFromInput(p.id, e.target.value)}
+                      aria-label={`Quantity for ${p.name}`}
+                    />
                   </div>
                 </div>
               ))}
@@ -3933,14 +4470,25 @@ export default function GrandmaPage() {
           <div id="summaryItems">
             {selectedProducts.length ? (
               selectedProducts.map((p) => (
-                <div className="summary-row" key={p.id}>
-                  <div>
+                <div className="summary-row summary-item-row" key={p.id}>
+                  <div className="summary-item-main">
                     <div className="summary-left">
                       {p.name} x{p.qty}
                     </div>
                     <div className="summary-sub">{formatRwf(p.price)} each</div>
                   </div>
-                  <strong>{formatRwf(p.qty * p.price)}</strong>
+                  <div className="summary-item-end">
+                    <button
+                      type="button"
+                      className="summary-remove-btn"
+                      aria-label={`Remove ${p.name} from cart`}
+                      onClick={() => setQtyDirect(p.id, 0)}
+                    >
+                      <Trash2 aria-hidden />
+                      Remove
+                    </button>
+                    <strong>{formatRwf(p.qty * p.price)}</strong>
+                  </div>
                 </div>
               ))
             ) : (
@@ -3952,9 +4500,53 @@ export default function GrandmaPage() {
 
       {/* Page 4 — shipment, shop, totals, notes, pay */}
       <section className={`page ${page === 4 ? "active" : ""}`} id="page4-summary">
-        <div className="section-title">Shipment / Logistics</div>
+        <div className="section-title">{tPay.sectionLogistics}</div>
+        <div className="order-extras-label" style={{ marginBottom: 8 }}>
+          {tPay.fulfillmentSectionTitle}
+        </div>
+        <div className="fulfillment-row" role="group" aria-label={tPay.fulfillmentSectionTitle}>
+          <div
+            className={`log-option ${fulfillmentMode === "delivery" ? "active" : ""}`}
+            onClick={() => setFulfillmentMode("delivery")}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault()
+                setFulfillmentMode("delivery")
+              }
+            }}
+          >
+            <span className="log-icon" aria-hidden>
+              🚚
+            </span>
+            <div className="log-label">{tPay.fulfillmentDeliveryTitle}</div>
+            <div className="fulfill-sub">{tPay.fulfillmentDeliverySub}</div>
+          </div>
+          <div
+            className={`log-option ${fulfillmentMode === "pickup" ? "active" : ""}`}
+            onClick={() => setFulfillmentMode("pickup")}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault()
+                setFulfillmentMode("pickup")
+              }
+            }}
+          >
+            <span className="log-icon" aria-hidden>
+              🏪
+            </span>
+            <div className="log-label">{tPay.fulfillmentPickupTitle}</div>
+            <div className="fulfill-sub">{tPay.fulfillmentPickupSub}</div>
+          </div>
+        </div>
+
         <p className="note" style={{ marginTop: 0, marginBottom: 10 }}>
-          Delivery fees use this shop’s distance ({deliveryKm.toFixed(1)} km) × mode rate (demo — replace with your pricing API).
+          {fulfillmentMode === "delivery"
+            ? tPay.logisticsNote.replace("{km}", deliveryKm.toFixed(1))
+            : tPay.logisticsNotePickup}
         </p>
 
         <div className="card shop-box">
@@ -3979,47 +4571,56 @@ export default function GrandmaPage() {
           </div>
         </div>
 
-        <div className="logistics-row" id="logisticsRow">
-          {LOGISTICS.map((opt) => (
-            <div
-              key={opt.id}
-              className={`log-option ${selectedLogistics === opt.id ? "active" : ""}`}
-              onClick={() => toggleLogistics(opt.id)}
-              role="button"
-              tabIndex={0}
-            >
-              <span className="log-icon" aria-hidden>
-                {opt.icon}
-              </span>
-              <div className="log-label">{opt.label}</div>
-              <div className="log-price">{formatRwf(logisticsQuote(opt, deliveryKm))}</div>
+        {fulfillmentMode === "delivery" ? (
+          <>
+            <div className="order-extras-label" style={{ marginBottom: 8 }}>
+              {tPay.fulfillmentDeliveryModesHint}
             </div>
-          ))}
-        </div>
+            <div className="logistics-row" id="logisticsRow">
+              {LOGISTICS.map((opt) => (
+                <div
+                  key={opt.id}
+                  className={`log-option ${selectedLogistics === opt.id ? "active" : ""}`}
+                  onClick={() => selectLogisticsMode(opt.id)}
+                  role="button"
+                  tabIndex={0}
+                >
+                  <span className="log-icon" aria-hidden>
+                    {opt.icon}
+                  </span>
+                  <div className="log-label">
+                    {opt.id === "human" ? tPay.logHuman : opt.id === "bike" ? tPay.logBike : tPay.logMoto}
+                  </div>
+                  <div className="log-price">{formatRwf(logisticsQuote(opt, deliveryKm))}</div>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : null}
 
         <div className="card summary-card">
           <div className="summary-row">
-            <span>Items</span>
+            <span>{tPay.summaryLineItems}</span>
             <strong id="sumItemsCount">{itemsCount}</strong>
           </div>
           <div className="summary-row">
-            <span>Total Items</span>
+            <span>{tPay.summaryLineItemsTotal}</span>
             <strong id="sumItemsTotal">{formatRwf(itemsTotal)}</strong>
           </div>
-          <div className="summary-row">
+          <div className="summary-row" style={{ color: "var(--muted)", fontSize: 13 }}>
             <span>{tPay.ihuteFees}</span>
             <strong id="sumIhuteFees">{formatRwf(ihuteFees)}</strong>
           </div>
           <div className="summary-row">
-            <span>Taxes</span>
+            <span>{tPay.taxes}</span>
             <strong id="sumTaxes">{formatRwf(TAXES_PLACEHOLDER)}</strong>
           </div>
           <div className="summary-row">
-            <span>Logistics</span>
+            <span>{tPay.summaryLineLogisticsRow}</span>
             <strong id="sumLogistics">{formatRwf(logisticsTotal)}</strong>
           </div>
           <div className="summary-row">
-            <span>Grand Total</span>
+            <span>{tPay.summaryLineGrandTotal}</span>
             <strong id="sumGrand">{formatRwf(grandTotal)}</strong>
           </div>
         </div>
@@ -4116,13 +4717,7 @@ export default function GrandmaPage() {
           <div className="pay-detail-row">
             <span className="pay-detail-label">{tPay.eta}</span>
             <span className="pay-detail-value">
-              {selectedLogistics ? (
-                <>
-                  {etaRange.lo}–{etaRange.hi} min
-                </>
-              ) : (
-                "—"
-              )}
+              {fulfillmentMode === "pickup" ? tPay.etaAtShop : `${etaRange.lo}–${etaRange.hi} min`}
             </span>
           </div>
           <div className="pay-detail-sub" style={{ paddingTop: 2 }}>
@@ -4156,7 +4751,7 @@ export default function GrandmaPage() {
             <span>{tPay.amountShop}</span>
             <strong id="payShop">{formatRwf(itemsTotal)}</strong>
           </div>
-          <div className="summary-row">
+          <div className="summary-row" style={{ color: "var(--muted)", fontSize: 13 }}>
             <span>{tPay.ihuteFees}</span>
             <strong id="payIhuteFees">{formatRwf(ihuteFees)}</strong>
           </div>
@@ -4174,49 +4769,49 @@ export default function GrandmaPage() {
           </div>
         </div>
 
-        {selectedLogistics ? (
-        <div
-          className="card rider-card"
-          onClick={() => setCourierModalOpen(true)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault()
-              setCourierModalOpen(true)
-            }
-          }}
-          role="button"
-          tabIndex={0}
-          aria-label="View couriers near the shop"
-        >
-          <div className="rider-card-inner">
-            <div className="rider-avatar" aria-hidden>
-              {featuredCourierSafe.avatarEmoji}
-            </div>
-            <div className="rider-body">
-              <div className="rider-name">{featuredCourierSafe.name}</div>
-              <div className="rider-role">{tPay.deliveryPerson}</div>
-              <div className="rider-hobbies">
-                <span>{tPay.hobbies}</span>
-                {featuredCourierSafe.hobbies}
+        {fulfillmentMode === "delivery" ? (
+          <div
+            className="card rider-card"
+            onClick={() => setCourierModalOpen(true)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault()
+                setCourierModalOpen(true)
+              }
+            }}
+            role="button"
+            tabIndex={0}
+            aria-label="View couriers near the shop"
+          >
+            <div className="rider-card-inner">
+              <div className="rider-avatar" aria-hidden>
+                {featuredCourierSafe.avatarEmoji}
               </div>
-              <div className="rider-meta-row">
-                <span className="rider-stars" aria-hidden>
-                  {courierStarGlyphs(featuredCourierSafe.rating)}
-                </span>
-                <span className="rider-reviews">
-                  {featuredCourierSafe.rating.toFixed(1)} · {featuredCourierSafe.reviewCount} {tPay.reviewers}
-                </span>
-                <span className="rider-dist">
-                  {featuredCourierSafe.distanceToShopKm.toFixed(2)} {tPay.kmToShop}
-                </span>
+              <div className="rider-body">
+                <div className="rider-name">{featuredCourierSafe.name}</div>
+                <div className="rider-role">{tPay.deliveryPerson}</div>
+                <div className="rider-hobbies">
+                  <span>{tPay.hobbies}</span>
+                  {featuredCourierSafe.hobbies}
+                </div>
+                <div className="rider-meta-row">
+                  <span className="rider-stars" aria-hidden>
+                    {courierStarGlyphs(featuredCourierSafe.rating)}
+                  </span>
+                  <span className="rider-reviews">
+                    {featuredCourierSafe.rating.toFixed(1)} · {featuredCourierSafe.reviewCount} {tPay.reviewers}
+                  </span>
+                  <span className="rider-dist">
+                    {featuredCourierSafe.distanceToShopKm.toFixed(2)} {tPay.kmToShop}
+                  </span>
+                </div>
               </div>
             </div>
+            <div className="rider-tap-hint">{tPay.tapCouriers}</div>
           </div>
-          <div className="rider-tap-hint">{tPay.tapCouriers}</div>
-        </div>
         ) : null}
 
-        {selectedLogistics && courierModalOpen ? (
+        {fulfillmentMode === "delivery" && courierModalOpen ? (
           <div
             className="courier-modal-backdrop"
             role="presentation"
@@ -4294,27 +4889,27 @@ export default function GrandmaPage() {
         {!grandmaBuyerSession?.phone?.trim() ? (
           <div className="card" style={{ marginBottom: 14, textAlign: "left" }}>
             <Label htmlFor="grandma-guest-phone" className="text-sm font-bold text-[#17324d]">
-              Phone (optional)
+              {tPay.paymentGuestPhoneLabel}
             </Label>
             <Input
               id="grandma-guest-phone"
               type="tel"
               inputMode="tel"
               autoComplete="tel"
-              placeholder="e.g. 0788 123 456 — to link SMS or follow-up"
+              placeholder={tPay.paymentGuestPhonePlaceholder}
               value={grandmaBuyerPhoneInput}
               onChange={(e) => setGrandmaBuyerPhoneInput(e.target.value)}
               className="mt-2 border-[#dbe7f3]"
             />
             <p className="card note" style={{ marginTop: 10, fontSize: 11, lineHeight: 1.45, color: "var(--muted)" }}>
-              Like guest checkout elsewhere: you can skip this and still complete the order using your track link.{" "}
+              {tPay.paymentGuestPhoneNote}{" "}
               <a
                 href={`${GRANDMA_PATHS.login}?redirect=${encodeURIComponent(GRANDMA_PATHS.appRoot)}`}
                 className="font-semibold text-[#1897e0] underline"
               >
-                Sign in
-              </a>{" "}
-              to save orders on your account, or add a phone above to tie this purchase to your number.
+                {tPay.signIn}
+              </a>
+              .
             </p>
           </div>
         ) : null}
@@ -4331,22 +4926,33 @@ export default function GrandmaPage() {
         </p>
       </section>
 
-      <div className="footer">
-        <button className={page === 1 ? "active" : ""} onClick={() => goToPage(1)}>
-          🏠<span>Home</span>
+      <div className={cn("footer", showSupplierDashboardNav && "footer--supplier-6")}>
+        <button type="button" className={page === 1 ? "active" : ""} onClick={() => goToPage(1)}>
+          🏠<span>{settingsUi.footerHome}</span>
         </button>
-        <button className={page === 2 ? "active" : ""} onClick={() => goToPage(2)}>
-          🏬<span>Shops</span>
+        <button type="button" className={page === 2 ? "active" : ""} onClick={() => goToPage(2)}>
+          🏬<span>{settingsUi.footerShops}</span>
         </button>
-        <button className={page === 3 ? "active" : ""} onClick={() => goToPage(3)}>
-          🛍️<span>Items</span>
+        <button type="button" className={page === 3 ? "active" : ""} onClick={() => goToPage(3)}>
+          🛍️<span>{settingsUi.footerItems}</span>
         </button>
-        <button className={page === 4 ? "active" : ""} onClick={() => goToPage(4)}>
-          📦<span>Summary</span>
+        <button type="button" className={page === 4 ? "active" : ""} onClick={() => goToPage(4)}>
+          📦<span>{settingsUi.footerSummary}</span>
         </button>
-        <button className={page === 5 ? "active" : ""} onClick={() => goToPage(5)}>
-          💳<span>Pay</span>
+        <button type="button" className={page === 5 ? "active" : ""} onClick={() => goToPage(5)}>
+          💳<span>{settingsUi.footerPay}</span>
         </button>
+        {showSupplierDashboardNav ? (
+          <button
+            type="button"
+            title={settingsUi.footerDashboard}
+            aria-label={settingsUi.footerDashboard}
+            onClick={() => router.push("/supplier/dashboard")}
+          >
+            <LayoutDashboard className="footer-dash-icon" aria-hidden />
+            <span>{settingsUi.footerDashboardShort}</span>
+          </button>
+        ) : null}
       </div>
 
       <Sheet open={filterSheetOpen} onOpenChange={setFilterSheetOpen}>
@@ -4578,239 +5184,313 @@ export default function GrandmaPage() {
         </SheetContent>
       </Sheet>
 
-      <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
+      <Sheet
+        open={settingsOpen}
+        onOpenChange={(open) => {
+          setSettingsOpen(open)
+          if (!open) setSettingsSellerGuardMsg(null)
+        }}
+      >
         <SheetContent
           side="right"
-          className="flex w-full max-w-[min(100vw,420px)] flex-col gap-0 overflow-y-auto border-l p-0"
+          className="flex h-full max-h-[100dvh] w-full max-w-[min(100vw,420px)] flex-col gap-0 overflow-hidden border-l p-0"
         >
-          <SheetHeader className="border-b border-border px-4 py-4 text-left">
+          <SheetHeader className="shrink-0 border-b border-border px-4 py-4 text-left">
             <SheetTitle>{settingsUi.settings}</SheetTitle>
             <SheetDescription>{settingsUi.settingsSub}</SheetDescription>
             <p className="mt-2 text-xs text-muted-foreground">
               {settingsUi.versionLabel} {GRANDMA_APP_VERSION}
             </p>
           </SheetHeader>
-          <div className="space-y-6 px-4 py-4">
-            <GrandmaRequestStatsPanel
-              open={settingsOpen}
-              labels={{
-                title: settingsUi.requestStatsTitle,
-                none: settingsUi.requestStatsNone,
-                line: settingsUi.requestStatsLine,
-                lastFail: settingsUi.requestStatsLastFail,
-              }}
-            />
-            <div>
-              <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Mode</div>
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                {(["buyer", "seller"] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => {
-                      if (mode === "buyer") {
-                        setAppMode("buyer")
-                        setSellerView("home")
-                        return
-                      }
-                      const u = useAuthStore.getState().user
-                      if (u && userCanAccessSellerSpace(u)) {
-                        setAppMode("seller")
-                        setSellerView("home")
-                        setPage(1)
-                        setSettingsOpen(false)
-                        return
-                      }
-                      setSettingsOpen(false)
-                      router.push(
-                        `${GRANDMA_PATHS.login}?redirect=${encodeURIComponent(GRANDMA_PATHS.appRoot)}`,
-                      )
-                    }}
-                    className={cn(
-                      "rounded-xl border px-3 py-2.5 text-sm font-bold transition-colors",
-                      appMode === mode
-                        ? "border-blue-600 bg-blue-50 text-blue-900"
-                        : "border-border bg-background text-foreground hover:bg-muted/60",
-                    )}
-                  >
-                    {mode === "buyer" ? "Buyer" : "Seller"}
-                  </button>
-                ))}
-              </div>
-            </div>
 
-            {appMode === "buyer" ? (
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+            <div className="space-y-6">
               <div>
-                <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{settingsUi.myOrders}</div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {isAuthenticated ? settingsUi.viewMyOrders : settingsUi.signInForOrders}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSettingsOpen(false)
-                    const target = GRANDMA_PATHS.buyerOrders
-                    if (isAuthenticated) router.push(target)
-                    else
-                      router.push(
-                        `${GRANDMA_PATHS.login}?redirect=${encodeURIComponent(target)}`,
-                      )
-                  }}
-                  className="mt-2 w-full rounded-xl border border-border bg-background px-3 py-2.5 text-left text-sm font-bold hover:bg-muted/60"
-                >
-                  {isAuthenticated ? settingsUi.viewMyOrders : settingsUi.signIn}
-                </button>
+                <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Mode</div>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  {(["buyer", "seller"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => {
+                        if (mode === "buyer") {
+                          setSettingsSellerGuardMsg(null)
+                          writeGrandmaSignupRole("buyer")
+                          setAppMode("buyer")
+                          setSellerView("home")
+                          setPage(1)
+                          try {
+                            localStorage.setItem("grandma:mode", "buyer")
+                          } catch {
+                            /* ignore */
+                          }
+                          return
+                        }
+                        writeGrandmaSignupRole("seller")
+                        const st = useAuthStore.getState()
+                        const u = st.user
+                        if (u && grandmaUserCanUseSellerWorkspace(u)) {
+                          setSettingsSellerGuardMsg(null)
+                          setAppMode("seller")
+                          setPage(1)
+                          setSellerView("home")
+                          try {
+                            localStorage.setItem("grandma:mode", "seller")
+                          } catch {
+                            /* ignore */
+                          }
+                          return
+                        }
+                        setSettingsSellerGuardMsg(settingsUi.settingsSellerTapDenied)
+                      }}
+                      className={cn(
+                        "rounded-xl border px-3 py-2.5 text-sm font-bold transition-colors",
+                        appMode === mode
+                          ? "border-blue-600 bg-blue-50 text-blue-900"
+                          : "border-border bg-background text-foreground hover:bg-muted/60",
+                      )}
+                    >
+                      {mode === "buyer" ? "Buyer" : "Seller"}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">{settingsUi.settingsModeHint}</p>
+                {settingsSellerGuardMsg ? (
+                  <p className="mt-2 text-sm font-medium text-red-800">{settingsSellerGuardMsg}</p>
+                ) : null}
               </div>
-            ) : null}
 
-            <div>
-              <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{settingsUi.language}</div>
-              <div className="mt-2 flex gap-2">
-                {(["en", "rw", "fr"] as const).map((lang) => (
-                  <button
-                    key={lang}
-                    type="button"
-                    onClick={() => setLanguage(lang)}
-                    className={cn(
-                      "min-w-0 flex-1 rounded-xl border px-2 py-2.5 text-xs font-bold transition-colors",
-                      language === lang
-                        ? "border-blue-600 bg-blue-50 text-blue-900"
-                        : "border-border bg-background text-foreground hover:bg-muted/60",
-                    )}
-                  >
-                    {lang === "en" ? settingsUi.langEn : lang === "rw" ? settingsUi.langRw : settingsUi.langFr}
-                  </button>
-                ))}
-              </div>
-            </div>
+              {appMode === "buyer" ? (
+                <div className="space-y-6 rounded-xl border border-border bg-muted/20 p-3">
+                  <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    {settingsUi.settingsFormBuyerTitle}
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{settingsUi.myOrders}</div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {isAuthenticated ? settingsUi.viewMyOrders : settingsUi.signInForOrders}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSettingsOpen(false)
+                        const target = GRANDMA_PATHS.buyerOrders
+                        if (isAuthenticated) router.push(target)
+                        else
+                          router.push(
+                            `${GRANDMA_PATHS.login}?redirect=${encodeURIComponent(target)}`,
+                          )
+                      }}
+                      className="mt-2 w-full rounded-xl border border-border bg-background px-3 py-2.5 text-left text-sm font-bold hover:bg-muted/60"
+                    >
+                      {isAuthenticated ? settingsUi.viewMyOrders : settingsUi.signIn}
+                    </button>
+                  </div>
 
-            <div>
-              <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{settingsUi.setLocation}</div>
-              <p className="mt-1 text-sm text-muted-foreground">
-                <span className="font-semibold text-foreground">{settingsUi.locationCurrent}:</span>{" "}
-                {locationData ? displayUserLocationEn : settingsUi.noLocationYet}
-              </p>
-              <button
-                type="button"
-                onClick={() => setLocationDialogOpen(true)}
-                className="mt-2 w-full rounded-xl border border-border bg-background px-3 py-2.5 text-left text-sm font-bold hover:bg-muted/60"
-              >
-                {settingsUi.setLocation}
-              </button>
-            </div>
-
-            <div>
-              <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{settingsUi.preferredShops}</div>
-              <p className="mt-1 text-xs text-muted-foreground">{settingsUi.preferredHint}</p>
-              <div className="mt-2 max-h-52 space-y-1 overflow-y-auto rounded-xl border border-border p-2">
-                <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 hover:bg-muted/50">
-                  <input
-                    type="checkbox"
-                    checked={preferredShopIds.includes(PREFERRED_ALL_ID)}
-                    onChange={() => togglePreferredShop(PREFERRED_ALL_ID)}
-                    className="h-4 w-4 shrink-0 accent-blue-600"
-                  />
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-white text-sm font-extrabold">
-                    ALL
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-sm font-semibold">All shops</span>
-                </label>
-                <div className="space-y-4">
-                  {allShopsLoading ? (
-                    <div className="flex items-center justify-center py-4">
-                      <div className="text-sm text-muted-foreground">Loading shops...</div>
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{settingsUi.language}</div>
+                    <div className="mt-2 flex gap-2">
+                      {(["en", "rw", "fr"] as const).map((lang) => (
+                        <button
+                          key={lang}
+                          type="button"
+                          onClick={() => setLanguage(lang)}
+                          className={cn(
+                            "min-w-0 flex-1 rounded-xl border px-2 py-2.5 text-xs font-bold transition-colors",
+                            language === lang
+                              ? "border-blue-600 bg-blue-50 text-blue-900"
+                              : "border-border bg-background text-foreground hover:bg-muted/60",
+                          )}
+                        >
+                          {lang === "en" ? settingsUi.langEn : lang === "rw" ? settingsUi.langRw : settingsUi.langFr}
+                        </button>
+                      ))}
                     </div>
-                  ) : allShopsError ? (
-                    <div className="flex items-center justify-center py-4">
-                      <div className="text-sm text-red-500">Error loading shops</div>
-                    </div>
-                  ) : allAvailableShops.length > 0 ? (
-                    allAvailableShops.map((shop) => (
-                      <label
-                        key={shop.id}
-                        className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-muted/50"
-                      >
+                  </div>
+
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{settingsUi.setLocation}</div>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      <span className="font-semibold text-foreground">{settingsUi.locationCurrent}:</span>{" "}
+                      {locationData ? displayUserLocationEn : settingsUi.noLocationYet}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setLocationDialogOpen(true)}
+                      className="mt-2 w-full rounded-xl border border-border bg-background px-3 py-2.5 text-left text-sm font-bold hover:bg-muted/60"
+                    >
+                      {settingsUi.setLocation}
+                    </button>
+                  </div>
+
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{settingsUi.preferredShops}</div>
+                    <p className="mt-1 text-xs text-muted-foreground">{settingsUi.preferredHint}</p>
+                    <div className="mt-2 max-h-52 space-y-1 overflow-y-auto rounded-xl border border-border bg-background p-2">
+                      <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 hover:bg-muted/50">
                         <input
                           type="checkbox"
-                          data-shop-id={shop.id}
-                          checked={isPreferredGrandmaShop(shop.id, preferredShopIds)}
-                          onChange={() => togglePreferredShop(shop.id)}
+                          checked={preferredShopIds.includes(PREFERRED_ALL_ID)}
+                          onChange={() => togglePreferredShop(PREFERRED_ALL_ID)}
                           className="h-4 w-4 shrink-0 accent-blue-600"
                         />
-                        <img src={shop.logoSrc} alt="" className="h-8 w-8 shrink-0 rounded-md border border-border bg-white object-contain" />
-                        <span className="min-w-0 flex-1 truncate text-sm font-semibold">{shop.name}</span>
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-white text-sm font-extrabold">
+                          ALL
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-sm font-semibold">All shops</span>
                       </label>
-                    ))
-                  ) : (
-                    <div className="flex items-center justify-center py-4">
-                      <div className="text-sm text-muted-foreground">No shops available</div>
+                      <div className="space-y-4">
+                        {allShopsLoading ? (
+                          <div className="flex items-center justify-center py-4">
+                            <div className="text-sm text-muted-foreground">Loading shops...</div>
+                          </div>
+                        ) : allShopsError ? (
+                          <div className="flex items-center justify-center py-4">
+                            <div className="text-sm text-red-500">Error loading shops</div>
+                          </div>
+                        ) : allAvailableShops.length > 0 ? (
+                          allAvailableShops.map((shop) => (
+                            <label
+                              key={shop.id}
+                              className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-muted/50"
+                            >
+                              <input
+                                type="checkbox"
+                                data-shop-id={shop.id}
+                                checked={isPreferredGrandmaShop(shop.id, preferredShopIds)}
+                                onChange={() => togglePreferredShop(shop.id)}
+                                className="h-4 w-4 shrink-0 accent-blue-600"
+                              />
+                              <img src={shop.logoSrc} alt="" className="h-8 w-8 shrink-0 rounded-md border border-border bg-white object-contain" />
+                              <span className="min-w-0 flex-1 truncate text-sm font-semibold">{shop.name}</span>
+                            </label>
+                          ))
+                        ) : (
+                          <div className="flex items-center justify-center py-4">
+                            <div className="text-sm text-muted-foreground">No shops available</div>
+                          </div>
+                        )}
+                      </div>
                     </div>
+                  </div>
+
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{settingsUi.paymentMode}</div>
+                    <div className="mt-2 space-y-2">
+                      {PAYMENTS.map((mode) => (
+                        <button
+                          key={mode.id}
+                          type="button"
+                          onClick={() => setSelectedPayment(mode.id)}
+                          className={cn(
+                            "flex w-full items-center justify-between gap-2 rounded-xl border px-3 py-2.5 text-left text-sm font-bold transition-colors",
+                            selectedPayment === mode.id
+                              ? "border-blue-600 bg-blue-50 text-blue-950"
+                              : "border-border bg-background hover:bg-muted/60",
+                          )}
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-white">
+                              <img src={mode.iconSrc} alt="" className="h-full w-full object-contain" />
+                            </span>
+                            <span className="min-w-0 leading-tight">{mode.label}</span>
+                          </span>
+                          <span
+                            className={cn(
+                              "h-4 w-4 shrink-0 rounded-full border-2",
+                              selectedPayment === mode.id ? "border-blue-600 bg-blue-600" : "border-muted-foreground",
+                            )}
+                            aria-hidden
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4 rounded-xl border border-border bg-muted/20 p-3">
+                  <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    {settingsUi.settingsFormSellerTitle}
+                  </div>
+                  {grandmaUserCanUseSellerWorkspace(grandmaBuyerSession) ? (
+                    <>
+                      <p className="text-sm text-muted-foreground">{settingsUi.settingsSellerIntro}</p>
+                      <div className="text-base font-bold text-foreground">{sellerShopLabel || "—"}</div>
+                      <div className="grid gap-2">
+                        <button
+                          type="button"
+                          className="rounded-xl border border-border bg-background px-3 py-2.5 text-left text-sm font-bold hover:bg-muted/60"
+                          onClick={() => {
+                            setSellerView("home")
+                            setSettingsOpen(false)
+                          }}
+                        >
+                          {settingsUi.settingsOpenSellerHome}
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-xl border border-border bg-background px-3 py-2.5 text-left text-sm font-bold hover:bg-muted/60"
+                          onClick={() => {
+                            setSellerView("orders")
+                            setSettingsOpen(false)
+                          }}
+                        >
+                          {settingsUi.settingsOpenSellerOrders}
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-xl border border-border bg-background px-3 py-2.5 text-left text-sm font-bold hover:bg-muted/60"
+                          onClick={() => {
+                            setSellerView("items")
+                            setSettingsOpen(false)
+                          }}
+                        >
+                          {settingsUi.settingsOpenSellerItems}
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">{settingsUi.settingsSellerNeedLogin}</p>
                   )}
                 </div>
-              </div>
-            </div>
-
-            <div>
-              <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{settingsUi.paymentMode}</div>
-              <div className="mt-2 space-y-2">
-                {PAYMENTS.map((mode) => (
-                  <button
-                    key={mode.id}
-                    type="button"
-                    onClick={() => setSelectedPayment(mode.id)}
-                    className={cn(
-                      "flex w-full items-center justify-between gap-2 rounded-xl border px-3 py-2.5 text-left text-sm font-bold transition-colors",
-                      selectedPayment === mode.id
-                        ? "border-blue-600 bg-blue-50 text-blue-950"
-                        : "border-border bg-background hover:bg-muted/60",
-                    )}
-                  >
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-white">
-                        <img src={mode.iconSrc} alt="" className="h-full w-full object-contain" />
-                      </span>
-                      <span className="min-w-0 leading-tight">{mode.label}</span>
-                    </span>
-                    <span
-                      className={cn(
-                        "h-4 w-4 shrink-0 rounded-full border-2",
-                        selectedPayment === mode.id ? "border-blue-600 bg-blue-600" : "border-muted-foreground",
-                      )}
-                      aria-hidden
-                    />
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="border-t border-border pt-4">
-              {isAuthenticated ? (
-                <button
-                  type="button"
-                  className="w-full rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-center text-sm font-bold text-red-900 transition-colors hover:bg-red-100"
-                  onClick={() => {
-                    setSettingsOpen(false)
-                    logout()
-                    router.push(GRANDMA_PATHS.login)
-                  }}
-                >
-                  {settingsUi.logOut}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="w-full rounded-xl border border-blue-200 bg-blue-50 px-3 py-3 text-center text-sm font-bold text-blue-900 transition-colors hover:bg-blue-100"
-                  onClick={() => {
-                    setSettingsOpen(false)
-                    router.push(
-                      `${GRANDMA_PATHS.login}?redirect=${encodeURIComponent(GRANDMA_PATHS.appRoot)}`,
-                    )
-                  }}
-                >
-                  {settingsUi.signIn}
-                </button>
               )}
             </div>
+          </div>
+
+          <div className="shrink-0 space-y-2 border-t border-border bg-background px-4 py-3">
+            <button
+              type="button"
+              className="w-full rounded-xl bg-[#1a4d8c] px-4 py-3 text-sm font-bold text-white shadow-sm"
+              onClick={() => setSettingsOpen(false)}
+            >
+              {settingsUi.settingsApplyClose}
+            </button>
+            {isAuthenticated ? (
+              <button
+                type="button"
+                className="w-full rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-center text-sm font-bold text-red-900 transition-colors hover:bg-red-100"
+                onClick={() => {
+                  setSettingsOpen(false)
+                  logout()
+                  router.push(GRANDMA_PATHS.login)
+                }}
+              >
+                {settingsUi.logOut}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="w-full rounded-xl border border-blue-200 bg-blue-50 px-3 py-3 text-center text-sm font-bold text-blue-900 transition-colors hover:bg-blue-100"
+                onClick={() => {
+                  setSettingsOpen(false)
+                  router.push(
+                    `${GRANDMA_PATHS.login}?redirect=${encodeURIComponent(GRANDMA_PATHS.appRoot)}`,
+                  )
+                }}
+              >
+                {settingsUi.signIn}
+              </button>
+            )}
           </div>
         </SheetContent>
       </Sheet>

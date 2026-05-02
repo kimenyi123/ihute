@@ -1,7 +1,8 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { Package, CheckCircle, XCircle, Flag, Ban } from 'lucide-react'
+import { CheckCircle, XCircle } from 'lucide-react'
+import { postAdminApi } from '@/lib/admin-client'
 
 interface Product {
   id: number
@@ -30,31 +31,19 @@ export default function ProductsPage() {
       setLoading(true)
       
       if (activeTab === 'pending') {
-        const res = await fetch('/api/admin', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'getPendingProducts' })
-        })
+        const res = await postAdminApi({ action: 'getPendingProducts' })
         const data = await res.json()
         if (data.ok) {
           setPendingProducts(data.products || [])
         }
       } else if (activeTab === 'flagged') {
-        const res = await fetch('/api/admin', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'getFlaggedProducts' })
-        })
+        const res = await postAdminApi({ action: 'getFlaggedProducts' })
         const data = await res.json()
         if (data.ok) {
           setFlaggedProducts(data.products || [])
         }
       } else {
-        const res = await fetch('/api/admin', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'getBannedProducts' })
-        })
+        const res = await postAdminApi({ action: 'getBannedProducts' })
         const data = await res.json()
         if (data.ok) {
           setBannedProducts(data.products || [])
@@ -69,11 +58,7 @@ export default function ProductsPage() {
 
   const handleApprove = async (itemCode: string, sellerAccount: string) => {
     try {
-      const res = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'approveProduct', itemCode, sellerAccount })
-      })
+      const res = await postAdminApi({ action: 'approveProduct', itemCode, sellerAccount })
       const data = await res.json()
       if (data.ok) {
         loadProducts()

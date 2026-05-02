@@ -4,11 +4,12 @@ import type React from "react"
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useAuthStore } from "@/lib/auth-store"
+import { useAuthPersistHydrated } from "@/lib/use-auth-persist-hydrated"
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Upload, FileSpreadsheet } from "lucide-react"
+import { Upload, FileSpreadsheet, Loader2 } from "lucide-react"
 import Link from "next/link"
 
 const DATA_TYPES = [
@@ -23,16 +24,18 @@ type DataType = (typeof DATA_TYPES)[number]["value"]
 export default function UmusadaExcelUploadPage() {
   const router = useRouter()
   const { user, isAuthenticated } = useAuthStore()
+  const authHydrated = useAuthPersistHydrated()
   const [loading, setLoading] = useState(false)
   const [file, setFile] = useState<File | null>(null)
   const [dataType, setDataType] = useState<DataType>("sales")
   const [result, setResult] = useState<{ ok: boolean; message?: string; sent?: number; errors?: string[]; error?: string } | null>(null)
 
   useEffect(() => {
+    if (!authHydrated) return
     if (!isAuthenticated) {
       router.push("/login")
     }
-  }, [isAuthenticated, router])
+  }, [authHydrated, isAuthenticated, router])
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -84,13 +87,23 @@ export default function UmusadaExcelUploadPage() {
     }
   }
 
+  if (!authHydrated) {
+    return (
+      <div className="min-h-screen flex flex-col bg-slate-50">
+        <Header />
+        <main className="flex-1 flex flex-col items-center justify-center gap-2 text-slate-600">
+          <Loader2 className="h-8 w-8 animate-spin" aria-hidden />
+          <p className="text-sm">Checking session…</p>
+        </main>
+        <Footer />
+      </div>
+    )
+  }
+
   if (!isAuthenticated) return null
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50">
-      <Header />
-
-      <main className="flex-1 container mx-auto px-6 py-8 max-w-2xl">
+    <main className="container mx-auto px-6 py-8 max-w-2xl">
         <h1 className="text-2xl font-bold text-slate-900 mb-2">Umusada Excel Upload</h1>
         <p className="text-slate-600 mb-6">
           Upload Excel files to send Sales, Purchase, Financial, or Supplier data to Umusada.
@@ -182,9 +195,6 @@ export default function UmusadaExcelUploadPage() {
         <Button variant="ghost" className="mt-6" asChild>
           <Link href="/buyer/dashboard">← Back to Dashboard</Link>
         </Button>
-      </main>
-
-      <Footer />
-    </div>
+    </main>
   )
 }

@@ -23,7 +23,10 @@ export function ServiceWorkerRegister() {
       }
     }
 
-    registerServiceWorker()
+    // Avoid SW on `next dev`: stale SW + changing chunk URLs → ChunkLoadError on layout.*.js
+    if (process.env.NODE_ENV === "production") {
+      registerServiceWorker()
+    }
   }, [])
 
   return null

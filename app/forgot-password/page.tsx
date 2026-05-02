@@ -70,7 +70,11 @@ export default function ForgotPasswordPage() {
           newPassword,
         }),
       })
-      const json = await res.json().catch(() => ({}))
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean
+        error?: string
+        message?: string
+      }
       if (!res.ok || !json?.ok) {
         throw new Error(json?.error || "Could not update password")
       }

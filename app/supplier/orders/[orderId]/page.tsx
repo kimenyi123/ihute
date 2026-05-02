@@ -8,7 +8,7 @@ import { Footer } from "@/components/footer"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, Phone, MapPin, User2, RotateCw, CreditCard, Truck } from "lucide-react"
+import { ArrowLeft, Phone, User2, RotateCw, CreditCard } from "lucide-react"
 import { useAuthStore } from "@/lib/auth-store"
 import dynamic from "next/dynamic"
 
@@ -55,37 +55,22 @@ function getPaymentStatus(order: any): { status: string; displayName: string; is
   }
 }
 
-// Improved order status with payment consideration
-function getOrderStatus(order: any, paymentInfo: any) {
-  const orderStatus = (order?.ORDER_STATUS || "").toLowerCase()
-  
-  if (orderStatus.includes('delivered')) return { status: 'delivered', displayName: 'Delivered' }
-  if (orderStatus.includes('transit') || orderStatus.includes('shipped')) return { status: 'in-transit', displayName: 'In Transit' }
-  if (orderStatus.includes('processing')) return { status: 'processing', displayName: 'Processing' }
-  
-  // If payment is completed but order status is still open/pending
-  if (paymentInfo.isPaid && (orderStatus.includes('open') || orderStatus.includes('pending'))) {
-    return { status: 'processing', displayName: 'Processing Payment' }
+function pickAnyNum(row: Record<string, unknown>, ...keys: string[]): number | null {
+  for (const k of keys) {
+    const v = row[k]
+    if (v == null || String(v).trim() === "") continue
+    const n = Number(v)
+    if (!Number.isNaN(n)) return n
   }
-  
-  return { status: 'pending', displayName: 'Pending' }
+  return null
 }
 
-/** Display timestamp as YYYY-MM-DD HH:mm:ss (no ISO T/Z or milliseconds). */
-function formatOrderDate(value: unknown): string {
-  if (value == null || value === "") return ""
-  const s = String(value).trim()
-  if (!s) return ""
-  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(s)) return s.replace(/\.\d+Z?$/i, "").slice(0, 19)
-  const d = new Date(s)
-  if (Number.isNaN(d.getTime())) return s
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, "0")
-  const day = String(d.getDate()).padStart(2, "0")
-  const h = String(d.getHours()).padStart(2, "0")
-  const min = String(d.getMinutes()).padStart(2, "0")
-  const sec = String(d.getSeconds()).padStart(2, "0")
-  return `${y}-${m}-${day} ${h}:${min}:${sec}`
+function pickAnyStr(row: Record<string, unknown>, ...keys: string[]): string {
+  for (const k of keys) {
+    const v = row[k]
+    if (v != null && String(v).trim() !== "") return String(v).trim()
+  }
+  return ""
 }
 
 export default function SupplierOrderDetailsPage() {
@@ -170,19 +155,18 @@ export default function SupplierOrderDetailsPage() {
 
   // --- helpers ---
   const qtyOf = (it: any) => Number(it.QUANTITY ?? it.qty ?? it.quantity ?? 0)
-  const unitPriceOf = (it: any) =>
-    Number(it.UNIT_PRICE ?? it.UNITY_PRICE ?? it.REQUEST_PRICE ?? it.unitPrice ?? it.price ?? 0)
+  const requestedPriceOf = (it: any) =>
+    Number(it.REQUEST_PRICE ?? it.request_price ?? it.UNIT_PRICE ?? it.unitPrice ?? it.price ?? 0)
+  const servedPriceOf = (it: any) =>
+    Number(it.UNITY_PRICE ?? it.unity_price ?? it.SERVED_AMOUNT ?? it.servedAmount ?? it.UNIT_PRICE ?? it.unitPrice ?? 0)
   const unitOf = (it: any) => String(it.UNIT ?? it.unit ?? it.measurement ?? "")
-  const totalOf = (it: any) => Math.round(qtyOf(it) * unitPriceOf(it))
+  const totalRequestedOf = (it: any) => Math.round(qtyOf(it) * requestedPriceOf(it))
   const n = (v: number) => Number(v || 0).toLocaleString()
 
-  const { order, buyer, items, created, currency, grandTotal, paymentInfo, orderStatus, isGuestBuyer, displayBuyerName } = useMemo(() => {
+  const { order, buyer, items, currency, grandTotal, servedOrderAmount, orderNote, paymentInfo, isGuestBuyer, displayBuyerName } = useMemo(() => {
     const order = detail?.order
     const buyer = detail?.buyer
     const rawItems = detail?.items ?? []
-    const created = order?.CREATED_AT
-      ? new Date(typeof order.CREATED_AT === "number" ? order.CREATED_AT : order.CREATED_AT)
-      : null
     const currency = order?.CURRENCY || "RWF"
 
     // Combine items that share the same code, name, and ordered-by user
@@ -190,15 +174,23 @@ export default function SupplierOrderDetailsPage() {
     rawItems.forEach((it: any, index: number) => {
       const code = it.ITEM_CODE ?? it.code ?? `${index}`
       const name = it.ITEM_NAME ?? it.name ?? "-"
-      const orderedBy = (it.ORDERED_BY ?? buyer?.OWNER ?? "").toString().trim()
-      const key = `${code}||${name}||${orderedBy}`
+      // ✅ Remove ORDERED_BY field - use buyer info from account_signup instead
+      // const orderedBy = (it.ORDERED_BY ?? buyer?.OWNER ?? "").toString().trim()
+      const key = `${code}||${name}||${buyer?.OWNER || ""}`
       const existing = groupedMap.get(key)
       if (existing) {
         const merged = { ...existing }
         const newQty = qtyOf(existing) + qtyOf(it)
+        const servedExisting =
+          Number((existing as any).CONFIRMED_RECEIVED_QTY ?? (existing as any).SERVED_QTY ?? 0) || 0
+        const servedLine =
+          Number((it as any).CONFIRMED_RECEIVED_QTY ?? (it as any).SERVED_QTY ?? 0) || 0
+        const newServed = servedExisting + servedLine
         if ("QUANTITY" in merged) merged.QUANTITY = newQty
         if ("qty" in merged) merged.qty = newQty
         if ("quantity" in merged) merged.quantity = newQty
+        ;(merged as any).CONFIRMED_RECEIVED_QTY = newServed
+        ;(merged as any).SERVED_QTY = newServed
         groupedMap.set(key, merged)
       } else {
         groupedMap.set(key, { ...it })
@@ -206,23 +198,41 @@ export default function SupplierOrderDetailsPage() {
     })
 
     const items = Array.from(groupedMap.values())
-    const grandTotal = items.reduce((sum, it) => sum + totalOf(it), 0)
+    const grandTotal = items.reduce((sum, it) => sum + totalRequestedOf(it), 0)
+    const servedOrderAmount =
+      pickAnyNum(order ?? {}, "SERVED_AMOUNT", "servedAmount", "AMOUNT_SERVED", "SERVED_TOTAL") ?? 0
+    const orderNote = pickAnyStr(order ?? {}, "CONDITIONS", "ORDER_NOTE", "orderNote", "NOTE")
 
-    // Get payment and order status
+    // Get payment status
     const paymentInfo = getPaymentStatus(order)
-    const orderStatus = getOrderStatus(order, paymentInfo)
 
-    // Detect if buyer is a guest (anonymous checkout)
-    const buyerEmail = order?.BUYER_EMAIL || buyer?.EMAIL || ""
-    const isGuestBuyer = buyerEmail.startsWith("guest_") || !order?.BUYER_ISHYIGA_ACCOUNT
+    // Prefer explicit buyer identity fields; only show "Guest Buyer" when no usable identity exists.
+    const buyerEmail = String(order?.BUYER_EMAIL || buyer?.EMAIL || "").trim()
+    const buyerAccount = String(order?.BUYER_ISHYIGA_ACCOUNT || buyer?.ISHYIGA_ACCOUNT || "").trim()
+    const buyerPhone = String(order?.BUYER_PHONE || buyer?.PHONE || order?.BUYER_TEL || "").trim()
 
     // Never show seller name as buyer (fix for wrong data or seller placing test order)
-    const rawBuyer = (order?.BUYER_OWNER ?? order?.BUYER_NAME ?? buyer?.OWNER ?? buyer?.NAMES ?? "Guest Buyer").toString().trim()
+    const rawBuyer = (
+      order?.OWNER ??
+      order?.BUYER_OWNER_NAME ??
+      order?.BUYER_OWNER ??
+      order?.BUYER_NAMES ??
+      order?.BUYER_NAME ??
+      buyer?.OWNER ??
+      buyer?.NAMES ??
+      "Guest Buyer"
+    ).toString().trim()
     const sellerName = (order?.SELLER_NAMES ?? detail?.seller?.OWNER ?? "").toString().trim()
     const sameAsSeller = sellerName && rawBuyer && sellerName.toLowerCase() === rawBuyer.toLowerCase()
-    const displayBuyerName = sameAsSeller ? (order?.TABLE_NAME ? `Table: ${order.TABLE_NAME}` : "Guest Buyer") : (rawBuyer || "Guest Buyer")
+    const cleanBuyerName = !rawBuyer || /^na$/i.test(rawBuyer) ? "" : rawBuyer
+    const hasIdentity = Boolean(cleanBuyerName || buyerAccount || buyerPhone || buyerEmail)
+    const guestByEmail = buyerEmail.toLowerCase().startsWith("guest_")
+    const isGuestBuyer = guestByEmail || !hasIdentity
+    const displayBuyerName = sameAsSeller
+      ? (order?.TABLE_NAME ? `Table: ${order.TABLE_NAME}` : "Guest Buyer")
+      : (cleanBuyerName || (buyerAccount ? `Buyer ${buyerAccount}` : "Guest Buyer"))
 
-    return { order, buyer, items, created, currency, grandTotal, paymentInfo, orderStatus, isGuestBuyer, displayBuyerName }
+    return { order, buyer, items, currency, grandTotal, servedOrderAmount, orderNote, paymentInfo, isGuestBuyer, displayBuyerName }
   }, [detail])
 
   const sellerMomo = (detail?.seller?.momo ?? "").toString().trim()
@@ -281,29 +291,9 @@ export default function SupplierOrderDetailsPage() {
             <div className="grid md:grid-cols-3 gap-4">
               <Card className="md:col-span-2">
                 <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <CardTitle>Order Summary</CardTitle>
-                    <div className="flex gap-2">
-                      <Badge variant={orderStatus.status === 'delivered' ? 'default' : orderStatus.status === 'in-transit' ? 'secondary' : 'outline'}>
-                        {orderStatus.displayName}
-                      </Badge>
-                      <Badge variant={paymentInfo.isPaid ? 'default' : paymentInfo.status === 'processing' ? 'secondary' : 'outline'}>
-                        {paymentInfo.isPaid ? '✅ Paid' : paymentInfo.displayName}
-                      </Badge>
-                    </div>
-                  </div>
-                  <CardDescription>{formatOrderDate(order?.CREATED_AT ?? order?.created_at ?? order?.heure) || ""}</CardDescription>
+                  <CardTitle>Order Summary</CardTitle>
                 </CardHeader>
-                <CardContent className="grid sm:grid-cols-3 gap-3">
-                  <div className="rounded-md border p-3">
-                    <div className="text-sm text-slate-600">Status</div>
-                    <div className="font-medium flex items-center gap-2">
-                      {orderStatus.status === 'delivered' ? '✅' : 
-                       orderStatus.status === 'in-transit' ? '🚚' : 
-                       orderStatus.status === 'processing' ? '⏳' : '📦'}
-                      {orderStatus.displayName}
-                    </div>
-                  </div>
+                <CardContent className="grid sm:grid-cols-2 gap-3">
                   <div className="rounded-md border p-3">
                     <div className="text-sm text-slate-600">Payment</div>
                     <div className="font-medium flex items-center gap-2">
@@ -341,12 +331,12 @@ export default function SupplierOrderDetailsPage() {
                   </div>
                   <div className="flex items-center gap-2 text-slate-700">
                     <Phone className="h-4 w-4" />
-                    <span>{order?.BUYER_PHONE || buyer?.PHONE || order?.BUYER_TEL || "Not provided"}</span>
+                    <span>{order?.BUYER_PHONE || buyer?.TEL || buyer?.PHONE || order?.BUYER_TEL || "Not provided"}</span>
                   </div>
-                  <div className="flex items-center gap-2 text-slate-700">
+                  {/* <div className="flex items-center gap-2 text-slate-700">
                     <MapPin className="h-4 w-4" />
                     <span>{order?.DELIVERY_LOCATION || "Not provided"}</span>
-                  </div>
+                  </div> */}
                   {isGuestBuyer && (
                     <div className="mt-3 pt-3 border-t">
                       <p className="text-xs text-amber-700 bg-amber-50 p-2 rounded">
@@ -373,10 +363,12 @@ export default function SupplierOrderDetailsPage() {
                     <tr className="[&>th]:py-2 [&>th]:px-3 text-xs text-slate-500 uppercase tracking-wide">
                       <th className="text-left pl-0 w-28">Code</th>
                       <th className="text-left">Item</th>
-                      <th className="text-left w-36">Ordered By</th>
                       <th className="text-right w-20">Qty</th>
-                      <th className="text-right w-28">Unit Price</th>
-                      <th className="text-right w-32 pr-0">Total</th>
+                      <th className="text-right w-24">Served Qty</th>
+                      <th className="text-right w-28">Requested Price</th>
+                      <th className="text-right w-28">Served Price</th>
+                      <th className="text-right w-32">Total Requested</th>
+                      <th className="text-right w-32 pr-0">Total Served</th>
                     </tr>
                   </thead>
 
@@ -385,25 +377,36 @@ export default function SupplierOrderDetailsPage() {
                       const code = it.ITEM_CODE ?? it.code ?? `${i}`
                       const name = it.ITEM_NAME ?? it.name ?? "-"
                       const qty = qtyOf(it)
-                      const unitPrice = unitPriceOf(it)
-                      const total = totalOf(it)
-                      const orderedBy = (it.ORDERED_BY ?? buyer?.OWNER ?? "").toString().trim()
+                      const servedQty =
+                        pickAnyNum(it as Record<string, unknown>, "CONFIRMED_RECEIVED_QTY", "SERVED_QTY", "servedQty", "CONFIRMED_QTY") ?? 0
+                      const requestedPrice = requestedPriceOf(it)
+                      const servedPrice = servedPriceOf(it)
+                      const totalRequested = totalRequestedOf(it)
+                      const totalServed = servedQty * servedPrice
+                      // ✅ Remove ORDERED_BY field - use buyer info from account_signup instead
+                      // const orderedBy = (it.ORDERED_BY ?? buyer?.OWNER ?? "").toString().trim()
 
                       return (
-                        <tr key={`${code}-${name}-${orderedBy || "anon"}`}>
+                        <tr key={`${code}-${name}-${buyer?.OWNER || "anon"}`}>
                           <td className="py-2 px-3 pl-0 align-middle">{code}</td>
                           <td className="py-2 px-3 align-middle">{name}</td>
-                          <td className="py-2 px-3 align-middle text-sm text-slate-700">
-                            {orderedBy || "—"}
-                          </td>
                           <td className="py-2 px-3 text-right align-middle font-mono tabular-nums">
                             {n(qty)}
                           </td>
                           <td className="py-2 px-3 text-right align-middle font-mono tabular-nums">
-                            {n(unitPrice)}
+                            {n(servedQty)}
+                          </td>
+                          <td className="py-2 px-3 text-right align-middle font-mono tabular-nums">
+                            {n(requestedPrice)}
+                          </td>
+                          <td className="py-2 px-3 text-right align-middle font-mono tabular-nums">
+                            {n(servedPrice)}
+                          </td>
+                          <td className="py-2 px-3 text-right align-middle font-mono tabular-nums">
+                            {n(totalRequested)}
                           </td>
                           <td className="py-2 pr-0 pl-3 text-right align-middle font-mono tabular-nums">
-                            {n(total)}
+                            {n(totalServed)}
                           </td>
                         </tr>
                       )
@@ -412,7 +415,7 @@ export default function SupplierOrderDetailsPage() {
 
                   <tfoot>
                     <tr className="border-t">
-                      <td colSpan={4} className="py-3 pr-4 text-right font-semibold">
+                      <td colSpan={8} className="py-3 pr-4 text-right font-semibold">
                         Total
                       </td>
                       <td className="py-3 pr-0 text-right font-bold font-mono tabular-nums">
@@ -421,6 +424,34 @@ export default function SupplierOrderDetailsPage() {
                     </tr>
                   </tfoot>
                 </table>
+                {(() => {
+                  const totals = items.reduce(
+                    (acc, it: any) => {
+                      const qty = qtyOf(it)
+                      const servedQty =
+                        pickAnyNum(it as Record<string, unknown>, "CONFIRMED_RECEIVED_QTY", "SERVED_QTY", "servedQty", "CONFIRMED_QTY") ?? 0
+                      const requestedPrice = requestedPriceOf(it)
+                      const servedPrice = servedPriceOf(it)
+                      acc.requested += qty * requestedPrice
+                      acc.served += servedQty * servedPrice
+                      return acc
+                    },
+                    { requested: 0, served: 0 }
+                  )
+                  return (
+                    <div className="mt-3 text-right space-y-1">
+                      <div className="text-sm text-slate-600">
+                        Total Requested Price: {n(totals.requested)} {currency}
+                      </div>
+                      <div className="text-sm text-slate-600">
+                        Total Served Price: {n(totals.served)} {currency}
+                      </div>
+                    </div>
+                  )
+                })()}
+                <div className="mt-3 text-right space-y-1">
+                  {orderNote && <div className="text-sm text-slate-600">Order Note: {orderNote}</div>}
+                </div>
               </CardContent>
             </Card>
 

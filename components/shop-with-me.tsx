@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef, useMemo } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { Header } from "@/components/header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -13,7 +14,6 @@ import {
   MapPin,
   Mail,
   Heart,
-  ShoppingCart,
   ChevronDown,
   ChevronUp,
   ChevronLeft,
@@ -64,9 +64,9 @@ import {
 } from "@/components/ui/sheet";
 import { Slider } from "@/components/ui/slider";
 import { useCartStore } from "@/lib/cart-store";
+import { useAuthStore } from "@/lib/auth-store";
 import { useFavoritesStore } from "@/lib/favorites-store";
 import { useTableCommandStore, getOrCreateGuestEmail } from "@/lib/table-command-store";
-import { useAuthStore } from "@/lib/auth-store";
 import { trackProductView, trackClick } from "@/lib/interaction-tracker";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/use-toast";
@@ -77,6 +77,12 @@ import {
   normalizeImageUrl,
   NO_IMAGE_URL,
 } from "@/lib/image-utils";
+import {
+  generalSellingPrice,
+  normalizeItemEmballageForCart,
+  resolveItemEmballageRaw,
+} from "@/lib/package-price";
+import { itemEmballageDisplaySuffix } from "@/lib/cart-display-utils";
 import { LocationBadge } from "@/components/location-badge";
 
 /** Optional fields for production: plug in from DB when available. */
@@ -671,9 +677,7 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
   const [itemsPerPage, setItemsPerPage] = useState(12);
   const [categoryPages, setCategoryPages] = useState<Record<string, number>>({});
 
-  const cartItems = useCartStore((s) => s.items);
   const addItem = useCartStore((s) => s.addItem);
-  const cartItemCount = cartItems.reduce((sum, item) => sum + item.qty, 0);
   const setTableInfo = useCartStore((s) => s.setTableInfo);
   const clearTableInfo = useCartStore((s) => s.clearTableInfo);
   const joinTableCommand = useTableCommandStore((s) => s.joinTableCommand);
@@ -982,9 +986,10 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
     const categoryMap = new Map<string, ShopWithMeProduct[]>();
 
     currentSeller.products.forEach((product) => {
-      const price = extractNumericPrice(product.price || product.item_emballage)
-        || extractNumericPrice((product as Record<string, unknown>).selling_price as string);
-      if (price <= 0) return; // don't show 0-price items
+      const r = product as Record<string, unknown>;
+      const base =
+        extractNumericPrice(r.selling_price ?? product.price ?? r.UNITY_PRICE ?? r.SALE_PRICE_INCLUSIVE);
+      if (base <= 0) return; // don't show 0-price items
       const fam = (product as Record<string, unknown>).famille ?? (product as Record<string, unknown>).FAMILLE;
       const category = (fam && String(fam).trim()) ? String(fam).trim() : categorizeProduct(product);
       if (!categoryMap.has(category)) {
@@ -1093,15 +1098,31 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
     switch (sortBy) {
       case "price-low":
         sorted.sort((a, b) => {
-          const priceA = extractNumericPrice(a.selling_price ?? a.price);
-          const priceB = extractNumericPrice(b.selling_price ?? b.price);
+          const ra = a as Record<string, unknown>;
+          const rb = b as Record<string, unknown>;
+          const priceA = generalSellingPrice(
+            extractNumericPrice(ra.selling_price ?? a.price ?? ra.UNITY_PRICE ?? ra.SALE_PRICE_INCLUSIVE),
+            ra.item_emballage ?? ra.ITEM_EMBALLAGE
+          );
+          const priceB = generalSellingPrice(
+            extractNumericPrice(rb.selling_price ?? b.price ?? rb.UNITY_PRICE ?? rb.SALE_PRICE_INCLUSIVE),
+            rb.item_emballage ?? rb.ITEM_EMBALLAGE
+          );
           return priceA - priceB;
         });
         break;
       case "price-high":
         sorted.sort((a, b) => {
-          const priceA = extractNumericPrice(a.selling_price ?? a.price);
-          const priceB = extractNumericPrice(b.selling_price ?? b.price);
+          const ra = a as Record<string, unknown>;
+          const rb = b as Record<string, unknown>;
+          const priceA = generalSellingPrice(
+            extractNumericPrice(ra.selling_price ?? a.price ?? ra.UNITY_PRICE ?? ra.SALE_PRICE_INCLUSIVE),
+            ra.item_emballage ?? ra.ITEM_EMBALLAGE
+          );
+          const priceB = generalSellingPrice(
+            extractNumericPrice(rb.selling_price ?? b.price ?? rb.UNITY_PRICE ?? rb.SALE_PRICE_INCLUSIVE),
+            rb.item_emballage ?? rb.ITEM_EMBALLAGE
+          );
           return priceB - priceA;
         });
         break;
@@ -1183,79 +1204,8 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header – same alignment as main site (omit when embedInMainLayout, main site Header is used) */}
-      {!embedInMainLayout && (
-      <header className="sticky top-0 z-50 w-full border-b bg-white shadow-sm">
-        <div className="container mx-auto px-4">
-          <div className="flex h-16 items-center justify-between gap-2 md:gap-4">
-            {/* Logo – left, link to home */}
-            <Link href="/" className="flex items-center shrink-0">
-              <Image
-                src="/images/ishyiga-logo.png"
-                alt="Ishyiga Software"
-                width={100}
-                height={35}
-                className="h-8 w-auto md:h-10"
-              />
-            </Link>
-
-            {/* Center: product search + location + filters (when seller selected) – same line as main site */}
-            {currentSeller && (
-              <div className="hidden lg:flex flex-1 max-w-xl items-center gap-2">
-                <div className="relative min-w-0 flex-1">
-                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                  <Input
-                    type="search"
-                    placeholder="Search products..."
-                    value={productSearchQuery}
-                    onChange={(e) => setProductSearchQuery(e.target.value)}
-                    className="h-9 pl-9 min-w-0"
-                  />
-                </div>
-                <LocationBadge compact />
-                {showFilterButton && (
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    className="h-9 w-9 shrink-0 relative"
-                    onClick={() => setFilterSheetOpen(true)}
-                    title="Sort, price range & category"
-                  >
-                    <SlidersHorizontal className="h-4 w-4" />
-                    {hasActiveFilters && (
-                      <span className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-primary text-[10px] font-medium text-primary-foreground flex items-center justify-center">
-                        {[categoryFilter, priceMin.trim(), priceMax.trim(), moodPreference].filter(Boolean).length}
-                      </span>
-                    )}
-                  </Button>
-                )}
-              </div>
-            )}
-
-            {/* Actions – right side, same as main site */}
-            <div className="flex items-center gap-1 md:gap-2">
-              <Button variant="ghost" size="sm" className="hidden md:flex">
-                English
-              </Button>
-              <Button variant="ghost" size="sm" className="hidden sm:flex">
-                Login
-              </Button>
-              <Button variant="ghost" size="icon" className="hidden sm:flex">
-                <Heart className="h-5 w-5" />
-              </Button>
-              <Button variant="ghost" size="icon" className="relative" onClick={() => router.push("/cart")}>
-                <ShoppingCart className="h-5 w-5" />
-                {cartItemCount > 0 && (
-                  <span className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-green-500 text-white text-xs flex items-center justify-center">
-                    {cartItemCount}
-                  </span>
-                )}
-              </Button>
-            </div>
-          </div>
-        </div>
-      </header>
-      )}
+      {/* Main site header (layout provides it when embedInMainLayout) */}
+      {!embedInMainLayout && <Header />}
 
       {/* Main Content – same container as main site */}
       <div className="container mx-auto px-4 py-6">
@@ -1422,8 +1372,8 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
               )}
             </div>
 
-            {/* Mobile: search + filters (desktop has them in header). When embedInMainLayout always show here. */}
-            <div className={cn("flex flex-col sm:flex-row gap-3 sm:items-center", !embedInMainLayout && "lg:hidden")}>
+            {/* Shop-scoped search + filters (single header: main Header above; no duplicate nav bar) */}
+            <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -1977,13 +1927,19 @@ function ProductCard({
 
   const itemCode = getItemCode(product);
   const p = product as Record<string, unknown>;
-  // API/Redis format: item_commercial_name, item_emballage (as-is), item_key_words, item_packet, image_url; price from selling_price
+  // Base unit price: `selling_price` from Redis/API; `price` is the same meaning when both are present.
   const productName = String(p.item_commercial_name ?? p.item_name ?? p.ITEM_NAME ?? p.ITEM_COMMERCIAL_NAME ?? "").trim() || "Product";
   const categoryVal = p.category ?? p.famille ?? p.FAMILLE ?? p.item_department;
   const categoryLabel = categoryVal && String(categoryVal).trim() ? String(categoryVal).trim() : "n";
   const displayName = `${productName} - ${categoryLabel}`;
   const priceRaw = p.selling_price ?? p.price ?? p.UNITY_PRICE ?? p.SALE_PRICE_INCLUSIVE;
-  const price = extractNumericPrice(priceRaw);
+  const baseUnit = extractNumericPrice(priceRaw);
+  const embRaw = resolveItemEmballageRaw(p);
+  const price = generalSellingPrice(baseUnit, embRaw);
+  const itemEmballageCart = normalizeItemEmballageForCart(embRaw);
+  const embStr =
+    embRaw != null && String(embRaw).trim() !== "" ? String(embRaw) : null;
+  const unitLabel = itemEmballageDisplaySuffix(embStr ?? "1") ?? "1 Pkg";
   const moodMeta = moodMetaType ? getMoodMetaText(product, moodMetaType) : { text: null };
 
   /** Try KAOS famille → flat NIKI → each backend URL → no_image (same order as getProductImageSrc, but advance on 404). */
@@ -2012,6 +1968,8 @@ function ProductCard({
   const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
   const fav = isFavorite(itemCode);
   const [erxOpen, setErxOpen] = useState(false);
+  const user = useAuthStore((s) => s.user);
+  const isDoctor = String(user?.dbRole ?? "").trim().toUpperCase() === "DOCTOR";
 
   const pickField = (...keys: string[]) => {
     for (const k of keys) {
@@ -2025,7 +1983,6 @@ function ProductCard({
     dosage: pickField("dosage", "DOSAGE"),
     inn: pickField("inn", "INN", "item_name"),
     form: pickField("form", "FORM", "measurement", "MEASUREMENT"),
-    pack: pickField("package", "PACKAGE", "item_emballage"),
   };
 
   useEffect(() => {
@@ -2083,6 +2040,7 @@ function ProductCard({
         isBarResto: isBarOrRestaurant,
         erx,
         notes: erx ? serializeErxForNotes(erx) : undefined,
+        ...(itemEmballageCart ? { itemEmballage: itemEmballageCart } : {}),
       },
       Math.max(1, qty)
     );
@@ -2204,7 +2162,6 @@ function ProductCard({
               {pharmacyViewFields.dosage && <p>Dosage: {pharmacyViewFields.dosage}</p>}
               {pharmacyViewFields.inn && <p>INN: {pharmacyViewFields.inn}</p>}
               {pharmacyViewFields.form && <p>Form: {pharmacyViewFields.form}</p>}
-              {pharmacyViewFields.pack && <p>Package: {pharmacyViewFields.pack}</p>}
             </div>
           )}
           {moodMeta.text && moodMetaType !== "discounted" && (
@@ -2225,7 +2182,7 @@ function ProductCard({
             <div className="mt-1 flex flex-wrap gap-1">
               {(p.search_priority as string) === "direct" && (
                 <span className="inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
-                  Main Ingredient
+                  {/* Main Ingredient */}
                 </span>
               )}
               {(p.contains_ingredient as string) && (p.search_priority as string) !== "direct" && (
@@ -2244,8 +2201,9 @@ function ProductCard({
         </div>
 
         <div className="space-y-0.5">
-          <div className="font-bold text-base">
+          <div className="font-bold text-base tabular-nums text-foreground">
             {price.toLocaleString()} {product.currency || "RWF"}
+            <span className="text-sm font-normal text-muted-foreground"> ({unitLabel})</span>
           </div>
         </div>
 
@@ -2254,7 +2212,7 @@ function ProductCard({
           className="mt-1 w-full bg-[#1e3a5f] hover:bg-[#2c4f7c]"
           onClick={(e) => {
             e.stopPropagation();
-            if (isPharmacy) {
+            if (isPharmacy && isDoctor) {
               openErxDialog();
             } else {
               pushToCart();
@@ -2269,13 +2227,15 @@ function ProductCard({
         </Button>
       </CardContent>
 
-      <ErxPrescriptionDialog
-        open={erxOpen}
-        onOpenChange={setErxOpen}
-        productName={productName}
-        prefillSource={p as Record<string, unknown>}
-        onConfirm={(erx) => pushToCart(1, erx)}
-      />
+      {isDoctor && (
+        <ErxPrescriptionDialog
+          open={erxOpen}
+          onOpenChange={setErxOpen}
+          productName={productName}
+          prefillSource={p as Record<string, unknown>}
+          onConfirm={(erx) => pushToCart(1, erx)}
+        />
+      )}
 
       <Dialog open={imagePreviewOpen} onOpenChange={setImagePreviewOpen}>
         <DialogContent className="sm:max-w-lg">

@@ -1,16 +1,26 @@
 "use client"
 
-import { Suspense, useEffect, useState, useMemo } from "react"
+import { Suspense, useEffect, useState, useMemo, useRef } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { CheckCircle, MessageCircle, Copy, ArrowRight, ArrowLeft } from "lucide-react"
-import { formatPaymentMethod } from "@/lib/payment-utils" // ✅ IMPORTED
+import {
+  CheckCircle,
+  MessageCircle,
+  Copy,
+  ArrowRight,
+  ArrowLeft,
+  Users,
+  X,
+} from "lucide-react"
+import { formatPaymentMethod } from "@/lib/payment-utils"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { RatingModal } from "@/components/RatingModal"
+import { useTableCommandStore } from "@/lib/table-command-store"
 
 function normalizePhone(raw?: string | null): string {
-  let v = (raw || "").replace(/\s|-/g, "")
+  const v = (raw || "").replace(/\s|-/g, "")
   if (!v) return ""
   if (v.startsWith("+250") || v.startsWith("+258")) return v
   if (v.startsWith("250")) return "+" + v
@@ -44,6 +54,58 @@ function OrderSuccessPageInner() {
   const [showRatingModal, setShowRatingModal] = useState(false)
   const [ratingItems, setRatingItems] = useState<Array<{ code: string, name: string }>>([])
   const [hasCheckedRating, setHasCheckedRating] = useState(false)
+
+  // ✅ Get table session reactively from store
+  const tableSession = useTableCommandStore((state) => state.activeSession)
+
+  // ✅ Table shareable link alert for table creators
+  const [showTableLinkAlert, setShowTableLinkAlert] = useState(false)
+  const [tableShareLink, setTableShareLink] = useState<string>("")
+  const [tableName, setTableName] = useState<string>("")
+  const hasShownAlert = useRef(false)
+
+  // Check if user is table creator and show shareable link
+  useEffect(() => {
+    if (hasShownAlert.current) return // Only show once per session
+
+    if (tableSession) {
+      console.log('🔍 Order Success - Table session:', tableSession)
+      // User is in a table command session
+      const isCreator = tableSession.userEmail === tableSession.createdBy
+      console.log('🔍 Order Success - Is creator:', isCreator)
+
+      if (isCreator && tableSession.tableName && tableSession.locationId) {
+        // Generate shareable link (same format as backend)
+        const tokenData = `${tableSession.tableName}|${tableSession.locationId}|${Date.now()}`
+        const token = btoa(tokenData).replace(/\+/g, '-').replace(/\//g, '_')
+        const shareLink = `${window.location.origin}/join-table?token=${token}`
+
+        setTableShareLink(shareLink)
+        setTableName(tableSession.tableName)
+        setShowTableLinkAlert(true)
+        hasShownAlert.current = true
+
+        console.log('✅ Showing table share alert for:', tableSession.tableName)
+
+        // Auto-hide after 8 seconds
+        const timer = setTimeout(() => {
+          setShowTableLinkAlert(false)
+        }, 8000)
+
+        return () => clearTimeout(timer)
+      }
+    }
+  }, [tableSession])
+
+  const copyTableLink = async () => {
+    try {
+      await navigator.clipboard.writeText(tableShareLink)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch (err) {
+      console.error("Failed to copy table link:", err)
+    }
+  }
 
   useEffect(() => {
     if (!orderId && !trackToken) {

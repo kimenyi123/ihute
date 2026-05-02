@@ -11,8 +11,10 @@ const pool = mysql.createPool({
   queueLimit: 0,
 });
 
-export async function GET(req: NextRequest, { params }: { params: { itemCode: string } }) {
-  const { itemCode } = params;
+type Ctx = { params: Promise<{ itemCode: string }> };
+
+export async function GET(req: NextRequest, { params }: Ctx) {
+  const { itemCode } = await params;
   if (!itemCode) return NextResponse.json({ ok: false, message: "Item code is required" }, { status: 400 });
 
   try {
@@ -29,8 +31,8 @@ export async function GET(req: NextRequest, { params }: { params: { itemCode: st
     return NextResponse.json({ ok: false, message: err.message || "Internal Server Error" }, { status: 500 });
   }
 }
-export async function PUT(req: NextRequest, { params }: { params: { itemCode: string } }) {
-  const { itemCode } = params;
+export async function PUT(req: NextRequest, { params }: Ctx) {
+  const { itemCode } = await params;
   const body = await req.json();
 
   try {
@@ -56,8 +58,8 @@ export async function PUT(req: NextRequest, { params }: { params: { itemCode: st
   }
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { itemCode: string } }) {
-  const { itemCode } = params;
+export async function DELETE(req: NextRequest, { params }: Ctx) {
+  const { itemCode } = await params;
   const searchParams = req.nextUrl.searchParams;
   const account = searchParams.get("account");
 
@@ -67,7 +69,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { itemCode:
 
   try {
     let query = "DELETE FROM seller_add_stock WHERE ITEM_CODE = ?";
-    let queryParams: any[] = [itemCode];
+    const queryParams: any[] = [itemCode];
 
     // If account is provided, add it to the WHERE clause for safety
     if (account) {

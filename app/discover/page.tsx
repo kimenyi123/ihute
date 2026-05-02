@@ -2,13 +2,15 @@
 
 import { useEffect, useState } from "react"
 import { ProductCard } from "@/components/product-card"
-import { TrendingUp, Sparkles, Clock, Store, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react"
+import { Sparkles, Clock, Store, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react"
 import { useAuthStore } from "@/lib/auth-store"
-import { getSessionId, getRecentProductIds } from "@/lib/interaction-tracker"
+import { getRecentProductIds } from "@/lib/interaction-tracker"
 import { getSmartRecommendations } from "@/lib/recommendation-service"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { ArrowLeft } from "lucide-react"
+import { Header } from "@/components/header"
+import { generalSellingPrice } from "@/lib/package-price"
 
 const BURROWS_NICKNAME = "burrows"
 const BURROWS_DISPLAY_NAME = "PANGOLIN'S BURROWS"
@@ -20,6 +22,13 @@ interface Product {
   price: number
   unit?: string
   image?: string
+  image_url?: string
+  item_image_url?: string
+  IMAGE_URL?: string
+  item_key_words?: string
+  item_code?: string
+  famille?: string
+  FAMILLE?: string
   supplierId?: string
   supplierName?: string
   supplierLocation?: string
@@ -27,6 +36,7 @@ interface Product {
   category?: string
   inStock?: boolean
   rating?: number
+  itemEmballage?: string
 }
 
 interface RecommendationSection {
@@ -113,16 +123,27 @@ export default function DiscoverPage() {
           const code = p.item_code || p.ITEM_CODE || p.item_commercial_name || ""
           if (seen.has(code)) continue
           seen.add(code)
-          const price = parsePrice(p.item_emballage ?? p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? "0")
-          if (price <= 0) continue
+          const base = parsePrice(p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? p.price ?? "0")
+          const embRaw = p.item_emballage ?? p.ITEM_EMBALLAGE
+          const linePrice = generalSellingPrice(base, embRaw)
+          if (linePrice <= 0) continue
           const img = p.image_url ?? p.item_image_url ?? p.image ?? p.IMAGE_URL
           products.push({
             id: code || `burrows-${products.length}`,
             name: p.item_commercial_name ?? p.ITEM_NAME ?? p.item_name ?? "Product",
             description: undefined,
-            price,
+            price: linePrice,
+            itemEmballage:
+              embRaw != null && String(embRaw).trim() !== "" ? String(embRaw).trim() : undefined,
             unit: p.item_packet ?? p.UNIT ?? "",
             image: typeof img === "string" ? img : undefined,
+            image_url: p.image_url,
+            item_image_url: p.item_image_url,
+            IMAGE_URL: p.IMAGE_URL,
+            item_key_words: p.item_key_words ?? p.ITEM_CODE,
+            item_code: p.item_code ?? p.ITEM_CODE,
+            famille: p.famille ?? p.FAMILLE,
+            FAMILLE: p.FAMILLE,
             supplierId,
             supplierName,
             supplierLocation: seller.loc_cell ?? seller.supplier_location ?? "",
@@ -247,16 +268,35 @@ export default function DiscoverPage() {
             if (seenIds.has(productId)) continue
             seenIds.add(productId)
 
-            const price = parseFloat(p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? p.price ?? "0")
+            const base = parseFloat(
+              String(p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? p.price ?? "0").replace(
+                /[^\d.-]/g,
+                ""
+              )
+            )
+            const embRaw = p.item_emballage ?? p.ITEM_EMBALLAGE
+            const linePrice = generalSellingPrice(
+              Number.isFinite(base) && !isNaN(base) ? base : 0,
+              embRaw
+            )
             const rawCategory = p.FAMILLE || p.famille || p.category || ""
 
             allProducts.push({
               id: productId,
               name: p.ITEM_NAME || p.item_commercial_name || p.name || productName,
               description: p.DESCRIPTION_KEYWORD || p.item_key_words || "",
-              price: isNaN(price) ? 0 : price,
+              price: linePrice,
+              itemEmballage:
+                embRaw != null && String(embRaw).trim() !== "" ? String(embRaw).trim() : undefined,
               unit: p.UNIT || p.item_packet || "",
               image: p.image_url ?? p.item_image_url ?? p.IMAGE_URL ?? p.image ?? undefined,
+              image_url: p.image_url,
+              item_image_url: p.item_image_url,
+              IMAGE_URL: p.IMAGE_URL,
+              item_key_words: p.item_key_words ?? p.ITEM_CODE,
+              item_code: p.item_code ?? p.ITEM_CODE,
+              famille: p.famille ?? p.FAMILLE,
+              FAMILLE: p.FAMILLE,
               supplierId: p.SELLER_ISHYIGA_ACCOUNT || p.item_seller_account || "",
               supplierName: p.SELLER_NAMES || p.supplier_name || "",
               supplierLocation: p.LOCATION || p.supplier_location || "",
@@ -298,6 +338,7 @@ export default function DiscoverPage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-background">
+        <Header />
         <div className="container mx-auto px-4 py-8">
           <div className="text-center text-muted-foreground">Loading recommendations...</div>
         </div>
@@ -307,8 +348,11 @@ export default function DiscoverPage() {
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Header with hamburger menu */}
+      <Header />
+      
       <div className="container mx-auto px-4 py-6">
-        {/* Header */}
+        {/* Page Header */}
         <div className="mb-6">
           <div className="flex items-start justify-between mb-4">
             <Link href="/">

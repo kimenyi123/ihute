@@ -3,6 +3,9 @@ import { create } from "zustand"
 import { persist, createJSONStorage } from "zustand/middleware"
 import { mergeSessionToUser } from "./interaction-tracker"
 
+/** Stale test accounts in persisted storage — must not be sent to AdminServlet. */
+const LEGACY_DISCARD_EMAILS = new Set<string>(["admin0799338897@ihute.local"])
+
 export type UserRole = "customer" | "supplier" | "admin" | "staff"
 
 export interface User {
@@ -37,18 +40,24 @@ export interface User {
   description?: string
   /** Display nickname (e.g. for Shop with Me URL) */
   nickname?: string
+  /** From Java login when ADMIN_API_SECRET is set — sent to AdminServlet via Next proxy */
+  adminApiToken?: string
 }
 
 interface AuthState {
   user: User | null
   isAuthenticated: boolean
+  /** When the user signed in (epoch ms). */
   loginTime: number | null
+  /** Last user activity; session expires `sessionTimeout` after this (sliding window). */
+  lastActivityAt: number | null
   sessionTimeout: number
   hasHydrated: boolean
   login: (user: User) => void
   logout: () => void
   updateUser: (user: Partial<User>) => void
-  updateActivity: () => void
+  /** Bump the sliding session window (call on interaction). */
+  touchSession: () => void
   checkSession: () => boolean
   setSessionTimeout: (timeout: number) => void
 }
@@ -59,13 +68,19 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       isAuthenticated: false,
       loginTime: null,
-      /** Default 30 days — “keep me signed in” for marketplace flows (was 24h). */
-      sessionTimeout: 30 * 24 * 60 * 60 * 1000,
+      lastActivityAt: null,
+      sessionTimeout: 60 * 60 * 1000, // 60 minutes
       hasHydrated: false,
 
       login: (user) => {
         const now = Date.now()
-        set({ user, isAuthenticated: true, loginTime: now, hasHydrated: true })
+        set({
+          user,
+          isAuthenticated: true,
+          loginTime: now,
+          lastActivityAt: now,
+          hasHydrated: true,
+        })
         
         // Merge anonymous session interactions to user account
         if (typeof window !== "undefined") {
@@ -76,7 +91,7 @@ export const useAuthStore = create<AuthState>()(
       },
 
       logout: () => {
-        set({ user: null, isAuthenticated: false, loginTime: null })
+        set({ user: null, isAuthenticated: false, loginTime: null, lastActivityAt: null })
         if (typeof window !== "undefined") {
           localStorage.removeItem("auth-storage")
           localStorage.removeItem("cart-storage")
@@ -96,18 +111,19 @@ export const useAuthStore = create<AuthState>()(
       updateUser: (updates) =>
         set((state) => ({ user: state.user ? { ...state.user, ...updates } : null })),
 
-      updateActivity: () => {
-        const state = get()
-        if (state.isAuthenticated) {
-          set({ loginTime: Date.now() })
-        }
+      touchSession: () => {
+        const s = get()
+        if (!s.isAuthenticated) return
+        set({ lastActivityAt: Date.now() })
       },
 
       checkSession: () => {
         const state = get()
         if (!state.isAuthenticated || !state.loginTime) return false
         const now = Date.now()
-        const sessionExpired = now - state.loginTime > state.sessionTimeout
+        // Sliding window: timeout from last activity (older persisted state has no lastActivityAt → use loginTime)
+        const anchor = state.lastActivityAt ?? state.loginTime
+        const sessionExpired = now - anchor > state.sessionTimeout
         if (sessionExpired) {
           state.logout()
           return false
@@ -124,6 +140,7 @@ export const useAuthStore = create<AuthState>()(
         user: s.user,
         isAuthenticated: s.isAuthenticated,
         loginTime: s.loginTime,
+        lastActivityAt: s.lastActivityAt,
         sessionTimeout: s.sessionTimeout,
       }),
       onRehydrateStorage: () => (state) => {
@@ -134,6 +151,36 @@ export const useAuthStore = create<AuthState>()(
             state.sessionTimeout = minSession
           }
         }
+        queueMicrotask(() => {
+          try {
+            const raw =
+              typeof window !== "undefined" ? localStorage.getItem("auth-storage") : null
+            const p = raw
+              ? (JSON.parse(raw) as { state?: { user?: { email?: string | null } | null } })
+              : undefined
+            const em =
+              typeof p?.state?.user?.email === "string" ? p.state!.user!.email!.trim().toLowerCase() : ""
+            if (em && LEGACY_DISCARD_EMAILS.has(em)) {
+              console.warn("[auth-store] dropping legacy persisted auth:", em)
+              try {
+                localStorage.removeItem("auth-storage")
+              } catch {
+                /* ignore */
+              }
+              useAuthStore.setState({
+                user: null,
+                isAuthenticated: false,
+                loginTime: null,
+                lastActivityAt: null,
+                hasHydrated: true,
+              })
+              return
+            }
+          } catch (e) {
+            console.warn("[auth-store] rehydrate legacy check failed:", e)
+          }
+          useAuthStore.setState({ hasHydrated: true })
+        })
       },
     }
   )

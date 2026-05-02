@@ -98,7 +98,7 @@ export default function SupplierStockUploadPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="min-h-0 bg-gray-50 p-4 sm:p-6">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <div className="mb-8">
@@ -111,7 +111,7 @@ export default function SupplierStockUploadPage() {
         {/* Header - Excel Upload Only */}
         <div className="bg-white rounded-lg shadow-md mb-6">
           <div className="border-b border-gray-200">
-            <div className="px-6 py-4">
+            <div className="px-4 sm:px-6 py-4">
               <h2 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
                 <FileSpreadsheet className="w-6 h-6 text-blue-600" />
                 Bulk Excel Upload
@@ -141,8 +141,8 @@ export default function SupplierStockUploadPage() {
             </div>
 
             {/* Upload Card */}
-            <div className="bg-white rounded-lg shadow-md p-8">
-              <div className="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center">
+            <div className="bg-white rounded-lg shadow-md p-4 sm:p-8">
+              <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 sm:p-12 text-center">
                 <FileSpreadsheet className="w-16 h-16 text-gray-400 mx-auto mb-4" />
                 
                 <input

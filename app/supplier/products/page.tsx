@@ -9,7 +9,6 @@ import { Badge } from "@/components/ui/badge"
 import {
   Package,
   Edit,
-  Trash2,
   Plus,
   Search,
   Filter,
@@ -20,6 +19,7 @@ import {
   AlertCircle,
 } from "lucide-react"
 import Link from "next/link"
+import { generalSellingPrice, parsePackageMultiplier, resolveItemEmballageRaw } from "@/lib/package-price"
 
 type ProductStatus = "active" | "inactive" | "out-of-stock"
 
@@ -28,11 +28,16 @@ type Product = {
   name: string
   category: string
   price: number
+  /** Unit cost before package multiplier (same basis as dashboard). */
+  costPrice: number
+  currency?: string
   stock: number
   status: ProductStatus
   sales: number
   revenue: number
   lastRestocked?: string
+  /** Packaging / item_emballage from Redis or DB */
+  itemEmballage?: string
 }
 
 export default function MyProductsPage() {
@@ -45,7 +50,7 @@ export default function MyProductsPage() {
 
   // Filters
   const [searchQuery, setSearchQuery] = useState("")
-  // const [categoryFilter, setCategoryFilter] = useState("all")
+  const categoryFilter = "all" as const
   const [statusFilter, setStatusFilter] = useState<ProductStatus | "all">("all")
   const [fromCache, setFromCache] = useState(false)
 
@@ -82,6 +87,10 @@ export default function MyProductsPage() {
     price = parseFloat(p.price || p.SALE_PRICE_INCLUSIVE || 0)
   }
 
+  const costPrice = Number(
+    p.cost_price ?? p.cost ?? p.COST_PRICE_INCLUSIVE ?? 0
+  )
+
   // ✅ Handle Redis stock format (item_packet) or DB format
   let stock = 0
   if (p.item_packet) {
@@ -93,16 +102,29 @@ export default function MyProductsPage() {
   let status: ProductStatus = "active"
   if (stock === 0) status = "out-of-stock"
 
+  const embRaw = resolveItemEmballageRaw(p)
+  const emb =
+    embRaw != null && String(embRaw).trim() !== ""
+      ? String(embRaw).trim()
+      : undefined
+
+  const packMult = parsePackageMultiplier(emb)
+
   return {
     id,
     name,
     category: p.category || "uncategorized",
     price,
+    costPrice,
     stock,
     status,
     sales: p.sales || 0,
-    revenue: p.revenue || price * stock,
+    revenue:
+      p.revenue != null && p.revenue !== ""
+        ? Number(p.revenue)
+        : price * packMult * stock,
     lastRestocked: p.lastRestocked,
+    itemEmballage: emb,
   } as Product
 })
         // Apply client-side filters
@@ -152,11 +174,14 @@ export default function MyProductsPage() {
       return
     }
 
-    const headers = "ID,Name,Category,Price,Stock,Status,Sales,Revenue"
-    const rows = filteredProducts.map(
-      (p) =>
-        `${p.id},${p.name},${p.category},${p.price},${p.stock},${p.status},${p.sales || 0},${p.revenue || 0}`
-    )
+    const headers =
+      "ID,Name,Category,Selling Price,Cost Price,Package,Stock,Status,Sales,Revenue"
+    const rows = filteredProducts.map((p) => {
+      const mult = parsePackageMultiplier(p.itemEmballage)
+      const sell = p.price * mult
+      const cost = p.costPrice * mult
+      return `${p.id},${p.name},${p.category},${sell},${cost},"${(p.itemEmballage ?? "").replace(/"/g, '""')}",${p.stock},${p.status},${p.sales || 0},${p.revenue || 0}`
+    })
     const csv = [headers, ...rows].join("\n")
 
     const blob = new Blob([csv], { type: "text/csv" })
@@ -314,7 +339,8 @@ export default function MyProductsPage() {
                     <tr className="border-b">
                       <th className="text-left p-3 text-sm font-semibold">Product</th>
                       {/* <th className="text-left p-3 text-sm font-semibold">Category</th> */}
-                      <th className="text-right p-3 text-sm font-semibold">Price</th>
+                      <th className="text-right p-3 text-sm font-semibold">Selling Price</th>
+                      <th className="text-right p-3 text-sm font-semibold">Cost Price</th>
                       <th className="text-right p-3 text-sm font-semibold">Stock</th>
                       <th className="text-center p-3 text-sm font-semibold">Status</th>
                       <th className="text-right p-3 text-sm font-semibold">Sales</th>
@@ -323,7 +349,16 @@ export default function MyProductsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredProducts.map((product) => (
+                    {filteredProducts.map((product) => {
+                      const displaySelling = generalSellingPrice(
+                        product.price,
+                        product.itemEmballage
+                      )
+                      const displayCost = generalSellingPrice(
+                        product.costPrice,
+                        product.itemEmballage
+                      )
+                      return (
                       <tr key={product.id} className="border-b hover:bg-muted/50 transition-colors">
                         <td className="p-3">
                           <div className="flex items-center gap-2">
@@ -340,7 +375,20 @@ export default function MyProductsPage() {
                         </td>
                         {/* <td className="p-3 text-sm">{product.category}</td> */}
                         <td className="p-3 text-right font-semibold text-sm">
-                          {product.price.toLocaleString()} {product.currency || "RWF"}
+                          {product.price > 0 ? (
+                            <span>
+                              {displaySelling.toLocaleString()}{" "}
+                              {product.currency || "RWF"}
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="p-3 text-right font-semibold text-sm text-muted-foreground">
+                          {`${displayCost.toLocaleString(undefined, {
+                            minimumFractionDigits: 1,
+                            maximumFractionDigits: 1,
+                          })} ${product.currency || "RWF"}`}
                         </td>
                         <td className="p-3 text-right">
                           <span
@@ -397,7 +445,8 @@ export default function MyProductsPage() {
                           </div>
                         </td>
                       </tr>
-                    ))}
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>

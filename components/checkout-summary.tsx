@@ -22,6 +22,8 @@ function CheckoutSummaryItemRow({ item, lineTotal }: { item: CartItem; lineTotal
     setImgError(false)
   }, [resolvedUrl])
 
+  const displayUnit = String(item.selectedUnit || item.unit || "Pkg").replace(/\bpcs?\b/gi, "Pkg")
+
   return (
     <div className="flex gap-3">
       <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-muted">
@@ -48,7 +50,7 @@ function CheckoutSummaryItemRow({ item, lineTotal }: { item: CartItem; lineTotal
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate">{item.name}</p>
         <p className="text-xs text-muted-foreground">
-          {item.qty ?? 0} × {item.selectedUnit || item.unit || "pcs"}
+          {item.qty ?? 0} × {displayUnit}
         </p>
         <p className="text-sm font-semibold text-primary">
           {lineTotal.toLocaleString()} RWF

@@ -7,8 +7,15 @@ import {
   setCached,
   SUGGESTIONS_TTL_SEC,
 } from "@/lib/redis-cache"
+import { dedupeSearchProductsByItemCodeAndSellingPrice } from "@/lib/dedupe-search-products"
+import { enrichFetchSuggestionsProducts } from "@/lib/fetch-suggestions-enrich"
+import { stripExpiredFromFetchSuggestionsBody } from "@/lib/catalog-expiry-filter"
 
-const DEFAULT_TIMEOUT_MS = Math.max(30000, getProxyTimeoutMs())
+/**
+ * Global search can spend ~8–15s on Redis (many supplier_* blobs) plus NIKI MySQL.
+ * A cap near 10–12s aborts before the servlet returns 72 DB rows → empty UI + "took too long".
+ */
+const DEFAULT_TIMEOUT_MS = Math.min(90000, Math.max(35000, getProxyTimeoutMs()))
 
 function paramsToRecord(searchParams: URLSearchParams): Record<string, string> {
   const out: Record<string, string> = {}
@@ -17,6 +24,19 @@ function paramsToRecord(searchParams: URLSearchParams): Record<string, string> {
   })
   return out
 }
+
+/** When set, Kaos logs SQL and may return `_debugSql` + `X-SectorStats-*` headers; Next skips its Redis cache. */
+function isDebugSql(params: URLSearchParams): boolean {
+  const v = params.get("debugSql")?.trim().toLowerCase()
+  return v === "1" || v === "true" || v === "yes"
+}
+
+const SECTOR_STATS_DEBUG_HEADER_NAMES = [
+  "x-sectorstats-shops-sql",
+  "x-sectorstats-items-sql",
+  "x-sectorstats-category-like-binds",
+  "x-sectorstats-debug-cache-phase",
+] as const
 
 /** Kaos `?sectorStats=pharmacy` returns `{ ok, sector, shops, items }` — must not be replaced by empty-search JSON. */
 function sectorStatsErrorBody(sectorSlug: string, warning: string): string {
@@ -32,6 +52,9 @@ function sectorStatsErrorBody(sectorSlug: string, warning: string): string {
 async function forward(req: NextRequest) {
   const incoming = new URL(req.url)
   const sectorStatsParam = incoming.searchParams.get("sectorStats")
+  const debugSql = isDebugSql(incoming.searchParams)
+  /** Sector totals (`shops` / `items`) must track stock syncs; do not serve a 5‑min cached snapshot here. */
+  const skipSuggestionsCache = Boolean(sectorStatsParam?.trim()) || debugSql
   const target = new URL(getFetchSuggestionsUrl())
 
   // Copy query params. Backend must always search Redis first, then DB (see docs/backend-redis-search.md).
@@ -41,23 +64,45 @@ async function forward(req: NextRequest) {
 
   // Redis first (this app): check our response cache before calling backend (DB)
   const cacheKey = buildCacheKey("fetchSuggestions", paramsToRecord(incoming.searchParams))
-  const cached = await getCached(cacheKey)
+  const cached = skipSuggestionsCache ? null : await getCached(cacheKey)
   if (cached) {
     console.log("[fetchSuggestions] Redis cache hit")
-    return new Response(cached, {
-      status: 200,
-      headers: {
-        "content-type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        "X-Cache": "HIT",
-      },
-    })
+    try {
+      const parsed = JSON.parse(cached) as { products?: unknown[] }
+      const globalSearchQ = incoming.searchParams.get("globalSearch")?.trim()
+      // Drop expired lots first so dedupe never picks an expired row as representative when a valid batch exists.
+      stripExpiredFromFetchSuggestionsBody(parsed)
+      if (
+        globalSearchQ &&
+        Array.isArray(parsed.products) &&
+        parsed.products.length > 1
+      ) {
+        parsed.products = dedupeSearchProductsByItemCodeAndSellingPrice(parsed.products)
+      }
+      enrichFetchSuggestionsProducts(parsed)
+      return new Response(JSON.stringify(parsed), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization",
+          "X-Cache": "HIT",
+        },
+      })
+    } catch {
+      // Corrupted/non-JSON cache entry (e.g. upstream HTML error page accidentally cached).
+      // Do not return raw cached content as JSON; treat as cache miss and fetch fresh data.
+      console.warn("[fetchSuggestions] Invalid JSON in Redis cache; bypassing cached value")
+    }
   }
 
   // Cache miss: call backend (DB), then store in Redis
-  console.log("[fetchSuggestions] Redis miss, forwarding to backend:", target.toString())
+  console.log(
+    "[fetchSuggestions] Redis miss, forwarding to backend:",
+    target.toString(),
+    debugSql ? "(debugSql=1: Next Redis cache bypassed)" : "",
+  )
 
   const method = req.method
   const headers: Record<string, string> = {
@@ -119,6 +164,16 @@ async function forward(req: NextRequest) {
 
     const outBody = await resp.text()
 
+    if (sectorStatsParam && debugSql) {
+      console.log("[fetchSuggestions][sectorStats-DEBUG] upstream URL:", target.toString())
+      for (const hn of SECTOR_STATS_DEBUG_HEADER_NAMES) {
+        const hv = resp.headers.get(hn)
+        if (hv) {
+          console.log(`[fetchSuggestions][sectorStats-DEBUG] header ${hn}:`, hv)
+        }
+      }
+    }
+
     // Validate JSON response and log where results come from (redis vs database) based on product.source
     let parsed: any
     try {
@@ -154,7 +209,14 @@ async function forward(req: NextRequest) {
       })
     }
 
-    if (parsed && Array.isArray(parsed.products)) {
+    const supplierProductsParam = incoming.searchParams.get("supplierProducts") || ""
+    if (Array.isArray(parsed)) {
+      console.log(
+        "[fetchSuggestions] Data source: array payload | rows:",
+        parsed.length,
+        supplierProductsParam ? `| supplierProducts=${supplierProductsParam}` : "",
+      )
+    } else if (parsed && Array.isArray(parsed.products)) {
       const sources = parsed.products
         .map((p: any) => String(p?.source || "").toLowerCase() || "unknown")
       const total = sources.length
@@ -163,23 +225,100 @@ async function forward(req: NextRequest) {
       const otherCount = total - redisCount - dbCount
       const dataSource = redisCount > 0 && dbCount === 0 ? "redis" : dbCount > 0 && redisCount === 0 ? "database" : redisCount > 0 && dbCount > 0 ? "mixed" : "unknown"
       const supplierParam = incoming.searchParams.get("supplier") || ""
+      
+      // Debug: Check first few products for item_key_words and famille
       console.log("[fetchSuggestions] Data source:", dataSource, "| Products:", total, "| redis:", redisCount, "db:", dbCount, "other:", otherCount, supplierParam ? "| supplier=" + supplierParam : "")
+      
+      if (parsed.products.length > 0) {
+        const sampleProduct = parsed.products[0]
+        console.log("[fetchSuggestions] Sample product fields:", {
+          item_key_words: sampleProduct.item_key_words,
+          famille: sampleProduct.famille,
+          FAMILLE: sampleProduct.FAMILLE,
+          image_url: sampleProduct.image_url,
+          item_image_url: sampleProduct.item_image_url,
+          IMAGE_URL: sampleProduct.IMAGE_URL,
+          image: sampleProduct.image,
+          source: sampleProduct.source
+        })
+        
+        // Check if critical fields are null/undefined
+        if (sampleProduct.item_key_words == null) {
+          console.warn("[fetchSuggestions] WARNING: item_key_words is null/undefined in first product!")
+        }
+        if (sampleProduct.famille == null && sampleProduct.FAMILLE == null) {
+          console.warn("[fetchSuggestions] WARNING: Both famille and FAMILLE are null/undefined in first product!")
+        }
+      }
     } else if (parsed) {
       const supplierParam = incoming.searchParams.get("supplier") || ""
-      console.log("[fetchSuggestions] Data source: unknown (no products array) | supplier=" + (supplierParam || "n/a"))
+      console.log(
+        "[fetchSuggestions] Data source: unknown (no products array) | supplier=" +
+          (supplierParam || "n/a") +
+          (supplierProductsParam ? " | supplierProducts=" + supplierProductsParam : ""),
+      )
     }
 
-    // Store in Redis for next time (Redis first, then DB)
-    await setCached(cacheKey, JSON.stringify(parsed ?? {}), SUGGESTIONS_TTL_SEC)
+    if (sectorStatsParam && debugSql && parsed && typeof parsed === "object" && parsed._debugSql != null) {
+      console.log("[fetchSuggestions][sectorStats-DEBUG] JSON _debugSql:", JSON.stringify(parsed._debugSql, null, 2))
+    }
+
+    // Remove strictly expired lots before dedupe so merged rows reflect sellable batches only (same idea Kaos validateStock should use).
+    stripExpiredFromFetchSuggestionsBody(parsed ?? {})
+
+    // Keyword search: collapse same supplier + item code + selling price (multiple lots → one card).
+    const globalSearchQ = incoming.searchParams.get("globalSearch")?.trim()
+    if (
+      globalSearchQ &&
+      parsed &&
+      Array.isArray(parsed.products) &&
+      parsed.products.length > 1
+    ) {
+      const before = parsed.products.length
+      parsed.products = dedupeSearchProductsByItemCodeAndSellingPrice(parsed.products)
+      if (before !== parsed.products.length) {
+        console.log(
+          "[fetchSuggestions] Deduped products (code + price per supplier):",
+          before,
+          "→",
+          parsed.products.length
+        )
+      }
+    }
+
+    enrichFetchSuggestionsProducts(parsed ?? {})
+
+    // Store in Redis for next time (Redis first, then DB) — skip sectorStats (fresh counts) and debugSql
+    if (!skipSuggestionsCache) {
+      await setCached(cacheKey, JSON.stringify(parsed ?? {}), SUGGESTIONS_TTL_SEC)
+    }
+
+    const resHeaders = new Headers({
+      "content-type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    })
+    if (sectorStatsParam && debugSql) {
+      let anySectorDebugHeader = false
+      for (const hn of SECTOR_STATS_DEBUG_HEADER_NAMES) {
+        const hv = resp.headers.get(hn)
+        if (hv) {
+          resHeaders.set(hn, hv)
+          anySectorDebugHeader = true
+        }
+      }
+      if (anySectorDebugHeader) {
+        resHeaders.set(
+          "Access-Control-Expose-Headers",
+          "X-SectorStats-Shops-Sql, X-SectorStats-Items-Sql, X-SectorStats-Category-Like-Binds, X-SectorStats-Debug-Cache-Phase",
+        )
+      }
+    }
 
     return new Response(JSON.stringify(parsed ?? {}), {
       status: resp.status,
-      headers: {
-        "content-type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-      },
+      headers: resHeaders,
     })
   } catch (err: any) {
     console.error("Backend fetch error:", err?.message || err)
@@ -204,7 +343,7 @@ async function forward(req: NextRequest) {
         suppliersByProduct: [],
         products: [],
         query: incoming.searchParams.get('globalSearch') || '',
-        warning: "Search took too long, please try again with more specific terms"
+        // warning: "Search took too long, please try again with more specific terms"
       }), {
         status: 200,
         headers: {

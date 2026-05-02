@@ -511,11 +511,47 @@ export function getOrCreateGuestEmail(): string {
   return guestEmail
 }
 
+// ✅ HELPER: Get or create/set guest name
+export function getOrCreateGuestName(): string {
+  if (typeof window === "undefined") return "Guest"
+
+  let guestName = localStorage.getItem("guest_name")
+
+  if (!guestName) {
+    guestName = "Guest"
+    localStorage.setItem("guest_name", guestName)
+  }
+
+  return guestName
+}
+
+// ✅ HELPER: Set guest name explicitly
+export function setGuestName(name: string): void {
+  if (typeof window !== "undefined" && name) {
+    localStorage.setItem("guest_name", name.trim())
+    console.log("✅ Set guest name:", name)
+  }
+}
+
+// ✅ HELPER: Get guest name
+export function getGuestName(): string | null {
+  if (typeof window === "undefined") return null
+  return localStorage.getItem("guest_name")
+}
+
 // ✅ HELPER: Clear guest email
 export function clearGuestEmail(): void {
   if (typeof window !== "undefined") {
     localStorage.removeItem("guest_email")
     console.log("🗑️ Cleared guest email")
+  }
+}
+
+// ✅ HELPER: Clear guest name
+export function clearGuestName(): void {
+  if (typeof window !== "undefined") {
+    localStorage.removeItem("guest_name")
+    console.log("🗑️ Cleared guest name")
   }
 }
 

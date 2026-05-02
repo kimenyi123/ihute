@@ -1,7 +1,16 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
 
-export type ShopByTab = "sector" | "category" | "brand" | "all" | "opportunities" | "manufacturers" | "high-margin" | "high-demand"
+export type ShopByTab =
+  | "sector"
+  | "category"
+  | "shops"
+  | "brand"
+  | "all"
+  | "opportunities"
+  | "manufacturers"
+  | "high-margin"
+  | "high-demand"
 
 export interface ProductFiltersState {
   sector: string

@@ -5,14 +5,13 @@ import { useEffect, useMemo, useState, useCallback } from "react"
 import { useRouter, useSearchParams, usePathname } from "next/navigation"
 import { useAuthStore } from "@/lib/auth-store"
 import { useOrdersStore, type Order } from "@/lib/orders-store"
-import { Header } from "@/components/header"
-import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Search, RotateCw, Calendar } from "lucide-react"
+import { SdcInfoCell, sdcRaw } from "@/components/sdc-info-cell"
 
 // ===========================================
 // Constants
@@ -81,6 +80,24 @@ function localDateKeysLastNDays(n: number): { from: string; to: string } {
   return { from: toLocalDateKey(start), to: toLocalDateKey(end) }
 }
 
+function pickAnyStr(row: Record<string, unknown>, ...keys: string[]): string {
+  for (const k of keys) {
+    const v = row[k]
+    if (v != null && String(v).trim() !== "") return String(v).trim()
+  }
+  return ""
+}
+
+function pickAnyNum(row: Record<string, unknown>, ...keys: string[]): number | null {
+  for (const k of keys) {
+    const v = row[k]
+    if (v == null || String(v).trim() === "") continue
+    const n = Number(v)
+    if (!Number.isNaN(n)) return n
+  }
+  return null
+}
+
 // ===========================================
 // Inline Status Picker Component
 // ===========================================
@@ -99,7 +116,11 @@ function InlineStatusPicker({ order, orders, setOrders }: { order: Order, orders
       const res = await fetch(ORDER_STATUS_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId: Number(order.id), status: next })
+        body: JSON.stringify({
+          orderId: Number(order.id),
+          status: next,
+          publicSiteUrl: typeof window !== "undefined" ? window.location.origin : undefined,
+        }),
       })
 
       const json = await res.json()
@@ -211,10 +232,20 @@ export default function SupplierOrdersPage() {
       const maxPages = 40
 
       while (pageNum <= maxPages) {
+        const criteria = statusFilter !== "all" ? statusFilter.toUpperCase() : undefined
         const res = await fetch("/api/seller-orders", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sellerAccount, page: pageNum, pageSize: pageSizeCap }),
+          body: JSON.stringify({
+            sellerAccount,
+            buyerAccount: searchQuery.trim() || undefined,
+            CLIENT: searchQuery.trim() || undefined,
+            START: dateFrom ? `${dateFrom} 00:00:00` : undefined,
+            END: dateTo ? `${dateTo} 23:59:59` : undefined,
+            criteria,
+            page: pageNum,
+            pageSize: pageSizeCap,
+          }),
           cache: "no-store",
         })
         const json = await res.json()
@@ -272,6 +303,7 @@ export default function SupplierOrdersPage() {
         )
 
         return {
+          rawRow: t,
           id: String(t.ID_ORDER ?? t.id_order ?? t.id ?? ""),
           sellerId: String(t.SELLER_ISHYIGA_ACCOUNT ?? t.seller_ishyiga_account ?? ""),
           sellerName: t.SELLER_NAMES ?? t.SELLER_OWNER ?? t.seller_names ?? "Supplier",
@@ -294,6 +326,8 @@ export default function SupplierOrdersPage() {
           })(),
           buyerTIN: t.BUYER_TIN ?? t.buyer_tin ?? "",
           SUPPLIER_TIN: t.SELLER_TIN ?? t.seller_tin ?? "",
+          // Prefer account_signup OWNER-style fields over generic BUYER_OWNER labels.
+          buyerOwner: t.OWNER ?? t.owner ?? t.BUYER_OWNER_NAME ?? t.BUYER_OWNER ?? t.buyer_owner_name ?? "",
           buyerName: (() => {
             if (isKioskOrder) {
               const kioskCustomerName = String(t.BUYER_NAMES ?? t.BUYER_NAME ?? t.CUSTOMER_NAME ?? t.customer_name ?? "").toString().trim()
@@ -314,6 +348,18 @@ export default function SupplierOrdersPage() {
           })(),
           isKioskOrder,
           paymentStatus: /(pay[_\s-]*on[_\s-]*delivery|cod)/i.test(String(t.PAYMENT_NAME ?? t.payment_name ?? "")) ? "unpaid" : "paid",
+          servedAmount:
+            pickAnyNum(t, "SERVED_AMOUNT", "servedAmount", "AMOUNT_SERVED", "SERVED_TOTAL") ?? 0,
+          servedQty:
+            pickAnyNum(t, "CONFIRMED_RECEIVED_QTY", "SERVED_QTY", "servedQty", "SERVED_QUANTITY", "received_quantity") ?? 0,
+          orderNote:
+            pickAnyStr(t, "CONDITIONS", "ORDER_NOTE", "orderNote", "NOTE") || "",
+          internalData: pickAnyStr(t, "INTERNAL_DATA", "internal_data"),
+          timeSdc: pickAnyStr(t, "TIME_SDC", "time_sdc", "SDC_TIME", "sdc_time"),
+          sdcId: pickAnyStr(t, "SDC_ID", "sdc_id"),
+          receiptNumber: pickAnyStr(t, "RECEIPT_NUMBER", "receipt_number"),
+          sdcInternalData: pickAnyStr(t, "SDC_INTERNAL_DATA", "sdc_internal_data"),
+          receiptSignature: pickAnyStr(t, "RECEIPT_SIGNATURE", "receipt_signature"),
         }
       })
 
@@ -324,7 +370,7 @@ export default function SupplierOrdersPage() {
     } finally {
       setLoading(false)
     }
-  }, [user?.ishyigaAccount, setOrders, loadPageSize])
+  }, [user?.ishyigaAccount, setOrders, loadPageSize, searchQuery, dateFrom, dateTo, statusFilter])
 
   useEffect(() => {
     if (!isAuthenticated || !user) return
@@ -403,6 +449,45 @@ export default function SupplierOrdersPage() {
     [filteredOrders, page, pageSize]
   )
   const supplierOrderLink = (orderId: number | string) => `/supplier/orders/${orderId}`
+  const exportOrderRowCsv = (order: any) => {
+    const fields = [
+      "Order ID",
+      "Buyer",
+      "Company",
+      "Amount",
+      "Served Amount",
+      "Status",
+      "Date",
+      "TIME_SDC",
+      "SDC_ID",
+      "RECEIPT_NUMBER",
+      "SDC_INTERNAL_DATA",
+      "RECEIPT_SIGNATURE",
+    ]
+    const values = [
+      String(order.id ?? ""),
+      String(order.buyerName ?? ""),
+      String(order.buyerOwner ?? ""),
+      String(order.subtotal ?? 0),
+      String(Number(order.servedAmount ?? 0)),
+      String(order.status ?? ""),
+      String(order.createdAt ?? ""),
+      sdcRaw(order.timeSdc) === "N/A" ? "" : String(order.timeSdc).trim(),
+      sdcRaw(order.sdcId) === "N/A" ? "" : String(order.sdcId).trim(),
+      sdcRaw(order.receiptNumber) === "N/A" ? "" : String(order.receiptNumber).trim(),
+      sdcRaw(order.sdcInternalData) === "N/A" ? "" : String(order.sdcInternalData).trim(),
+      sdcRaw(order.receiptSignature) === "N/A" ? "" : String(order.receiptSignature).trim(),
+    ]
+    const esc = (v: string) => `"${v.replace(/"/g, '""')}"`
+    const csv = `${fields.map(esc).join(",")}\n${values.map(esc).join(",")}\n`
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `order-${order.id}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 
   // Wait for auth to hydrate from localStorage so existing session counts as "logged in"
   if (!hydrated) {
@@ -417,10 +502,8 @@ export default function SupplierOrdersPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <Header />
-
-      <main className="container mx-auto px-4 py-8">
+    <div className="min-h-0 bg-slate-50">
+      <main className="w-full px-2 sm:px-4 py-4 sm:py-6">
         {isWrongSeller && (
           <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4 flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm text-amber-800">
@@ -445,9 +528,9 @@ export default function SupplierOrdersPage() {
         {err && <div className="mb-4 p-2 bg-red-50 border border-red-300 rounded text-sm">{err}</div>}
         {loading && <div className="mb-4 p-2 text-sm">Loading...</div>}
 
-        <div className="mb-4 flex flex-col gap-4 rounded-lg border bg-white p-4">
+        <div className="mb-4 flex flex-col gap-4 rounded-lg border bg-white p-3 sm:p-4">
           <div className="flex flex-wrap items-center gap-3">
-            <div className="relative flex-1 min-w-[200px] max-w-sm">
+            <div className="relative w-full sm:flex-1 sm:min-w-[200px] sm:max-w-sm">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 placeholder="Search by order #, customer, date, total, payment, status..."
@@ -464,7 +547,7 @@ export default function SupplierOrdersPage() {
                 aria-label="From date"
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
-                className="w-[140px]"
+                className="w-full sm:w-[140px]"
               />
               <span className="text-muted-foreground">–</span>
               <Input
@@ -472,7 +555,7 @@ export default function SupplierOrdersPage() {
                 aria-label="To date"
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
-                className="w-[140px]"
+                className="w-full sm:w-[140px]"
               />
               <Button
                 type="button"
@@ -514,7 +597,7 @@ export default function SupplierOrdersPage() {
               </Button>
             </div>
             <Select value={paymentFilter} onValueChange={(v) => setPaymentFilter(v as "all" | "paid" | "unpaid")}>
-              <SelectTrigger className="w-[130px]">
+              <SelectTrigger className="w-full sm:w-[130px]">
                 <SelectValue placeholder="Payment" />
               </SelectTrigger>
               <SelectContent>
@@ -524,7 +607,7 @@ export default function SupplierOrdersPage() {
               </SelectContent>
             </Select>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[130px]">
+              <SelectTrigger className="w-full sm:w-[130px]">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
@@ -537,7 +620,7 @@ export default function SupplierOrdersPage() {
               </SelectContent>
             </Select>
             <Select value={sourceFilter} onValueChange={(v) => setSourceFilter(v as "all" | "kiosk")}>
-              <SelectTrigger className="w-[170px]">
+              <SelectTrigger className="w-full sm:w-[170px]">
                 <SelectValue placeholder="Order source" />
               </SelectTrigger>
               <SelectContent>
@@ -552,7 +635,7 @@ export default function SupplierOrdersPage() {
                 setPage(1)
               }}
             >
-              <SelectTrigger className="w-[110px]">
+              <SelectTrigger className="w-full sm:w-[110px]">
                 <SelectValue placeholder="Per page" />
               </SelectTrigger>
               <SelectContent>
@@ -592,12 +675,15 @@ export default function SupplierOrdersPage() {
         </div>
 
         <div className="rounded-lg border bg-white overflow-x-auto">
-          <Table className="min-w-[1000px]">
+          <Table className="min-w-[1150px]">
             <TableHeader>
               <TableRow>
                 <TableHead>Order #</TableHead>
-                <TableHead>Customer</TableHead>
+                <TableHead>User</TableHead>
+                <TableHead>Company</TableHead>
+                <TableHead>Served Amount</TableHead>
                 <TableHead>Date</TableHead>
+                <TableHead>SDC Info</TableHead>
                 <TableHead>Total</TableHead>
                 <TableHead>Payment</TableHead>
                 <TableHead>Status</TableHead>
@@ -607,7 +693,7 @@ export default function SupplierOrdersPage() {
             <TableBody>
               {!loading && !err && pagedOrders.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
                     {orders.length === 0
                       ? "No orders yet. Orders from customers will appear here."
                       : "No orders match your search or filters. Try different criteria."}
@@ -627,16 +713,26 @@ export default function SupplierOrdersPage() {
                         )}
                       </div>
                     </TableCell>
+                    <TableCell>{(order as any).buyerOwner || "—"}</TableCell>
+                    <TableCell>{Number((order as any).servedAmount ?? 0).toLocaleString()} RWF</TableCell>
                     <TableCell>{formatOrderDate(order.createdAt)}</TableCell>
+                    <TableCell className="align-middle">
+                      <SdcInfoCell order={order} />
+                    </TableCell>
                     <TableCell>{order.subtotal.toLocaleString()} RWF</TableCell>
                     <TableCell>{order.paymentStatus}</TableCell>
                     <TableCell>
                       <InlineStatusPicker order={order} orders={orders} setOrders={setOrders} />
                     </TableCell>
-                    <TableCell className="text-center flex gap-2 justify-center">
-                      <Button variant="outline" size="sm" onClick={() => router.push(supplierOrderLink(order.id))}>
-                        View
-                      </Button>
+                    <TableCell className="text-center">
+                      <div className="flex flex-col sm:flex-row gap-2 justify-center sm:items-center">
+                        <Button variant="outline" size="sm" onClick={() => router.push(supplierOrderLink(order.id))}>
+                          View
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => exportOrderRowCsv(order)}>
+                          Export
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))
@@ -646,14 +742,12 @@ export default function SupplierOrdersPage() {
         </div>
 
         {/* Pagination Controls */}
-        <div className="flex justify-between mt-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 mt-4">
           <Button disabled={page === 1} onClick={() => setPage(p => p - 1)}>Prev</Button>
           <span>Page {page} of {totalPages}</span>
           <Button disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>Next</Button>
         </div>
       </main>
-
-      <Footer />
     </div>
   )
 }

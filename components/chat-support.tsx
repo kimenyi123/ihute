@@ -9,7 +9,6 @@ import {
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
 import { motion, AnimatePresence } from "framer-motion"
 import Link from "next/link"
 import { 
@@ -19,6 +18,7 @@ import {
   type AssistantResponse 
 } from "@/lib/shopping-assistant"
 import { useCartStore } from "@/lib/cart-store"
+import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 
@@ -128,7 +128,19 @@ export function ChatSupport() {
     const itemName = product.item_commercial_name || product.ITEM_NAME || "Product"
     const supplierAccount = product.supplier_account || product.item_seller_account
     const supplierName = product.supplier_name || product.item_seller_name || "Supplier"
-    const price = parseFloat(product.item_price || product.ITEM_PRICE || product.price || "0")
+    const base = parseFloat(
+      String(
+        product.selling_price ??
+          product.SALE_PRICE_INCLUSIVE ??
+          product.item_price ??
+          product.ITEM_PRICE ??
+          product.price ??
+          "0"
+      ).replace(/[^\d.-]/g, "")
+    )
+    const embRaw = product.item_emballage ?? product.ITEM_EMBALLAGE
+    const price = generalSellingPrice(Number.isFinite(base) ? base : 0, embRaw)
+    const itemEmballage = normalizeItemEmballageForCart(embRaw)
     const unit = product.item_packet || product.ITEM_PACKET || product.unit || "unit"
     const image = product.image ?? product.image_url ?? product.item_image_url ?? product.ITEM_IMAGE ?? ""
     const momo = product.momo || ""
@@ -146,6 +158,7 @@ export function ChatSupport() {
         supplierName: supplierName,
         supplierLocation: supplierLocation,
         momo: momo,
+        ...(itemEmballage ? { itemEmballage } : {}),
       }, 1)
 
       // Show success message

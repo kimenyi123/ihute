@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ProductCard } from "@/components/product-card";
+import { ProductQuickView, type QuickViewProduct } from "@/components/product-quick-view";
+import { useCartStore } from "@/lib/cart-store";
+import { getProductImageSrc } from "@/lib/image-utils";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
@@ -13,6 +16,12 @@ import type { TranslationKey } from "@/lib/translations";
 import { cn } from "@/lib/utils";
 
 const LIST_SECTOR_SUPPLIERS_LIMIT = 500;
+import {
+  generalSellingPrice,
+  normalizeItemEmballageForCart,
+  resolveItemEmballageRaw,
+} from "@/lib/package-price";
+import { useToast } from "@/components/ui/use-toast";
 
 type ServerProduct = {
   item_commercial_name?: string;
@@ -26,7 +35,16 @@ type ServerProduct = {
   item_seller_account?: string;
   supplier_name?: string;
   supplier_location?: string;
+  // Preserve all image fields for KAOS URL construction
   image?: string;
+  image_url?: string;
+  item_image_url?: string;
+  IMAGE_URL?: string;
+  IMAGE_URL_2?: string;
+  IMAGE_URL_3?: string;
+  // Also preserve famille for KAOS paths
+  famille?: string;
+  FAMILLE?: string;
   // ✅ we’ll keep category info if backend provides it (type/sector/category)
   type?: string;
   sector?: string;
@@ -34,13 +52,9 @@ type ServerProduct = {
   /** Brand from niki_items: item_fabricant or id_fabricant */
   brand?: string;
   momo?: string;
-  famille?: string;
   /** Catalogue / NIKI code for KAOS images and deduping */
   item_code?: string;
   ITEM_CODE?: string;
-  image_url?: string;
-  item_image_url?: string;
-  IMAGE_URL?: string;
 };
 
 function extractNumericPrice(value: any): number {
@@ -99,25 +113,27 @@ function normalizeProduct(
   return {
     item_commercial_name: p.item_commercial_name ?? p.ITEM_NAME ?? p.name ?? "Product",
     item_packet: p.item_packet ?? p.UNIT ?? p.pack ?? "",
-    item_emballage: p.item_emballage ?? "",
+    item_emballage: p.item_emballage ?? p.ITEM_EMBALLAGE ?? "",
     selling_price: p.selling_price,
     cost_price: p.cost_price,
     currency: p.currency,
     item_key_words: p.item_key_words ?? p.DESCRIPTION_KEYWORD ?? "",
     item_seller_account:
       p.item_seller_account ??
+      p.supplier_account ??
       p.seller_account ??
       p.SELLER_ISHYIGA_ACCOUNT ??
       fallbacks?.account ??
       "",
     supplier_name: p.supplier_name ?? p.SELLER_NAMES ?? fallbacks?.sellerName ?? "",
     supplier_location: p.supplier_location ?? p.LOCATION ?? fallbacks?.sellerLoc ?? "",
-    image: imgStr || undefined,
-    image_url: p.image_url ?? p.IMAGE_URL ?? undefined,
-    item_image_url: p.item_image_url ?? undefined,
-    IMAGE_URL: p.IMAGE_URL ?? p.image_url ?? undefined,
-    item_code: code || undefined,
-    ITEM_CODE: code || undefined,
+    // Preserve all original image fields for KAOS URL construction
+    image: p.image,
+    image_url: p.image_url,
+    item_image_url: p.item_image_url,
+    IMAGE_URL: p.IMAGE_URL,
+    // Preserve raw FAMILLE for KAOS paths; `famille` below is normalized
+    FAMILLE: p.FAMILLE,
     momo: p.momo,
     // keep any server-provided category hint
     type: p.type ?? p.TYPE ?? undefined,
@@ -150,6 +166,66 @@ function flattenListSuppliersPayloadToProducts(sellers: unknown[]): ServerProduc
     }
   }
   return products;
+}
+
+function extractSuppliersWithProducts(payload: any): any[] {
+  if (Array.isArray(payload)) return payload;
+  if (payload && typeof payload === "object") {
+    if (Array.isArray(payload.sellers)) return payload.sellers;
+    if (Array.isArray(payload.suppliers)) return payload.suppliers;
+    if (Array.isArray(payload.data)) return payload.data;
+    if (Array.isArray(payload.results)) return payload.results;
+  }
+  return [];
+}
+
+/** Card row for ProductCard / quick view (shape of `allProducts` items). */
+export type GridCardProduct = {
+  id: string;
+  name: string;
+  description?: string;
+  price: number;
+  itemEmballage?: string | number;
+  currency?: string;
+  unit?: string | number;
+  supplierId?: string;
+  supplierName?: string;
+  supplierLocation?: string;
+  item_code?: string;
+  item_key_words?: string;
+  image?: string;
+  image_url?: string;
+  item_image_url?: string;
+  IMAGE_URL?: string;
+  famille?: string;
+  FAMILLE?: string;
+  momo?: string;
+  item_state?: string;
+  expiryLabel?: string;
+  _routeCategory?: string;
+};
+
+function gridProductToQuickView(p: GridCardProduct): QuickViewProduct {
+  const line = generalSellingPrice(p.price, p.itemEmballage);
+  return {
+    id: (p.item_code ?? p.item_key_words ?? p.id).toString(),
+    name: p.name,
+    price: line,
+    currency: p.currency || "RWF",
+    unit: p.unit?.toString(),
+    itemCode: p.item_code ?? p.item_key_words,
+    supplierId: p.supplierId,
+    supplierName: p.supplierName,
+    itemEmballage: normalizeItemEmballageForCart(p.itemEmballage),
+    image: p.image,
+    image_url: p.image_url,
+    item_image_url: p.item_image_url,
+    IMAGE_URL: p.IMAGE_URL,
+    famille: p.famille ?? p.FAMILLE,
+    FAMILLE: p.FAMILLE,
+    item_key_words: p.item_key_words,
+    item_code: p.item_code ?? p.item_key_words,
+  };
 }
 
 export function ProductGrid({
@@ -190,17 +266,15 @@ export function ProductGrid({
   const [error, setError] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
   const [globalSearchResults, setGlobalSearchResults] = useState<ServerProduct[]>([]);
+  const [quickViewProduct, setQuickViewProduct] = useState<GridCardProduct | null>(null);
+  const [quickViewOpen, setQuickViewOpen] = useState(false);
+  const addOrInc = useCartStore((s) => s.addOrInc ?? s.addItem);
+  const { toast } = useToast();
 
   function getApiBase() {
     // Always use empty string to make relative calls to Next.js API routes
     return "";
   }
-
-  useEffect(() => {
-    if (browseMode !== "item") return;
-    setDisplayCount(20);
-    setFamilleFilter(null);
-  }, [browseMode]);
 
   // reset search & pagination when the supplier changes
   useEffect(() => {
@@ -223,9 +297,13 @@ export function ProductGrid({
         const params = new URLSearchParams({
           globalSearch: effectiveSearchQuery.trim(),
           sector: categoryId, // Filter to current category only
-          limit: "100",
+          limit: "10000",
           Currency: "RWF",
         });
+        // When a supplier is selected, force Redis-first supplier cache search in backend.
+        if (selectedSupplier && selectedSupplier !== "all") {
+          params.set("supplier", selectedSupplier);
+        }
 
         const res = await fetch(`/api/fetchSuggestions?${params}`, {
           cache: "no-store"
@@ -294,7 +372,7 @@ export function ProductGrid({
 
           try {
             const supplierRes = await fetch(
-              `/api/fetchSuggestions?supplierProducts=${encodeURIComponent(supplierAccount)}&limit=20&Currency=RWF`,
+              `/api/fetchSuggestions?supplierProducts=${encodeURIComponent(supplierAccount)}&limit=10000&Currency=RWF`,
               { cache: "no-store" }
             );
 
@@ -385,9 +463,11 @@ export function ProductGrid({
         const loadAllSectorProducts = async (shuffle: boolean) => {
           const res = await fetch(sectorListUrl, { cache: "no-store" });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const sellers = (await res.json()) as Array<any>;
+          const raw = await res.json();
+          const sellers = extractSuppliersWithProducts(raw);
+
           const products: ServerProduct[] = [];
-          for (const s of sellers || []) {
+          for (const s of sellers) {
             const sellerAccount =
               s.seller_account ?? s.SELLER_ISHYIGA_ACCOUNT ?? s.seller_ishyiga_account ?? "";
             const sellerName = s.seller_name ?? s.SELLER_NAMES ?? "";
@@ -404,7 +484,7 @@ export function ProductGrid({
 
         if (selectedSupplier !== "all") {
           const res = await fetch(
-            `${base}/api/fetchSuggestions?supplierProducts=${encodeURIComponent(selectedSupplier)}&limit=50&Currency=RWF`,
+            `${base}/api/fetchSuggestions?supplierProducts=${encodeURIComponent(selectedSupplier)}&limit=10000&Currency=RWF`,
             { cache: "no-store" }
           );
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -437,25 +517,49 @@ export function ProductGrid({
     // Use global search results if searching, otherwise use server products
     const sourceProducts = effectiveSearchQuery.trim() ? globalSearchResults : serverProducts;
 
+    console.log("[ProductGrid] allProducts update:", {
+      searchQuery: effectiveSearchQuery,
+      usingGlobalResults: !!effectiveSearchQuery.trim(),
+      sourceProductsCount: sourceProducts.length,
+      globalResultsCount: globalSearchResults.length,
+      serverProductsCount: serverProducts.length
+    });
+
     return (sourceProducts || []).map((p, idx) => {
+      // Backend often sets type: "product" (entity kind), not a sector — do not treat as route category.
+      const typeRaw = p.type != null ? String(p.type).trim() : "";
+      const fromType =
+        typeRaw && typeRaw.toLowerCase() !== "product"
+          ? toRouteCategoryId(p.type)
+          : undefined;
       const firstCategoryHint =
-        toRouteCategoryId(p.type) ||
+        fromType ||
         toRouteCategoryId(p.sector) ||
         toRouteCategoryId(p.category);
       const kw = (p.item_key_words ?? "").toString();
       const acct = (p.item_seller_account ?? "").toString();
 
       // Do not set `image` to a local placeholder: getProductImageSrc treats `/placeholder...` as a valid URL and skips KAOS / backend fallbacks.
+      const embRaw = resolveItemEmballageRaw(p as Record<string, unknown>);
+      const embStr =
+        embRaw != null && String(embRaw).trim() !== "" ? String(embRaw).trim() : undefined;
+      // `selling_price` from Redis/API is the base catalog unit (same as supplier dashboard `product.price`).
+      // Customer line = base × item_emballage — applied once in ProductCard via `generalSellingPrice`.
+      // Do not pre-multiply here or prices become base × emballage² (e.g. 510×50 vs 10.2×50).
       return {
         id: `${categoryId}-${acct}-${kw}-${idx}`,
         name: p.item_commercial_name || "Product",
         description: undefined,
         price: extractNumericPrice(p.selling_price),
+        itemEmballage: embStr,
         currency: p.currency || "RWF",
         unit: p.item_packet,
         inStock: true,
         rating: 4,
-        supplierId: p.item_seller_account,
+        supplierId:
+          p.item_seller_account ||
+          (selectedSupplier !== "all" ? selectedSupplier : "") ||
+          "",
         supplierName: p.supplier_name || p.item_seller_account || "Supplier",
         supplierLocation: p.supplier_location,
         image: p.image,
@@ -465,12 +569,13 @@ export function ProductGrid({
         item_code: p.item_code,
         ITEM_CODE: p.ITEM_CODE,
         item_key_words: p.item_key_words,
+        famille: (p as { famille?: string }).famille ?? (p as { FAMILLE?: string }).FAMILLE ?? "",
+        FAMILLE: (p as { FAMILLE?: string }).FAMILLE,
         momo: p.momo,
         _routeCategory: firstCategoryHint,
-        famille: p.famille || "",
       };
     });
-  }, [serverProducts, globalSearchResults, effectiveSearchQuery, categoryId]);
+  }, [serverProducts, globalSearchResults, effectiveSearchQuery, categoryId, selectedSupplier]);
 
   const suppliers = useMemo(() => {
     const uniq = new Map<string, { id: string; name: string; location?: string }>();
@@ -498,6 +603,9 @@ export function ProductGrid({
   const filteredProducts = useMemo(() => {
     let items = allProducts;
 
+    // Supplier chip: only match account id. Category/sector is enforced by the API
+    // (sector on globalSearch, listSuppliersWithProducts by categoryId, etc.) — never
+    // re-filter here using client-side _routeCategory heuristics (breaks with type: "product", mixed fields, Redis shapes).
     if (selectedSupplier !== "all") {
       items = items.filter((p) => p.supplierId === selectedSupplier);
       if (items.some((p) => !!p._routeCategory)) {
@@ -515,10 +623,18 @@ export function ProductGrid({
 
     switch (sortBy) {
       case "price-low":
-        items = [...items].sort((a, b) => a.price - b.price);
+        items = [...items].sort(
+          (a, b) =>
+            generalSellingPrice(a.price, a.itemEmballage) -
+            generalSellingPrice(b.price, b.itemEmballage)
+        );
         break;
       case "price-high":
-        items = [...items].sort((a, b) => b.price - a.price);
+        items = [...items].sort(
+          (a, b) =>
+            generalSellingPrice(b.price, b.itemEmballage) -
+            generalSellingPrice(a.price, a.itemEmballage)
+        );
         break;
       case "rating":
         items = [...items].sort((a, b) => b.rating - a.rating);
@@ -538,7 +654,39 @@ export function ProductGrid({
 
   const slimCategoryItemHeader = browseMode === "item" && hideInlineSearch;
 
+  function addGridProductToCart(p: GridCardProduct) {
+    const displayPrice = generalSellingPrice(p.price, p.itemEmballage);
+    const itemEmballageForCart = normalizeItemEmballageForCart(p.itemEmballage);
+    const imageUrlForCart = getProductImageSrc(
+      p as Record<string, unknown>,
+      "/placeholder.svg?height=300&width=300",
+    );
+    addOrInc(
+      {
+        id: p.id,
+        itemCode: (p.item_code ?? p.item_key_words ?? p.id).toString(),
+        name: p.name,
+        price: displayPrice,
+        unit: p.unit?.toString(),
+        image: imageUrlForCart,
+        image_url: p.image_url,
+        item_image_url: p.item_image_url,
+        IMAGE_URL: p.IMAGE_URL,
+        item_key_words: p.item_key_words,
+        famille: p.famille,
+        supplierId: (p.supplierId || "unknown").toString().trim(),
+        supplierName: p.supplierName || "Supplier",
+        supplierLocation: p.supplierLocation,
+        momo: p.momo,
+        selectedUnit: p.unit?.toString(),
+        ...(itemEmballageForCart ? { itemEmballage: itemEmballageForCart } : {}),
+      },
+      1,
+    );
+  }
+
   return (
+    <>
     <div className="space-y-6">
       <div className="flex flex-col gap-4">
         {!slimCategoryItemHeader && (
@@ -566,6 +714,36 @@ export function ProductGrid({
           </div>
         )}
 
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              type="search"
+              placeholder={`Search ${categoryName} products or suppliers…`}
+              value={searchQuery}
+              onChange={(e) => {
+                console.log("[ProductGrid] Search input changed:", e.target.value);
+                setSearchQuery(e.target.value);
+              }}
+              className="pl-10 pr-10"
+            />
+            {searching && (
+              <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-blue-600" />
+            )}
+          </div>
+          <Select value={sortBy} onValueChange={setSortBy}>
+            <SelectTrigger className="w-full sm:w-[200px]">
+              <SelectValue placeholder="Sort by" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="featured">Featured</SelectItem>
+              <SelectItem value="price-low">Price: Low to High</SelectItem>
+              <SelectItem value="price-high">Price: High to Low</SelectItem>
+              <SelectItem value="newest">Newest First</SelectItem>
+              <SelectItem value="rating">Highest Rated</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
         {(!hideInlineSearch || browseMode !== "item") && (
           <div className="flex flex-col sm:flex-row gap-3">
             {!hideInlineSearch && (
@@ -687,5 +865,17 @@ export function ProductGrid({
         </>
       )}
     </div>
+    <ProductQuickView
+      product={quickViewProduct ? gridProductToQuickView(quickViewProduct) : null}
+      open={quickViewOpen}
+      onOpenChange={setQuickViewOpen}
+      onAddToCart={() => {
+        if (!quickViewProduct) return;
+        addGridProductToCart(quickViewProduct);
+        toast({ title: "Added to cart", description: quickViewProduct.name, duration: 2000 });
+        setQuickViewOpen(false);
+      }}
+    />
+    </>
   );
 }

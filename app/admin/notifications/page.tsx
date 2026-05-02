@@ -1,7 +1,8 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { Bell, Send, Mail, MessageSquare, Clock } from 'lucide-react'
+import { Send, Clock } from 'lucide-react'
+import { postAdminApi } from '@/lib/admin-client'
 
 interface NotificationHistory {
   id: number
@@ -28,11 +29,7 @@ export default function NotificationsPage() {
   const loadHistory = async () => {
     try {
       setLoading(true)
-      const res = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'getNotificationHistory' })
-      })
+      const res = await postAdminApi({ action: 'getNotificationHistory' })
       const data = await res.json()
       if (data.ok) {
         setHistory(data.history || [])
@@ -50,17 +47,13 @@ export default function NotificationsPage() {
       if (notificationType === 'sms') action = 'sendSMSBroadcast'
       if (notificationType === 'email') action = 'sendEmailCampaign'
 
-      const res = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action,
-          title: notificationType === 'email' ? title : undefined,
-          subject: notificationType === 'email' ? title : undefined,
-          message,
-          body: notificationType === 'email' ? message : undefined,
-          target
-        })
+      const res = await postAdminApi({
+        action,
+        title: notificationType === 'email' ? title : undefined,
+        subject: notificationType === 'email' ? title : undefined,
+        message,
+        body: notificationType === 'email' ? message : undefined,
+        target,
       })
       const data = await res.json()
       if (data.ok) {

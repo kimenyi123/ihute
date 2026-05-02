@@ -9,7 +9,6 @@
 
 import { useEffect, useState } from "react"
 import { orderStatusMonitor } from "@/lib/order-status-monitor"
-import { webSocketNotifications } from "@/lib/websocket-notifications"
 import { RatingModal } from "@/components/RatingModal"
 
 interface RatingData {

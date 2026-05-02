@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { X } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { ImagePlus, Upload, X } from 'lucide-react';
 
 interface AddProductModalProps {
   isOpen: boolean;
@@ -18,7 +18,12 @@ export interface ProductFormData {
   cost?: number;
   description?: string;
   unit?: string;
+  /** Set when user picks a new image; uploaded after product save via `/api/images/overrides`. */
+  imageFile?: File;
 }
+
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const ACCEPT_IMAGES = 'image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif';
 
 export default function AddProductModal({ 
   isOpen, 
@@ -38,6 +43,18 @@ export default function AddProductModal({
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const clearImage = useCallback(() => {
+    setImageFile(null);
+    setPreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }, []);
 
   useEffect(() => {
     if (editingProduct) {
@@ -48,7 +65,7 @@ export default function AddProductModal({
         price: editingProduct.price || 0,
         cost: editingProduct.cost || 0,
         description: editingProduct.description || '',
-        unit: editingProduct.unit || 'PCS'
+        unit: editingProduct.unit || 'PCS',
       });
     } else {
       setFormData({
@@ -58,11 +75,43 @@ export default function AddProductModal({
         price: 0,
         cost: 0,
         description: '',
-        unit: 'PCS'
+        unit: 'PCS',
       });
     }
+    clearImage();
     setErrors({});
-  }, [editingProduct, isOpen]);
+  }, [editingProduct, isOpen, clearImage]);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  const applyImageFile = (file: File | null) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setErrors((prev) => ({ ...prev, image: 'Please choose an image file (JPEG, PNG, WebP, …).' }));
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      setErrors((prev) => ({
+        ...prev,
+        image: `Image is too large (max ${Math.round(MAX_IMAGE_BYTES / (1024 * 1024))} MB).`,
+      }));
+      return;
+    }
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next.image;
+      return next;
+    });
+    setImageFile(file);
+    setPreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return URL.createObjectURL(file);
+    });
+  };
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
@@ -100,7 +149,9 @@ export default function AddProductModal({
 
     setSaving(true);
     try {
-      await onSave(formData);
+      const payload: ProductFormData = { ...formData };
+      if (imageFile) payload.imageFile = imageFile;
+      await onSave(payload);
       onClose();
     } catch (error) {
       console.error('Error saving product:', error);
@@ -109,7 +160,10 @@ export default function AddProductModal({
     }
   };
 
-  const handleInputChange = (field: keyof ProductFormData, value: string | number) => {
+  const handleInputChange = (
+    field: Exclude<keyof ProductFormData, 'imageFile'>,
+    value: string | number,
+  ) => {
     setFormData(prev => ({ ...prev, [field]: value }));
     
     // Clear error when user starts typing
@@ -117,6 +171,15 @@ export default function AddProductModal({
       setErrors(prev => ({ ...prev, [field]: '' }));
     }
   };
+
+  /** Digits only, strip leading zeros; empty → 0 (field shows blank when stock is 0). */
+  const parseQuantityInput = (raw: string): number => {
+    const digits = raw.replace(/\D/g, "")
+    const noLeading = digits.replace(/^0+/, "")
+    if (noLeading === "") return 0
+    const n = Number.parseInt(noLeading, 10)
+    return Number.isFinite(n) ? n : 0
+  }
 
   if (!isOpen) return null;
 
@@ -139,6 +202,90 @@ export default function AddProductModal({
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          {/* Product image (optional) */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Product image</label>
+            <p className="mb-2 text-xs text-gray-500">
+              Optional — JPEG or PNG recommended. Uploaded after the product is saved (same flow as bulk
+              overrides).
+            </p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={ACCEPT_IMAGES}
+              className="sr-only"
+              disabled={saving}
+              onChange={(e) => {
+                const f = e.target.files?.[0] ?? null;
+                if (f) applyImageFile(f);
+              }}
+            />
+            <div
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  fileInputRef.current?.click();
+                }
+              }}
+              onClick={() => !saving && fileInputRef.current?.click()}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const f = e.dataTransfer.files?.[0];
+                if (f) applyImageFile(f);
+              }}
+              className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-6 transition ${
+                errors.image ? 'border-red-400 bg-red-50/50' : 'border-gray-300 bg-gray-50/80 hover:border-blue-400 hover:bg-blue-50/40'
+              } ${saving ? 'pointer-events-none opacity-60' : ''}`}
+            >
+              {previewUrl ? (
+                <img
+                  src={previewUrl}
+                  alt="Selected product preview"
+                  className="max-h-40 w-auto max-w-full rounded-lg object-contain shadow-sm"
+                />
+              ) : (
+                <>
+                  <span className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-100 text-blue-700">
+                    <ImagePlus className="h-6 w-6" aria-hidden />
+                  </span>
+                  <span className="text-center text-sm font-medium text-gray-800">
+                    Tap to choose or drag &amp; drop an image here
+                  </span>
+                  <span className="text-center text-xs text-gray-500">Up to 8 MB</span>
+                </>
+              )}
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => !saving && fileInputRef.current?.click()}
+                disabled={saving}
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-800 shadow-sm hover:bg-gray-50"
+              >
+                <Upload className="h-4 w-4" aria-hidden />
+                Browse files
+              </button>
+              {(imageFile || previewUrl) && (
+                <button
+                  type="button"
+                  onClick={clearImage}
+                  disabled={saving}
+                  className="text-sm font-medium text-red-600 hover:underline"
+                >
+                  Remove image
+                </button>
+              )}
+            </div>
+            {errors.image && <p className="text-red-500 text-xs mt-1">{errors.image}</p>}
+          </div>
+
           {/* Product Name */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -188,16 +335,17 @@ export default function AddProductModal({
                 Quantity *
               </label>
               <input
-                type="number"
-                required
-                min="0"
-                value={formData.quantity}
-                onChange={(e) => handleInputChange('quantity', parseInt(e.target.value) || 0)}
-                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                value={formData.quantity === 0 ? "" : String(formData.quantity)}
+                onChange={(e) => handleInputChange("quantity", parseQuantityInput(e.target.value))}
+                className={`w-full min-h-[52px] px-4 py-3 text-center text-xl font-semibold tabular-nums tracking-wide border-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                   errors.quantity ? 'border-red-500' : 'border-gray-300'
                 }`}
-                placeholder="0"
+                placeholder="—"
                 disabled={saving}
+                aria-label="Quantity in stock"
               />
               {errors.quantity && (
                 <p className="text-red-500 text-xs mt-1">{errors.quantity}</p>

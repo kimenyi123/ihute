@@ -6,12 +6,12 @@ import { CartItemCard } from "@/components/cart-item-card"
 import { CartSummary } from "@/components/cart-summary"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { ShoppingBag, ArrowLeft, Search, ScanBarcode } from "lucide-react"
+import { ShoppingBag, ArrowLeft, Search } from "lucide-react"
 import Link from "next/link"
-import { CartAlsoBuy } from "@/components/cart-also-buy"
 import { BarcodeScanner } from "@/components/barcode-scanner"
 import { useToast } from "@/components/ui/use-toast"
 import { usePriceDropToasts } from "@/lib/use-price-drop-toasts"
+import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price"
 
 export function CartContent() {
   const items = useCartStore((state) => state.items)
@@ -49,7 +49,18 @@ export function CartContent() {
         return
       }
       const name = first.item_commercial_name ?? first.ITEM_NAME ?? "Product"
-      const price = Number(first.selling_price ?? first.UNIT_PRICE ?? 0) || 0
+      const base =
+        Number(
+          String(first.selling_price ?? first.SALE_PRICE_INCLUSIVE ?? first.price ?? 0).replace(
+            /[^\d.-]/g,
+            ""
+          )
+        ) || 0
+      const embRaw =
+        (first as { item_emballage?: unknown }).item_emballage ??
+        (first as { ITEM_EMBALLAGE?: unknown }).ITEM_EMBALLAGE
+      const price = generalSellingPrice(base, embRaw)
+      const itemEmballage = normalizeItemEmballageForCart(embRaw)
       const code = first.item_key_words ?? first.item_code ?? first.ITEM_CODE ?? first.id ?? barcode
       const supplierId = (first.supplier_account ?? first.seller_account ?? "unknown").toString().trim()
       const supplierName = first.supplier_name ?? first.OWNER ?? "Supplier"
@@ -64,6 +75,7 @@ export function CartContent() {
         supplierName,
         supplierLocation: first.supplier_location,
         momo: first.momo,
+        ...(itemEmballage ? { itemEmballage } : {}),
       }, 1)
       toast({ title: "Added to cart", description: name })
     } catch {
@@ -102,10 +114,10 @@ export function CartContent() {
   )
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-2xl font-bold text-foreground">Shopping Cart</h1>
+      <div className="flex flex-col gap-3 sm:gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="text-xl sm:text-2xl font-bold text-foreground">Shopping Cart</h1>
         <div className="flex items-center gap-2">
           {/*<Button variant="outline" size="sm" className="gap-2" onClick={() => setBarcodeOpen(true)}>
             <ScanBarcode className="h-4 w-4" />
@@ -132,7 +144,7 @@ export function CartContent() {
       </div>
 
       {/* Cart items + Summary */}
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-4 sm:gap-6 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
           {filteredItems.length > 0 ? (
             filteredItems.map((item) => (
@@ -146,7 +158,6 @@ export function CartContent() {
               No products found matching “{searchQuery}”
             </div>
           )}
-          <CartAlsoBuy cartItems={items} />
         </div>
 
         <div className="lg:col-span-1">

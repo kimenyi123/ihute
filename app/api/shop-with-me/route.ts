@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getShopWithMeUrl, getFetchSuggestionsUrl } from '@/lib/backend-config';
 import { buildCacheKey, getCached, setCached, DATA_TTL_SEC } from '@/lib/redis-cache';
+import { stripExpiredFromShopWithMeBody } from '@/lib/catalog-expiry-filter';
 
 /** Ensure each product in the response has brand and category for the client. */
 function normalizeBrandAndCategory(data: { sellers?: Array<{ products?: any[] }> }) {
@@ -196,13 +197,14 @@ export async function GET(request: NextRequest) {
       }
 
       const parsed = await response.json();
+      stripExpiredFromShopWithMeBody(parsed);
       if (shopWithMeResponseLooksGood(parsed)) {
         data = parsed;
         winningVariant = variant;
         break;
       }
       data = parsed;
-      lastStatus = 200;
+      lastStatus = response.status;
     }
 
     if (!shopWithMeResponseLooksGood(data)) {

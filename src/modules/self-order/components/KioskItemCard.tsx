@@ -2,6 +2,8 @@
 
 import type { KioskMenuItem } from "@/src/modules/self-order/types"
 import { Button } from "@/components/ui/button"
+import { generalSellingPrice } from "@/lib/package-price"
+import { itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
 
 interface Props {
   item: KioskMenuItem
@@ -9,7 +11,12 @@ interface Props {
 }
 
 export function KioskItemCard({ item, onSelect }: Props) {
-  const price = Number(item.selling_price || 0)
+  const displayPrice = generalSellingPrice(Number(item.selling_price || 0), item.item_emballage)
+  const displayUnitLabel = itemEmballageDisplaySuffix(
+    item.item_emballage == null || String(item.item_emballage).trim() === ""
+      ? "1"
+      : String(item.item_emballage)
+  )
   const mainBadge =
     typeof item.search_priority === "number" && item.search_priority >= 2
   const contains = item.contains_ingredient
@@ -22,7 +29,7 @@ export function KioskItemCard({ item, onSelect }: Props) {
     >
       <div className="relative h-32 w-full bg-slate-800 overflow-hidden">
         {item.image_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
+           
           <img
             src={item.image_url}
             alt={item.item_commercial_name || ""}
@@ -35,7 +42,7 @@ export function KioskItemCard({ item, onSelect }: Props) {
         )}
         {mainBadge && (
           <span className="absolute top-2 left-2 rounded-full bg-emerald-500/90 text-emerald-950 text-[11px] font-semibold px-2 py-0.5">
-            Main ingredient
+            
           </span>
         )}
         {!mainBadge && contains && (
@@ -52,9 +59,11 @@ export function KioskItemCard({ item, onSelect }: Props) {
           {item.supplier_name}
         </div>
         <div className="mt-1 flex items-center justify-between">
-          <div className="text-sm font-semibold text-emerald-300">
-            {price.toLocaleString("en")} RWF{" "}
-            <span className="text-xs text-slate-400 ml-1">{item.unit}</span>
+          <div className="text-sm font-semibold text-emerald-300 tabular-nums">
+            {displayPrice.toLocaleString("en")} RWF
+            {displayUnitLabel ? (
+              <span className="text-xs font-normal text-slate-400 ml-1">({displayUnitLabel})</span>
+            ) : null}
           </div>
           <Button
             type="button"

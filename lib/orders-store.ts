@@ -49,6 +49,13 @@ export type Order = {
   amount?: number
   /** Seller display name (orders list page) */
   seller?: string
+  /** EBM/SDC response information */
+  timeSdc?: string
+  sdcId?: string
+  receiptNumber?: string
+  sdcInternalData?: string
+  receiptSignature?: string
+  internalData?: string
   /** Seller sector / department hint from API (e.g. DEPARTMENT, PREFERRED_CATEGORIES) — used for Grandma reorder. */
   sellerCategoryHint?: string
   /** Opaque tracking token from `/api/orders/track` when available (preferred for `/track-order/...` links). */

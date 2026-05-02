@@ -39,21 +39,36 @@ export async function POST(req: NextRequest) {
 
     const paymentName = mapPaymentToOrdersPaymentName(body.payment_method)
 
-    const items = body.items.map((it, idx) => ({
-      itemCode: it.item_code,
-      itemName: it.item_name || `Item ${idx + 1}`,
-      qty: it.quantity,
-      unit: it.unit,
-      unitPrice: it.unit_price,
-      lineTotal: it.line_total,
-    }))
+    const items = body.items.map((it, idx) => {
+      const base: Record<string, unknown> = {
+        itemCode: it.item_code,
+        itemName: it.item_name || `Item ${idx + 1}`,
+        qty: it.quantity,
+        unit: it.unit,
+        unitPrice: it.unit_price,
+        lineTotal: it.line_total,
+      }
+      const emb = it.item_emballage
+      if (emb != null && String(emb).trim() !== "") {
+        const s = String(emb).trim()
+        base.item_emballage = s
+        base.ITEM_EMBALLAGE = s
+      }
+      return base
+    })
 
     const form = new URLSearchParams()
     form.set("action", "createKioskOrder")
     form.set("sellerAccount", sellerAccount)
     form.set("items", JSON.stringify(items))
+    if (body.buyer_account) form.set("buyerAccount", body.buyer_account)
+    if (body.buyer_email) form.set("buyerEmail", body.buyer_email)
     if (body.table_number) form.set("tableNumber", body.table_number)
     if (body.customer_name) form.set("customerName", body.customer_name)
+    // Backend may rely on buyerName for identification even when buyerEmail/buyerAccount are present.
+    // Use customer_name when available; otherwise fallback to "Guest".
+    const buyerName = String(body.customer_name ?? "").trim() || "Guest"
+    form.set("buyerName", buyerName)
     form.set("kioskCategory", body.kiosk_category)
     form.set("paymentName", paymentName)
     form.set("currency", body.currency || "RWF")

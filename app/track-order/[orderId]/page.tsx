@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
+import { jsPDF } from "jspdf"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -15,12 +16,15 @@ import {
   ArrowLeft,
   CreditCard,
   FileText,
+  Download,
+  Eye,
   XCircle,
 } from "lucide-react"
 import { formatPaymentMethod } from "@/lib/payment-utils"
 import { RatingModal } from "@/components/RatingModal"
 import { useOrderTracking } from "@/hooks/useOrderTracking"
 import { DeliveryCountdown } from "@/components/delivery-countdown"
+import { unitMeaningfulForDisplay } from "@/lib/product-unit-display"
 import {
   Dialog,
   DialogContent,
@@ -192,8 +196,8 @@ function buildTracking(status: OrderStatus) {
   // Get friendly name for current status
   const statusLabels: Record<OrderStatus, string> = {
     "open": "Order Placed",
-    "pending": "Awaiting Confirmation",
-    "processing": "Being Prepared",
+    "pending": "Order Placed",
+    "processing": "Processing",
     "invoice": "Invoice",
     "in-transit": "Out for Delivery",
     "delivered": "Delivered Successfully",
@@ -247,7 +251,7 @@ function buildTracking(status: OrderStatus) {
 }
 
 function normalizePhone(raw?: string | null): string {
-  let v = (raw || "").replace(/\s|-/g, "")
+  const v = (raw || "").replace(/\s|-/g, "")
   if (!v) return ""
   if (v.startsWith("+250") || v.startsWith("+258")) return v
   if (v.startsWith("250")) return "+" + v
@@ -260,6 +264,37 @@ function waHrefFor(phone: string, text: string) {
   const p = phone.replace(/^\+/, "")
   const encoded = encodeURIComponent(text)
   return `https://wa.me/${p}?text=${encoded}`
+}
+
+function canShowInvoiceActions(rawStatus?: string): boolean {
+  const s = (rawStatus || "").trim().toUpperCase()
+  return s !== "" && s !== "OPEN"
+}
+
+function formatInvoiceAmount(amount: number): string {
+  return `${Number(amount || 0).toLocaleString()} RWF`
+}
+
+function buildInvoiceText(order: OrderDetail): string {
+  const lines = order.items.map((item, idx) => {
+    const lineTotal = Number(item.qty || 0) * Number(item.unitPrice || 0)
+    return `${idx + 1}. ${item.name} | Qty: ${item.qty} | Amount: ${Number(item.unitPrice || 0).toLocaleString()} RWF | Total: ${lineTotal.toLocaleString()} RWF`
+  })
+  return [
+    `INVOICE - ORDER #${order.orderId}`,
+    `Date: ${new Date(order.createdAt).toLocaleString()}`,
+    `Seller: ${order.sellerName || "—"}`,
+    `Buyer: ${order.buyerName || "—"}`,
+    `Buyer phone: ${order.buyerPhone || "—"}`,
+    `Delivery location: ${order.buyerLocation || "—"}`,
+    `Payment method: ${formatPaymentMethod(order.paymentMethod)}`,
+    `Status: ${order.ORDER_STATUS || order.status || "—"}`,
+    "",
+    "Items:",
+    ...lines,
+    "",
+    `TOTAL: ${formatInvoiceAmount(order.total)}`,
+  ].join("\n")
 }
 
 const trackShell =
@@ -284,6 +319,7 @@ function TrackOrderPageInner() {
   const [addressDraft, setAddressDraft] = useState("")
   const [addressBusy, setAddressBusy] = useState(false)
   const [editingAddress, setEditingAddress] = useState(false)
+  const [invoiceOpen, setInvoiceOpen] = useState(false)
   /** Opaque 5-char code for share links (from API). */
   const [publicToken, setPublicToken] = useState<string | null>(null)
 
@@ -540,6 +576,7 @@ function TrackOrderPageInner() {
 
   const steps = buildTracking(order.status)
   const sellerPhoneNormalized = normalizePhone(order.sellerPhone)
+  const canShowInvoice = canShowInvoiceActions(order.ORDER_STATUS)
   const displayBuyerLocation =
     buyerAddressOverride !== undefined ? buyerAddressOverride : (order.buyerLocation ?? "")
   const canEditDeliveryAddress = order.status !== "delivered" && order.status !== "cancelled"
@@ -595,6 +632,33 @@ function TrackOrderPageInner() {
   ].filter(Boolean).join("\n")
 
   const whatsappHref = sellerPhoneNormalized ? waHrefFor(sellerPhoneNormalized, whatsappMessage) : ""
+
+  const downloadInvoice = () => {
+    const content = buildInvoiceText(order)
+    const doc = new jsPDF({ unit: "pt", format: "a4" })
+    const pageWidth = doc.internal.pageSize.getWidth()
+    const pageHeight = doc.internal.pageSize.getHeight()
+    const margin = 40
+    const maxTextWidth = pageWidth - margin * 2
+
+    doc.setFont("helvetica", "normal")
+    doc.setFontSize(11)
+
+    const wrappedLines = doc.splitTextToSize(content, maxTextWidth) as string[]
+    const lineHeight = 16
+    let y = margin
+
+    for (const line of wrappedLines) {
+      if (y > pageHeight - margin) {
+        doc.addPage()
+        y = margin
+      }
+      doc.text(line, margin, y)
+      y += lineHeight
+    }
+
+    doc.save(`invoice-order-${String(order.orderId)}.pdf`)
+  }
 
   return (
     <div className={trackShell}>
@@ -883,6 +947,30 @@ function TrackOrderPageInner() {
             </Card>
           )}
 
+          {canShowInvoice && (
+            <Card className="border-0 shadow-xl rounded-2xl border-indigo-100 bg-white text-slate-900">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FileText className="h-5 w-5 text-indigo-600" />
+                  Invoice
+                </CardTitle>
+                <CardDescription>
+                  Your order reached invoice stage ({order.ORDER_STATUS || "INVOICE"}). You can view or download it.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" onClick={() => setInvoiceOpen(true)}>
+                  <Eye className="h-4 w-4 mr-2" />
+                  View invoice
+                </Button>
+                <Button type="button" onClick={downloadInvoice} className="bg-indigo-600 hover:bg-indigo-700">
+                  <Download className="h-4 w-4 mr-2" />
+                  Download invoice
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Driver contact (when in transit) */}
           {(order.status === "in-transit" && (order.driverPhone || order.sellerPhone)) && (
             <Card className="border-0 shadow-xl rounded-2xl border-blue-100 bg-white text-slate-900">
@@ -1006,7 +1094,7 @@ function TrackOrderPageInner() {
                       <p className="font-medium">{item.name}</p>
                       <p className="text-sm text-muted-foreground">
                         {item.qty} × {item.unitPrice.toLocaleString()} RWF
-                        {item.unit && ` (${item.unit})`}
+                        {unitMeaningfulForDisplay(item.unit) ? ` (${item.unit})` : ""}
                       </p>
                     </div>
                     <p className="font-bold">{(item.qty * item.unitPrice).toLocaleString()} RWF</p>
@@ -1115,6 +1203,27 @@ function TrackOrderPageInner() {
               }}
             >
               Not yet / still pending
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={invoiceOpen} onOpenChange={setInvoiceOpen}>
+        <DialogContent className="max-w-[min(100vw,720px)] border-0 bg-white text-slate-900 sm:rounded-2xl">
+          <DialogHeader>
+            <DialogTitle>Invoice — Order #{order.orderId}</DialogTitle>
+            <DialogDescription>Preview invoice details for this order.</DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[60vh] overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <pre className="whitespace-pre-wrap text-sm text-slate-800">{buildInvoiceText(order)}</pre>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setInvoiceOpen(false)}>
+              Close
+            </Button>
+            <Button type="button" onClick={downloadInvoice} className="bg-indigo-600 hover:bg-indigo-700">
+              <Download className="h-4 w-4 mr-2" />
+              Download
             </Button>
           </DialogFooter>
         </DialogContent>

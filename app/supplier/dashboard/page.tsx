@@ -1,8 +1,9 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { LanguageSelector } from "@/components/language-selector";
 import { useAuthStore } from "@/lib/auth-store";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,6 +28,8 @@ import {
   Plus,
   Package,
   TrendingUp,
+  Trophy,
+  Sparkles,
   LogOut,
   AlertTriangle,
   Edit,
@@ -41,6 +44,45 @@ import {
 import Link from "next/link";
 import AddProductModal, { ProductFormData } from "@/components/supplier/AddProductModal";
 import { isRestoBarPreferredCategories } from "@/lib/supplier-sector";
+import {
+  lineCostPriceFromProductRow,
+  lineSellingPriceFromProductRow,
+  resolveItemEmballageRaw,
+  sellableStockFromPacketEmballage,
+} from "@/lib/package-price";
+import { formatItemEmballageMultiplierOnly } from "@/lib/cart-display-utils";
+import { parseItemStateBatchExpiry } from "@/lib/item-state-display";
+import { SupplierProductTableImage } from "@/components/supplier-product-table-image";
+import { ResponsiveTable } from "@/components/ui/responsive-table";
+import { cn } from "@/lib/utils";
+
+/** Redis / API may send last_sync_time, LAST_SYNC_TIME, or lastSyncTime */
+function parseSupplierProductLastSyncMs(p: Record<string, unknown>): number | null {
+  const raw =
+    p.last_sync_time ??
+    p.LAST_SYNC_TIME ??
+    p.lastSyncTime ??
+    p.last_sync;
+  if (raw == null || String(raw).trim() === "") return null;
+  const s = String(raw).trim();
+  const normalized = s.includes("T") ? s : s.replace(/^(\d{4}-\d{2}-\d{2}) (\d)/, "$1T$2");
+  const d = new Date(normalized);
+  return Number.isNaN(d.getTime()) ? null : d.getTime();
+}
+
+function formatSupplierProductLastSync(p: Record<string, unknown>): string {
+  const ms = parseSupplierProductLastSyncMs(p);
+  if (ms != null) {
+    return new Date(ms).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
+  }
+  const raw =
+    p.last_sync_time ??
+    p.LAST_SYNC_TIME ??
+    p.lastSyncTime ??
+    p.last_sync;
+  if (raw == null || String(raw).trim() === "") return "—";
+  return String(raw).trim();
+}
 
 const QRCode = dynamic(() => import("react-qr-code"), { ssr: false });
 
@@ -55,6 +97,8 @@ function SupplierDashboard() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /** Bump to refetch stock silently (interval / tab visible) without full-page spinner */
+  const [stockRefreshKey, setStockRefreshKey] = useState(0);
 
   // Add Product Modal state
   const [showAddModal, setShowAddModal] = useState(false);
@@ -89,7 +133,7 @@ function SupplierDashboard() {
     if (!user?.ishyigaAccount || user?.role !== "supplier") return;
     fetch(`/api/supplier/profile?account=${encodeURIComponent(user.ishyigaAccount)}`)
       .then((res) => res.json())
-      .then((data) => {
+      .then(async (data) => {
         const isRestoBar = isRestoBarPreferredCategories(data?.preferredCategories);
         if (isRestoBar) {
           setShowBarOrRestaurantOption(true);
@@ -127,17 +171,22 @@ function SupplierDashboard() {
       return;
     }
 
-    setLoading(true);
-    setError(null);
+    const showFullLoading = stockRefreshKey === 0;
+    if (showFullLoading) {
+      setLoading(true);
+      setError(null);
+    }
 
-    fetch(`/api/supplier/stock?account=${user.ishyigaAccount}`)
+    fetch(`/api/supplier/stock?account=${encodeURIComponent(user.ishyigaAccount)}&_=${Date.now()}`, {
+      cache: "no-store",
+    })
       .then((res) => {
         if (!res.ok) {
           throw new Error(`HTTP error! status: ${res.status}`);
         }
         return res.json();
       })
-      .then((data) => {
+      .then(async (data) => {
         console.log("=== API Response ===");
         console.log("Full data:", data);
         console.log("Products array:", data.products);
@@ -147,6 +196,8 @@ function SupplierDashboard() {
         if (!data.ok) {
           throw new Error(data.error || "API returned ok: false");
         }
+
+        setError(null);
 
         const products = data.products || [];
         console.log(`Received ${products.length} products from ${data.source}`);
@@ -185,6 +236,13 @@ function SupplierDashboard() {
         };
 
         // Map products - handle Redis format (your format)
+        const buildBatchState = (product: any): string => {
+          const batch = String(product?.BATCH ?? product?.batch ?? "").trim();
+          const exp = String(product?.DATE_EXP ?? product?.date_exp ?? product?.EXPIRE_DATE ?? "").trim();
+          if (!batch && !exp) return "";
+          return `Ba:${batch || "NA"}| Ex:${exp || "NA"}`;
+        };
+
         const mappedProducts = products.map((p: any, index: number) => {
           console.log(`Product ${index}:`, p);
 
@@ -194,8 +252,11 @@ function SupplierDashboard() {
           let mapped;
 
           if (isRedisFormat) {
-            // Handle Redis format: price only from selling_price; item_emballage passed through as-is (empty remains empty)
-            const stock = parseIntSafe(p.item_packet);
+            // Handle Redis format: price only from selling_price; stock = item_packet / item_emballage
+            const stock = sellableStockFromPacketEmballage(
+              p.item_packet,
+              resolveItemEmballageRaw(p)
+            );
             const price = p.selling_price != null ? parsePrice(String(p.selling_price)) : 0;
 
             mapped = {
@@ -213,28 +274,30 @@ function SupplierDashboard() {
               COST_PRICE_INCLUSIVE: Number(p.cost_price ?? p.cost ?? 0),
               category: p.item_category || p.category || "uncategorized",
               sales: 0,
-              batchInfo: p.item_state || "",
-              DESCRIPTION: p.item_description || p.item_state || "",
+              batchInfo: p.item_state || buildBatchState(p) || "",
+              DESCRIPTION: p.item_description || p.item_state || buildBatchState(p) || "",
               UNIT: p.item_unit || "PCS",
               currency: p.currency ?? "RWF",
-              imageUrl: p.item_image_url || p.IMAGE_URL || p.image_url || ""
+              imageUrl:
+                p.item_image_url || p.IMAGE_URL || p.image_url || (p as { image?: string }).image || "",
+              famille: p.famille ?? (p as { FAMILLE?: string }).FAMILLE,
+              last_sync_time:
+                p.last_sync_time ?? p.LAST_SYNC_TIME ?? p.lastSyncTime ?? p.last_sync ?? "",
             };
           } else {
             // Handle database format (fallback)
             const price = parsePrice(
               p.selling_price ?? (p.price || p.UNITY_PRICE || p.SALE_PRICE_INCLUSIVE || 0)
             );
+            const stock = sellableStockFromPacketEmballage(
+              p.item_packet ?? p.stock ?? p.STOCK ?? p.QUANTITY ?? 0,
+              resolveItemEmballageRaw(p)
+            );
 
             mapped = {
               ...p, // Keep all original fields
               // Normalize field names - handle database, Redis, and API variations
-              stock: Number(
-                p.stock ||
-                p.STOCK ||
-                p.item_packet ||
-                p.QUANTITY ||
-                0
-              ),
+              stock: stock,
               price: price,
               costPrice: Number(
                 p.cost_price ??
@@ -252,11 +315,15 @@ function SupplierDashboard() {
                 p.itemCode ||
                 p.item_key_words ||
                 "",
-              batchInfo: p.item_state || p.DESCRIPTION || "",
+              batchInfo: p.item_state || buildBatchState(p) || p.DESCRIPTION || "",
               category: p.category || "uncategorized",
               sales: 0,
               currency: p.currency ?? "RWF",
-              imageUrl: p.IMAGE_URL || p.image_url || p.item_image_url || "",
+              imageUrl:
+                p.IMAGE_URL || p.image_url || p.item_image_url || (p as { image?: string }).image || "",
+              famille: p.famille ?? (p as { FAMILLE?: string }).FAMILLE,
+              last_sync_time:
+                p.last_sync_time ?? p.LAST_SYNC_TIME ?? p.lastSyncTime ?? p.last_sync ?? "",
             };
           }
 
@@ -268,8 +335,35 @@ function SupplierDashboard() {
         console.log(mappedProducts);
         console.log(`Total: ${mappedProducts.length}`);
 
+        let finalProducts = mappedProducts;
+        try {
+          const mapRes = await fetch(
+            `/api/images/overrides?scope=product&account=${encodeURIComponent(user.ishyigaAccount ?? "")}`,
+            { cache: "no-store" }
+          );
+          const mapData = await mapRes.json().catch(() => ({}));
+          const imageMap = (mapData?.map ?? {}) as Record<string, string>;
+          if (imageMap && typeof imageMap === "object" && Object.keys(imageMap).length > 0) {
+            finalProducts = mappedProducts.map((row: any) => {
+              const code = String(row.itemCode || row.ITEM_CODE || "").trim().toUpperCase();
+              const override = code ? imageMap[code] : "";
+              if (!override) return row;
+              return {
+                ...row,
+                imageUrl: override,
+                image_url: override,
+                item_image_url: override,
+                IMAGE_URL: override,
+                image: override,
+              };
+            });
+          }
+        } catch {
+          // keep backend-provided images when overrides fetch fails
+        }
+
         // Don't filter by stock > 0, show ALL products
-        setSupplierProducts(mappedProducts);
+        setSupplierProducts(finalProducts);
         setLoading(false);
       })
       .catch((err) => {
@@ -277,7 +371,20 @@ function SupplierDashboard() {
         setError(err.message);
         setLoading(false);
       });
-  }, [isAuthenticated, user?.ishyigaAccount, user?.role, router]);
+  }, [isAuthenticated, user?.ishyigaAccount, user?.role, router, stockRefreshKey]);
+
+  useEffect(() => {
+    if (!user?.ishyigaAccount || user?.role !== "supplier") return;
+    const id = window.setInterval(() => setStockRefreshKey((k) => k + 1), 45_000);
+    const onVis = () => {
+      if (document.visibilityState === "visible") setStockRefreshKey((k) => k + 1);
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [user?.ishyigaAccount, user?.role]);
 
   useEffect(() => {
     if (!user?.ishyigaAccount || user?.role !== "supplier") return;
@@ -286,7 +393,7 @@ function SupplierDashboard() {
 
     const fetchAnalytics = async () => {
       try {
-        const res = await fetch(`/api/supplier/analytics?account=${encodeURIComponent(user.ishyigaAccount)}`, {
+        const res = await fetch(`/api/supplier/analytics?account=${encodeURIComponent(user.ishyigaAccount ?? "")}`, {
           cache: "no-store",
         })
         const data = await res.json().catch(() => null)
@@ -311,9 +418,28 @@ function SupplierDashboard() {
 
   // Filter products
   const filteredProducts = supplierProducts.filter((p) => {
+    const stateFromBatchColumns =
+      p.BATCH || p.DATE_EXP ? `Ba:${p.BATCH || "NA"}| Ex:${p.DATE_EXP || "NA"}` : "";
+    const stateRaw = String(
+      p.item_state ??
+      p.batchInfo ??
+      (stateFromBatchColumns || p.DESCRIPTION || "")
+    );
+    const stateHay = stateRaw.toLowerCase();
+    const { batch, expiryLabel } = parseItemStateBatchExpiry(
+      stateRaw
+    );
+    const batchHay = (batch ?? "").toLowerCase();
+    const expHay = (expiryLabel ?? "").toLowerCase();
+    const q = searchTerm.toLowerCase();
     const matchesSearch =
-      p.itemName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.ITEM_NAME?.toLowerCase().includes(searchTerm.toLowerCase());
+      p.itemName?.toLowerCase().includes(q) ||
+      p.ITEM_NAME?.toLowerCase().includes(q) ||
+      (p.itemCode && String(p.itemCode).toLowerCase().includes(q)) ||
+      (p.ITEM_CODE && String(p.ITEM_CODE).toLowerCase().includes(q)) ||
+      stateHay.includes(q) ||
+      batchHay.includes(q) ||
+      expHay.includes(q);
     const matchesCategory =
       categoryFilter === "all" || p.category === categoryFilter;
     const matchesStatus =
@@ -339,10 +465,69 @@ function SupplierDashboard() {
   const totalProducts = supplierProducts.length;
   const lowStock = supplierProducts.filter((p) => p.stock <= 10 && p.stock > 0).length;
   const outOfStock = supplierProducts.filter((p) => p.stock === 0).length;
-  const totalValue = supplierProducts.reduce(
-    (sum, p) => sum + p.price * p.stock,
-    0
-  );
+  const totalValue = supplierProducts.reduce((sum, p) => {
+    const pr = p as Record<string, unknown>;
+    const lineCost = lineCostPriceFromProductRow(pr);
+    return sum + lineCost * Number(p.stock ?? 0);
+  }, 0);
+
+  const latestInventorySyncLabel = (() => {
+    let best: number | null = null;
+    for (const p of supplierProducts) {
+      const t = parseSupplierProductLastSyncMs(p as Record<string, unknown>);
+      if (t != null && (best == null || t > best)) best = t;
+    }
+    if (best == null) return null;
+    return new Date(best).toLocaleString(undefined, {
+      dateStyle: "short",
+      timeStyle: "short",
+    });
+  })();
+
+  const bestSellingHero = useMemo(() => {
+    if (!analytics?.bestSelling?.length) return null;
+    const top = analytics.bestSelling[0];
+    const lineTotal = analytics.bestSelling.reduce((s, x) => s + Number(x.total ?? 0), 0);
+    const pct =
+      lineTotal > 0 ? Math.min(100, Math.round((Number(top.total ?? 0) / lineTotal) * 100)) : null;
+    return { top, pct, lineTotal };
+  }, [analytics]);
+
+  const topUpSaleBullets = useMemo(() => {
+    const bullets: string[] = [];
+    if (analytics?.bestSelling?.[0]) {
+      const b = analytics.bestSelling[0];
+      bullets.push(
+        `Restock priority: “${b.name}” led today with ${b.quantity} units sold (${Number(b.total ?? 0).toLocaleString()} RWF).`,
+      );
+    }
+    if (analytics?.bestSelling?.[1]) {
+      const b = analytics.bestSelling[1];
+      bullets.push(
+        `Runner-up: “${b.name}” · ${b.quantity} units · ${Number(b.total ?? 0).toLocaleString()} RWF.`,
+      );
+    }
+    const low = supplierProducts.filter((p) => p.stock <= 10 && p.stock > 0).slice(0, 2);
+    for (const p of low) {
+      const nm = String(p.itemName || p.ITEM_NAME || "Product").trim();
+      bullets.push(`Low stock: ${nm} — only ${p.stock} left. Top up before it runs out.`);
+    }
+    if (
+      analytics &&
+      analytics.dailyOrdersCount > 0 &&
+      (!analytics.bestSelling || analytics.bestSelling.length === 0)
+    ) {
+      bullets.push(
+        "Orders are recorded for today, but line items were empty. Deploy the latest backend (SellerOrdersServlet fix) and refresh — best-selling names will appear here.",
+      );
+    }
+    if (bullets.length === 0) {
+      bullets.push(
+        "Fulfill orders and keep fast movers in stock — tailored tips appear here from your live sales and inventory.",
+      );
+    }
+    return bullets.slice(0, 4);
+  }, [analytics, supplierProducts]);
 
   const handleDelete = async (product: any) => {
     const itemName = product.ITEM_NAME || product.itemName || "this product";
@@ -378,6 +563,7 @@ function SupplierDashboard() {
     try {
       const action = editingProduct ? "updateProduct" : "addProduct";
 
+      const { imageFile: _imageFile, ...productJson } = productData;
       const res = await fetch("/api/supplier/stock", {
         method: "POST",
         headers: {
@@ -386,13 +572,32 @@ function SupplierDashboard() {
         body: JSON.stringify({
           action,
           account: user.ishyigaAccount,
-          ...productData,
+          ...productJson,
         }),
       });
 
       const data = await res.json();
 
       if (data.ok) {
+        if (productData.imageFile) {
+          const normalizedCode = String(productData.itemCode || "").trim().toUpperCase();
+          if (!normalizedCode) {
+            throw new Error("Product code is required before image upload");
+          }
+          const fd = new FormData();
+          fd.append("scope", "product");
+          fd.append("account", user.ishyigaAccount);
+          fd.append("itemCode", normalizedCode);
+          fd.append("file", productData.imageFile);
+          const imgRes = await fetch("/api/images/overrides", {
+            method: "POST",
+            body: fd,
+          });
+          const imgJson = await imgRes.json().catch(() => ({}));
+          if (!imgRes.ok || !imgJson?.ok) {
+            throw new Error(imgJson?.error || "Product saved but image upload failed");
+          }
+        }
         // Refresh the products list
         window.location.reload();
       } else {
@@ -406,9 +611,9 @@ function SupplierDashboard() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-b-2 border-blue-600"></div>
           <p className="text-slate-600">Loading products...</p>
         </div>
       </div>
@@ -417,7 +622,7 @@ function SupplierDashboard() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100">
         <Card className="max-w-md">
           <CardHeader>
             <CardTitle className="text-red-600">Error</CardTitle>
@@ -434,111 +639,136 @@ function SupplierDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
+    <div className="min-h-0 bg-gradient-to-br from-slate-50 to-slate-100 text-slate-900">
       {/* Header */}
-      <header className="bg-white border-b shadow-sm sticky top-0 z-10">
-        <div className="container mx-auto px-6 py-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">
-              {user?.businessName || "Supplier Dashboard"}
-            </h1>
-            <p className="text-sm text-slate-600">
-              {user?.businessCategory || "Supplier Panel"} • Account: {user?.ishyigaAccount}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" asChild className="gap-2">
-              <Link href="/account">
-                <User className="h-4 w-4" />
-                My profile
-              </Link>
-            </Button>
-            {user?.dualPharmacyRetail && (
+      <header className="border-b border-slate-200 bg-white shadow-sm">
+        <div className="container mx-auto space-y-4 px-4 py-4 sm:px-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <h1 className="text-2xl font-bold text-slate-900">
+                {user?.businessName || "Supplier Dashboard"}
+              </h1>
+              <p className="break-words text-sm text-slate-600">
+                {user?.businessCategory || "Supplier Panel"} • Account: {user?.ishyigaAccount}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <LanguageSelector />
               <Button variant="ghost" asChild className="gap-2">
-                <Link href="/buyer/orders">
-                  <Package className="h-4 w-4" />
-                  My purchases
+                <Link href="/account">
+                  <User className="h-4 w-4" />
+                  My profile
                 </Link>
               </Button>
-            )}
-            <Button variant="outline" onClick={handleLogout} className="gap-2">
-              <LogOut className="h-4 w-4" />
-              Logout
-            </Button>
+              {user?.dualPharmacyRetail && (
+                <Button variant="ghost" asChild className="gap-2">
+                  <Link href="/buyer/orders">
+                    <Package className="h-4 w-4" />
+                    My purchases
+                  </Link>
+                </Button>
+              )}
+              <Button variant="outline" onClick={handleLogout} className="gap-2">
+                <LogOut className="h-4 w-4" />
+                Logout
+              </Button>
+            </div>
           </div>
         </div>
       </header>
 
-      <div className="container mx-auto px-6 py-8">
-
-
+      <div className="container mx-auto px-4 sm:px-6 py-6 sm:py-8">
         {/* Stats Section */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <Card className="bg-white shadow-md hover:shadow-lg transition-shadow">
+          <Card className="bg-card shadow-md transition-shadow hover:shadow-lg">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-slate-600">
+              <CardTitle className="text-sm font-medium text-slate-600 ">
+                Daily Sales
+              </CardTitle>
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 ">
+                <TrendingUp className="h-5 w-5 text-emerald-600 " />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-slate-900 ">
+                {Number(analytics?.dailySalesTotal ?? 0).toLocaleString()} RWF
+              </div>
+              <p className="mt-1 text-xs text-slate-500 ">
+                {Number(analytics?.dailyOrdersCount ?? 0)} orders today
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-card shadow-md transition-shadow hover:shadow-lg">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-slate-600 ">
                 Total Products
               </CardTitle>
-              <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
-                <Package className="h-5 w-5 text-blue-600" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 ">
+                <Package className="h-5 w-5 text-blue-600 " />
               </div>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold text-slate-900">
+              <div className="text-3xl font-bold text-slate-900 ">
                 {totalProducts}
               </div>
-              <p className="text-xs text-slate-500 mt-1">All products</p>
+              <p className="mt-1 text-xs text-slate-500 ">All products</p>
+              {latestInventorySyncLabel != null && (
+                <p className="mt-1.5 border-t border-slate-100 pt-1 text-xs text-slate-500">
+                  Last sync  {latestInventorySyncLabel}
+                </p>
+              )}
             </CardContent>
           </Card>
 
-          <Card className="bg-white shadow-md hover:shadow-lg transition-shadow">
+          <Card className="bg-card shadow-md transition-shadow hover:shadow-lg">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-slate-600">
+              <CardTitle className="text-sm font-medium text-slate-600 ">
                 Inventory Value
               </CardTitle>
-              <div className="h-10 w-10 rounded-full bg-green-100 flex items-center justify-center">
-                <TrendingUp className="h-5 w-5 text-green-600" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-100 ">
+                <TrendingUp className="h-5 w-5 text-green-600 " />
               </div>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold text-slate-900">
+              <div className="text-3xl font-bold text-slate-900 ">
                 {totalValue.toLocaleString()} RWF
               </div>
-              <p className="text-xs text-slate-500 mt-1">Total stock value</p>
+              <p className="mt-1 text-xs text-slate-500 ">Total stock value</p>
             </CardContent>
           </Card>
 
-          <Card className="bg-white shadow-md hover:shadow-lg transition-shadow">
+          <Card className="bg-card shadow-md transition-shadow hover:shadow-lg">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-slate-600">
+              <CardTitle className="text-sm font-medium text-slate-600 ">
                 Low Stock Items
               </CardTitle>
-              <div className="h-10 w-10 rounded-full bg-yellow-100 flex items-center justify-center">
-                <AlertTriangle className="h-5 w-5 text-yellow-600" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-yellow-100 ">
+                <AlertTriangle className="h-5 w-5 text-yellow-600 " />
               </div>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold text-yellow-700">
+              <div className="text-3xl font-bold text-yellow-700 ">
                 {lowStock}
               </div>
-              <p className="text-xs text-slate-500 mt-1">Items below 10 units</p>
+              <p className="mt-1 text-xs text-slate-500 ">Items below 10 units</p>
             </CardContent>
           </Card>
 
-          <Card className="bg-white shadow-md hover:shadow-lg transition-shadow">
+          <Card className="bg-card shadow-md transition-shadow hover:shadow-lg">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-slate-600">
+              <CardTitle className="text-sm font-medium text-slate-600 ">
                 Out of Stock
               </CardTitle>
-              <div className="h-10 w-10 rounded-full bg-red-100 flex items-center justify-center">
-                <AlertTriangle className="h-5 w-5 text-red-600" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-red-100 ">
+                <AlertTriangle className="h-5 w-5 text-red-600 " />
               </div>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold text-red-700">
+              <div className="text-3xl font-bold text-red-700 ">
                 {outOfStock}
               </div>
-              <p className="text-xs text-slate-500 mt-1">Items with 0 stock</p>
+              <p className="mt-1 text-xs text-slate-500 ">Items with 0 stock</p>
             </CardContent>
           </Card>
         </div>
@@ -548,19 +778,31 @@ function SupplierDashboard() {
           const lowStockList = supplierProducts.filter((p) => p.stock <= 10 && p.stock > 0).slice(0, 5);
           if (lowStockList.length === 0) return null;
           return (
-            <Card className="bg-white shadow-md mb-6">
+            <Card className="mb-6 bg-card shadow-md">
               <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-yellow-700">Low stock alerts</CardTitle>
+                <CardTitle className="text-sm font-medium text-yellow-700 ">Low stock alerts</CardTitle>
                 <Button variant="ghost" size="sm" onClick={() => setStatusFilter("low")}>
                   View all ({lowStock})
                 </Button>
               </CardHeader>
               <CardContent>
-                <ul className="text-sm space-y-1">
+                <ul className="space-y-0 divide-y divide-slate-100 text-sm ">
                   {lowStockList.map((p) => (
-                    <li key={p.itemCode || p.ITEM_CODE} className="flex justify-between">
-                      <span className="truncate">{p.itemName || p.ITEM_NAME}</span>
-                      <span className="text-yellow-700 font-medium">{p.stock ?? p.STOCK} left</span>
+                    <li
+                      key={p.itemCode || p.ITEM_CODE}
+                      className="flex items-start justify-between gap-3 py-2 first:pt-0"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <span className="block truncate text-slate-900 ">
+                          {p.itemName || p.ITEM_NAME}
+                        </span>
+                        <span className="mt-0.5 block text-xs text-slate-500 ">
+                          Last sync: {formatSupplierProductLastSync(p as Record<string, unknown>)}
+                        </span>
+                      </div>
+                      <span className="text-yellow-700 font-medium shrink-0">
+                        {p.stock ?? p.STOCK} left
+                      </span>
                     </li>
                   ))}
                 </ul>
@@ -569,55 +811,134 @@ function SupplierDashboard() {
           );
         })()}
 
-        {/* Daily sales & best-selling */}
+        {/* Best selling + Top-up sale — shop insights */}
         {analytics && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-            <Card className="bg-white shadow-md">
-              <CardHeader>
-                <CardTitle className="text-sm font-medium text-slate-600">Today&apos;s sales</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-slate-900">
-                  {analytics.dailySalesTotal.toLocaleString()} RWF
+          <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Card
+              className={cn(
+                "relative overflow-hidden border-amber-200/90 bg-gradient-to-br from-amber-50 via-white to-orange-50 shadow-md",
+              )}
+            >
+              <div
+                className="pointer-events-none absolute -right-8 -top-8 h-28 w-28 rounded-full bg-amber-200/25 blur-2xl"
+                aria-hidden
+              />
+              <CardHeader className="pb-2">
+                <div className="flex items-start gap-3">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 text-white shadow-md shadow-amber-500/20">
+                    <Trophy className="h-5 w-5" strokeWidth={2.2} aria-hidden />
+                  </span>
+                  <div className="min-w-0">
+                    <CardTitle className="text-xs font-extrabold uppercase tracking-[0.12em] text-amber-900/80">
+                      Best selling today
+                    </CardTitle>
+                    <CardDescription className="mt-0.5 text-[11px] font-medium text-slate-600">
+                      {analytics.dailyOrdersCount} orders today · ranked by units sold
+                    </CardDescription>
+                  </div>
                 </div>
-                <p className="text-xs text-slate-500 mt-1">{analytics.dailyOrdersCount} orders today</p>
+              </CardHeader>
+              <CardContent className="pt-0">
+                {bestSellingHero ? (
+                  <>
+                    <h3 className="line-clamp-3 text-xl font-black leading-snug tracking-tight text-slate-900">
+                      {bestSellingHero.top.name}
+                    </h3>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <span className="inline-flex items-center rounded-full border border-amber-200 bg-white/95 px-2.5 py-1 text-[11px] font-bold text-amber-950 shadow-sm">
+                        {bestSellingHero.top.quantity.toLocaleString()}{" "}
+                        <span className="ml-1 font-semibold opacity-80">units sold</span>
+                      </span>
+                      {bestSellingHero.pct != null ? (
+                        <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-950">
+                          {bestSellingHero.pct}% of today&apos;s line revenue ·{" "}
+                          {Number(bestSellingHero.top.total ?? 0).toLocaleString()} RWF
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-bold text-slate-800">
+                          {Number(bestSellingHero.top.total ?? 0).toLocaleString()} RWF line total
+                        </span>
+                      )}
+                    </div>
+                    {analytics.bestSelling.length > 1 ? (
+                      <ul className="mt-4 space-y-2 border-t border-amber-100/90 pt-3 text-sm">
+                        {analytics.bestSelling.slice(1, 5).map((item, i) => (
+                          <li key={i} className="flex justify-between gap-3 text-slate-700">
+                            <span className="min-w-0 truncate font-medium">{item.name}</span>
+                            <span className="shrink-0 text-right text-xs font-semibold text-slate-600">
+                              {item.quantity} · {Number(item.total ?? 0).toLocaleString()} RWF
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </>
+                ) : (
+                  <div className="space-y-2">
+                    {analytics.dailyOrdersCount > 0 ? (
+                      <p className="text-sm font-medium leading-relaxed text-amber-900/90">
+                        We see {analytics.dailyOrdersCount} orders today, but no product lines were returned for
+                        aggregation. After updating the backend, pull to refresh — your #1 product name will show
+                        here.
+                      </p>
+                    ) : (
+                      <p className="text-sm text-slate-600">No orders yet today — best seller appears when you have sales.</p>
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
-            <Card className="bg-white shadow-md">
-              <CardHeader>
-                <CardTitle className="text-sm font-medium text-slate-600">Best selling</CardTitle>
+
+            <Card className="border-emerald-200/80 bg-gradient-to-b from-emerald-50/90 to-white shadow-md">
+              <CardHeader className="pb-2">
+                <div className="flex items-start gap-3">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-md shadow-emerald-600/20">
+                    <Sparkles className="h-5 w-5" strokeWidth={2.2} aria-hidden />
+                  </span>
+                  <div className="min-w-0">
+                    <CardTitle className="text-xs font-extrabold uppercase tracking-[0.12em] text-emerald-900/80">
+                      Top-up sale
+                    </CardTitle>
+                    <CardDescription className="mt-0.5 text-[11px] font-medium text-slate-600">
+                      Stock and revenue actions for your shop
+                    </CardDescription>
+                  </div>
+                </div>
               </CardHeader>
-              <CardContent>
-                <p className="text-xs text-slate-500 mb-2">{analytics.dailyOrdersCount} orders today</p>
-                {analytics.bestSelling.length === 0 ? (
-                  <p className="text-sm text-slate-500">No orders today</p>
-                ) : (
-                  <ul className="text-sm space-y-1">
-                    {analytics.bestSelling.slice(0, 5).map((item, i) => (
-                      <li key={i} className="flex justify-between gap-4">
-                        <span className="truncate">{item.name}</span>
-                        <span className="text-right">
-                          <span className="font-medium">{item.quantity} sold</span>
-                          <span className="block text-xs text-slate-500">{Number(item.total ?? 0).toLocaleString()} RWF</span>
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+              <CardContent className="space-y-3 pt-0">
+                <ul className="space-y-2">
+                  {topUpSaleBullets.map((line, i) => (
+                    <li key={i} className="flex gap-2 text-[13px] leading-snug text-slate-900">
+                      <span
+                        className="mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500 ring-4 ring-emerald-100"
+                        aria-hidden
+                      />
+                      <span className="font-medium">{line}</span>
+                    </li>
+                  ))}
+                </ul>
+                <div className="flex flex-wrap gap-2 border-t border-emerald-100 pt-3">
+                  <Button variant="outline" size="sm" className="border-emerald-200 bg-white text-emerald-900" asChild>
+                    <a href="#supplier-products">Stock &amp; catalog</a>
+                  </Button>
+                  <Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700" asChild>
+                    <Link href="/supplier/orders">Open orders</Link>
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           </div>
         )}
 
         {/* Shop With Me QR Code — collapsible so original dashboard stays primary */}
-        <Card className="bg-white shadow-md mb-8">
+        <Card className="mb-8 bg-card shadow-md">
           <CardHeader
-            className="border-b bg-slate-50 cursor-pointer hover:bg-slate-100 transition-colors select-none"
+            className="cursor-pointer select-none border-b bg-slate-50 transition-colors hover:bg-slate-100"
             onClick={() => setShopWithMeQROpen((o) => !o)}
           >
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <Share2 className="h-6 w-6 text-blue-600 shrink-0" />
+                <Share2 className="h-6 w-6 shrink-0 text-blue-600 " />
                 <div>
                   <CardTitle className="text-xl">QR Codes</CardTitle>
                   <CardDescription className="mt-1">
@@ -682,13 +1003,13 @@ function SupplierDashboard() {
                 </div>
               )}
               {shopWithMeLink && (
-                <div className="flex flex-col sm:flex-row gap-4 items-start pt-4 border-t">
-                  <div className="bg-slate-50 p-4 rounded-lg">
+                <div className="flex flex-col items-start gap-4 border-t border-slate-200 pt-4  sm:flex-row">
+                  <div className="rounded-lg bg-slate-50 p-4 ">
                     <QRCode value={shopWithMeLink} size={180} />
                   </div>
-                  <div className="flex-1 min-w-0 space-y-2">
-                    <Label className="text-slate-600">Link (for customers)</Label>
-                    <p className="text-sm text-slate-700 break-all font-mono">{shopWithMeLink}</p>
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <Label className="text-slate-600 ">Link (for customers)</Label>
+                    <p className="break-all font-mono text-sm text-slate-700 ">{shopWithMeLink}</p>
                     <Button variant="outline" size="sm" onClick={copyShopWithMeLink} className="gap-2">
                       <Copy className="h-4 w-4" />
                       Copy link
@@ -699,16 +1020,16 @@ function SupplierDashboard() {
 
               {/* Supplier: scan to open my orders (e.g. on phone) */}
               {supplierOrdersLink && (
-                <div className="flex flex-col sm:flex-row gap-4 items-start pt-6 mt-6 border-t">
-                  <div className="bg-slate-50 p-4 rounded-lg">
+                <div className="mt-6 flex flex-col items-start gap-4 border-t border-slate-200 pt-6  sm:flex-row">
+                  <div className="rounded-lg bg-slate-50 p-4 ">
                     <QRCode value={supplierOrdersLink} size={180} />
                   </div>
-                  <div className="flex-1 min-w-0 space-y-2">
-                    <Label className="text-slate-600">Scan to open your orders</Label>
-                    <p className="text-sm text-slate-700">
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <Label className="text-slate-600 ">Scan to open your orders</Label>
+                    <p className="text-sm text-slate-700 ">
                       Scan with your phone to open this link. Log in with your supplier account — you’ll be returned here to view only your orders.
                     </p>
-                    <p className="text-sm text-slate-500 break-all font-mono">{supplierOrdersLink}</p>
+                    <p className="break-all font-mono text-sm text-slate-500 ">{supplierOrdersLink}</p>
                     <Button
                       variant="outline"
                       size="sm"
@@ -728,9 +1049,9 @@ function SupplierDashboard() {
         </Card>
 
         {/* Product Management Card */}
-        <Card className="bg-white shadow-md">
+        <Card id="supplier-products" className="bg-card scroll-mt-24 shadow-md">
           <CardHeader className="border-b bg-slate-50">
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
                 <CardTitle className="text-xl">My Products</CardTitle>
                 <CardDescription className="mt-1">
@@ -774,11 +1095,11 @@ function SupplierDashboard() {
             {/* Filters */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transform text-slate-400 " />
                 <input
                   type="text"
                   placeholder="Search by name..."
-                  className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full rounded-lg border border-slate-300 bg-background py-2 pl-10 pr-4 text-slate-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
                   value={searchTerm}
                   onChange={(e) => {
                     setSearchTerm(e.target.value);
@@ -788,7 +1109,7 @@ function SupplierDashboard() {
               </div>
 
               <select
-                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                className="w-full rounded-lg border border-slate-300 bg-background px-4 py-2 text-sm text-slate-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
                 value={categoryFilter}
                 onChange={(e) => {
                   setCategoryFilter(e.target.value);
@@ -804,7 +1125,7 @@ function SupplierDashboard() {
               </select>
 
               <select
-                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                className="w-full rounded-lg border border-slate-300 bg-background px-4 py-2 text-sm text-slate-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
                 value={statusFilter}
                 onChange={(e) => {
                   setStatusFilter(e.target.value);
@@ -835,68 +1156,169 @@ function SupplierDashboard() {
               </div>
             ) : (
               <>
-                <div className="overflow-x-auto rounded-lg border border-slate-200">
+                <ResponsiveTable className="rounded-lg border border-slate-200 " minWidth="1100px">
                   <table className="w-full">
-                    <thead className="bg-slate-100 border-b border-slate-200">
+                    <thead className="border-b border-slate-200 bg-slate-100">
                       <tr>
-                        <th className="text-left px-4 py-3 text-sm font-semibold text-slate-700">
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 ">
                           Product
                         </th>
-                        <th className="text-left px-4 py-3 text-sm font-semibold text-slate-700">
-                          Price
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 ">
+                          Selling Price
                         </th>
-                        <th className="text-center px-4 py-3 text-sm font-semibold text-slate-700">
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 ">
+                          Cost Price
+                        </th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 ">
+                          Package
+                        </th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 ">
+                          Batch
+                        </th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700  whitespace-nowrap">
+                          Expiry
+                        </th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold text-slate-700 ">
                           Stock
                         </th>
-                        <th className="text-center px-4 py-3 text-sm font-semibold text-slate-700">
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700  whitespace-nowrap">
+                          Last sync
+                        </th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold text-slate-700 ">
                           Status
                         </th>
-                        <th className="text-left px-4 py-3 text-sm font-semibold text-slate-700">
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 ">
                           Value
                         </th>
-                        <th className="text-left px-4 py-3 text-sm font-semibold text-slate-700">
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 ">
                           Image
                         </th>
-                        <th className="text-center px-4 py-3 text-sm font-semibold text-slate-700">
+                        <th className="px-4 py-3 text-center text-sm font-semibold text-slate-700 ">
                           Actions
                         </th>
                       </tr>
                     </thead>
 
-                    <tbody className="divide-y divide-slate-200">
+                    <tbody className="divide-y divide-slate-200 ">
                       {paginatedProducts.map((p, rowIndex) => {
-                        const revenue = p.price * p.stock;
                         const displayName = p.ITEM_NAME || p.itemName || "Unknown";
                         const displayCode = p.ITEM_CODE || p.itemCode || "";
                         const uniqueKey = `${displayCode}-${startIndex + rowIndex}`;
+                        const pr = p as Record<string, unknown>;
+                        const emballageRaw = resolveItemEmballageRaw(pr);
+                        const displaySelling = lineSellingPriceFromProductRow(pr);
+                        const displayCost = lineCostPriceFromProductRow(pr);
+                        const revenue = displayCost * Number(p.stock ?? 0);
+                        const emballageDisplay =
+                          formatItemEmballageMultiplierOnly(emballageRaw);
+
+                        const stateFromBatchColumns =
+                          p.BATCH || p.DATE_EXP
+                            ? `Ba:${p.BATCH || "NA"}| Ex:${p.DATE_EXP || "NA"}`
+                            : "";
+                        const itemStateRaw =
+                          p.item_state ??
+                          p.batchInfo ??
+                          (stateFromBatchColumns || p.DESCRIPTION || "");
+                        const {
+                          batch,
+                          expiryLabel,
+                          isExpired,
+                          expiryRaw,
+                          exDdMmYyEncoded,
+                          expiryAt,
+                        } = parseItemStateBatchExpiry(itemStateRaw);
+                        const expiryAsEncodedOnly = Boolean(exDdMmYyEncoded && !expiryAt);
 
                         return (
                           <tr
                             key={uniqueKey}
-                            className="hover:bg-slate-50 transition-colors"
+                            className="transition-colors hover:bg-slate-50 "
                           >
                             <td className="px-4 py-4">
                               <div className="flex items-center gap-3">
-                                <div className="h-10 w-10 rounded-lg bg-slate-200 flex items-center justify-center">
-                                  <Package className="h-5 w-5 text-slate-500" />
+                                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-200 ">
+                                  <Package className="h-5 w-5 text-slate-500 " />
                                 </div>
                                 <div>
-                                  <p className="font-medium text-slate-900">
+                                  <p className="font-medium text-slate-900 ">
                                     {displayName}
                                   </p>
-                                  <p className="text-xs text-slate-500">{displayCode}</p>
+                                  <p className="text-xs text-slate-500 ">{displayCode}</p>
                                 </div>
                               </div>
                             </td>
                             <td className="px-4 py-4">
-                              {p.price > 0 ? (
-                                <span className="font-medium text-slate-900">
-                                  {p.price.toLocaleString()} {p.currency ?? "RWF"}
+                              {displaySelling > 0 ? (
+                                <span className="whitespace-nowrap font-medium text-slate-900 ">
+                                  {displaySelling.toLocaleString()}{" "}
+                                  {p.currency ?? "RWF"}
                                 </span>
                               ) : (
                                 <span className="text-slate-400 text-sm italic">
                                   No price
                                 </span>
+                              )}
+                            </td>
+                            <td className="px-4 py-4">
+                              <span className="font-medium text-slate-900 ">
+                                {displayCost.toLocaleString(undefined, {
+                                  minimumFractionDigits: 1,
+                                  maximumFractionDigits: 1,
+                                })}{" "}
+                                {p.currency ?? "RWF"}
+                              </span>
+                            </td>
+                            <td className="max-w-[140px] px-4 py-4 text-sm text-slate-700 ">
+                              <span className="break-words" title={emballageDisplay}>
+                                {emballageDisplay}
+                              </span>
+                            </td>
+                            <td className="max-w-[120px] px-4 py-4 text-sm text-slate-700 ">
+                              {batch ? (
+                                <span className="break-words font-mono text-xs" title={batch}>
+                                  {batch}
+                                </span>
+                              ) : (
+                                <span className="text-slate-400">—</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-4 text-sm">
+                              {expiryLabel ? (
+                                <div>
+                                  <span
+                                    className={
+                                      isExpired
+                                        ? "text-red-700 font-medium"
+                                        : expiryRaw
+                                          ? "text-amber-800"
+                                          : "text-slate-800 font-mono"
+                                    }
+                                    title={
+                                      isExpired
+                                        ? "Expired (valid calendar date from Ex)"
+                                        : expiryRaw
+                                          ? "Non-standard Ex value"
+                                          : expiryAsEncodedOnly
+                                            ? "Shown as dd/mm/yy from Ex (not adjusted)"
+                                            : "Ex dd/mm/yy (valid calendar date)"
+                                    }
+                                  >
+                                    {expiryLabel}
+                                    {isExpired ? (
+                                      <span className="ml-1.5 inline-flex items-center rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-red-800">
+                                        Expired
+                                      </span>
+                                    ) : null}
+                                    {expiryRaw && !isExpired ? (
+                                      <span className="ml-1.5 inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-900">
+                                        Check
+                                      </span>
+                                    ) : null}
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-slate-400">—</span>
                               )}
                             </td>
                             <td className="px-4 py-4 text-center">
@@ -906,15 +1328,18 @@ function SupplierDashboard() {
                                     ? "text-red-600"
                                     : p.stock <= 10
                                     ? "text-yellow-600"
-                                    : "text-slate-900"
+                                    : "text-slate-900 "
                                 }`}
                               >
                                 {p.stock}
                               </span>
                             </td>
+                            <td className="whitespace-nowrap px-4 py-4 text-sm tabular-nums text-slate-600 ">
+                              {formatSupplierProductLastSync(p as Record<string, unknown>)}
+                            </td>
                             <td className="px-4 py-4 text-center">
                               <span
-                                className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
+                                className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${
                                   p.stock === 0
                                     ? "bg-red-100 text-red-700"
                                     : p.stock <= 10
@@ -927,7 +1352,7 @@ function SupplierDashboard() {
                             </td>
                             <td className="px-4 py-4">
                               {revenue > 0 ? (
-                                <span className="font-medium text-slate-900">
+                                <span className="font-medium text-slate-900 ">
                                   {revenue.toLocaleString()} RWF
                                 </span>
                               ) : (
@@ -936,19 +1361,11 @@ function SupplierDashboard() {
                                 </span>
                               )}
                             </td>
-                            <td className="px-4 py-4">
-                              {p.imageUrl ? (
-                                <a
-                                  href={p.imageUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-blue-600 hover:text-blue-800 underline text-sm"
-                                >
-                                  View Image
-                                </a>
-                              ) : (
-                                <span className="text-slate-400 text-sm">—</span>
-                              )}
+                            <td className="px-4 py-4 align-top">
+                              <SupplierProductTableImage
+                                product={p as Record<string, unknown>}
+                                alt={displayName}
+                              />
                             </td>
                             <td className="px-4 py-4">
                               <div className="flex items-center justify-center gap-2">
@@ -977,14 +1394,14 @@ function SupplierDashboard() {
                       })}
                     </tbody>
                   </table>
-                </div>
+                </ResponsiveTable>
 
                 {/* Pagination */}
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-6">
                   <div className="flex items-center gap-2">
                     <span className="text-sm text-slate-600">Show</span>
                     <select
-                      className="px-3 py-1 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                      className="rounded-lg border border-slate-300 bg-background px-3 py-1 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       value={itemsPerPage}
                       onChange={(e) => {
                         setItemsPerPage(Number(e.target.value));

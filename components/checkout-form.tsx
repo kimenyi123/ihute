@@ -3,6 +3,10 @@
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useCartStore } from "@/lib/cart-store"
+import { useAuthStore } from "@/lib/auth-store"
+import { flushCartToServer } from "@/lib/flush-cart-server"
+import { getOrCreateGuestName, useTableCommandStore } from "@/lib/table-command-store"
+import { GUEST_POOL_EMAIL, ensureGuestPoolBuyerAccount } from "@/lib/guest-checkout"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -10,6 +14,10 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { CheckoutSummary } from "@/components/checkout-summary"
+import { validateStock } from "@/lib/api/table-commands"
+import { orderErrorMessageWithProductNames } from "@/lib/order-error-display"
+import { kaosCatalogBaseUnitPrice } from "@/lib/kaos-catalog-price"
+import { parsePackageMultiplier } from "@/lib/package-price"
 import { CreditCard, Smartphone, ArrowLeft, Check, MapPin, Users } from "lucide-react"
 import Link from "next/link"
 import { useForm } from "react-hook-form"
@@ -36,13 +44,14 @@ type CheckoutFormData = z.infer<typeof checkoutSchema>
 export function CheckoutForm() {
   const router = useRouter()
   const { items, getTotalPrice, clearCart, tableInfo } = useCartStore()
+  const { user, isAuthenticated } = useAuthStore()
   const [isProcessing, setIsProcessing] = useState(false)
   const [showReview, setShowReview] = useState(false)
   const [showMap, setShowMap] = useState(false)
 
   // Check if this is a table order
-  const hasTableNumber = tableInfo?.tableNumber && tableInfo.tableNumber.trim() !== ""
-  const isTableOrder = hasTableNumber
+  const hasTableNumber = Boolean(tableInfo?.tableNumber && tableInfo.tableNumber.trim() !== "")
+  const isTableOrder: boolean = hasTableNumber
 
   const {
     register,
@@ -59,31 +68,54 @@ export function CheckoutForm() {
 
   const paymentMethod = watch("paymentMethod")
 
-  // ✅ IMPROVED: Pre-fill form with table info
+  // ✅ Get table session reactively from store
+  const tableSession = useTableCommandStore((state) => state.activeSession)
+
+  // Pre-fill from table session / guest name and table-encoded address.
   useEffect(() => {
+    const guestName = getOrCreateGuestName()
+    const sessionOrGuest = (tableSession?.userName || guestName || "").trim()
+
+    if (sessionOrGuest && sessionOrGuest !== "Guest") {
+      setValue("fullName", sessionOrGuest)
+    }
+
     if (tableInfo?.tableNumber) {
       const tableNum = tableInfo.tableNumber.trim()
-
-      // Check if tableNumber contains "Name | Address" format
       if (tableNum.includes("|")) {
-        const parts = tableNum.split("|").map(p => p.trim())
+        const parts = tableNum.split("|").map((p) => p.trim())
         if (parts.length >= 2) {
-          const [name, address] = parts
-          setValue("fullName", name)
-          setValue("address", address)
+          const [namePart, addressPart] = parts
+          setValue("address", addressPart)
+          const resolvedName = (tableSession?.userName || guestName || namePart || "").trim()
+          if (resolvedName && resolvedName !== "Guest") {
+            setValue("fullName", resolvedName)
+          }
         }
       } else {
-        // If it's just a table number, use it for both name and address
-        setValue("fullName", tableNum)
         setValue("address", tableNum)
+        if (!sessionOrGuest || sessionOrGuest === "Guest") {
+          setValue("fullName", tableNum)
+        }
       }
-
-      // Set city to shop name for context
       if (tableInfo.shopName) {
         setValue("city", tableInfo.shopName)
       }
     }
-  }, [tableInfo, setValue])
+  }, [tableInfo, tableSession, setValue])
+
+  // Prefill checkout fields for authenticated buyers (skip when table flow owns the fields).
+  useEffect(() => {
+    if (!isAuthenticated || !user) return
+    if (isTableOrder) return
+    setValue("fullName", user.name || "")
+    setValue("email", user.email || "")
+    setValue("phone", user.phone || "")
+    if (user.location) {
+      setValue("address", user.location)
+      setValue("city", user.location)
+    }
+  }, [isAuthenticated, user, setValue, isTableOrder])
 
   if (items.length === 0) {
     return (
@@ -118,11 +150,71 @@ export function CheckoutForm() {
 
     setIsProcessing(true)
     try {
+      let buyerEmail = ""
+      let buyerAccount = ""
+      let isGuestCheckout = false
+
+      if (isAuthenticated && user?.email) {
+        buyerEmail = user.email
+        buyerAccount = String(user.ishyigaAccount ?? "").trim()
+      } else {
+        // For anonymous checkout, always attach the shared guest buyer identity.
+        buyerEmail = GUEST_POOL_EMAIL
+        buyerAccount = await ensureGuestPoolBuyerAccount()
+        isGuestCheckout = true
+      }
+
+      if (!buyerEmail.trim()) {
+        throw new Error("Buyer account is missing. Please sign in or retry.")
+      }
+
+      const sellerAccount = items[0]?.supplierId || ""
+      if (sellerAccount) {
+        const stockItems = items.map((it) => {
+          const row = it as Record<string, unknown>
+          const rawCode = String(it.itemCode ?? row.item_key_words ?? row.ITEM_CODE ?? it.id ?? "").trim()
+          const itemCode = rawCode.replace(/__p\d+$/i, "") || rawCode
+          const emb = it.itemEmballage
+          const mult = parsePackageMultiplier(emb)
+          const embStr = String(mult > 0 ? mult : 1)
+          return {
+            itemCode,
+            item_key_words: itemCode,
+            ITEM_CODE: itemCode,
+            itemName: it.name,
+            quantity: it.qty,
+            unitPrice: kaosCatalogBaseUnitPrice(it.price, emb),
+            item_emballage: embStr,
+            ITEM_EMBALLAGE: embStr,
+          }
+        })
+        const validation = await validateStock(stockItems, sellerAccount)
+        if (!validation.allAvailable) {
+          const bad =
+            validation.items?.filter((i) => !i.isAvailable) ?? []
+          const detail =
+            bad.length > 0
+              ? bad
+                  .map(
+                    (i) =>
+                      `${i.itemName || i.itemCode}: need ${i.requestedQty}, available ${i.availableQty}`,
+                  )
+                  .join("\n")
+              : validation.error || "Stock could not be confirmed"
+          throw new Error(orderErrorMessageWithProductNames(detail, items))
+        }
+        if (!validation.ok && validation.error) {
+          throw new Error(orderErrorMessageWithProductNames(validation.error, items))
+        }
+      }
+
       const res = await fetch("/api/orders/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          buyerEmail: data.email || "",
+          buyerEmail,
+          ...(buyerAccount ? { buyerAccount } : {}),
+          ...(isGuestCheckout ? { isGuestCheckout: true } : {}),
           buyerName: data.fullName,
           buyerPhone: data.phone,
           buyerLocation: data.city ? `${data.address}, ${data.city}` : data.address,
@@ -144,12 +236,26 @@ export function CheckoutForm() {
           reference: data.notes || `ORDER-${Date.now()}`,
           currency: "RWF",
 
-          items: items.map((it) => ({
-            name: it.name,
-            qty: it.quantity, // ✅ Fixed: use quantity instead of qty
-            unitPrice: it.price,
-            unit: it.unit || "pcs",
-          })),
+          items: items.map((it) => {
+            const row = it as Record<string, unknown>
+            const rawCode = String(it.itemCode ?? row.item_key_words ?? row.ITEM_CODE ?? it.id ?? "").trim()
+            const itemCode = rawCode.replace(/__p\d+$/i, "") || rawCode
+            return {
+              name: it.name,
+              qty: it.qty,
+              // Persist the exact line unit price shown in cart/product cards.
+              unitPrice: it.price,
+              unit: it.unit || "pcs",
+              itemCode,
+              item_key_words: itemCode,
+              ITEM_CODE: itemCode,
+              ...(it.itemEmballage
+                ? { item_emballage: it.itemEmballage, ITEM_EMBALLAGE: it.itemEmballage }
+                : {}),
+              ...(it.item_state ? { item_state: it.item_state } : {}),
+              ...(it.expiryLabel ? { expiry_label: it.expiryLabel } : {}),
+            }
+          }),
 
           subtotal: getTotalPrice(),
         }),
@@ -158,7 +264,12 @@ export function CheckoutForm() {
       const json = await res.json()
 
       if (!res.ok || !json?.ok) {
-        throw new Error(json?.error || "Order creation failed")
+        throw new Error(
+          orderErrorMessageWithProductNames(
+            json?.error || "Order creation failed",
+            items,
+          ),
+        )
       }
 
       console.log("✅ Order created successfully:", json)
@@ -166,10 +277,13 @@ export function CheckoutForm() {
       clearCart()
       const slug = (json as { trackToken?: string }).trackToken || json.orderId
       router.push(`/track-order/${encodeURIComponent(String(slug))}`)
+      await flushCartToServer(user?.email ?? "", [])
+      router.push(`/track-order/${json.orderId}`)
 
     } catch (e: any) {
       console.error("❌ Order creation error:", e)
-      alert(e?.message || "Failed to create order. Please try again.")
+      const raw = e?.message || "Failed to create order. Please try again."
+      alert(orderErrorMessageWithProductNames(raw, items))
     } finally {
       setIsProcessing(false)
     }
@@ -219,9 +333,8 @@ export function CheckoutForm() {
                   <Input
                     id="fullName"
                     placeholder={isTableOrder ? "Table 5" : "John Doe"}
-                    {...register("fullName")}
-                    disabled={showReview || isTableOrder}
-                    className={isTableOrder ? "bg-muted" : ""}
+                    {...register("fullName", { disabled: showReview || isTableOrder })}
+                    className={isTableOrder ? "bg-muted" : undefined}
                   />
                   {isTableOrder && (
                     <p className="text-xs text-muted-foreground">
@@ -266,8 +379,7 @@ export function CheckoutForm() {
                   <Input
                     id="address"
                     placeholder={isTableOrder ? "Table 5" : "Street address, building, apartment"}
-                    {...register("address")}
-                    disabled={showReview || isTableOrder}
+                    {...register("address", { disabled: showReview || isTableOrder })}
                     className={`flex-1 ${isTableOrder ? "bg-muted" : ""}`}
                   />
                   {!isTableOrder && (

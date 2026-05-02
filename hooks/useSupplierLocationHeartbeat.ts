@@ -118,9 +118,12 @@ export function useSupplierLocationHeartbeat(opts: Options = {}) {
                 setQueueSize(result.failed)
 
                 // Trigger service worker background sync
-                if ('serviceWorker' in navigator && 'sync' in ServiceWorkerRegistration.prototype) {
+                if ('serviceWorker' in navigator) {
                     const registration = await navigator.serviceWorker.ready
-                    await registration.sync.register('sync-gps-updates')
+                    const syncApi = (registration as ServiceWorkerRegistration & {
+                        sync?: { register: (tag: string) => Promise<void> }
+                    }).sync
+                    await syncApi?.register('sync-gps-updates')
                 }
             } catch (e) {
                 console.error("[GPS] Sync failed:", e)
