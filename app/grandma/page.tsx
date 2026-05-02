@@ -109,7 +109,7 @@ type BurrowsApiSeller = {
 
 type BurrowsApiResponse = { ok: boolean; sellers?: BurrowsApiSeller[] }
 
-type LogisticsId = "human" | "bike" | "moto"
+type LogisticsId = "pickup" | "human" | "bike" | "moto"
 type LogisticsOption = { id: LogisticsId; icon: string; label: string; baseRwf: number; rwfPerKm: number }
 
 /** Buyer chooses delivery vs collecting at shop — avoids mixing modes. */
@@ -277,6 +277,7 @@ const GRANDMA_LABELS: Record<
     eta: string
     etaSub: string
     etaSubNoMode: string
+    logisticsFeesHint: string
     paymentModeSection: string
     shopsIntro: string
     sortDistance: string
@@ -305,9 +306,11 @@ const GRANDMA_LABELS: Record<
     summaryLineLogisticsRow: string
     summaryLineGrandTotal: string
     preferredBadge: string
+    logPickup: string
     logHuman: string
     logBike: string
     logMoto: string
+    etaSubPickup: string
     amountShop: string
     ihuteFees: string
     taxes: string
@@ -389,7 +392,10 @@ const GRANDMA_LABELS: Record<
       "Add your phone number — we send order updates and confirmations by SMS to this number.",
     eta: "Estimated time of arrival",
     etaSub: "From ~{km} km · {mode} delivery",
+    etaSubPickup: "Pick up at this shop · 0 RWF delivery · no courier sent to you.",
     etaSubNoMode: "~{km} km from the shop. Choose a delivery option on Summary to see arrival time.",
+    logisticsFeesHint:
+      "PickUp is 0 RWF — you collect at the shop. Human, Bike, and Moto use ~{km} km × mode rate (demo — replace with your pricing API).",
     paymentModeSection: "Payment Mode",
     sortDistance: " Sorted by distance.",
     shopsIntro:
@@ -421,6 +427,7 @@ const GRANDMA_LABELS: Record<
     summaryLineLogisticsRow: "Logistics",
     summaryLineGrandTotal: "Grand total",
     preferredBadge: "Preferred",
+    logPickup: "PickUp",
     logHuman: "Human",
     logBike: "Bike",
     logMoto: "Moto",
@@ -616,7 +623,10 @@ const GRANDMA_LABELS: Record<
       "Indiquez votre numéro de téléphone — nous y envoyons les mises à jour et confirmations de commande par SMS.",
     eta: "Heure d'arrivée estimée",
     etaSub: "Depuis ~{km} km · livraison {mode}",
+    etaSubPickup: "Retrait au magasin · 0 RWF livraison · pas de coursier vers vous.",
     etaSubNoMode: "À ~{km} km du magasin. Choisissez une livraison sur le récapitulatif pour voir l’heure d’arrivée.",
+    logisticsFeesHint:
+      "Retrait : 0 RWF — vous récupérez au magasin. À pied, vélo et moto : ~{km} km × tarif du mode (démo — remplacez par votre API).",
     paymentModeSection: "Mode de paiement",
     sortDistance: " Triés par distance.",
     shopsIntro: "Choisissez un magasin dans {cat}. Favoris et commandes passées en premier.{sort}",
@@ -647,6 +657,7 @@ const GRANDMA_LABELS: Record<
     summaryLineLogisticsRow: "Logistique",
     summaryLineGrandTotal: "Total général",
     preferredBadge: "Favori",
+    logPickup: "Retrait",
     logHuman: "À pied",
     logBike: "Vélo",
     logMoto: "Moto",
@@ -1118,10 +1129,26 @@ const INITIAL_PRODUCTS: Product[] = [
 ]
 
 const LOGISTICS: LogisticsOption[] = [
+  { id: "pickup", icon: "📦", label: "PickUp", baseRwf: 0, rwfPerKm: 0 },
   { id: "human", icon: "🚶", label: "Human", baseRwf: 150, rwfPerKm: 85 },
   { id: "bike", icon: "🚲", label: "Bike", baseRwf: 200, rwfPerKm: 110 },
   { id: "moto", icon: "🏍", label: "Moto", baseRwf: 250, rwfPerKm: 145 },
 ]
+
+function logisticsOptionDisplayLabel(id: LogisticsId, tr: (typeof GRANDMA_LABELS)[GrandmaLang]): string {
+  switch (id) {
+    case "pickup":
+      return tr.logPickup
+    case "human":
+      return tr.logHuman
+    case "bike":
+      return tr.logBike
+    case "moto":
+      return tr.logMoto
+    default:
+      return id
+  }
+}
 
 const PAYMENTS: PaymentMode[] = [
   { id: "momo", label: "MTN MoMo (Mokash loan @7%)", iconSrc: "/img/momo.png" },
@@ -1390,6 +1417,9 @@ function logisticsQuote(opt: LogisticsOption, distanceKm: number): number {
  * Human (walk) is slowest per km; moto fastest — same short trip must not beat motorbike on foot.
  */
 function deliveryEtaRange(distanceKm: number, mode: LogisticsId | null): { lo: number; hi: number } {
+  if (mode === "pickup") {
+    return { lo: 12, hi: 28 }
+  }
   const km = Math.max(0, distanceKm)
   const kmEff = Math.max(0.2, km)
   const prepMin = 7
@@ -1941,6 +1971,10 @@ export default function GrandmaPage() {
   }, [courierModalOpen])
 
   useEffect(() => {
+    if (fulfillmentMode === "pickup") setCourierModalOpen(false)
+  }, [fulfillmentMode])
+
+  useEffect(() => {
     const prefs = readGrandmaPrefs()
     setLanguage(prefs.lang)
     setPreferredShopIds(prefs.preferred)
@@ -1998,10 +2032,6 @@ export default function GrandmaPage() {
       /* ignore */
     }
   }, [fulfillmentMode, prefsHydrated])
-
-  useEffect(() => {
-    if (fulfillmentMode === "pickup") setCourierModalOpen(false)
-  }, [fulfillmentMode])
 
   useEffect(() => {
     if (appMode === "seller" || (page !== 2 && page !== 3)) setFilterSheetOpen(false)
