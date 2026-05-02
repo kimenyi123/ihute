@@ -719,7 +719,8 @@ function CartSidebar({
                     value={ci.qty}
                     onChange={(e) => {
                       const n = Number.parseInt(e.target.value, 10)
-                      if (Number.isFinite(n)) setQty(ci.id, ci.selectedUnit, Math.max(1, n))
+                      if (Number.isFinite(n))
+                        setQty(ci.id, Math.max(1, n), ci.selectedUnit, ci.lineSignature)
                     }}
                     className="h-8 w-20"
                     aria-label="Quantity"
@@ -1140,17 +1141,17 @@ export function KioskMenuGrid({
   function quickInc(item: KioskMenuItem) {
     const target = cartItems.find((ci) => matchesQuickTarget(ci, item))
     if (!target) return
-    setQty(target.id, target.selectedUnit, (target.qty ?? 0) + 1)
+    setQty(target.id, (target.qty ?? 0) + 1, target.selectedUnit, target.lineSignature)
   }
 
   function quickDec(item: KioskMenuItem) {
     const target = cartItems.find((ci) => matchesQuickTarget(ci, item))
     if (!target) return
     if ((target.qty ?? 0) <= 1) {
-      remove(target.id, target.selectedUnit)
+      remove(target.id, target.selectedUnit, target.lineSignature)
       return
     }
-    setQty(target.id, target.selectedUnit, (target.qty ?? 0) - 1)
+    setQty(target.id, (target.qty ?? 0) - 1, target.selectedUnit, target.lineSignature)
   }
 
   function quickSetQty(item: KioskMenuItem, qty: number) {
@@ -1161,10 +1162,10 @@ export function KioskMenuGrid({
       return
     }
     if (qty <= 0) {
-      remove(target.id, target.selectedUnit)
+      remove(target.id, target.selectedUnit, target.lineSignature)
       return
     }
-    setQty(target.id, target.selectedUnit, qty)
+    setQty(target.id, qty, target.selectedUnit, target.lineSignature)
   }
 
   return (
