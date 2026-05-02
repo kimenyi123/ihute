@@ -425,8 +425,12 @@ function normalizeKaosStockItemLine(
     raw.item_emballage ?? raw.ITEM_EMBALLAGE ?? raw.itemEmballage;
   const mult = parsePackageMultiplier(embRaw);
   const embStr = String(mult > 0 ? mult : 1);
+  const code = String(raw.itemCode ?? "").trim();
   return {
-    itemCode: raw.itemCode,
+    itemCode: code,
+    /** Kaos Redis + decrement match on {@code item_key_words} / {@code ITEM_CODE} */
+    item_key_words: code,
+    ITEM_CODE: code,
     itemName: raw.itemName,
     quantity,
     unitPrice: raw.unitPrice,

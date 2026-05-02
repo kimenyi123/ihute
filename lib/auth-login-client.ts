@@ -125,6 +125,19 @@ export async function loginWithCredentials(phoneOrEmail: string, password: strin
 export function userCanAccessSellerSpace(user: User | null): boolean {
   if (!user) return false
   if (user.role === "supplier") return true
+  /** Backend may flag twin account_seller without mapping role to supplier yet. */
+  if (user.dualPharmacyRetail) return true
   const db = user.dbRole?.toUpperCase()
   return db === "SELLER"
+}
+
+/**
+ * Grandma MODE + seller UI: same as {@link userCanAccessSellerSpace}, plus `supplier_*` ishyiga accounts
+ * when persisted auth omits role flags (e.g. older sessions).
+ */
+export function grandmaUserCanUseSellerWorkspace(user: User | null): boolean {
+  if (!user) return false
+  if (userCanAccessSellerSpace(user)) return true
+  const acc = user.ishyigaAccount?.trim() ?? ""
+  return /^supplier_/i.test(acc)
 }

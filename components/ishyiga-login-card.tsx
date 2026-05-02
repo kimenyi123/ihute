@@ -38,6 +38,8 @@ export type IshyigaLoginCardProps = {
   /** @deprecated Use `defaultPhone` */
   defaultPhoneOrEmail?: string
   registerHref?: string
+  /** Link label under the form (e.g. “Register as seller” when `registerHref` points to seller signup). */
+  registerLinkText?: string
   forgotHref?: string
   showLogo?: boolean
   className?: string
@@ -57,6 +59,7 @@ export function IshyigaLoginCard({
   defaultPhone,
   defaultPhoneOrEmail,
   registerHref = "/register/buyer",
+  registerLinkText,
   forgotHref = "/forgot-password",
   showLogo = true,
   className,
@@ -195,7 +198,7 @@ export function IshyigaLoginCard({
           <p className="text-sm text-muted-foreground">
             Don&apos;t have an account?{" "}
             <Link href={registerHref} className="font-medium text-[#1897e0] hover:underline">
-              Register here
+              {registerLinkText ?? "Register here"}
             </Link>
           </p>
         </div>

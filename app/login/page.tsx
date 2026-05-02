@@ -18,10 +18,10 @@ import {
 import { useAuthStore } from "@/lib/auth-store"
 import type { User } from "@/lib/auth-store"
 import type { ApiLoginOK } from "@/lib/auth-login-client"
-import { normalizeJavaLoginToUser, userCanAccessSellerSpace } from "@/lib/auth-login-client"
+import { grandmaUserCanUseSellerWorkspace, normalizeJavaLoginToUser } from "@/lib/auth-login-client"
 import { IshyigaLoginCard } from "@/components/ishyiga-login-card"
 import { APP_VERSION_DISPLAY } from "@/lib/app-version"
-import { GRANDMA_PATHS } from "@/lib/grandma-urls"
+import { GRANDMA_PATHS, writeGrandmaSignupRole } from "@/lib/grandma-urls"
 import { getStrongPasswordError } from "@/lib/password-policy"
 
 const isLoginDebugEnabled = false
@@ -83,7 +83,10 @@ function LoginPageInner() {
     if (typeof window === "undefined") return
     if (!decodedRedirect.startsWith("/grandma")) return
     try {
-      localStorage.setItem("grandma:mode", userCanAccessSellerSpace(user) ? "seller" : "buyer")
+      const asSeller = grandmaUserCanUseSellerWorkspace(user)
+      const mode = asSeller ? "seller" : "buyer"
+      localStorage.setItem("grandma:mode", mode)
+      writeGrandmaSignupRole(asSeller ? "seller" : "buyer")
     } catch {
       /* ignore */
     }

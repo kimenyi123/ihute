@@ -71,7 +71,7 @@ export function UmuriroBoarding() {
   const user = useAuthStore((s) => s.user)
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
   const hasHydrated = useAuthStore((s) => s.hasHydrated)
-  const updateActivity = useAuthStore((s) => s.updateActivity)
+  const touchSession = useAuthStore((s) => s.touchSession)
 
   const [mode, setMode] = useState<UmuriroMode>("quick")
   const [shopName, setShopName] = useState("")
@@ -113,8 +113,8 @@ export function UmuriroBoarding() {
   }, [])
 
   useEffect(() => {
-    if (user && isAuthenticated) updateActivity()
-  }, [user, isAuthenticated, updateActivity])
+    if (user && isAuthenticated) touchSession()
+  }, [user, isAuthenticated, touchSession])
 
   const totalRwf = useMemo(() => {
     const p = parseFloat(unitPrice.replace(",", "."))

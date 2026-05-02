@@ -68,6 +68,7 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       isAuthenticated: false,
       loginTime: null,
+      lastActivityAt: null,
       sessionTimeout: 60 * 60 * 1000, // 60 minutes
       hasHydrated: false,
 
@@ -170,6 +171,7 @@ export const useAuthStore = create<AuthState>()(
                 user: null,
                 isAuthenticated: false,
                 loginTime: null,
+                lastActivityAt: null,
                 hasHydrated: true,
               })
               return
