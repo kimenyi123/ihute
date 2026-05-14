@@ -40,6 +40,7 @@ import {
   Share2,
   Copy,
   User,
+  Layers,
 } from "lucide-react";
 import Link from "next/link";
 import AddProductModal, { ProductFormData } from "@/components/supplier/AddProductModal";
@@ -1076,6 +1077,12 @@ function SupplierDashboard() {
                   className="gap-2"
                 >
                   Bulk price update
+                </Button>
+                <Button asChild variant="outline" className="gap-2 border-emerald-200 text-emerald-900 hover:bg-emerald-50">
+                  <Link href="/register/seller?step=2">
+                    <Layers className="h-4 w-4" />
+                    Add stock from NIKI
+                  </Link>
                 </Button>
                 <Button
                   onClick={() => {

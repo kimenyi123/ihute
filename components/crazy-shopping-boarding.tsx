@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/select"
 import Image from "next/image"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useAuthStore } from "@/lib/auth-store"
 import { cn } from "@/lib/utils"
 import type { CatalogPick, ShopBusinessDraft, ShopLineDraft } from "@/lib/crazy-shopping-types"
@@ -223,6 +223,7 @@ function RwfPriceInput({
 
 export function CrazyShoppingBoarding() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const login = useAuthStore((s) => s.login)
   const [step, setStep] = useState<1 | 2>(1)
   const [business, setBusiness] = useState<ShopBusinessDraft>(initialBusiness)
@@ -250,6 +251,16 @@ export function CrazyShoppingBoarding() {
       /* ignore */
     }
   }, [setLanguage])
+
+  /** Deep link from Grandma “Add stock (NIKI)” → NIKI catalog step (products during signup). */
+  useEffect(() => {
+    const stepParam = searchParams.get("step")
+    const niki = searchParams.get("niki")
+    const catalog = searchParams.get("catalog")
+    if (stepParam === "2" || niki === "1" || catalog === "1") {
+      setStep(2)
+    }
+  }, [searchParams])
 
   useEffect(() => {
     if (langPersistSkip.current) {

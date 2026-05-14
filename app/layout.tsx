@@ -5,6 +5,7 @@ import { GeistMono } from "geist/font/mono"
 import { Analytics } from "@vercel/analytics/next"
 import { Suspense } from "react"
 import { SessionProvider } from "@/components/session-provider"
+import { LanguageSyncProvider } from "@/components/language-sync-provider"
 import { ServiceWorkerRegister } from "@/components/service-worker-register"
 import { NotificationPrompt } from "@/components/notification-prompt"
 import { GlobalRatingManager } from "@/components/GlobalRatingManager"
@@ -27,10 +28,12 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en">
+    <html lang="rw" data-scroll-behavior="smooth">
       <body className={`font-sans ${GeistSans.variable} ${GeistMono.variable} antialiased`} suppressHydrationWarning>
         <SessionProvider>
-          <Suspense fallback={null}>{children}</Suspense>
+          <LanguageSyncProvider>
+            <Suspense fallback={null}>{children}</Suspense>
+          </LanguageSyncProvider>
         </SessionProvider>
         <Toaster />
         <ServiceWorkerRegister />
