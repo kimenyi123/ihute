@@ -1945,7 +1945,6 @@ export default function GrandmaPage() {
   const setLanguage = useLanguageStore((s) => s.setLanguage)
   const [preferredShopIds, setPreferredShopIds] = useState<string[]>([])
   const [selectedPayment, setSelectedPayment] = useState<PaymentId>("momo")
-  const [grandmaPayPayerPhone, setGrandmaPayPayerPhone] = useState("")
   const [grandmaBkCardDigits, setGrandmaBkCardDigits] = useState("")
   const [grandmaBkExpiry, setGrandmaBkExpiry] = useState("")
   const [grandmaBkCvc, setGrandmaBkCvc] = useState("")
@@ -3501,11 +3500,7 @@ export default function GrandmaPage() {
       const buyerName = authUser?.name?.trim() || "Guest"
       const phoneFromAccount = authUser?.phone?.replace(/\D/g, "").slice(0, 15) ?? ""
       const phoneFromInput = normalizePhoneDigitsForAuth(grandmaBuyerPhoneInput.trim()).slice(0, 15)
-      const phoneFromMomoPayer =
-        selectedPayment === "momo" || selectedPayment === "airtel"
-          ? normalizePhoneDigitsForAuth(grandmaPayPayerPhone.trim()).slice(0, 15)
-          : ""
-      const buyerPhone = (phoneFromAccount || phoneFromInput || phoneFromMomoPayer).slice(0, 15)
+      const buyerPhone = (phoneFromAccount || phoneFromInput).slice(0, 15)
 
       const trSubmit = GRANDMA_LABELS[language]
       if (!buyerPhone) {
@@ -3514,7 +3509,8 @@ export default function GrandmaPage() {
       }
 
       if (selectedPayment === "momo" || selectedPayment === "airtel") {
-        if (!isGrandmaRwMobileDigits(grandmaPayPayerPhone)) {
+        const payerRaw = phoneFromAccount || grandmaBuyerPhoneInput.trim()
+        if (!isGrandmaRwMobileDigits(payerRaw)) {
           setGrandmaOrderSubmitError(trSubmit.payStepErrPhone)
           return
         }
@@ -3575,7 +3571,7 @@ export default function GrandmaPage() {
 
       const payerDigits =
         selectedPayment === "momo" || selectedPayment === "airtel"
-          ? normalizePhoneDigitsForAuth(grandmaPayPayerPhone.trim())
+          ? normalizePhoneDigitsForAuth(buyerPhone)
           : undefined
       const bkCardLast4 = selectedPayment === "bk" ? getBkCardLast4(grandmaBkCardDigits) : undefined
 
@@ -3716,7 +3712,6 @@ export default function GrandmaPage() {
     displayUserLocationEn,
     grandTotal,
     grandmaBuyerPhoneInput,
-    grandmaPayPayerPhone,
     grandmaBkCardDigits,
     grandmaBkExpiry,
     grandmaBkCvc,
@@ -5098,35 +5093,39 @@ export default function GrandmaPage() {
               ) : null}
             </div>
 
+            {!grandmaBuyerSession?.phone?.trim() ? (
+              <div className="mb-4 space-y-2">
+                <div className="flex items-start gap-2">
+                  <Smartphone className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700" aria-hidden />
+                  <Label htmlFor="grandma-guest-phone" className="text-sm font-bold leading-snug text-emerald-950">
+                    {tPay.paymentGuestPhoneLabel}
+                  </Label>
+                </div>
+                <Input
+                  id="grandma-guest-phone"
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  placeholder={tPay.paymentGuestPhonePlaceholder}
+                  value={grandmaBuyerPhoneInput}
+                  onChange={(e) => setGrandmaBuyerPhoneInput(e.target.value)}
+                  className="pay-input-tap min-h-[48px] border-emerald-200 bg-white text-base focus-visible:ring-emerald-500/30"
+                />
+                <p className="text-xs leading-snug text-emerald-900/80">
+                  {tPay.paymentGuestPhoneNote}{" "}
+                  <a
+                    href={`${GRANDMA_PATHS.login}?redirect=${encodeURIComponent(GRANDMA_PATHS.appRoot)}`}
+                    className="font-semibold text-emerald-800 underline underline-offset-2"
+                  >
+                    {tPay.signIn}
+                  </a>
+                </p>
+              </div>
+            ) : null}
+
             {selectedPayment === "momo" ? (
               <div className="space-y-3">
                 <div style={{ fontWeight: 700, fontSize: 13 }}>{tPay.payStepMtnTitle}</div>
-                <div>
-                  <Label htmlFor="grandma-pay-mtn" className="text-xs font-bold text-[#166534]">
-                    {tPay.payStepMtnPayer}
-                  </Label>
-                  <Input
-                    id="grandma-pay-mtn"
-                    type="tel"
-                    inputMode="tel"
-                    autoComplete="tel"
-                    value={grandmaPayPayerPhone}
-                    onChange={(e) => setGrandmaPayPayerPhone(e.target.value)}
-                    className="pay-input-tap mt-1.5 min-h-[48px] border-[#dbe7f3] text-base transition-shadow duration-200"
-                    placeholder="078 …"
-                  />
-                </div>
-                {isGrandmaRwMobileDigits(grandmaPayPayerPhone) ? (
-                  <p className="text-[11px] leading-snug text-[#166534]/90">
-                    You will receive a prompt on your phone to enter PIN and confirm payment.
-                  </p>
-                ) : null}
-                {grandmaOrderSubmitting && selectedPayment === "momo" ? (
-                  <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900">
-                    <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
-                    {tPay.payStepProcessing}
-                  </div>
-                ) : null}
                 {grandmaMtnUssd ? (
                   <div>
                     <span className="text-xs font-bold text-[#166534]">{tPay.payStepMtnDial}</span>
@@ -5173,32 +5172,6 @@ export default function GrandmaPage() {
             ) : selectedPayment === "airtel" ? (
               <div className="space-y-3">
                 <div style={{ fontWeight: 700, fontSize: 13 }}>{tPay.payStepAirtelTitle}</div>
-                <div>
-                  <Label htmlFor="grandma-pay-airtel" className="text-xs font-bold text-[#166534]">
-                    {tPay.payStepAirtelPayer}
-                  </Label>
-                  <Input
-                    id="grandma-pay-airtel"
-                    type="tel"
-                    inputMode="tel"
-                    autoComplete="tel"
-                    value={grandmaPayPayerPhone}
-                    onChange={(e) => setGrandmaPayPayerPhone(e.target.value)}
-                    className="pay-input-tap mt-1.5 min-h-[48px] border-[#dbe7f3] text-base transition-shadow duration-200"
-                    placeholder="073 …"
-                  />
-                </div>
-                {isGrandmaRwMobileDigits(grandmaPayPayerPhone) ? (
-                  <p className="text-[11px] leading-snug text-[#166534]/90">
-                    You will receive a prompt on your phone to enter PIN and confirm payment.
-                  </p>
-                ) : null}
-                {grandmaOrderSubmitting && selectedPayment === "airtel" ? (
-                  <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900">
-                    <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
-                    {tPay.payStepProcessing}
-                  </div>
-                ) : null}
                 {grandmaAirtelUssd ? (
                   <div>
                     <span className="text-xs font-bold text-[#166534]">{tPay.payStepAirtelDial}</span>
@@ -5333,15 +5306,6 @@ export default function GrandmaPage() {
                     maxLength={6}
                   />
                 </div>
-                <p style={{ fontSize: 11, color: "var(--muted)", margin: "6px 0 0", lineHeight: 1.4 }}>
-                  Confirm card PIN on your phone or bank channel prompt.
-                </p>
-                {grandmaOrderSubmitting && selectedPayment === "bk" ? (
-                  <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900">
-                    <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
-                    {tPay.payStepProcessing}
-                  </div>
-                ) : null}
               </div>
             ) : (
               <div className="space-y-3">
@@ -5520,38 +5484,6 @@ export default function GrandmaPage() {
         {grandmaOrderSubmitError ? (
           <div className="card note" style={{ color: "#b42318", marginBottom: 12 }}>
             {grandmaOrderSubmitError}
-          </div>
-        ) : null}
-        {!grandmaBuyerSession?.phone?.trim() ? (
-          <div
-            className="card border-emerald-100 bg-gradient-to-b from-emerald-50/80 to-white"
-            style={{ marginBottom: 14, textAlign: "left", padding: "14px 16px" }}
-          >
-            <div className="mb-2 flex items-start gap-2">
-              <Smartphone className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700" aria-hidden />
-              <Label htmlFor="grandma-guest-phone" className="text-sm font-bold leading-snug text-emerald-950">
-                {tPay.paymentGuestPhoneLabel}
-              </Label>
-            </div>
-            <Input
-              id="grandma-guest-phone"
-              type="tel"
-              inputMode="tel"
-              autoComplete="tel"
-              placeholder={tPay.paymentGuestPhonePlaceholder}
-              value={grandmaBuyerPhoneInput}
-              onChange={(e) => setGrandmaBuyerPhoneInput(e.target.value)}
-              className="pay-input-tap min-h-[48px] border-emerald-200 bg-white text-base focus-visible:ring-emerald-500/30"
-            />
-            <p className="mt-2 text-xs leading-snug text-emerald-900/80">
-              {tPay.paymentGuestPhoneNote}{" "}
-              <a
-                href={`${GRANDMA_PATHS.login}?redirect=${encodeURIComponent(GRANDMA_PATHS.appRoot)}`}
-                className="font-semibold text-emerald-800 underline underline-offset-2"
-              >
-                {tPay.signIn}
-              </a>
-            </p>
           </div>
         ) : null}
         <button
