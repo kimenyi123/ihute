@@ -56,6 +56,10 @@ export type UmuriroPayload = {
   ussd: string
   submittedAt: string
   rid?: string
+  payment?: {
+    channel: "momo" | "cash"
+    momoSmsMatched: boolean | null
+  }
 }
 
 export async function POST(req: Request) {

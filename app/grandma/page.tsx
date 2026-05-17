@@ -188,6 +188,71 @@ type ShopEntry = {
   payoutAccount?: string
 }
 
+const GRANDMA_ORDERED_SHOPS_LS = "ihute:grandma:orderedShopIds" as const
+
+function readGrandmaOrderedShopIdsFromStorage(): string[] {
+  if (typeof window === "undefined") return []
+  try {
+    const raw = window.localStorage.getItem(GRANDMA_ORDERED_SHOPS_LS)
+    if (!raw) return []
+    const p = JSON.parse(raw) as unknown
+    if (!Array.isArray(p)) return []
+    return [...new Set(p.map((x) => String(x).trim()).filter(Boolean))]
+  } catch {
+    return []
+  }
+}
+
+function persistGrandmaOrderedShopIds(ids: string[]) {
+  try {
+    window.localStorage.setItem(GRANDMA_ORDERED_SHOPS_LS, JSON.stringify(ids.slice(0, 80)))
+  } catch {
+    /* ignore */
+  }
+}
+
+/** After a successful Grandma checkout — powers the “Reorder” shop filter. */
+function appendGrandmaOrderedShopId(shopId: string): string[] {
+  const id = String(shopId ?? "").trim()
+  if (!id) return readGrandmaOrderedShopIdsFromStorage()
+  const prev = readGrandmaOrderedShopIdsFromStorage()
+  const next = [id, ...prev.filter((x) => x !== id)].slice(0, 80)
+  persistGrandmaOrderedShopIds(next)
+  return next
+}
+
+function supplierRowSuggestsOnSale(supplier: Record<string, unknown>): boolean {
+  const pos = (v: unknown) => {
+    const x = Number(v)
+    return Number.isFinite(x) && x > 0
+  }
+  const truthy = (v: unknown) => v === true || v === "true" || v === "1" || v === 1
+  if (truthy(supplier.on_sale) || truthy(supplier.ON_SALE) || truthy(supplier.onSale)) return true
+  if (truthy(supplier.has_promo) || truthy(supplier.HAS_PROMO)) return true
+  if (pos(supplier.promo_count) || pos(supplier.PROMO_COUNT)) return true
+  if (pos(supplier.discount_items) || pos(supplier.DISCOUNT_ITEMS)) return true
+  return false
+}
+
+/** Live sector list has no “trending” flag — approximate with top stock-line counts per category. */
+function annotateShopTrendingByCategory(shops: ShopEntry[]): ShopEntry[] {
+  const groups = new Map<Category, ShopEntry[]>()
+  for (const s of shops) {
+    const g = groups.get(s.category) ?? []
+    g.push(s)
+    groups.set(s.category, g)
+  }
+  return shops.map((s) => {
+    const peers = groups.get(s.category) ?? [s]
+    const sorted = [...peers].sort((a, b) => (b.stockLineCount ?? 0) - (a.stockLineCount ?? 0))
+    const lim = Math.min(12, Math.max(4, Math.ceil(sorted.length * 0.22)))
+    const idx = Math.max(0, Math.min(lim, sorted.length) - 1)
+    const t = sorted[idx]?.stockLineCount ?? 0
+    const trending = t > 0 && (s.stockLineCount ?? 0) >= t
+    return { ...s, trending }
+  })
+}
+
 /** `supplier_ACCOUNT` or `supplier_ACCOUNT__Pharmacy` → Kaos seller account (no prefix / sector suffix). */
 function sellerAccountFromGrandmaShopId(shopId: string | null | undefined): string {
   const raw = String(shopId ?? "").replace(/^supplier_/, "").trim()
@@ -198,6 +263,100 @@ function sellerAccountFromGrandmaShopId(shopId: string | null | undefined): stri
 function sameGrandmaSeller(a: string | null | undefined, b: string | null | undefined): boolean {
   if (!a || !b) return false
   return sellerAccountFromGrandmaShopId(a) === sellerAccountFromGrandmaShopId(b)
+}
+
+/** Normalize seller account from API fields to compare with `sellerAccountFromGrandmaShopId(shop.id)`. */
+function normalizeSellerKeyFromSearch(raw: unknown): string {
+  const s = String(raw ?? "").trim()
+  if (!s) return ""
+  const synthetic = s.toLowerCase().startsWith("supplier_") ? s : `supplier_${s}__x`
+  return sellerAccountFromGrandmaShopId(synthetic).toUpperCase()
+}
+
+/** Collect seller accounts from global search JSON (products + suppliers). */
+function collectSellerAccountsFromGlobalSearchJson(json: Record<string, unknown>): Set<string> {
+  const out = new Set<string>()
+  const add = (raw: unknown) => {
+    const k = normalizeSellerKeyFromSearch(raw)
+    if (k) out.add(k)
+  }
+  const products = Array.isArray(json.products) ? json.products : []
+  for (const p of products) {
+    if (!p || typeof p !== "object") continue
+    const o = p as Record<string, unknown>
+    add(
+      o.supplier_account ??
+        o.SELLER_ISHYIGA_ACCOUNT ??
+        o.supplierAccount ??
+        o.ISHYIGA_ACCOUNT ??
+        o.seller_account ??
+        o.SELLER_ACCOUNT,
+    )
+  }
+  for (const arr of [json.suppliersByProduct, json.suppliersByName]) {
+    const rows = Array.isArray(arr) ? arr : []
+    for (const s of rows) {
+      if (!s || typeof s !== "object") continue
+      const o = s as Record<string, unknown>
+      add(
+        o.supplier_account ??
+          o.SELLER_ISHYIGA_ACCOUNT ??
+          o.supplierAccount ??
+          o.ISHYIGA_ACCOUNT ??
+          o.seller_account,
+      )
+    }
+  }
+  return out
+}
+
+function numPriceish(v: unknown): number {
+  if (typeof v === "number" && Number.isFinite(v)) return v
+  const s = String(v ?? "")
+    .replace(/,/g, "")
+    .replace(/[^\d.\-]/g, "")
+  const n = parseFloat(s)
+  return Number.isFinite(n) ? n : 0
+}
+
+/** Catalog row looks discounted (list vs selling) or explicit promo flags. */
+function productRowLooksDiscounted(o: Record<string, unknown>): boolean {
+  const sell = numPriceish(o.selling_price ?? o.SALE_PRICE_INCLUSIVE ?? o.UNITY_PRICE ?? o.price ?? o.PRICE)
+  const list = numPriceish(
+    o.list_price ??
+      o.LIST_PRICE ??
+      o.PV ??
+      o.MRP ??
+      o.rrp ??
+      o.RRP ??
+      o.prix_public ??
+      o.RECOMMENDED_RETAIL_PRICE ??
+      o.MSRP,
+  )
+  if (list > 0 && sell > 0 && sell < list * 0.995) return true
+  const d = String(o.on_sale ?? o.ON_SALE ?? o.promo ?? o.PROMO ?? o.has_discount ?? "").toLowerCase()
+  return d === "true" || d === "1" || d === "yes" || d === "y"
+}
+
+/** Seller keys (uppercase) that have at least one discounted line in a fetchSuggestions JSON body. */
+function collectDiscountedSellerAccountsFromSearchJson(json: Record<string, unknown>): Set<string> {
+  const out = new Set<string>()
+  const products = Array.isArray(json.products) ? json.products : []
+  for (const p of products) {
+    if (!p || typeof p !== "object") continue
+    const o = p as Record<string, unknown>
+    if (!productRowLooksDiscounted(o)) continue
+    const k = normalizeSellerKeyFromSearch(
+      o.supplier_account ??
+        o.SELLER_ISHYIGA_ACCOUNT ??
+        o.supplierAccount ??
+        o.ISHYIGA_ACCOUNT ??
+        o.seller_account ??
+        o.SELLER_ACCOUNT,
+    )
+    if (k) out.add(k)
+  }
+  return out
 }
 
 function isPreferredGrandmaShop(shopId: string, preferredIds: string[]): boolean {
@@ -1927,6 +2086,15 @@ export default function GrandmaPage() {
   const [category, setCategory] = useState<Category>("Boutique")
   const [search, setSearch] = useState("")
   const [shopSearch, setShopSearch] = useState("")
+  /** Seller accounts (uppercase) returned by global product search — shops are included if they sell matching items. */
+  const [shopProductSearchAccounts, setShopProductSearchAccounts] = useState<string[]>([])
+  const [shopProductSearchLoading, setShopProductSearchLoading] = useState(false)
+  /** Shop ids the buyer has successfully ordered from on this device (localStorage). */
+  const [grandmaOrderedShopIds, setGrandmaOrderedShopIds] = useState<string[]>([])
+  /** SELLER_ISHYIGA_ACCOUNT keys (uppercase) from buyer order history — powers Reorder when LS is empty. */
+  const [reorderHistorySellerKeys, setReorderHistorySellerKeys] = useState<string[]>([])
+  /** Sellers that had discounted catalog hits in sector-wide search probes — powers On sale. */
+  const [onsaleSellerAccounts, setOnsaleSellerAccounts] = useState<string[]>([])
   const [shopTab, setShopTab] = useState<ShopFilterTab | null>(null)
   const [useLocationSort, setUseLocationSort] = useState(false)
   const [selectedShopId, setSelectedShopId] = useState<string | null>(null)
@@ -2022,6 +2190,54 @@ export default function GrandmaPage() {
     return () => {
       cancelled = true
     }
+  }, [])
+
+  /** Debounced global product search so shop list can include stores that sell the query (e.g. “milk”), not only name/tagline matches. */
+  useEffect(() => {
+    let cancelled = false
+    const q = shopSearch.trim()
+    if (q.length < 2) {
+      setShopProductSearchAccounts([])
+      setShopProductSearchLoading(false)
+      return
+    }
+    const ac = new AbortController()
+    const tid = setTimeout(() => {
+      if (cancelled) return
+      void (async () => {
+        setShopProductSearchLoading(true)
+        try {
+          const sector = GRANDMA_CATEGORY_TO_SECTOR_SLUG[category]?.trim()
+          const params = new URLSearchParams({
+            globalSearch: q,
+            limit: "200",
+            Currency: "RWF",
+          })
+          if (sector) params.set("sector", sector)
+          const res = await fetch(`/api/fetchSuggestions?${params.toString()}`, {
+            signal: ac.signal,
+            cache: "no-store",
+          })
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          const json = (await res.json()) as Record<string, unknown>
+          const acc = collectSellerAccountsFromGlobalSearchJson(json)
+          if (!cancelled) setShopProductSearchAccounts([...acc])
+        } catch {
+          if (!cancelled && !ac.signal.aborted) setShopProductSearchAccounts([])
+        } finally {
+          if (!cancelled && !ac.signal.aborted) setShopProductSearchLoading(false)
+        }
+      })()
+    }, 380)
+    return () => {
+      cancelled = true
+      clearTimeout(tid)
+      ac.abort()
+    }
+  }, [shopSearch, category])
+
+  useEffect(() => {
+    setGrandmaOrderedShopIds(readGrandmaOrderedShopIdsFromStorage())
   }, [])
 
   // Combine API products with existing products, preserving quantities - FIXED FOR API INTEGRATION
@@ -2414,7 +2630,7 @@ export default function GrandmaPage() {
             favorite: false,
             orderedBefore: false,
             trending: false,
-            onSale: false,
+            onSale: supplierRowSuggestsOnSale(supplier as Record<string, unknown>),
             distanceKm: Math.random() * 5 + 0.5, // Mock distance
             momo: `MTN MoMo: ${supplier.seller_momo || 'N/A'}`,
             rating: 4.0,
@@ -2440,7 +2656,7 @@ export default function GrandmaPage() {
           // keep default logos if override fetch fails
         }
 
-        setAllAvailableShops(shopsWithImages)
+        setAllAvailableShops(annotateShopTrendingByCategory(shopsWithImages))
         console.log('setAllAvailableShops called with:', transformedShops.length, 'shops')
         console.log('Shop IDs in allAvailableShops:', transformedShops.map(s => s.id))
         console.log('Current preferredShopIds:', preferredShopIds)
@@ -2994,11 +3210,124 @@ export default function GrandmaPage() {
     return []
   }, [category, allAvailableShops, allShopsLoading])
 
-  const visibleShops = useMemo(() => {
-    const q = shopSearch.trim().toLowerCase()
-    let list = shopsInCategory.filter(
-      (s) => !q || s.name.toLowerCase().includes(q) || s.tagline.toLowerCase().includes(q)
-    )
+  const reorderSellerKeySet = useMemo(() => {
+    const set = new Set<string>()
+    for (const id of grandmaOrderedShopIds) {
+      const k = sellerAccountFromGrandmaShopId(id).toUpperCase()
+      if (k) set.add(k)
+    }
+    for (const k of reorderHistorySellerKeys) {
+      if (k) set.add(k.toUpperCase())
+    }
+    return set
+  }, [grandmaOrderedShopIds, reorderHistorySellerKeys])
+
+  const onsaleSellerKeysSet = useMemo(
+    () => new Set(onsaleSellerAccounts.map((x) => String(x).trim().toUpperCase()).filter(Boolean)),
+    [onsaleSellerAccounts],
+  )
+
+  useEffect(() => {
+    if (!isAuthenticated || !grandmaBuyerSession?.ishyigaAccount) {
+      setReorderHistorySellerKeys([])
+      return
+    }
+    let cancel = false
+    const ac = new AbortController()
+    void (async () => {
+      try {
+        const res = await fetch("/api/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            buyerAccount: grandmaBuyerSession.ishyigaAccount,
+            page: 1,
+            pageSize: 50,
+          }),
+          cache: "no-store",
+          signal: ac.signal,
+        })
+        if (!res.ok) return
+        const json = (await res.json()) as { transactions?: unknown[]; orders?: unknown[] }
+        const rawList = (Array.isArray(json.transactions)
+          ? json.transactions
+          : Array.isArray(json.orders)
+            ? json.orders
+            : []) as Record<string, unknown>[]
+        const keys = new Set<string>()
+        for (const raw of rawList) {
+          const acc = String(raw.SELLER_ISHYIGA_ACCOUNT ?? raw.seller_account ?? "").trim()
+          if (!acc) continue
+          const base = acc.replace(/^supplier_/i, "").split("__")[0].trim()
+          if (base) keys.add(base.toUpperCase())
+        }
+        if (!cancel) setReorderHistorySellerKeys([...keys])
+      } catch {
+        if (!cancel) setReorderHistorySellerKeys([])
+      }
+    })()
+    return () => {
+      cancel = true
+      ac.abort()
+    }
+  }, [isAuthenticated, grandmaBuyerSession?.ishyigaAccount])
+
+  useEffect(() => {
+    const sector = GRANDMA_CATEGORY_TO_SECTOR_SLUG[category]?.trim()
+    if (!sector || allAvailableShops.length === 0) {
+      setOnsaleSellerAccounts([])
+      return
+    }
+    let cancel = false
+    const ac = new AbortController()
+    const probes = ["a", "e", "i", "1"]
+    const tid = setTimeout(() => {
+      void (async () => {
+        const merged = new Set<string>()
+        for (const g of probes) {
+          if (cancel || ac.signal.aborted) break
+          try {
+            const params = new URLSearchParams({
+              globalSearch: g,
+              limit: "120",
+              Currency: "RWF",
+              sector,
+            })
+            const res = await fetch(`/api/fetchSuggestions?${params.toString()}`, {
+              signal: ac.signal,
+              cache: "no-store",
+            })
+            if (!res.ok) continue
+            const json = (await res.json()) as Record<string, unknown>
+            collectDiscountedSellerAccountsFromSearchJson(json).forEach((x) => merged.add(x))
+          } catch {
+            /* ignore */
+          }
+        }
+        if (!cancel) setOnsaleSellerAccounts([...merged])
+      })()
+    }, 600)
+    return () => {
+      cancel = true
+      clearTimeout(tid)
+      ac.abort()
+    }
+  }, [category, allAvailableShops.length])
+
+  const shopListFilterResult = useMemo(() => {
+    const qRaw = shopSearch.trim().toLowerCase()
+    const tokens = qRaw.split(/\s+/).filter(Boolean)
+    const productAccountSet = new Set(shopProductSearchAccounts)
+
+    const shopMatchesQuery = (s: ShopEntry): boolean => {
+      if (!tokens.length) return true
+      const sellerKey = sellerAccountFromGrandmaShopId(s.id).toUpperCase()
+      const productHit = productAccountSet.has(sellerKey)
+      const hay = `${s.name} ${s.tagline} ${s.momo ?? ""} ${s.id}`.toLowerCase()
+      const textHit = tokens.every((t) => hay.includes(t))
+      return textHit || productHit
+    }
+
     const prefBoost = (a: ShopEntry, b: ShopEntry) => {
       const pref =
         Number(isPreferredGrandmaShop(b.id, preferredShopIds)) -
@@ -3006,32 +3335,96 @@ export default function GrandmaPage() {
       if (pref !== 0) return pref
       return 0
     }
-    if (shopTab === "favorites") list = list.filter((s) => s.favorite)
-    else if (shopTab === "reorder") list = list.filter((s) => s.orderedBefore)
-    else if (shopTab === "trending") list = list.filter((s) => s.trending)
-    else if (shopTab === "onsale") list = list.filter((s) => s.onSale)
-    else {
-      list = [...list].sort((a, b) => {
-        // Preferred shops (Settings) first — e.g. Burrows + Rite when you mark them
+
+    const shopOrderedRecently = (s: ShopEntry) => {
+      const k = sellerAccountFromGrandmaShopId(s.id).toUpperCase()
+      return reorderSellerKeySet.has(k) || s.orderedBefore
+    }
+
+    const sortList = (list: ShopEntry[]) =>
+      [...list].sort((a, b) => {
+        if (tokens.length && productAccountSet.size > 0) {
+          const ak = sellerAccountFromGrandmaShopId(a.id).toUpperCase()
+          const bk = sellerAccountFromGrandmaShopId(b.id).toUpperCase()
+          const ap = productAccountSet.has(ak) ? 1 : 0
+          const bp = productAccountSet.has(bk) ? 1 : 0
+          if (ap !== bp) return bp - ap
+        }
         const p = prefBoost(a, b)
         if (p !== 0) return p
         if (a.favorite !== b.favorite) return a.favorite ? -1 : 1
-        if (a.orderedBefore !== b.orderedBefore) return a.orderedBefore ? -1 : 1
+        if (shopOrderedRecently(a) !== shopOrderedRecently(b)) return shopOrderedRecently(b) ? -1 : 1
         if (useLocationSort) return a.distanceKm - b.distanceKm
         return a.name.localeCompare(b.name)
       })
+
+    const applyTab = (list: ShopEntry[]): ShopEntry[] => {
+      if (shopTab === "favorites") {
+        if (preferredShopIds.includes(PREFERRED_ALL_ID)) return list
+        const prefs = preferredShopIds.filter((x) => x !== PREFERRED_ALL_ID)
+        return list.filter(
+          (s) => s.favorite || (prefs.length > 0 && prefs.some((pid) => sameGrandmaSeller(pid, s.id))),
+        )
+      }
+      if (shopTab === "reorder") {
+        if (reorderSellerKeySet.size === 0) return []
+        return list.filter((s) => reorderSellerKeySet.has(sellerAccountFromGrandmaShopId(s.id).toUpperCase()))
+      }
+      if (shopTab === "trending") return list.filter((s) => s.trending)
+      if (shopTab === "onsale") {
+        return list.filter((s) => {
+          if (s.onSale) return true
+          return onsaleSellerKeysSet.has(sellerAccountFromGrandmaShopId(s.id).toUpperCase())
+        })
+      }
       return list
     }
-    list = [...list].sort((a, b) => {
-      const p = prefBoost(a, b)
-      if (p !== 0) return p
-      if (a.favorite !== b.favorite) return a.favorite ? -1 : 1
-      if (a.orderedBefore !== b.orderedBefore) return a.orderedBefore ? -1 : 1
-      if (useLocationSort) return a.distanceKm - b.distanceKm
-      return a.name.localeCompare(b.name)
-    })
-    return list
-  }, [shopsInCategory, shopSearch, shopTab, useLocationSort, preferredShopIds])
+
+    const base = shopsInCategory
+    let relaxedNote: string | null = null
+
+    if (!tokens.length) {
+      const list = shopTab ? applyTab(base) : base
+      return { shops: sortList(list), relaxedNote: null }
+    }
+
+    const searchHits = base.filter(shopMatchesQuery)
+    if (!shopTab) {
+      return { shops: sortList(searchHits), relaxedNote: null }
+    }
+
+    const tabbed = applyTab(base)
+    const tabAndSearch = tabbed.filter(shopMatchesQuery)
+    if (tabAndSearch.length > 0) {
+      return { shops: sortList(tabAndSearch), relaxedNote: null }
+    }
+
+    if (searchHits.length > 0) {
+      relaxedNote =
+        language === "rw"
+          ? "Nta duka riri muri uyu muhuza (Reorder, …) rihuye n'uko wanditse — reba amaduka yose ahuye n'uko wanditse."
+          : language === "fr"
+            ? "Aucun commerce ne correspond à ce filtre + recherche — affichage de tous les commerces correspondant à votre recherche."
+            : "No shop matches this filter plus your search — showing all shops that match your search."
+      return { shops: sortList(searchHits), relaxedNote }
+    }
+
+    return { shops: sortList([]), relaxedNote: null }
+  }, [
+    shopsInCategory,
+    shopSearch,
+    shopTab,
+    useLocationSort,
+    preferredShopIds,
+    language,
+    shopProductSearchAccounts,
+    grandmaOrderedShopIds,
+    reorderSellerKeySet,
+    onsaleSellerKeysSet,
+  ])
+
+  const visibleShops = shopListFilterResult.shops
+  const shopSearchRelaxedNote = shopListFilterResult.relaxedNote
 
   const isAllPreferred = useMemo(() => preferredShopIds.includes(PREFERRED_ALL_ID), [preferredShopIds])
   const multiShopMode = useMemo(() => isAllPreferred && !selectedShopId, [isAllPreferred, selectedShopId])
@@ -3272,6 +3665,7 @@ export default function GrandmaPage() {
       if (p?.v !== 1 || !p.shopId || !Array.isArray(p.lines) || p.lines.length === 0) return
       sessionStorage.removeItem(GRANDMA_REORDER_STORAGE_KEY)
       setPendingReorder(p)
+      setGrandmaOrderedShopIds(appendGrandmaOrderedShopId(p.shopId))
       setReorderSplashOpen(true)
       setSelectedShopId(p.shopId)
       setAppMode("buyer")
@@ -3661,6 +4055,7 @@ export default function GrandmaPage() {
 
       try {
         localStorage.setItem("grandma:lastOrderId", String(oid))
+        setGrandmaOrderedShopIds(appendGrandmaOrderedShopId(selectedShop.id))
       } catch {
         /* ignore */
       }
@@ -4490,7 +4885,12 @@ export default function GrandmaPage() {
           <button
             type="button"
             className="shop-trio-btn"
-            onClick={() => alert("List your shop on Ihute — seller onboarding (coming from your admin / API).")}
+            onClick={() => {
+              writeGrandmaSignupRole("seller")
+              router.push(
+                `${GRANDMA_OUTBOUND.registerSeller}?redirect=${encodeURIComponent(GRANDMA_PATHS.appRoot)}`,
+              )
+            }}
           >
             List your shop
           </button>
@@ -4508,8 +4908,8 @@ export default function GrandmaPage() {
           <input
             value={shopSearch}
             onChange={(e) => setShopSearch(e.target.value)}
-            placeholder="Search shops"
-            aria-label="Search shops"
+            placeholder="Search shops or products (e.g. milk, bread)"
+            aria-label="Search shops or products"
           />
         </div>
 
@@ -4527,6 +4927,11 @@ export default function GrandmaPage() {
             </button>
           ))}
         </div>
+        {shopSearchRelaxedNote ? (
+          <p className="card note" style={{ marginTop: 8, marginBottom: 0, fontSize: 12, color: "#92400e", background: "#fffbeb", borderColor: "#fcd34d" }}>
+            {shopSearchRelaxedNote}
+          </p>
+        ) : null}
 
         <div className="shop-list" id="shopList">
           {allShopsLoading ? (
@@ -4547,7 +4952,38 @@ export default function GrandmaPage() {
               {!GRANDMA_SHOW_DEMO_SHOPS && allAvailableShops.length === 0 ? (
                 <p style={{ marginBottom: 10, color: "#5a6b7a", fontSize: "0.92rem" }}>{GRANDMA_NO_LIVE_SHOPS_HINT}</p>
               ) : null}
-              No shops match. Try another filter or search.
+              {shopSearch.trim() ? (
+                shopProductSearchLoading ? (
+                  <p style={{ margin: 0 }}>
+                    {language === "rw"
+                      ? "Turimo gushakisha ibicuruzya kugira ngo tubone amaduka abibamo…"
+                      : language === "fr"
+                        ? "Recherche des produits pour afficher les boutiques concernées…"
+                        : "Searching the product catalog for shops that carry matching items…"}
+                  </p>
+                ) : language === "rw" ? (
+                  <p style={{ margin: 0 }}>
+                    Nta duka ryahuye na <strong>&quot;{shopSearch.trim()}&quot;</strong> ku izina cyangwa ibicuruzya.
+                    {shopTab ? " Gerageza gukura filtere." : ""} Gerageza andi magambo cyangwa siba uko wanditse.
+                  </p>
+                ) : language === "fr" ? (
+                  <p style={{ margin: 0 }}>
+                    Aucun commerce ne correspond à <strong>&quot;{shopSearch.trim()}&quot;</strong> (nom ou produits du
+                    catalogue).
+                    {shopTab ? " Essayez de désactiver le filtre actif." : ""} Essayez d&apos;autres mots ou effacez la
+                    recherche.
+                  </p>
+                ) : (
+                  <p style={{ margin: 0 }}>
+                    No shops match <strong>&quot;{shopSearch.trim()}&quot;</strong> by shop name, MoMo, or catalog
+                    products
+                    {shopTab ? " with the current filter." : "."} Try different words, clear the search box, or tap the
+                    active filter again to turn it off.
+                  </p>
+                )
+              ) : (
+                <p style={{ margin: 0 }}>No shops match. Try another filter or search.</p>
+              )}
             </div>
           ) : null}
           {!allShopsLoading && !shopsLoading && !shopsError && visibleShops.length > 0 ? (
@@ -4591,10 +5027,20 @@ export default function GrandmaPage() {
                     {isPreferredGrandmaShop(s.id, preferredShopIds) ? (
                       <span className="shop-badge">★ Preferred</span>
                     ) : null}
-                    {s.favorite ? <span className="shop-badge">★ Favorite</span> : null}
-                    {s.orderedBefore ? <span className="shop-badge">Reorder</span> : null}
+                    {preferredShopIds.includes(PREFERRED_ALL_ID) ||
+                    s.favorite ||
+                    preferredShopIds
+                      .filter((x) => x !== PREFERRED_ALL_ID)
+                      .some((pid) => sameGrandmaSeller(pid, s.id)) ? (
+                      <span className="shop-badge">★ Favorite</span>
+                    ) : null}
+                    {reorderSellerKeySet.has(sellerAccountFromGrandmaShopId(s.id).toUpperCase()) || s.orderedBefore ? (
+                      <span className="shop-badge">Reorder</span>
+                    ) : null}
                     {s.trending ? <span className="shop-badge">Trending</span> : null}
-                    {s.onSale ? <span className="shop-badge sale">On sale</span> : null}
+                    {s.onSale || onsaleSellerKeysSet.has(sellerAccountFromGrandmaShopId(s.id).toUpperCase()) ? (
+                      <span className="shop-badge sale">On sale</span>
+                    ) : null}
                   </div>
                 </div>
                 <div className="shop-row-dist">{s.distanceKm.toFixed(1)} km</div>

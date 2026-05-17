@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import Image from "next/image"
-import { Check, Copy, Flame, Loader2, Phone } from "lucide-react"
+import { Check, Copy, Flame, Loader2, MessageSquare, Phone } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Select,
   SelectContent,
@@ -32,6 +33,10 @@ import { shopCategoryToSectorSlug } from "@/lib/seller-category-sector"
 import { isValidRwandaMobileE164, normalizeRwandaMobileE164 } from "@/lib/rwanda-phone"
 import { cn } from "@/lib/utils"
 import { GRANDMA_PATHS } from "@/lib/grandma-urls"
+import { extractMerchantMomoCodeForUssd } from "@/lib/grandma-order-billing"
+import { buildMoMoUssd } from "@/lib/momo-ussd"
+import { generalSellingPrice, lineSellingPriceFromProductRow, resolveItemEmballageRaw } from "@/lib/package-price"
+import { matchMoMoSmsToOrderTotal, type MoMoSmsMatchResult } from "@/lib/momo-payment-sms-match"
 
 const LS_KEY = "ihute:umuriro:lastShop"
 
@@ -52,18 +57,92 @@ const cardClass =
 type CatalogHit = {
   item_code?: string
   item_commercial_name?: string
+  selling_price?: string | number
+  item_emballage?: string | number
+  [key: string]: unknown
+}
+
+function parseCatalogPriceRwf(v: unknown): number {
+  if (typeof v === "number" && Number.isFinite(v)) return v
+  const n = String(v ?? "")
+    .replace(/[^\d.,-]/g, "")
+    .replace(/,/g, "")
+  const p = parseFloat(n)
+  return Number.isFinite(p) ? p : 0
+}
+
+function catalogHitSellerLabel(p: CatalogHit): string {
+  return String(
+    p.SELLER_NAMES ?? p.supplier_name ?? p.OWNER ?? p.owner ?? "",
+  ).trim()
+}
+
+function catalogHitSellerAccount(p: CatalogHit): string {
+  return String(
+    p.SELLER_ISHYIGA_ACCOUNT ?? p.item_seller_account ?? p.supplier_account ?? "",
+  ).trim()
+}
+
+function shopNameMatchesCatalogHit(shop: string, p: CatalogHit): boolean {
+  const sn = shop.trim().toLowerCase()
+  if (!sn) return true
+  const seller = catalogHitSellerLabel(p).toLowerCase()
+  if (!seller) return false
+  return seller === sn || seller.includes(sn) || sn.includes(seller)
+}
+
+/** Customer price from catalog row (API `final_selling_price` or seller `selling_price`). */
+function catalogHitPriceRwf(p: CatalogHit): number {
+  const row = p as Record<string, unknown>
+  const finalRaw = row.final_selling_price
+  if (finalRaw != null && finalRaw !== "") {
+    const n = parseCatalogPriceRwf(finalRaw)
+    if (n >= 1) return Math.round(n)
+  }
+  const fromLine = lineSellingPriceFromProductRow(row)
+  if (fromLine >= 1) return Math.round(fromLine)
+  const base =
+    parseCatalogPriceRwf(row.selling_price) ||
+    parseCatalogPriceRwf(row.SALE_PRICE_INCLUSIVE) ||
+    parseCatalogPriceRwf(row.UNITY_PRICE) ||
+    parseCatalogPriceRwf(row.price) ||
+    parseCatalogPriceRwf(row.PRICE)
+  if (base >= 1) {
+    return Math.round(generalSellingPrice(base, resolveItemEmballageRaw(row)))
+  }
+  return 0
+}
+
+function productNameMatchesQuery(p: CatalogHit, q: string): boolean {
+  const t = q.trim().toLowerCase()
+  if (!t) return true
+  const hay = `${p.item_commercial_name ?? ""} ${p.item_key_words ?? ""} ${p.item_code ?? ""}`.toLowerCase()
+  const tokens = t.split(/\s+/).filter((x) => x.length >= 2)
+  if (tokens.length === 0) return hay.includes(t)
+  return tokens.every((tok) => hay.includes(tok))
+}
+
+function parseSupplierProductsResponse(json: unknown): CatalogHit[] {
+  if (Array.isArray(json)) return json as CatalogHit[]
+  if (json && typeof json === "object" && Array.isArray((json as { products?: unknown }).products)) {
+    return (json as { products: CatalogHit[] }).products
+  }
+  return []
 }
 
 type UmuriroMode = "quick" | "advanced"
+type UmuriroPayChannel = "momo" | "cash"
+type SmsPayCheck = "paid" | "mismatch" | "no_amount" | null
 
 function digitsOnly(s: string): string {
   return s.replace(/\D/g, "")
 }
 
-function buildUssd(momoDigits: string, totalRwf: number): string {
-  const d = momoDigits.trim()
+function buildUssd(merchantCode: string, totalRwf: number): string {
+  const code = merchantCode.trim()
   const t = Math.max(0, Math.round(totalRwf))
-  return `*182*${d}*${t}#`
+  if (!code || t < 1) return ""
+  return buildMoMoUssd(code, t)
 }
 
 export function UmuriroBoarding() {
@@ -84,6 +163,8 @@ export function UmuriroBoarding() {
   const [itemOpen, setItemOpen] = useState(false)
   const itemWrapRef = useRef<HTMLDivElement>(null)
   const itemFetchRef = useRef<AbortController | null>(null)
+  const supplierResolveRef = useRef<AbortController | null>(null)
+  const [resolvedSupplierAccount, setResolvedSupplierAccount] = useState<string | null>(null)
   const [unitPrice, setUnitPrice] = useState("")
   const [quantity, setQuantity] = useState("1")
 
@@ -92,6 +173,10 @@ export function UmuriroBoarding() {
   const [doneMsg, setDoneMsg] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [trackDialogOpen, setTrackDialogOpen] = useState(false)
+  const [payChannel, setPayChannel] = useState<UmuriroPayChannel>("momo")
+  const [momoSmsPaste, setMomoSmsPaste] = useState("")
+  const [smsPayCheck, setSmsPayCheck] = useState<SmsPayCheck>(null)
+  const [smsMatchResult, setSmsMatchResult] = useState<MoMoSmsMatchResult | null>(null)
 
   useEffect(() => {
     try {
@@ -123,7 +208,7 @@ export function UmuriroBoarding() {
     return Math.round(p * q)
   }, [unitPrice, quantity])
 
-  const momoDigits = useMemo(() => digitsOnly(momoCode), [momoCode])
+  const momoDigits = useMemo(() => extractMerchantMomoCodeForUssd(momoCode), [momoCode])
   const ussd = useMemo(() => buildUssd(momoDigits, totalRwf), [momoDigits, totalRwf])
 
   /** `tel:` href for USSD — `#` must be `%23` for many mobile dialers. */
@@ -154,6 +239,65 @@ export function UmuriroBoarding() {
     }
   }
 
+  useEffect(() => {
+    const sn = shopName.trim()
+    if (sn.length < 2) {
+      setResolvedSupplierAccount(null)
+      return
+    }
+    supplierResolveRef.current?.abort()
+    const ac = new AbortController()
+    supplierResolveRef.current = ac
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const params = new URLSearchParams({ globalSearch: sn, limit: "8", Currency: "RWF" })
+          const sec = shopCategoryToSectorSlug(shopCategory)
+          if (sec) params.set("sector", sec)
+          const res = await fetch(`/api/fetchSuggestions?${params}`, {
+            cache: "no-store",
+            headers: { Accept: "application/json" },
+            signal: ac.signal,
+          })
+          if (!res.ok) return
+          const json = (await res.json()) as {
+            suppliersByName?: CatalogHit[]
+            suppliersByProduct?: CatalogHit[]
+          }
+          const suppliers = [
+            ...(Array.isArray(json.suppliersByName) ? json.suppliersByName : []),
+            ...(Array.isArray(json.suppliersByProduct) ? json.suppliersByProduct : []),
+          ]
+          const snL = sn.toLowerCase()
+          let bestAcc: string | null = null
+          let bestScore = 0
+          for (const s of suppliers) {
+            const name = catalogHitSellerLabel(s) || String(s.supplier_name ?? "").trim()
+            const acc = catalogHitSellerAccount(s) || String(s.supplier_account ?? "").trim()
+            if (!acc) continue
+            const nl = name.toLowerCase()
+            let score = 0
+            if (nl === snL) score = 100
+            else if (nl.includes(snL) || snL.includes(nl)) score = 60
+            else continue
+            if (score > bestScore) {
+              bestScore = score
+              bestAcc = acc
+            }
+          }
+          if (!ac.signal.aborted) setResolvedSupplierAccount(bestAcc)
+        } catch (e) {
+          if (e instanceof Error && e.name === "AbortError") return
+          if (!ac.signal.aborted) setResolvedSupplierAccount(null)
+        }
+      })()
+    }, 450)
+    return () => {
+      window.clearTimeout(timer)
+      ac.abort()
+    }
+  }, [shopName, shopCategory])
+
   const runItemSearch = useCallback(
     async (q: string) => {
       const t = q.trim()
@@ -169,23 +313,57 @@ export function UmuriroBoarding() {
       itemFetchRef.current = ac
       setItemSearchLoading(true)
       try {
-        const params = new URLSearchParams({
-          globalSearch: t,
-          limit: "8",
-          Currency: "RWF",
-        })
-        const sec = shopCategoryToSectorSlug(shopCategory)
-        if (sec) params.set("sector", sec)
-        const res = await fetch(`/api/fetchSuggestions?${params}`, {
-          cache: "no-store",
-          headers: { Accept: "application/json" },
-          signal: ac.signal,
-        })
-        if (!res.ok) throw new Error(`Search failed (${res.status})`)
-        const json = await res.json()
-        const raw: CatalogHit[] = Array.isArray(json.products) ? json.products : []
-        const filtered = filterProductsByRelevance(raw, t, 10).slice(0, 5)
-        if (!ac.signal.aborted) setItemSuggestions(filtered)
+        const shop = shopName.trim()
+        let raw: CatalogHit[] = []
+
+        if (resolvedSupplierAccount) {
+          const sp = new URLSearchParams({
+            supplierProducts: resolvedSupplierAccount,
+            limit: "2000",
+            Currency: "RWF",
+          })
+          const sRes = await fetch(`/api/fetchSuggestions?${sp}`, {
+            cache: "no-store",
+            headers: { Accept: "application/json" },
+            signal: ac.signal,
+          })
+          if (sRes.ok) {
+            const sJson = await sRes.json()
+            raw = parseSupplierProductsResponse(sJson).filter((p) => productNameMatchesQuery(p, t))
+          }
+        }
+
+        if (raw.length === 0) {
+          const params = new URLSearchParams({
+            globalSearch: t,
+            limit: "12",
+            Currency: "RWF",
+          })
+          const sec = shopCategoryToSectorSlug(shopCategory)
+          if (sec) params.set("sector", sec)
+          const res = await fetch(`/api/fetchSuggestions?${params}`, {
+            cache: "no-store",
+            headers: { Accept: "application/json" },
+            signal: ac.signal,
+          })
+          if (!res.ok) throw new Error(`Search failed (${res.status})`)
+          const json = await res.json()
+          raw = Array.isArray(json.products) ? json.products : []
+          if (shop) {
+            const forShop = raw.filter((p) => shopNameMatchesCatalogHit(shop, p))
+            if (forShop.length > 0) raw = forShop
+          }
+        }
+
+        const filtered = filterProductsByRelevance(raw, t, 8)
+        const ordered = shop
+          ? [...filtered].sort((a, b) => {
+              const am = shopNameMatchesCatalogHit(shop, a) ? 1 : 0
+              const bm = shopNameMatchesCatalogHit(shop, b) ? 1 : 0
+              return bm - am || (b as { finalScore?: number }).finalScore! - (a as { finalScore?: number }).finalScore!
+            })
+          : filtered
+        if (!ac.signal.aborted) setItemSuggestions(ordered.slice(0, 6))
       } catch (e) {
         if (e instanceof Error && e.name === "AbortError") return
         if (!ac.signal.aborted) setItemSuggestions([])
@@ -193,7 +371,7 @@ export function UmuriroBoarding() {
         if (!ac.signal.aborted) setItemSearchLoading(false)
       }
     },
-    [shopCategory]
+    [shopCategory, shopName, resolvedSupplierAccount]
   )
 
   useEffect(() => {
@@ -207,7 +385,12 @@ export function UmuriroBoarding() {
   useEffect(() => {
     setItemSuggestions([])
     setItemOpen(false)
+    setUnitPrice("")
   }, [shopCategory])
+
+  useEffect(() => {
+    setUnitPrice("")
+  }, [resolvedSupplierAccount])
 
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
@@ -219,9 +402,11 @@ export function UmuriroBoarding() {
     return () => document.removeEventListener("mousedown", onDoc)
   }, [])
 
-  const pickItemSuggestion = (p: CatalogHit) => {
+  const applyPickedCatalogHit = (p: CatalogHit) => {
     const label = String(p.item_commercial_name || p.item_code || "").trim()
     if (label) setItemName(label)
+    const priceRwf = catalogHitPriceRwf(p)
+    setUnitPrice(priceRwf >= 1 ? String(Math.round(priceRwf)) : "")
     setItemSuggestions([])
     setItemOpen(false)
   }
@@ -262,6 +447,24 @@ export function UmuriroBoarding() {
     }
     return true
   }
+
+  const verifyMoMoSms = useCallback(() => {
+    setSmsPayCheck(null)
+    setSmsMatchResult(null)
+    if (payChannel !== "momo" || totalRwf < 1) return
+    const t = momoSmsPaste.trim()
+    if (!t) return
+    const r = matchMoMoSmsToOrderTotal(t, totalRwf)
+    setSmsMatchResult(r)
+    if (!r.candidates.length) setSmsPayCheck("no_amount")
+    else if (r.matched) setSmsPayCheck("paid")
+    else setSmsPayCheck("mismatch")
+  }, [payChannel, totalRwf, momoSmsPaste])
+
+  useEffect(() => {
+    setSmsPayCheck(null)
+    setSmsMatchResult(null)
+  }, [payChannel, totalRwf])
 
   const sectorSlug =
     mode === "advanced" && shopCategory ? shopCategoryToSectorSlug(shopCategory) : ""
@@ -315,6 +518,10 @@ export function UmuriroBoarding() {
           unitPriceRwf: Math.round(p),
           quantity: Math.round(q),
           totalRwf,
+        },
+        payment: {
+          channel: payChannel,
+          momoSmsMatched: payChannel === "momo" ? smsPayCheck === "paid" : null,
         },
         ussd,
         submittedAt: new Date().toISOString(),
@@ -607,16 +814,24 @@ export function UmuriroBoarding() {
                           itemSuggestions.map((p, i) => {
                             const key = `${p.item_code ?? ""}-${p.item_commercial_name ?? ""}-${i}`
                             const label = itemSuggestionLabel(p)
+                            const priceRwf = catalogHitPriceRwf(p)
                             return (
                               <button
                                 key={key}
                                 type="button"
                                 role="option"
-                                className="flex w-full min-w-0 cursor-pointer px-3 py-2 text-left text-sm text-[#17324d] hover:bg-[#f0f8ff]"
-                                onMouseDown={(e) => e.preventDefault()}
-                                onClick={() => pickItemSuggestion(p)}
+                                className="flex w-full min-w-0 cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-sm text-[#17324d] hover:bg-[#f0f8ff]"
+                                onMouseDown={(e) => {
+                                  e.preventDefault()
+                                  applyPickedCatalogHit(p)
+                                }}
                               >
-                                <span className="truncate">{label}</span>
+                                <span className="min-w-0 truncate">{label}</span>
+                                {priceRwf >= 1 ? (
+                                  <span className="shrink-0 text-xs font-bold text-emerald-800">
+                                    {priceRwf.toLocaleString()} RWF
+                                  </span>
+                                ) : null}
                               </button>
                             )
                           })}
@@ -657,83 +872,188 @@ export function UmuriroBoarding() {
                 <span className="tabular-nums text-[#127fc0]">{totalRwf.toLocaleString()} RWF</span>
               </div>
 
-              {!isAdvanced ? (
-                <div className="min-w-0 space-y-2 border-t border-[#dbe7f3] pt-4">
-                  <Label className="text-[#17324d]">{pickLang(UMURIRO_UI.payWithMomo, lang)}</Label>
-                  <p className="text-xs text-[#6f8399]">{pickLang(UMURIRO_UI.ussdLabel, lang)}</p>
-                  <div className="flex min-w-0 flex-wrap items-stretch gap-2 sm:items-center">
-                    <code className="min-w-0 flex-1 break-all rounded-lg bg-[#17324d]/5 px-2 py-2 text-xs font-mono leading-relaxed text-[#17324d]">
-                      {momoDigits.length >= 6 && totalRwf > 0 ? ussd : "—"}
-                    </code>
-                    <div className="flex shrink-0 gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="border-[#dbe7f3]"
-                        onClick={copyUssd}
-                        disabled={momoDigits.length < 6 || totalRwf < 1}
-                      >
-                        {copied ? <Check className="h-4 w-4" /> : <Copy className="mr-1 h-4 w-4" />}
-                        {pickLang(UMURIRO_UI.copyUssd, lang)}
-                      </Button>
-                      {ussdTelHref ? (
-                        <Button type="button" variant="outline" size="sm" className="border-[#dbe7f3]" asChild>
-                          <a href={ussdTelHref}>
-                            <Phone className="mr-1 h-4 w-4" aria-hidden />
-                            {pickLang(UMURIRO_UI.dialMomo, lang)}
-                          </a>
-                        </Button>
-                      ) : (
-                        <Button type="button" variant="outline" size="sm" className="border-[#dbe7f3]" disabled>
-                          <Phone className="mr-1 h-4 w-4" aria-hidden />
-                          {pickLang(UMURIRO_UI.dialMomo, lang)}
-                        </Button>
+              <div className="min-w-0 space-y-3 border-t border-[#dbe7f3] pt-4">
+                <div className="space-y-2">
+                  <Label className="text-[#17324d]">{pickLang(UMURIRO_UI.payHowTitle, lang)}</Label>
+                  <div
+                    className="flex gap-1 rounded-xl border border-[#dbe7f3] bg-[#f7fbff] p-1"
+                    role="group"
+                    aria-label={pickLang(UMURIRO_UI.payHowTitle, lang)}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPayChannel("momo")
+                        setSmsPayCheck(null)
+                        setSmsMatchResult(null)
+                      }}
+                      className={cn(
+                        "min-h-9 flex-1 rounded-lg px-2 text-xs font-semibold sm:text-sm",
+                        payChannel === "momo"
+                          ? "bg-white text-[#17324d] shadow-sm"
+                          : "text-[#6f8399] hover:text-[#17324d]",
                       )}
-                    </div>
+                    >
+                      {pickLang(UMURIRO_UI.payMomo, lang)}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPayChannel("cash")
+                        setSmsPayCheck(null)
+                        setSmsMatchResult(null)
+                      }}
+                      className={cn(
+                        "min-h-9 flex-1 rounded-lg px-2 text-xs font-semibold sm:text-sm",
+                        payChannel === "cash"
+                          ? "bg-white text-[#17324d] shadow-sm"
+                          : "text-[#6f8399] hover:text-[#17324d]",
+                      )}
+                    >
+                      {pickLang(UMURIRO_UI.payCash, lang)}
+                    </button>
                   </div>
                 </div>
-              ) : (
-                <div className="min-w-0 space-y-2">
-                  <Label className="text-[#17324d]">{pickLang(UMURIRO_UI.ussdLabel, lang)}</Label>
-                  <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <code className="min-w-0 flex-1 break-all rounded-lg bg-[#17324d]/5 px-2 py-2 text-xs font-mono text-[#17324d]">
-                      {momoDigits.length >= 1 && totalRwf > 0 ? ussd : "—"}
-                    </code>
-                    <div className="flex shrink-0 gap-2">
+
+                {payChannel === "cash" ? (
+                  <div className="rounded-xl border border-[#dbe7f3] bg-[#fffbeb] px-3 py-2 text-sm text-[#92400e]">
+                    {pickLang(UMURIRO_UI.paymentCashSkipSms, lang)}
+                  </div>
+                ) : (
+                  <>
+                    {!isAdvanced ? (
+                      <div className="min-w-0 space-y-2">
+                        <Label className="text-[#17324d]">{pickLang(UMURIRO_UI.payWithMomo, lang)}</Label>
+                        <p className="text-xs text-[#6f8399]">{pickLang(UMURIRO_UI.ussdLabel, lang)}</p>
+                        <div className="flex min-w-0 flex-wrap items-stretch gap-2 sm:items-center">
+                          <code className="min-w-0 flex-1 break-all rounded-lg bg-[#17324d]/5 px-2 py-2 text-xs font-mono leading-relaxed text-[#17324d]">
+                            {momoDigits.length >= 6 && totalRwf > 0 ? ussd : "—"}
+                          </code>
+                          <div className="flex shrink-0 gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="border-[#dbe7f3]"
+                              onClick={copyUssd}
+                              disabled={momoDigits.length < 6 || totalRwf < 1}
+                            >
+                              {copied ? <Check className="h-4 w-4" /> : <Copy className="mr-1 h-4 w-4" />}
+                              {pickLang(UMURIRO_UI.copyUssd, lang)}
+                            </Button>
+                            {ussdTelHref ? (
+                              <Button type="button" variant="outline" size="sm" className="border-[#dbe7f3]" asChild>
+                                <a href={ussdTelHref}>
+                                  <Phone className="mr-1 h-4 w-4" aria-hidden />
+                                  {pickLang(UMURIRO_UI.dialMomo, lang)}
+                                </a>
+                              </Button>
+                            ) : (
+                              <Button type="button" variant="outline" size="sm" className="border-[#dbe7f3]" disabled>
+                                <Phone className="mr-1 h-4 w-4" aria-hidden />
+                                {pickLang(UMURIRO_UI.dialMomo, lang)}
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="min-w-0 space-y-2">
+                        <Label className="text-[#17324d]">{pickLang(UMURIRO_UI.ussdLabel, lang)}</Label>
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                          <code className="min-w-0 flex-1 break-all rounded-lg bg-[#17324d]/5 px-2 py-2 text-xs font-mono text-[#17324d]">
+                            {momoDigits.length >= 1 && totalRwf > 0 ? ussd : "—"}
+                          </code>
+                          <div className="flex shrink-0 gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="border-[#dbe7f3]"
+                              onClick={copyUssd}
+                              disabled={momoDigits.length < 1 || totalRwf < 1}
+                            >
+                              {copied ? <Check className="h-4 w-4" /> : <Copy className="mr-1 h-4 w-4" />}
+                              {pickLang(UMURIRO_UI.copyUssd, lang)}
+                            </Button>
+                            {ussdTelHref ? (
+                              <Button type="button" variant="outline" size="sm" className="border-[#dbe7f3]" asChild>
+                                <a href={ussdTelHref}>
+                                  <Phone className="mr-1 h-4 w-4" aria-hidden />
+                                  {pickLang(UMURIRO_UI.dialMomo, lang)}
+                                </a>
+                              </Button>
+                            ) : (
+                              <Button type="button" variant="outline" size="sm" className="border-[#dbe7f3]" disabled>
+                                <Phone className="mr-1 h-4 w-4" aria-hidden />
+                                {pickLang(UMURIRO_UI.dialMomo, lang)}
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                        {shopPhoneE164 ? (
+                          <p className="text-xs text-emerald-800">
+                            {pickLang(UMURIRO_UI.sellerSmsAfterSave, lang).replace("{phone}", shopPhoneE164)}
+                          </p>
+                        ) : null}
+                      </div>
+                    )}
+
+                    <div className="min-w-0 space-y-2 rounded-xl border border-[#dbe7f3] bg-white px-3 py-3">
+                      <div className="flex items-center gap-2">
+                        <MessageSquare className="h-4 w-4 shrink-0 text-[#127fc0]" aria-hidden />
+                        <span className="text-sm font-semibold text-[#17324d]">
+                          {pickLang(UMURIRO_UI.readMoMoSmsTitle, lang)}
+                        </span>
+                      </div>
+                      <p className="text-xs text-[#6f8399]">
+                        {pickLang(UMURIRO_UI.readMoMoSmsHint, lang).replace(
+                          "{total}",
+                          totalRwf.toLocaleString(),
+                        )}
+                      </p>
+                      <Textarea
+                        value={momoSmsPaste}
+                        onChange={(e) => {
+                          setMomoSmsPaste(e.target.value)
+                          setSmsPayCheck(null)
+                          setSmsMatchResult(null)
+                        }}
+                        className="min-h-[88px] resize-y border-[#dbe7f3] text-sm"
+                        placeholder="MTN MoMo…"
+                        aria-label={pickLang(UMURIRO_UI.readMoMoSmsTitle, lang)}
+                      />
                       <Button
                         type="button"
-                        variant="outline"
+                        variant="secondary"
                         size="sm"
-                        className="border-[#dbe7f3]"
-                        onClick={copyUssd}
-                        disabled={momoDigits.length < 1 || totalRwf < 1}
+                        className="w-full border-[#dbe7f3] bg-[#f7fbff] text-[#17324d] hover:bg-[#eef6ff]"
+                        onClick={() => void verifyMoMoSms()}
+                        disabled={totalRwf < 1 || !momoSmsPaste.trim()}
                       >
-                        {copied ? <Check className="h-4 w-4" /> : <Copy className="mr-1 h-4 w-4" />}
-                        {pickLang(UMURIRO_UI.copyUssd, lang)}
+                        {pickLang(UMURIRO_UI.verifySms, lang)}
                       </Button>
-                      {ussdTelHref ? (
-                        <Button type="button" variant="outline" size="sm" className="border-[#dbe7f3]" asChild>
-                          <a href={ussdTelHref}>
-                            <Phone className="mr-1 h-4 w-4" aria-hidden />
-                            {pickLang(UMURIRO_UI.dialMomo, lang)}
-                          </a>
-                        </Button>
-                      ) : (
-                        <Button type="button" variant="outline" size="sm" className="border-[#dbe7f3]" disabled>
-                          <Phone className="mr-1 h-4 w-4" aria-hidden />
-                          {pickLang(UMURIRO_UI.dialMomo, lang)}
-                        </Button>
-                      )}
+                      {smsPayCheck === "paid" ? (
+                        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-2 text-xs font-medium text-emerald-900">
+                          {pickLang(UMURIRO_UI.paymentPaidMatched, lang)}
+                        </div>
+                      ) : null}
+                      {smsPayCheck === "no_amount" ? (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-2 text-xs text-amber-950">
+                          {pickLang(UMURIRO_UI.paymentNoAmountInSms, lang)}
+                        </div>
+                      ) : null}
+                      {smsPayCheck === "mismatch" && smsMatchResult ? (
+                        <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-2 text-xs text-red-900">
+                          {pickLang(UMURIRO_UI.paymentMismatch, lang)
+                            .replace("{got}", String(smsMatchResult.amount ?? "—"))
+                            .replace("{expected}", totalRwf.toLocaleString())}
+                        </div>
+                      ) : null}
                     </div>
-                  </div>
-                  {shopPhoneE164 ? (
-                    <p className="text-xs text-emerald-800">
-                      SMS to {shopPhoneE164} after save (if Twilio/webhook is configured).
-                    </p>
-                  ) : null}
-                </div>
-              )}
+                  </>
+                )}
+              </div>
 
               <Button
                 type="button"
