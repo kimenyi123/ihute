@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/auth-store";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { MapPin, Navigation, Save, History, ArrowLeft, Loader2, Search } from "lucide-react";
+import { MapPin, Navigation, Save, History, ArrowLeft, Loader2, Search, FileText, Upload } from "lucide-react";
 import dynamic from "next/dynamic";
 
 const SupplierLocationMap = dynamic(
@@ -49,6 +49,12 @@ interface Landmark {
     type?: string;
     distance?: number;
 }
+
+const URUBUTO_DOC_TYPES: { type: string; label: string }[] = [
+    { type: "CERTIFICATE_INCORPORATION", label: "Certificate of incorporation" },
+    { type: "REPRESENTATIVE_ID", label: "Representative national ID" },
+    { type: "SIGNED_MERCHANT_FORM", label: "Signed merchant form" },
+];
 
 // Haversine formula for distance calculation
 function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -101,6 +107,16 @@ function SupplierLocationSettings() {
     const [fetchingLandmarks, setFetchingLandmarks] = useState(false);
     const [nearbyLandmarks, setNearbyLandmarks] = useState<Landmark[]>([]);
     const [error, setError] = useState<string | null>(null);
+
+    /** UrubutoPay merchant onboarding (supplier self-service via Next proxy). */
+    const [urubutoBootstrapped, setUrubutoBootstrapped] = useState(false);
+    const [urubutoMerchant, setUrubutoMerchant] = useState<Record<string, unknown> | null>(null);
+    const [urubutoEligibility, setUrubutoEligibility] = useState<Record<string, unknown> | null>(null);
+    const [urubutoDocs, setUrubutoDocs] = useState<{ doc_type: string; verified?: boolean; original_filename?: string }[]>([]);
+    const [urubutoPanelLoading, setUrubutoPanelLoading] = useState(false);
+    const [urubutoRegistering, setUrubutoRegistering] = useState(false);
+    const [urubutoUploadingType, setUrubutoUploadingType] = useState<string | null>(null);
+    const [urubutoNotice, setUrubutoNotice] = useState<string | null>(null);
 
     // Fetch nearby landmarks when coordinates change
     useEffect(() => {
@@ -271,6 +287,45 @@ out body 15;
         fetchHistory();
         fetchCategories();
     }, [isAuthenticated, user, router, hasHydrated]);
+
+    const loadUrubuto = async () => {
+        if (!user?.ishyigaAccount) return;
+        setUrubutoPanelLoading(true);
+        setUrubutoNotice(null);
+        try {
+            const acc = encodeURIComponent(user.ishyigaAccount);
+            const [mRes, eRes, dRes] = await Promise.all([
+                fetch(`/api/supplier/urubuto/merchant?account=${acc}`, { cache: "no-store" }),
+                fetch(`/api/supplier/urubuto/eligibility?account=${acc}`, { cache: "no-store" }),
+                fetch(`/api/supplier/urubuto/documents?account=${acc}`, { cache: "no-store" }),
+            ]);
+            const merchantJson = await mRes.json();
+            const eligJson = await eRes.json();
+            const docsJson = await dRes.json();
+            if (!mRes.ok || !eRes.ok || !dRes.ok) {
+                setUrubutoNotice(
+                    "Could not reach UrubutoPay supplier APIs. Redeploy Kaos with UrubutoPaySupplierServlet and set BACKEND_URL to your Tomcat context (e.g. http://localhost:8080/Trading).",
+                );
+            }
+            setUrubutoMerchant(merchantJson?.merchant ?? null);
+            setUrubutoEligibility(eligJson);
+            setUrubutoDocs(Array.isArray(docsJson?.documents) ? docsJson.documents : []);
+        } catch {
+            setUrubutoNotice("Could not load UrubutoPay application status. Check BACKEND_URL / Tomcat.");
+        } finally {
+            setUrubutoPanelLoading(false);
+            setUrubutoBootstrapped(true);
+        }
+    };
+
+    useEffect(() => {
+        if (!hasHydrated || !isAuthenticated || user?.role !== "supplier" || !user?.ishyigaAccount) {
+            setUrubutoBootstrapped(true);
+            return;
+        }
+        void loadUrubuto();
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- reload when supplier account is known
+    }, [hasHydrated, isAuthenticated, user?.ishyigaAccount, user?.role]);
 
     useEffect(() => {
         if (!user?.ishyigaAccount) return;
@@ -513,6 +568,59 @@ out body 15;
         setSelectedLng(lng);
     };
 
+    const handleRegisterUrubuto = async () => {
+        if (!user?.ishyigaAccount) return;
+        setUrubutoRegistering(true);
+        setUrubutoNotice(null);
+        try {
+            const res = await fetch("/api/supplier/urubuto/merchant", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    account: user.ishyigaAccount,
+                    display_name: (owner || nickname || user.ishyigaAccount).trim(),
+                }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || data?.ok === false) {
+                throw new Error((data as { message?: string; error?: string }).message || (data as { error?: string }).error || "Registration failed");
+            }
+            setUrubutoNotice(data.created ? "Application started. Upload the documents below." : "Already registered.");
+            await loadUrubuto();
+        } catch (e: unknown) {
+            setUrubutoNotice(e instanceof Error ? e.message : "Registration failed");
+        } finally {
+            setUrubutoRegistering(false);
+        }
+    };
+
+    const handleUrubutoDocUpload = async (docType: string, file: File) => {
+        if (!user?.ishyigaAccount) return;
+        setUrubutoUploadingType(docType);
+        setUrubutoNotice(null);
+        try {
+            const fd = new FormData();
+            fd.append("account", user.ishyigaAccount);
+            fd.append("doc_type", docType);
+            fd.append("file", file);
+            const res = await fetch("/api/supplier/urubuto/onboarding-documents", { method: "POST", body: fd });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                throw new Error(
+                    (data as { message?: string; error?: string }).message ||
+                        (data as { error?: string }).error ||
+                        `Upload failed (${res.status})`,
+                );
+            }
+            setUrubutoNotice("Document uploaded.");
+            await loadUrubuto();
+        } catch (e: unknown) {
+            setUrubutoNotice(e instanceof Error ? e.message : "Upload failed");
+        } finally {
+            setUrubutoUploadingType(null);
+        }
+    };
+
     if (loading) {
         return (
             <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
@@ -667,6 +775,139 @@ out body 15;
                                 </div>
                             </CardContent>
                         </Card>
+
+                        {/* UrubutoPay — under map (wide column) */}
+                        {user?.ishyigaAccount && (
+                            <Card className="border-violet-200/80 shadow-sm">
+                                <CardHeader>
+                                    <CardTitle className="flex items-center gap-2 text-xl">
+                                        <FileText className="h-6 w-6 text-violet-600" />
+                                        UrubutoPay for my shop
+                                    </CardTitle>
+                                    <CardDescription>
+                                        Start an application and upload onboarding documents (PDF, JPG, or PNG, max 10 MB each).
+                                        Eligibility is reviewed after documents are received.
+                                    </CardDescription>
+                                   
+                                </CardHeader>
+                                <CardContent className="space-y-4">
+                                    {!urubutoBootstrapped || urubutoPanelLoading ? (
+                                        <div className="flex items-center gap-2 text-sm text-slate-600">
+                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                            Loading UrubutoPay status…
+                                        </div>
+                                    ) : (
+                                        <>
+                                            {urubutoNotice && (
+                                                <div className="text-sm rounded-md border border-violet-200 bg-violet-50 text-violet-900 px-3 py-2">
+                                                    {urubutoNotice}
+                                                </div>
+                                            )}
+                                            {urubutoEligibility && (
+                                                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm space-y-1">
+                                                    <div className="flex flex-wrap gap-x-3 gap-y-1">
+                                                        <span>
+                                                            <span className="text-slate-500">Status:</span>{" "}
+                                                            <strong>
+                                                                {String(urubutoEligibility.merchantStatus ?? "—")}
+                                                            </strong>
+                                                        </span>
+                                                        {urubutoEligibility.merchantId != null && urubutoEligibility.merchantId !== "" && (
+                                                            <span>
+                                                                <span className="text-slate-500">Merchant #</span>{" "}
+                                                                <strong>{String(urubutoEligibility.merchantId)}</strong>
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <div>
+                                                        <span className="text-slate-500">Eligible for UrubutoPay:</span>{" "}
+                                                        <strong className={urubutoEligibility.eligible ? "text-green-700" : "text-amber-800"}>
+                                                            {urubutoEligibility.eligible ? "Yes" : "Not yet"}
+                                                        </strong>
+                                                    </div>
+                                                    {typeof urubutoEligibility.message === "string" && urubutoEligibility.message && (
+                                                        <p className="text-slate-600 text-xs leading-relaxed">{urubutoEligibility.message}</p>
+                                                    )}
+                                                </div>
+                                            )}
+                                            {!urubutoMerchant ? (
+                                                <div className="space-y-2">
+                                                    <p className="text-sm text-slate-600">
+                                                        You have not started an UrubutoPay merchant application for this seller account yet.
+                                                    </p>
+                                                    <Button
+                                                        type="button"
+                                                        variant="default"
+                                                        className="w-full sm:w-auto bg-violet-600 hover:bg-violet-700"
+                                                        onClick={handleRegisterUrubuto}
+                                                        disabled={urubutoRegistering}
+                                                    >
+                                                        {urubutoRegistering ? (
+                                                            <>
+                                                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                                                Starting…
+                                                            </>
+                                                        ) : (
+                                                            "Start UrubutoPay application"
+                                                        )}
+                                                    </Button>
+                                                </div>
+                                            ) : (
+                                                <div className="grid gap-4 sm:grid-cols-1 lg:grid-cols-3">
+                                                    <p className="text-xs text-slate-500 lg:col-span-3">
+                                                        Allowed files: PDF, JPEG, PNG. IHUTE forwards uploads securely to the payment service.
+                                                    </p>
+                                                    {URUBUTO_DOC_TYPES.map(({ type, label }) => {
+                                                        const existing = urubutoDocs.find((d) => d.doc_type === type);
+                                                        return (
+                                                            <div
+                                                                key={type}
+                                                                className="flex flex-col gap-2 rounded-md border border-slate-200 p-3 bg-white"
+                                                            >
+                                                                <div className="flex items-start justify-between gap-2">
+                                                                    <span className="text-sm font-medium text-slate-800">{label}</span>
+                                                                    {existing && (
+                                                                        <span className="text-xs shrink-0 text-green-700 font-medium">
+                                                                            {existing.verified ? "Verified" : "Received"}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                                <label className="flex items-center gap-2 cursor-pointer text-sm text-violet-700 hover:text-violet-900">
+                                                                    <Upload className="h-4 w-4" />
+                                                                    <span>{urubutoUploadingType === type ? "Uploading…" : "Choose file"}</span>
+                                                                    <input
+                                                                        type="file"
+                                                                        accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/*"
+                                                                        className="sr-only"
+                                                                        disabled={!!urubutoUploadingType}
+                                                                        onChange={(e) => {
+                                                                            const f = e.target.files?.[0];
+                                                                            e.target.value = "";
+                                                                            if (f) void handleUrubutoDocUpload(type, f);
+                                                                        }}
+                                                                    />
+                                                                </label>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                    <div className="lg:col-span-3">
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            size="sm"
+                                                            onClick={() => loadUrubuto()}
+                                                            disabled={urubutoPanelLoading}
+                                                        >
+                                                            {urubutoPanelLoading ? "Refreshing…" : "Refresh status"}
+                                                        </Button>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </>
+                                    )}
+                                </CardContent>
+                            </Card>
+                        )}
                     </div>
 
                     {/* Sidebar: Info, Landmarks & History */}

@@ -10,7 +10,9 @@ export const PAYMENT_METHOD_NAMES: Record<string, string> = {
   
   // Mobile Money - Standardized names
   "PAID_MTN_MOMO": "Pay with MoMo",
-  "PAID_MOMO": "Pay with MoMo", 
+  "PAID_MOMO": "Pay with MoMo",
+  "PAID_URUBUTO": "UrubutoPay",
+  "PAID_URUBUTO_PAY": "UrubutoPay", 
   "MTN_MOMO": "Pay with MoMo",
   "MOMO": "Pay with MoMo",
   "AIRTEL_MONEY": "Airtel Money",
@@ -47,9 +49,67 @@ export function formatPaymentMethod(method: string | null | undefined): string {
   if (normalized.startsWith("CARD_")) {
     return "Card Payment"
   }
+  if (normalized.startsWith("URUBUTO") || normalized.includes("URUBUTO")) {
+    return "UrubutoPay"
+  }
   
   // Exact match
   return PAYMENT_METHOD_NAMES[normalized] || method
+}
+
+/** Supplier / buyer order detail: payment row label (respects PAYMENT_NAME, not generic MoMo). */
+export function formatSupplierOrderPaymentDisplay(
+  paymentName?: string | null,
+  paymentStatus?: string | null,
+): { status: string; displayName: string; isPaid: boolean } {
+  const name = (paymentName ?? "").trim()
+  const normalized = name.toUpperCase()
+  const status = (paymentStatus ?? "").toLowerCase()
+  const isPaid = status === "paid"
+  const baseLabel = formatPaymentMethod(name)
+
+  if (normalized.includes("URUBUTO")) {
+    return {
+      status: isPaid ? "paid" : "pending",
+      displayName: isPaid ? "Paid via UrubutoPay" : "Awaiting UrubutoPay",
+      isPaid,
+    }
+  }
+
+  if (isPaid) {
+    if (normalized.includes("AIRTEL")) {
+      return { status: "paid", displayName: "Paid via Airtel Money", isPaid: true }
+    }
+    if (normalized.includes("MOMO") || normalized.includes("MTN")) {
+      return { status: "paid", displayName: "Paid via MoMo", isPaid: true }
+    }
+    if (normalized.includes("CARD") || normalized.includes("CREDIT") || normalized.includes("DEBIT")) {
+      return { status: "paid", displayName: "Paid via Card", isPaid: true }
+    }
+    if (normalized.includes("DELIVERY") || normalized.includes("COD")) {
+      return { status: "paid", displayName: "Paid on delivery", isPaid: true }
+    }
+    return { status: "paid", displayName: `Paid (${baseLabel})`, isPaid: true }
+  }
+
+  if (normalized.includes("MOMO") || normalized.includes("MTN") || normalized.includes("MOBILE")) {
+    return { status: status || "processing", displayName: "MoMo payment", isPaid: false }
+  }
+  if (normalized.includes("AIRTEL")) {
+    return { status: status || "processing", displayName: "Airtel Money", isPaid: false }
+  }
+  if (normalized.includes("PAY_ON_DELIVERY") || normalized.includes("COD")) {
+    return { status: "pending", displayName: "Pay on delivery", isPaid: false }
+  }
+  if (normalized.includes("CARD")) {
+    return { status: status || "processing", displayName: "Card payment", isPaid: false }
+  }
+
+  return {
+    status: status || "pending",
+    displayName: baseLabel,
+    isPaid,
+  }
 }
 
 /**
@@ -60,6 +120,7 @@ export function formatPaymentMethod(method: string | null | undefined): string {
 export function getPaymentMethodIcon(method: string): string {
   const m = method.toUpperCase()
   
+  if (m.includes("URUBUTO")) return "💜"
   if (m.includes("MOMO") || m.startsWith("MOMO_")) return "📱"
   if (m.includes("CARD") || m.includes("CREDIT") || m.includes("DEBIT") || m.startsWith("CARD_")) return "💳"
   if (m.includes("DELIVERY") || m.includes("COD") || m.startsWith("COD_")) return "🚚"
