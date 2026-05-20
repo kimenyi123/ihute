@@ -70,6 +70,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
       );
     }
     items.push(
+      { name: "UrubutoPay", href: "/supplier/urubuto" },
       { name: "Ratings", href: "/supplier/ratings" },
       { name: "Rekizisiyo / Kurangura byinshi", href: "/supplier/b2b" },
       { name: "Expenses", href: "/supplier/expenses" },
