@@ -12,6 +12,7 @@ import { usePriceWatchStore } from "@/lib/price-watch-store"
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { useToast } from "@/components/ui/use-toast"
+import { useAuthStore } from "@/lib/auth-store"
 import { PriceWatchButton } from "@/components/price-watch-button"
 import { ErxPrescriptionDialog } from "@/components/erx-prescription-dialog"
 import { serializeErxForNotes } from "@/lib/erx-prescription"
@@ -130,6 +131,7 @@ export function ProductCard({
   const spotlightQuickOnlyRow =
     isSpotlight && Boolean(onQuickView) && quickViewReplacesWatchPrice
   const router = useRouter()
+  const user = useAuthStore((s) => s.user)
   const addOrInc = useCartStore((s) => s.addOrInc ?? s.addItem)
   const cartItems = useCartStore((s) => s.items)
   const toggleFavorite = useFavoritesStore((s) => s.toggleFavorite)
@@ -223,6 +225,7 @@ export function ProductCard({
   const [imgError, setImgError] = useState(false)
   const [fallbackSrc, setFallbackSrc] = useState<string | null>(null)
   const [erxOpen, setErxOpen] = useState(false)
+  const isDoctor = String(user?.dbRole ?? "").trim().toUpperCase() === "DOCTOR"
 
   // Primary: KAOS-based URL (famille + item_key_words, then flat NIKI code, then backend URL, then KAOS no_image)
   const resolvedUrl = getProductImageSrc(product, placeholder)
@@ -547,7 +550,7 @@ export function ProductCard({
             onClick={(e) => {
               e.stopPropagation()
               trackClick("product", id, name)
-              if (pharmacyErx) {
+              if (pharmacyErx && isDoctor) {
                 setErxOpen(true)
                 return
               }
@@ -627,7 +630,7 @@ export function ProductCard({
         </div>
       </CardContent>
     </Card>
-    {pharmacyErx && (
+    {pharmacyErx && isDoctor && (
       <ErxPrescriptionDialog
         open={erxOpen}
         onOpenChange={setErxOpen}

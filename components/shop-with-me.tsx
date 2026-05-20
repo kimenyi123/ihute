@@ -64,9 +64,9 @@ import {
 } from "@/components/ui/sheet";
 import { Slider } from "@/components/ui/slider";
 import { useCartStore } from "@/lib/cart-store";
+import { useAuthStore } from "@/lib/auth-store";
 import { useFavoritesStore } from "@/lib/favorites-store";
 import { useTableCommandStore, getOrCreateGuestEmail } from "@/lib/table-command-store";
-import { useAuthStore } from "@/lib/auth-store";
 import { trackProductView, trackClick } from "@/lib/interaction-tracker";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/use-toast";
@@ -1968,6 +1968,8 @@ function ProductCard({
   const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
   const fav = isFavorite(itemCode);
   const [erxOpen, setErxOpen] = useState(false);
+  const user = useAuthStore((s) => s.user);
+  const isDoctor = String(user?.dbRole ?? "").trim().toUpperCase() === "DOCTOR";
 
   const pickField = (...keys: string[]) => {
     for (const k of keys) {
@@ -2210,7 +2212,7 @@ function ProductCard({
           className="mt-1 w-full bg-[#1e3a5f] hover:bg-[#2c4f7c]"
           onClick={(e) => {
             e.stopPropagation();
-            if (isPharmacy) {
+            if (isPharmacy && isDoctor) {
               openErxDialog();
             } else {
               pushToCart();
@@ -2225,13 +2227,15 @@ function ProductCard({
         </Button>
       </CardContent>
 
-      <ErxPrescriptionDialog
-        open={erxOpen}
-        onOpenChange={setErxOpen}
-        productName={productName}
-        prefillSource={p as Record<string, unknown>}
-        onConfirm={(erx) => pushToCart(1, erx)}
-      />
+      {isDoctor && (
+        <ErxPrescriptionDialog
+          open={erxOpen}
+          onOpenChange={setErxOpen}
+          productName={productName}
+          prefillSource={p as Record<string, unknown>}
+          onConfirm={(erx) => pushToCart(1, erx)}
+        />
+      )}
 
       <Dialog open={imagePreviewOpen} onOpenChange={setImagePreviewOpen}>
         <DialogContent className="sm:max-w-lg">
