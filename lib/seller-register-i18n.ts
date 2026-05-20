@@ -180,9 +180,9 @@ export const UMURIRO_UI = {
   },
   imBuying: { en: "I'm buying", rw: "Nagura", fr: "J’achète" },
   imBuyingHint: {
-    en: "Search the catalog in the category above, or type any name.",
-    rw: "Shakisha muri ubu bwoko hejuru, cyangwa wandike uko ukeneye.",
-    fr: "Cherchez dans cette catégorie, ou saisissez un nom libre.",
+    en: "Search an item, set price & quantity, tap Add to my list — repeat for soap, salt, bread, etc.",
+    rw: "Shakisha igicuruzwa, shyiramo igiciro n’umubare, ukande Ongeraho — kongera ku bindi byose.",
+    fr: "Cherchez, prix et quantité, puis Ajouter — répétez pour plusieurs articles.",
   },
   chooseCategory: {
     en: "Choose a shop category first.",
@@ -196,6 +196,32 @@ export const UMURIRO_UI = {
   },
   unitPrice: { en: "Price (RWF)", rw: "Igiciro (RWF)", fr: "Prix (RWF)" },
   quantity: { en: "Quantity", rw: "Umubare", fr: "Quantité" },
+  addToList: {
+    en: "Add to my list",
+    rw: "Ongeraho ku rutonde",
+    fr: "Ajouter à la liste",
+  },
+  cartTitle: {
+    en: "Your items",
+    rw: "Ibicuruzwa byawe",
+    fr: "Vos articles",
+  },
+  cartEmpty: {
+    en: "Search and add items above — soap, salt, bread, and more in one order.",
+    rw: "Shakisha hejuru wongeraho ibicuruzwa — isabune, umunyu, umugati, n’ibindi mu komande imwe.",
+    fr: "Cherchez et ajoutez des articles ci-dessus — tout en une seule commande.",
+  },
+  cartItemCount: {
+    en: "{count} item(s)",
+    rw: "Ibicuruzwa {count}",
+    fr: "{count} article(s)",
+  },
+  removeItem: { en: "Remove", rw: "Kuraho", fr: "Retirer" },
+  emptyCartError: {
+    en: "Add at least one item to your list.",
+    rw: "Ongeraho nibura igicuruzwa kimwe ku rutonde.",
+    fr: "Ajoutez au moins un article.",
+  },
   totalLabel: { en: "Total to pay (RWF)", rw: "Amafaranga yose", fr: "Total (RWF)" },
   ussdLabel: { en: "MTN MoMo USSD", rw: "Kode USSD ya MTN MoMo", fr: "USSD MTN MoMo" },
   sellerSmsPreview: {

@@ -16,7 +16,6 @@ import { useLocationStoreEnhanced, type LocationData } from "@/lib/location-stor
 import { getProductImageSrc, NO_IMAGE_URL } from "@/lib/image-utils"
 import { cn } from "@/lib/utils"
 import { LayoutDashboard, Loader2, SlidersHorizontal, Smartphone, Trash2 } from "lucide-react"
-import { AcceptedCardNetworksStrip } from "@/components/payment/AcceptedCardNetworksStrip"
 import { grandmaApiService } from "@/lib/grandma-api-service"
 import { getUserPreferences, toggleUserPreference, saveUserPreferences, getCurrentUserId, loadUserPreferences } from "@/lib/user-preferences-api"
 import {
@@ -35,11 +34,6 @@ import {
   computeIhutePlatformFeeRwf,
   stripShopMomoLabel,
 } from "@/lib/grandma-order-billing"
-import {
-  formatBkPanGroups,
-  getBkCardLast4,
-  validateGrandmaBkCardDemo,
-} from "@/lib/grandma-bk-card-demo"
 import { GRANDMA_CATEGORY_TO_SECTOR_SLUG } from "@/lib/seller-category-sector"
 import { fetchSectorStatsFromApi, productCountFromSupplierRow } from "@/lib/fetch-suggestions-helpers"
 import { useAuthStore } from "@/lib/auth-store"
@@ -130,19 +124,6 @@ type FulfillmentMode = "delivery" | "pickup"
 
 type PaymentId = "momo" | "airtel" | "bk" | "cash"
 type PaymentMode = { id: PaymentId; label: string; iconSrc: string }
-type BkCardNetwork = "visa" | "mastercard" | "amex" | "verve"
-
-function detectBkCardNetwork(panDigits: string): BkCardNetwork | null {
-  const d = digitsOnly(panDigits)
-  if (!d) return null
-  if (/^4/.test(d)) return "visa"
-  if (/^3[47]/.test(d)) return "amex"
-  if (/^5[1-5]/.test(d)) return "mastercard"
-  const mc2 = Number.parseInt(d.slice(0, 4), 10)
-  if (Number.isFinite(mc2) && mc2 >= 2221 && mc2 <= 2720) return "mastercard"
-  if (/^506[0-4]/.test(d) || /^6500/.test(d) || /^5078/.test(d) || /^5079/.test(d)) return "verve"
-  return null
-}
 
 /** Kaos {@code OrdersServlet} {@code paymentName} values */
 function grandmaPaymentToOrdersPaymentName(id: PaymentId): string {
@@ -2113,10 +2094,6 @@ export default function GrandmaPage() {
   const setLanguage = useLanguageStore((s) => s.setLanguage)
   const [preferredShopIds, setPreferredShopIds] = useState<string[]>([])
   const [selectedPayment, setSelectedPayment] = useState<PaymentId>("momo")
-  const [grandmaBkCardDigits, setGrandmaBkCardDigits] = useState("")
-  const [grandmaBkExpiry, setGrandmaBkExpiry] = useState("")
-  const [grandmaBkCvc, setGrandmaBkCvc] = useState("")
-  const [grandmaBkOtp, setGrandmaBkOtp] = useState("")
   const [grandmaCashConfirm, setGrandmaCashConfirm] = useState(false)
   const [grandmaUssdCopied, setGrandmaUssdCopied] = useState(false)
   const [prefsHydrated, setPrefsHydrated] = useState(false)
@@ -2382,12 +2359,6 @@ export default function GrandmaPage() {
   }, [selectedPayment, prefsHydrated])
   useEffect(() => {
     setGrandmaUssdCopied(false)
-    if (selectedPayment !== "bk") {
-      setGrandmaBkCardDigits("")
-      setGrandmaBkExpiry("")
-      setGrandmaBkCvc("")
-      setGrandmaBkOtp("")
-    }
     if (selectedPayment !== "cash") setGrandmaCashConfirm(false)
   }, [selectedPayment])
 
@@ -2887,18 +2858,6 @@ export default function GrandmaPage() {
     return buildGrandmaMtnUssd(selectedShop.momo ?? "", Math.round(grandTotal))
   }, [selectedShop, selectedPayment, grandTotal])
 
-  const grandmaDetectedBkNetwork = useMemo(() => detectBkCardNetwork(grandmaBkCardDigits), [grandmaBkCardDigits])
-
-  const grandmaBkCardPlaceholder = useMemo(() => {
-    const byNetwork: Record<BkCardNetwork, string> = {
-      visa: "4111 1111 1111 1111",
-      mastercard: "5555 5555 5555 4444",
-      amex: "3782 822463 10005",
-      verve: "5061 4604 1234 5678",
-    }
-    return grandmaDetectedBkNetwork ? byNetwork[grandmaDetectedBkNetwork] : "Card number"
-  }, [grandmaDetectedBkNetwork])
-
   const selectLogisticsMode = (id: LogisticsId) => {
     setSelectedLogistics(id)
   }
@@ -2924,12 +2883,6 @@ export default function GrandmaPage() {
   }
 
   const grandmaBuyerSession = useAuthStore((s) => s.user)
-  const grandmaBkOtpPhoneMask = useMemo(() => {
-    const raw = grandmaBuyerSession?.phone?.trim() || grandmaBuyerPhoneInput.trim()
-    const n = normalizePhoneDigitsForAuth(raw)
-    if (n.length >= 4) return `***${n.slice(-4)}`
-    return "***••••"
-  }, [grandmaBuyerSession?.phone, grandmaBuyerPhoneInput])
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
   /** Must be true before treating `user` as final — avoids seller mode snapping back to buyer on load. */
   const authHasHydrated = useAuthStore((s) => s.hasHydrated)
@@ -3909,26 +3862,6 @@ export default function GrandmaPage() {
           return
         }
       }
-      if (selectedPayment === "bk") {
-        const bkErr = validateGrandmaBkCardDemo({
-          panDigits: grandmaBkCardDigits,
-          expiry: grandmaBkExpiry,
-          cvc: grandmaBkCvc,
-          otp: grandmaBkOtp,
-        })
-        if (bkErr) {
-          const bkMsg =
-            bkErr === "card"
-              ? trSubmit.payStepErrBkCard
-              : bkErr === "expiry"
-                ? trSubmit.payStepErrBkExpiry
-                : bkErr === "cvc"
-                  ? trSubmit.payStepErrBkCvc
-                  : trSubmit.payStepErrBkOtp
-          setGrandmaOrderSubmitError(bkMsg)
-          return
-        }
-      }
       if (selectedPayment === "cash" && !grandmaCashConfirm) {
         setGrandmaOrderSubmitError(trSubmit.payStepErrCash)
         return
@@ -3967,8 +3900,6 @@ export default function GrandmaPage() {
         selectedPayment === "momo" || selectedPayment === "airtel"
           ? normalizePhoneDigitsForAuth(buyerPhone)
           : undefined
-      const bkCardLast4 = selectedPayment === "bk" ? getBkCardLast4(grandmaBkCardDigits) : undefined
-
       const billingTail = buildGrandmaBillingReferenceTail({
         intentId: String(piJson.intentId),
         ihuteFeeRwf: ihuteFees,
@@ -3977,7 +3908,6 @@ export default function GrandmaPage() {
         buyerGrandTotalRwf: Math.round(grandTotal),
         paymentChannel: selectedPayment,
         payerDigits,
-        bkCardLast4,
       })
 
       const locParts = [
@@ -4107,10 +4037,6 @@ export default function GrandmaPage() {
     displayUserLocationEn,
     grandTotal,
     grandmaBuyerPhoneInput,
-    grandmaBkCardDigits,
-    grandmaBkExpiry,
-    grandmaBkCvc,
-    grandmaBkOtp,
     grandmaCashConfirm,
     ihuteFees,
     itemsTotal,
@@ -5525,7 +5451,7 @@ export default function GrandmaPage() {
           ))}
         </div>
 
-        {selectedShop ? (
+        {selectedShop && selectedPayment !== "bk" ? (
           <div
             className="card pay-method-form"
             style={{ textAlign: "left", marginTop: 12, marginBottom: 12, padding: "14px 16px" }}
@@ -5659,99 +5585,6 @@ export default function GrandmaPage() {
                   </div>
                 ) : null}
                 <p style={{ fontSize: 11, color: "var(--muted)", margin: 0, lineHeight: 1.45 }}>{tPay.payStepAirtelHelp}</p>
-              </div>
-            ) : selectedPayment === "bk" ? (
-              <div className="space-y-3">
-                <div style={{ fontWeight: 700, fontSize: 13 }}>{tPay.payStepBkTitle}</div>
-                <p style={{ fontSize: 11, color: "var(--muted)", margin: 0, lineHeight: 1.45 }}>{tPay.payStepBkHelp}</p>
-                <div>
-                  <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-[#166534]">
-                    {tPay.payStepCardsAccepted}
-                  </p>
-                  <AcceptedCardNetworksStrip selectedNetwork={grandmaDetectedBkNetwork} label={tPay.payStepCardsAccepted} />
-                </div>
-                <div>
-                  <Label htmlFor="grandma-pay-bk-pan" className="text-xs font-bold text-[#166534]">
-                    {tPay.payStepBkCardNumber}
-                  </Label>
-                  <Input
-                    id="grandma-pay-bk-pan"
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="off"
-                    value={formatBkPanGroups(grandmaBkCardDigits)}
-                    onChange={(e) => setGrandmaBkCardDigits(digitsOnly(e.target.value).slice(0, 16))}
-                    className="pay-input-tap mt-1.5 min-h-[48px] border-[#dbe7f3] font-mono tracking-wide text-base"
-                    placeholder={grandmaBkCardPlaceholder}
-                  />
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                  <div>
-                    <Label htmlFor="grandma-pay-bk-exp" className="text-xs font-bold text-[#166534]">
-                      {tPay.payStepBkExpiry}
-                    </Label>
-                    <Input
-                      id="grandma-pay-bk-exp"
-                      type="text"
-                      inputMode="numeric"
-                      autoComplete="off"
-                      value={grandmaBkExpiry}
-                      onChange={(e) => {
-                        const d = digitsOnly(e.target.value).slice(0, 4)
-                        const v = d.length >= 2 ? `${d.slice(0, 2)}/${d.slice(2)}` : d
-                        setGrandmaBkExpiry(v)
-                      }}
-                      className="pay-input-tap mt-1.5 min-h-[48px] border-[#dbe7f3] font-mono text-base"
-                      placeholder="12/28"
-                      maxLength={5}
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="grandma-pay-bk-cvc" className="text-xs font-bold text-[#166534]">
-                      {tPay.payStepBkCvc}
-                    </Label>
-                    <Input
-                      id="grandma-pay-bk-cvc"
-                      type="password"
-                      inputMode="numeric"
-                      autoComplete="off"
-                      value={grandmaBkCvc}
-                      onChange={(e) => setGrandmaBkCvc(digitsOnly(e.target.value).slice(0, 4))}
-                      className="pay-input-tap mt-1.5 min-h-[48px] border-[#dbe7f3] font-mono text-base"
-                      placeholder="•••"
-                      maxLength={4}
-                    />
-                  </div>
-                </div>
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: "#166534",
-                    background: "var(--pay-soft)",
-                    border: "1px solid #bbf7d0",
-                    borderRadius: 10,
-                    padding: "10px 12px",
-                    lineHeight: 1.45,
-                  }}
-                >
-                  {tPay.payStepBkOtpSms.replace("{mask}", grandmaBkOtpPhoneMask)}
-                </div>
-                <div>
-                  <Label htmlFor="grandma-pay-bk-otp" className="text-xs font-bold text-[#166534]">
-                    {tPay.payStepBkOtp}
-                  </Label>
-                  <Input
-                    id="grandma-pay-bk-otp"
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    value={grandmaBkOtp}
-                    onChange={(e) => setGrandmaBkOtp(digitsOnly(e.target.value).slice(0, 6))}
-                    className="pay-input-tap mt-1.5 min-h-[48px] border-[#dbe7f3] font-mono tracking-widest text-base"
-                    placeholder="000000"
-                    maxLength={6}
-                  />
-                </div>
               </div>
             ) : (
               <div className="space-y-3">

@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx"
+import { roundRwfPrice } from "@/lib/parse-rwf-price"
 
 export type ParsedStockRow = {
   itemName: string
@@ -34,14 +35,7 @@ function normHeader(h: string): string {
 }
 
 function parseNum(raw: unknown): number {
-  if (typeof raw === "number" && Number.isFinite(raw)) return raw
-  const s = String(raw ?? "")
-    .replace(/[^\d.,-]/g, "")
-    .replace(",", ".")
-    .trim()
-  if (!s) return 0
-  const n = parseFloat(s)
-  return Number.isFinite(n) ? n : 0
+  return roundRwfPrice(raw)
 }
 
 function slugCode(name: string, index: number): string {

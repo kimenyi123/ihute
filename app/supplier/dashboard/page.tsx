@@ -52,6 +52,7 @@ import {
   sellableStockFromPacketEmballage,
 } from "@/lib/package-price";
 import { formatItemEmballageMultiplierOnly } from "@/lib/cart-display-utils";
+import { roundRwfPrice } from "@/lib/parse-rwf-price";
 import { parseItemStateBatchExpiry } from "@/lib/item-state-display";
 import { SupplierProductTableImage } from "@/components/supplier-product-table-image";
 import { ResponsiveTable } from "@/components/ui/responsive-table";
@@ -214,27 +215,9 @@ function SupplierDashboard() {
         };
 
         // Helper function to parse Redis price format (e.g., "3000RWF")
-        const parsePriceFromRedis = (value: any): number => {
-          if (typeof value === 'number') return value;
-          if (typeof value === 'string') {
-            const cleaned = value.replace(/RWF/gi, '').trim();
-            const parsed = parseFloat(cleaned);
-            return isNaN(parsed) ? 0 : parsed;
-          }
-          return 0;
-        };
+        const parsePriceFromRedis = (value: unknown): number => roundRwfPrice(value);
 
-        // Helper function to parse Redis price strings like "1880.0RWF"
-        const parsePrice = (value: any): number => {
-          if (typeof value === 'number') return value;
-          if (typeof value === 'string') {
-            // Remove "RWF" and parse
-            const cleaned = value.replace(/RWF/gi, '').trim();
-            const parsed = parseFloat(cleaned);
-            return isNaN(parsed) ? 0 : parsed;
-          }
-          return 0;
-        };
+        const parsePrice = (value: unknown): number => roundRwfPrice(value);
 
         // Map products - handle Redis format (your format)
         const buildBatchState = (product: any): string => {

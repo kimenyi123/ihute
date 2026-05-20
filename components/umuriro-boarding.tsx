@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import Image from "next/image"
-import { Check, Copy, Flame, Loader2, MessageSquare, Phone } from "lucide-react"
+import { Check, Copy, Flame, Loader2, MessageSquare, Minus, Phone, Plus, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -134,6 +134,24 @@ type UmuriroMode = "quick" | "advanced"
 type UmuriroPayChannel = "momo" | "cash"
 type SmsPayCheck = "paid" | "mismatch" | "no_amount" | null
 
+type UmuriroCartLine = {
+  id: string
+  itemName: string
+  itemCode?: string
+  unitPriceRwf: number
+  quantity: number
+}
+
+function cartLineKey(itemName: string, itemCode?: string): string {
+  const code = (itemCode || "").trim().toLowerCase()
+  if (code) return `code:${code}`
+  return `name:${itemName.trim().toLowerCase()}`
+}
+
+function newCartLineId(): string {
+  return `um-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+}
+
 function digitsOnly(s: string): string {
   return s.replace(/\D/g, "")
 }
@@ -167,6 +185,8 @@ export function UmuriroBoarding() {
   const [resolvedSupplierAccount, setResolvedSupplierAccount] = useState<string | null>(null)
   const [unitPrice, setUnitPrice] = useState("")
   const [quantity, setQuantity] = useState("1")
+  const [pendingItemCode, setPendingItemCode] = useState<string | null>(null)
+  const [cartLines, setCartLines] = useState<UmuriroCartLine[]>([])
 
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -201,12 +221,23 @@ export function UmuriroBoarding() {
     if (user && isAuthenticated) touchSession()
   }, [user, isAuthenticated, touchSession])
 
-  const totalRwf = useMemo(() => {
+  const draftLineTotalRwf = useMemo(() => {
     const p = parseFloat(unitPrice.replace(",", "."))
     const q = parseFloat(quantity.replace(",", "."))
-    if (!Number.isFinite(p) || !Number.isFinite(q) || p < 0 || q < 1) return 0
+    if (!Number.isFinite(p) || !Number.isFinite(q) || p < 1 || q < 1) return 0
     return Math.round(p * q)
   }, [unitPrice, quantity])
+
+  const cartTotalRwf = useMemo(
+    () =>
+      cartLines.reduce(
+        (sum, line) => sum + Math.round(line.unitPriceRwf * line.quantity),
+        0,
+      ),
+    [cartLines],
+  )
+
+  const totalRwf = cartTotalRwf
 
   const momoDigits = useMemo(() => extractMerchantMomoCodeForUssd(momoCode), [momoCode])
   const ussd = useMemo(() => buildUssd(momoDigits, totalRwf), [momoDigits, totalRwf])
@@ -301,7 +332,14 @@ export function UmuriroBoarding() {
   const runItemSearch = useCallback(
     async (q: string) => {
       const t = q.trim()
-      if (t.length < 2 || !shopCategory.trim()) {
+      if (t.length < 2) {
+        itemFetchRef.current?.abort()
+        itemFetchRef.current = null
+        setItemSuggestions([])
+        setItemSearchLoading(false)
+        return
+      }
+      if (mode === "advanced" && !shopCategory.trim()) {
         itemFetchRef.current?.abort()
         itemFetchRef.current = null
         setItemSuggestions([])
@@ -371,16 +409,15 @@ export function UmuriroBoarding() {
         if (!ac.signal.aborted) setItemSearchLoading(false)
       }
     },
-    [shopCategory, shopName, resolvedSupplierAccount]
+    [mode, shopCategory, shopName, resolvedSupplierAccount]
   )
 
   useEffect(() => {
-    if (mode !== "advanced") return
     const id = setTimeout(() => {
       void runItemSearch(itemName)
     }, 500)
     return () => clearTimeout(id)
-  }, [itemName, runItemSearch, mode])
+  }, [itemName, runItemSearch])
 
   useEffect(() => {
     setItemSuggestions([])
@@ -405,10 +442,78 @@ export function UmuriroBoarding() {
   const applyPickedCatalogHit = (p: CatalogHit) => {
     const label = String(p.item_commercial_name || p.item_code || "").trim()
     if (label) setItemName(label)
+    const code = String(p.item_code ?? "").trim()
+    setPendingItemCode(code || null)
     const priceRwf = catalogHitPriceRwf(p)
     setUnitPrice(priceRwf >= 1 ? String(Math.round(priceRwf)) : "")
+    setQuantity("1")
     setItemSuggestions([])
     setItemOpen(false)
+  }
+
+  const addCurrentLineToCart = () => {
+    setErr(null)
+    const name = itemName.trim()
+    const p = parseFloat(unitPrice.replace(",", "."))
+    const q = parseFloat(quantity.replace(",", "."))
+    if (!name) {
+      setErr("Enter item name.")
+      return
+    }
+    if (!Number.isFinite(p) || p < 1) {
+      setErr("Enter a valid price (RWF).")
+      return
+    }
+    if (!Number.isFinite(q) || q < 1) {
+      setErr("Enter quantity (at least 1).")
+      return
+    }
+    const roundedPrice = Math.round(p)
+    const roundedQty = Math.round(q)
+    const key = cartLineKey(name, pendingItemCode ?? undefined)
+
+    setCartLines((prev) => {
+      const idx = prev.findIndex(
+        (line) => cartLineKey(line.itemName, line.itemCode) === key,
+      )
+      if (idx >= 0) {
+        const next = [...prev]
+        const existing = next[idx]!
+        next[idx] = {
+          ...existing,
+          quantity: existing.quantity + roundedQty,
+          unitPriceRwf: roundedPrice,
+        }
+        return next
+      }
+      return [
+        ...prev,
+        {
+          id: newCartLineId(),
+          itemName: name,
+          itemCode: pendingItemCode ?? undefined,
+          unitPriceRwf: roundedPrice,
+          quantity: roundedQty,
+        },
+      ]
+    })
+
+    setItemName("")
+    setUnitPrice("")
+    setQuantity("1")
+    setPendingItemCode(null)
+    setItemOpen(false)
+  }
+
+  const removeCartLine = (id: string) => {
+    setCartLines((prev) => prev.filter((line) => line.id !== id))
+  }
+
+  const updateCartLineQty = (id: string, nextQty: number) => {
+    const q = Math.max(1, Math.round(nextQty))
+    setCartLines((prev) =>
+      prev.map((line) => (line.id === id ? { ...line, quantity: q } : line)),
+    )
   }
 
   const itemSuggestionLabel = (p: CatalogHit) =>
@@ -427,18 +532,8 @@ export function UmuriroBoarding() {
       setErr(pickLang(UMURIRO_UI.chooseCategory, lang))
       return false
     }
-    if (!itemName.trim()) {
-      setErr("Enter item name.")
-      return false
-    }
-    const p = parseFloat(unitPrice.replace(",", "."))
-    if (!Number.isFinite(p) || p < 1) {
-      setErr("Enter a valid price (RWF).")
-      return false
-    }
-    const q = parseFloat(quantity.replace(",", "."))
-    if (!Number.isFinite(q) || q < 1) {
-      setErr("Enter quantity (at least 1).")
+    if (cartLines.length < 1) {
+      setErr(pickLang(UMURIRO_UI.emptyCartError, lang))
       return false
     }
     if (totalRwf < 1) {
@@ -482,8 +577,14 @@ export function UmuriroBoarding() {
 
     setLoading(true)
     try {
-      const p = parseFloat(unitPrice.replace(",", "."))
-      const q = parseFloat(quantity.replace(",", "."))
+      const orderLines = cartLines.map((line) => ({
+        itemName: line.itemName,
+        itemCode: line.itemCode,
+        unitPriceRwf: line.unitPriceRwf,
+        quantity: line.quantity,
+        lineTotalRwf: Math.round(line.unitPriceRwf * line.quantity),
+      }))
+      const first = orderLines[0]!
       const payload = {
         kind: "umuriro" as const,
         umuriroMode: mode,
@@ -513,10 +614,11 @@ export function UmuriroBoarding() {
               }
             : {}),
         },
+        lines: orderLines,
         line: {
-          itemName: itemName.trim(),
-          unitPriceRwf: Math.round(p),
-          quantity: Math.round(q),
+          itemName: first.itemName,
+          unitPriceRwf: first.unitPriceRwf,
+          quantity: first.quantity,
           totalRwf,
         },
         payment: {
@@ -548,9 +650,11 @@ export function UmuriroBoarding() {
               ? ` — ${pickLang(UMURIRO_UI.savedEchoShort, lang)}`
               : ""
         setDoneMsg(`${base}${extra}`)
+        setCartLines([])
       } else {
         setDoneMsg(pickLang(UMURIRO_UI.orderSentAdvanced, lang))
         setTrackDialogOpen(true)
+        setCartLines([])
       }
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "Error")
@@ -780,26 +884,23 @@ export function UmuriroBoarding() {
 
               <div className="min-w-0 space-y-1">
                 <Label className="text-[#17324d]">{pickLang(UMURIRO_UI.imBuying, lang)}</Label>
-                {isAdvanced ? (
-                  <p className="text-xs text-[#6f8399]">{pickLang(UMURIRO_UI.imBuyingHint, lang)}</p>
-                ) : null}
+                <p className="text-xs text-[#6f8399]">{pickLang(UMURIRO_UI.imBuyingHint, lang)}</p>
                 <div className="relative min-w-0" ref={itemWrapRef}>
                   <Input
                     value={itemName}
                     onChange={(e) => {
                       setItemName(e.target.value)
-                      if (isAdvanced) setItemOpen(true)
+                      setItemOpen(true)
                     }}
-                    onFocus={() => isAdvanced && setItemOpen(true)}
+                    onFocus={() => setItemOpen(true)}
                     className="border-[#dbe7f3]"
                     autoComplete="off"
-                    aria-autocomplete={isAdvanced ? "list" : undefined}
-                    aria-expanded={isAdvanced ? itemOpen : undefined}
+                    aria-autocomplete="list"
+                    aria-expanded={itemOpen}
                   />
-                  {isAdvanced &&
-                    itemOpen &&
-                    shopCategory.trim() &&
-                    itemName.trim().length >= 2 && (
+                  {itemOpen &&
+                    itemName.trim().length >= 2 &&
+                    (isAdvanced ? shopCategory.trim() : true) && (
                       <div
                         className="absolute left-0 right-0 top-full z-40 mt-1 max-h-40 overflow-y-auto rounded-xl border border-[#dbe7f3] bg-white py-1 shadow-[0_8px_24px_rgba(24,151,224,.15)]"
                         role="listbox"
@@ -867,9 +968,115 @@ export function UmuriroBoarding() {
                 </div>
               </div>
 
-              <div className="rounded-xl border border-[#dbe7f3] bg-[#f7fbff]/60 px-3 py-2 text-sm">
+              {draftLineTotalRwf > 0 ? (
+                <p className="text-xs text-[#6f8399]">
+                  {pickLang(UMURIRO_UI.quantity, lang)} × {pickLang(UMURIRO_UI.unitPrice, lang)}:{" "}
+                  <span className="font-semibold tabular-nums text-[#127fc0]">
+                    {draftLineTotalRwf.toLocaleString()} RWF
+                  </span>
+                </p>
+              ) : null}
+
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full border-[#1897e0]/40 bg-[#f0f8ff] font-semibold text-[#127fc0] hover:bg-[#e8f4fc]"
+                onClick={addCurrentLineToCart}
+              >
+                <Plus className="mr-2 h-4 w-4" aria-hidden />
+                {pickLang(UMURIRO_UI.addToList, lang)}
+              </Button>
+
+              <div className="min-w-0 space-y-2 rounded-xl border border-[#dbe7f3] bg-[#f7fbff]/80 px-3 py-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-bold text-[#17324d]">
+                    {pickLang(UMURIRO_UI.cartTitle, lang)}
+                  </span>
+                  {cartLines.length > 0 ? (
+                    <span className="text-xs font-semibold text-[#6f8399]">
+                      {pickLang(UMURIRO_UI.cartItemCount, lang).replace(
+                        "{count}",
+                        String(cartLines.length),
+                      )}
+                    </span>
+                  ) : null}
+                </div>
+
+                {cartLines.length === 0 ? (
+                  <p className="text-xs leading-snug text-[#6f8399]">
+                    {pickLang(UMURIRO_UI.cartEmpty, lang)}
+                  </p>
+                ) : (
+                  <ul className="max-h-52 space-y-2 overflow-y-auto">
+                    {cartLines.map((line) => {
+                      const lineTotal = Math.round(line.unitPriceRwf * line.quantity)
+                      return (
+                        <li
+                          key={line.id}
+                          className="rounded-lg border border-[#dbe7f3] bg-white px-2.5 py-2"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm font-semibold text-[#17324d]">
+                                {line.itemName}
+                              </p>
+                              <p className="text-xs text-[#6f8399]">
+                                {line.unitPriceRwf.toLocaleString()} RWF × {line.quantity}
+                              </p>
+                            </div>
+                            <p className="shrink-0 text-sm font-bold tabular-nums text-emerald-800">
+                              {lineTotal.toLocaleString()}
+                            </p>
+                          </div>
+                          <div className="mt-2 flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                className="h-8 w-8 border-[#dbe7f3]"
+                                aria-label={`${pickLang(UMURIRO_UI.quantity, lang)} -`}
+                                onClick={() => updateCartLineQty(line.id, line.quantity - 1)}
+                              >
+                                <Minus className="h-3.5 w-3.5" />
+                              </Button>
+                              <span className="min-w-[2rem] text-center text-sm font-bold tabular-nums">
+                                {line.quantity}
+                              </span>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                className="h-8 w-8 border-[#dbe7f3]"
+                                aria-label={`${pickLang(UMURIRO_UI.quantity, lang)} +`}
+                                onClick={() => updateCartLineQty(line.id, line.quantity + 1)}
+                              >
+                                <Plus className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 px-2 text-red-700 hover:bg-red-50 hover:text-red-800"
+                              onClick={() => removeCartLine(line.id)}
+                            >
+                              <Trash2 className="mr-1 h-3.5 w-3.5" aria-hidden />
+                              {pickLang(UMURIRO_UI.removeItem, lang)}
+                            </Button>
+                          </div>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+              </div>
+
+              <div className="rounded-xl border border-[#1897e0]/25 bg-[#f0f8ff] px-3 py-2.5 text-sm">
                 <span className="font-semibold text-[#17324d]">{pickLang(UMURIRO_UI.totalLabel, lang)}: </span>
-                <span className="tabular-nums text-[#127fc0]">{totalRwf.toLocaleString()} RWF</span>
+                <span className="text-base font-bold tabular-nums text-[#127fc0]">
+                  {totalRwf.toLocaleString()} RWF
+                </span>
               </div>
 
               <div className="min-w-0 space-y-3 border-t border-[#dbe7f3] pt-4">
