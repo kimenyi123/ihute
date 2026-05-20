@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { CheckCircle, XCircle, Eye, AlertCircle, Search, Trash2 } from 'lucide-react'
 import { postAdminApi } from '@/lib/admin-client'
 import { CredentialSellersPanel } from '@/app/admin/sellers/CredentialSellersPanel'
+import { UrubutoKpiStrip } from '@/components/admin/urubuto-kpi-strip'
 
 interface Seller {
   id: number
@@ -21,23 +22,43 @@ interface Seller {
   totalSales?: number
 }
 
-type SellersTab = 'applications' | 'active' | 'suspended' | 'credentials'
+interface UrubutoMerchantAppRow {
+  id: number
+  sellerPayerCode: string
+  displayName: string
+  merchantStatus: string
+  urubutoMerchantCode: string
+  docCount: number
+  firstName: string
+  lastName: string
+  email: string
+  tel: string
+  location: string
+  sellerAccountStatus: string
+  createdAt: string
+}
+
+type SellersTab = 'applications' | 'urubuto' | 'active' | 'suspended' | 'credentials'
 
 export default function SellersPage() {
   const [activeTab, setActiveTab] = useState<SellersTab>('applications')
   const [applications, setApplications] = useState<Seller[]>([])
+  const [urubutoRows, setUrubutoRows] = useState<UrubutoMerchantAppRow[]>([])
   const [activeSellers, setActiveSellers] = useState<Seller[]>([])
   const [suspendedSellers, setSuspendedSellers] = useState<Seller[]>([])
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [pageApps, setPageApps] = useState(1)
+  const [pageUrubuto, setPageUrubuto] = useState(1)
   const [pageActive, setPageActive] = useState(1)
   const [pageSuspended, setPageSuspended] = useState(1)
   const [totalApps, setTotalApps] = useState(0)
+  const [totalUrubuto, setTotalUrubuto] = useState(0)
   const [totalActive, setTotalActive] = useState(0)
   const [totalSuspended, setTotalSuspended] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
+  const [urubutoStatusFilter, setUrubutoStatusFilter] = useState('')
   const pageSize = 10
 
   const [credRefreshTrigger, setCredRefreshTrigger] = useState(0)
@@ -51,9 +72,30 @@ export default function SellersPage() {
   // reset pagination when switching tabs
   useEffect(() => {
     if (activeTab === 'applications') setPageApps(1)
+    if (activeTab === 'urubuto') setPageUrubuto(1)
     if (activeTab === 'active') setPageActive(1)
     if (activeTab === 'suspended') setPageSuspended(1)
   }, [activeTab])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const tab = new URLSearchParams(window.location.search).get('tab')
+    if (tab === 'urubuto') setActiveTab('urubuto')
+  }, [])
+
+  /** Badge count for Urubuto tab before first visit (same AdminServlet action as the tab). */
+  useEffect(() => {
+    let cancelled = false
+    void postAdminApi({ action: 'getUrubutoMerchantApplications', page: 1, pageSize: 1 })
+      .then((r) => r.json())
+      .then((d: { ok?: boolean; totalCount?: number }) => {
+        if (!cancelled && d.ok) setTotalUrubuto(Number(d.totalCount) || 0)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     if (activeTab === 'credentials') {
@@ -61,7 +103,7 @@ export default function SellersPage() {
       return
     }
     loadSellers()
-  }, [activeTab, pageApps, pageActive, pageSuspended, searchTerm])
+  }, [activeTab, pageApps, pageUrubuto, pageActive, pageSuspended, searchTerm])
 
   const loadSellers = async () => {
     try {
@@ -74,6 +116,9 @@ export default function SellersPage() {
       if (activeTab === 'applications') {
         action = 'getSellerApplications'
         page = pageApps
+      } else if (activeTab === 'urubuto') {
+        action = 'getUrubutoMerchantApplications'
+        page = pageUrubuto
       } else if (activeTab === 'active') {
         action = 'getActiveSellers'
         page = pageActive
@@ -94,6 +139,9 @@ export default function SellersPage() {
         if (activeTab === 'applications') {
           setApplications(data.sellers || [])
           setTotalApps(data.totalCount || 0)
+        } else if (activeTab === 'urubuto') {
+          setUrubutoRows((data.applications as UrubutoMerchantAppRow[]) || [])
+          setTotalUrubuto(data.totalCount || 0)
         } else if (activeTab === 'active') {
           setActiveSellers(data.sellers || [])
           setTotalActive(data.totalCount || 0)
@@ -234,18 +282,68 @@ export default function SellersPage() {
     )
   }, [activeSellers, searchTerm, activeTab])
 
+  const filteredUrubutoRows = useMemo(() => {
+    let rows = urubutoRows
+    if (urubutoStatusFilter) {
+      rows = rows.filter((r) => r.merchantStatus === urubutoStatusFilter)
+    }
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase()
+      rows = rows.filter(
+        (r) =>
+          r.sellerPayerCode?.toLowerCase().includes(term) ||
+          r.displayName?.toLowerCase().includes(term) ||
+          r.email?.toLowerCase().includes(term) ||
+          r.firstName?.toLowerCase().includes(term) ||
+          r.lastName?.toLowerCase().includes(term)
+      )
+    }
+    return rows
+  }, [urubutoRows, urubutoStatusFilter, searchTerm])
+
+  const exportUrubutoCsv = () => {
+    const header = ['sellerPayerCode', 'displayName', 'email', 'tel', 'merchantStatus', 'docCount', 'urubutoMerchantCode', 'createdAt']
+    const lines = [header.join(',')]
+    for (const r of filteredUrubutoRows) {
+      lines.push(
+        [
+          r.sellerPayerCode,
+          r.displayName,
+          r.email,
+          r.tel,
+          r.merchantStatus,
+          String(r.docCount),
+          r.urubutoMerchantCode,
+          r.createdAt,
+        ]
+          .map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`)
+          .join(',')
+      )
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'urubuto-applications.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   const currentSellers = activeTab === 'applications' ? applications :
+    activeTab === 'urubuto' ? [] :
     activeTab === 'active' ? filteredActiveSellers : activeTab === 'suspended' ? suspendedSellers : []
-  const currentPage = activeTab === 'applications' ? pageApps : activeTab === 'active' ? pageActive : pageSuspended
-  const currentTotal = activeTab === 'applications' ? totalApps : activeTab === 'active' ? totalActive : totalSuspended
+  const currentPage = activeTab === 'applications' ? pageApps : activeTab === 'urubuto' ? pageUrubuto : activeTab === 'active' ? pageActive : pageSuspended
+  const currentTotal = activeTab === 'applications' ? totalApps : activeTab === 'urubuto' ? totalUrubuto : activeTab === 'active' ? totalActive : totalSuspended
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold text-gray-900">Sellers Management</h1>
         <p className="text-gray-600 mt-1">
-          Manage seller accounts. The first tab lists <strong className="font-medium text-gray-800">LIVE</strong>{' '}
-          registrations (same status as Trading signups).
+          Manage seller accounts. <strong className="font-medium text-gray-800">LIVE</strong> tab is seller shop
+          registrations. <strong className="font-medium text-gray-800">UrubutoPay</strong> tab lists merchant onboarding
+          applications from IHUTE, POS, POS MINI, or ERP — all stored on the Trading backend (
+          <code className="text-xs bg-gray-100 px-1 rounded">urubuto_merchant</code>).
         </p>
       </div>
 
@@ -253,10 +351,11 @@ export default function SellersPage() {
       <div className="border-b border-gray-200">
         <nav className="-mb-px flex space-x-8">
           {[
-            { id: 'applications', label: 'LIVE registrations', count: totalApps },
-            { id: 'active', label: 'Active Sellers', count: totalActive },
-            { id: 'suspended', label: 'Suspended Sellers', count: totalSuspended },
-            { id: 'credentials', label: 'Credentials', count: 0 },
+            { id: 'applications' as const, label: 'LIVE registrations', count: totalApps },
+            { id: 'urubuto' as const, label: 'UrubutoPay applications', count: totalUrubuto },
+            { id: 'active' as const, label: 'Active Sellers', count: totalActive },
+            { id: 'suspended' as const, label: 'Suspended Sellers', count: totalSuspended },
+            { id: 'credentials' as const, label: 'Credentials', count: 0 },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -287,6 +386,21 @@ export default function SellersPage() {
           actionLoadingKey={actionLoading}
           refreshTrigger={credRefreshTrigger}
         />
+      )}
+
+      {activeTab === 'urubuto' && (
+        <div className="bg-white p-4 rounded-lg border shadow-sm">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search payer code, shop name, email…"
+              className="w-full pl-10 pr-10 py-2 border rounded-lg focus:ring-2 focus:ring-violet-500 outline-none"
+            />
+          </div>
+        </div>
       )}
 
       {/* Search Input - Active Sellers Only */}
@@ -340,10 +454,115 @@ export default function SellersPage() {
         <div className="text-center py-12 text-gray-500">Loading sellers...</div>
       ) : error ? (
         <div className="text-center py-12 text-red-500">{error}</div>
-      ) : currentSellers.length === 0 ? (
-        <div className="text-center py-12 text-gray-500">No sellers found</div>
+      ) : (activeTab === 'urubuto' ? filteredUrubutoRows.length === 0 : currentSellers.length === 0) ? (
+        <div className="text-center py-12 text-gray-500">
+          {activeTab === 'urubuto' ? 'No UrubutoPay merchant applications yet.' : 'No sellers found'}
+        </div>
       ) : (
         <div>
+          {activeTab === 'urubuto' ? (
+            <>
+            <UrubutoKpiStrip />
+            <div className="flex flex-wrap gap-3 mb-3 items-center">
+              <select
+                className="rounded border px-3 py-1.5 text-sm"
+                value={urubutoStatusFilter}
+                onChange={(e) => setUrubutoStatusFilter(e.target.value)}
+              >
+                <option value="">All statuses</option>
+                <option value="PENDING">PENDING</option>
+                <option value="ACTIVE">ACTIVE</option>
+                <option value="REJECTED">REJECTED</option>
+              </select>
+              <button
+                type="button"
+                onClick={exportUrubutoCsv}
+                className="text-sm rounded border px-3 py-1.5 bg-white hover:bg-gray-50"
+              >
+                Export CSV for Urubuto
+              </button>
+            </div>
+            <div className="bg-white rounded-lg shadow overflow-hidden">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-violet-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
+                      Seller payer (ALG)
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
+                      Profile / contacts
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
+                      Merchant status
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
+                      Docs
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
+                      Urubuto code
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
+                      Applied
+                    </th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-600 uppercase tracking-wider">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {filteredUrubutoRows.map((row) => {
+                    const applied = row.createdAt ? new Date(row.createdAt).getTime() : 0
+                    const stale = applied > 0 && Date.now() - applied > 48 * 3600 * 1000 && !row.urubutoMerchantCode
+                    return (
+                    <tr key={row.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-mono font-medium text-gray-900">{row.sellerPayerCode}</div>
+                        <div className="text-xs text-gray-500">{row.displayName || '—'}</div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="text-sm text-gray-900">
+                          {(row.firstName || row.lastName) ? `${row.firstName} ${row.lastName}`.trim() : '—'}
+                        </div>
+                        <div className="text-sm text-gray-500">{row.email || '—'}</div>
+                        <div className="text-xs text-gray-400">{row.tel || ''}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="inline-flex rounded-full px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-800">
+                          {row.merchantStatus}
+                        </span>
+                        {row.sellerAccountStatus && (
+                          <div className="text-xs text-gray-500 mt-1">Seller: {row.sellerAccountStatus}</div>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {row.docCount}/3
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-700">
+                        {row.urubutoMerchantCode || '—'}
+                        {stale && (
+                          <span className="block text-xs text-amber-700 font-sans mt-0.5">SLA &gt;48h no code</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-500">
+                        {row.createdAt ? new Date(row.createdAt).toLocaleString() : '—'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                        <Link
+                          href={`/admin/sellers/urubuto/${encodeURIComponent(row.sellerPayerCode)}`}
+                          className="text-blue-600 hover:text-blue-900 inline-flex items-center gap-1"
+                          title="UrubutoPay application and documents"
+                        >
+                          <Eye size={18} />
+                        </Link>
+                      </td>
+                    </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            </>
+          ) : (
           <div className="bg-white rounded-lg shadow overflow-hidden">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
@@ -485,6 +704,7 @@ export default function SellersPage() {
               </tbody>
             </table>
           </div>
+          )}
           <div className="flex items-center justify-between mt-4 text-sm text-gray-600">
             <div>Page {currentPage} of {Math.max(1, Math.ceil(currentTotal / pageSize))}</div>
             <div className="space-x-2">
@@ -492,6 +712,7 @@ export default function SellersPage() {
                 className="px-3 py-1 border rounded disabled:opacity-50"
                 onClick={() => {
                   if (activeTab === 'applications') setPageApps((p) => Math.max(1, p - 1))
+                  else if (activeTab === 'urubuto') setPageUrubuto((p) => Math.max(1, p - 1))
                   else if (activeTab === 'active') setPageActive((p) => Math.max(1, p - 1))
                   else setPageSuspended((p) => Math.max(1, p - 1))
                 }}
@@ -504,6 +725,7 @@ export default function SellersPage() {
                 onClick={() => {
                   const maxPage = Math.max(1, Math.ceil(currentTotal / pageSize))
                   if (activeTab === 'applications') setPageApps((p) => (p < maxPage ? p + 1 : p))
+                  else if (activeTab === 'urubuto') setPageUrubuto((p) => (p < maxPage ? p + 1 : p))
                   else if (activeTab === 'active') setPageActive((p) => (p < maxPage ? p + 1 : p))
                   else setPageSuspended((p) => (p < maxPage ? p + 1 : p))
                 }}

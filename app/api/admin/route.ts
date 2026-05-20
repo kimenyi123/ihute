@@ -4,25 +4,12 @@ export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 export const revalidate = 0
 
-import { getBackendBase } from "@/lib/backend-config"
+import { getAdminServletUrl, getBackendBase } from "@/lib/backend-config"
 
 const BACKEND_URL = getBackendBase()
 
-function noTrailingSlash(s: string): string {
-  return s.replace(/\/+$/, "")
-}
-
-function getAdminServletCandidates(base: string): string[] {
-  const trimmed = noTrailingSlash(base.trim())
-  const out: string[] = []
-  const add = (u: string) => {
-    if (!out.includes(u)) out.push(u)
-  }
-
-  add(`${trimmed}/AdminServlet`)
-  add(`${trimmed}/Kaos/AdminServlet`)
-
-  return out
+function getAdminServletCandidates(): string[] {
+  return [getAdminServletUrl()]
 }
 
 export async function POST(req: Request) {
@@ -137,7 +124,7 @@ export async function POST(req: Request) {
       }
     })
 
-    const urls = getAdminServletCandidates(BACKEND_URL)
+    const urls = getAdminServletCandidates()
     console.log("[admin/route] POST - Candidate URLs:", urls.join(" | "))
     console.log("[admin/route] Action:", actionStr)
 
@@ -186,15 +173,24 @@ export async function POST(req: Request) {
     }
 
     if (!res || !json) {
+      const status = res?.status ?? 502
+      const trimmed = text.trim()
+      const looksLikeHtml = /<!doctype|<html/i.test(trimmed)
+      const hint = looksLikeHtml
+        ? "Backend returned HTML (wrong URL or servlet not deployed). Check BACKEND_URL / JAVA_BACKEND_BASE."
+        : !res
+          ? "Could not reach Java backend. Is Tomcat running?"
+          : "Backend response was not JSON."
       return NextResponse.json(
         {
           ok: false,
-          error: "Invalid JSON response from backend",
-          raw: text.substring(0, 500),
-          status: res?.status ?? 502,
+          error: hint,
+          raw: trimmed.substring(0, 500),
+          status,
           url,
+          action: actionStr,
         },
-        { status: 500 }
+        { status: status >= 400 && status < 600 ? status : 502 },
       )
     }
 
@@ -306,7 +302,7 @@ export async function GET(req: Request) {
       params.set("adminToken", tokenForJava)
     }
 
-    const baseUrls = getAdminServletCandidates(BACKEND_URL)
+    const baseUrls = getAdminServletCandidates()
     const urls = baseUrls.map((u) => `${u}?${params.toString()}`)
     console.log("[admin/route] GET - Candidate URLs:", urls.join(" | "))
     console.log("[admin/route] GET - Action:", action)
@@ -353,15 +349,24 @@ export async function GET(req: Request) {
     }
 
     if (!res || !json) {
+      const status = res?.status ?? 502
+      const trimmed = text.trim()
+      const looksLikeHtml = /<!doctype|<html/i.test(trimmed)
+      const hint = looksLikeHtml
+        ? "Backend returned HTML (wrong URL or servlet not deployed). Check BACKEND_URL / JAVA_BACKEND_BASE."
+        : !res
+          ? "Could not reach Java backend. Is Tomcat running?"
+          : "Backend response was not JSON."
       return NextResponse.json(
         {
           ok: false,
-          error: "Invalid JSON response from backend",
-          raw: text.substring(0, 500),
-          status: res?.status ?? 502,
+          error: hint,
+          raw: trimmed.substring(0, 500),
+          status,
           url,
+          action,
         },
-        { status: 500 }
+        { status: status >= 400 && status < 600 ? status : 502 },
       )
     }
 

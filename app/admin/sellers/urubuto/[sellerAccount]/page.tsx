@@ -1,0 +1,470 @@
+"use client"
+
+import { useCallback, useEffect, useState } from "react"
+import Link from "next/link"
+import { useParams } from "next/navigation"
+import { ArrowLeft, Copy, Download, Loader2, RefreshCw } from "lucide-react"
+import { postAdminApi, postAdminUrubutoMerchantDocumentDownload } from "@/lib/admin-client"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { EligibilityChecklist } from "@/components/urubuto/eligibility-checklist"
+import { UrubutoPipelineBadge } from "@/components/urubuto/pipeline-badge"
+import type { PipelineStage, UrubutoBreakdown, UrubutoChecklistItem } from "@/lib/urubuto-pipeline"
+import { DOC_TYPE_LABELS } from "@/lib/urubuto-pipeline"
+
+interface UrubutoMerchantJson {
+  id: number
+  displayName: string
+  sellerPayerCode: string
+  urubutoMerchantCode: string
+  status: string
+  applicationChannel?: string
+}
+
+interface UrubutoOnboardingJson {
+  onboardingApproved: boolean
+  remoteOnboarded: boolean | null
+  remoteCheckedAt: string
+  sellerSubmittedAt?: string
+  submittedToUrubutoAt?: string
+  submittedToUrubutoBy?: string
+  internalNote?: string
+}
+
+interface UrubutoDocRow {
+  documentId: number
+  docType: string
+  originalFilename: string
+  verified: boolean
+  verifiedBy: string
+  verifiedAt: string
+  uploadedAt: string
+  rejectionReason?: string
+}
+
+export default function UrubutoMerchantApplicationPage() {
+  const params = useParams()
+  const sellerAccount = decodeURIComponent(String(params.sellerAccount ?? ""))
+
+  const [merchant, setMerchant] = useState<UrubutoMerchantJson | null>(null)
+  const [onboarding, setOnboarding] = useState<UrubutoOnboardingJson | null>(null)
+  const [documents, setDocuments] = useState<UrubutoDocRow[]>([])
+  const [breakdown, setBreakdown] = useState<UrubutoBreakdown | null>(null)
+  const [audit, setAudit] = useState<{ action: string; actorEmail: string; createdAt: string }[]>([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [feedback, setFeedback] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [downloadingId, setDownloadingId] = useState<number | null>(null)
+
+  const [codeInput, setCodeInput] = useState("")
+  const [statusInput, setStatusInput] = useState("PENDING")
+  const [onboardingApproved, setOnboardingApproved] = useState(false)
+  const [internalNote, setInternalNote] = useState("")
+  const [rejectReason, setRejectReason] = useState<Record<number, string>>({})
+
+  const load = useCallback(async () => {
+    if (!sellerAccount) return
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await postAdminApi({
+        action: "getUrubutoMerchantApplicationDetail",
+        sellerAccount,
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok && !data.error) {
+        setError(`Backend error (${res.status})`)
+        return
+      }
+      if (data.ok && data.merchant) {
+        const m = data.merchant as UrubutoMerchantJson
+        setMerchant(m)
+        setOnboarding((data.onboarding as UrubutoOnboardingJson) ?? null)
+        setDocuments((data.documents as UrubutoDocRow[]) || [])
+        const b = data.breakdown as UrubutoBreakdown
+        setBreakdown({
+          pipelineStage: (b?.pipelineStage as PipelineStage) || "applied",
+          eligible: !!b?.eligible,
+          nextAction: b?.nextAction || "",
+          sellerMessage: b?.sellerMessage || "",
+          checklist: (b?.checklist as UrubutoChecklistItem[]) || [],
+        })
+        setCodeInput(m.urubutoMerchantCode || "")
+        setStatusInput(m.status || "PENDING")
+        setOnboardingApproved(!!(data.onboarding as UrubutoOnboardingJson)?.onboardingApproved)
+        setInternalNote((data.onboarding as UrubutoOnboardingJson)?.internalNote || "")
+      } else {
+        const hint =
+          typeof data.raw === "string" && data.raw
+            ? ` — ${data.raw.slice(0, 120)}`
+            : typeof data.url === "string" && data.url
+              ? ` (${data.url})`
+              : ""
+        setError((data.error || "Could not load") + hint)
+      }
+      const auditRes = await postAdminApi({ action: "getUrubutoMerchantAuditLog", sellerAccount, limit: 30 })
+      const auditData = await auditRes.json()
+      if (auditData.ok && Array.isArray(auditData.audit)) {
+        setAudit(auditData.audit)
+      }
+    } catch {
+      setError("Failed to load")
+    } finally {
+      setLoading(false)
+    }
+  }, [sellerAccount])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const adminAction = async (
+    action: string,
+    extra: Record<string, string | number> = {},
+    successMessage = "Saved",
+  ) => {
+    setSaving(true)
+    setFeedback(null)
+    try {
+      const res = await postAdminApi({ action, sellerAccount, ...extra })
+      const data = await res.json()
+      if (!res.ok || !data.ok) {
+        alert(data.error || data.message || "Action failed")
+        return
+      }
+      await load()
+      setFeedback(data.message || successMessage)
+    } catch {
+      alert("Action failed")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const saveMerchant = () =>
+    void adminAction("updateUrubutoMerchant", {
+      status: statusInput,
+      urubutoMerchantCode: codeInput.trim(),
+      onboardingApproved: onboardingApproved ? "true" : "false",
+    }, "Merchant saved")
+
+  const copy = (text: string) => {
+    void navigator.clipboard.writeText(text)
+  }
+
+  const handleDownload = async (documentId: number, suggestedName: string) => {
+    setDownloadingId(documentId)
+    try {
+      const res = await postAdminUrubutoMerchantDocumentDownload({ sellerAccount, documentId })
+      const ct = res.headers.get("content-type") || ""
+      if (ct.includes("application/json")) {
+        const j = (await res.json()) as { error?: string }
+        alert(j.error || "Download failed")
+        return
+      }
+      if (!res.ok) {
+        alert("Download failed")
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = suggestedName || "document"
+      a.click()
+      URL.revokeObjectURL(url)
+    } finally {
+      setDownloadingId(null)
+    }
+  }
+
+  const stage = breakdown?.pipelineStage ?? "applied"
+  const hasDownloadableDocument = (doc: UrubutoDocRow) => Boolean(doc.originalFilename?.trim())
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-3 md:p-5 lg:p-6">
+      <div className="max-w-7xl mx-auto space-y-4">
+        <Link
+          href="/admin/sellers?tab=urubuto"
+          className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
+        >
+          <ArrowLeft size={18} />
+          UrubutoPay applications
+        </Link>
+
+        <div className="flex flex-col gap-3 rounded-xl border bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-xl font-semibold text-gray-900 md:text-2xl">Urubuto ops cockpit</h1>
+            <UrubutoPipelineBadge stage={stage} />
+            {breakdown?.eligible && (
+              <span className="text-xs font-semibold text-green-700 bg-green-100 px-2 py-0.5 rounded-full">Eligible</span>
+            )}
+          </div>
+          <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading} className="w-full sm:w-auto">
+            <RefreshCw className="h-4 w-4 mr-1" />
+            Refresh
+          </Button>
+        </div>
+
+        {loading && <p className="text-gray-600">Loading…</p>}
+        {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
+
+        {!loading && merchant && (
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.65fr)]">
+            {/* Left: profile */}
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-1">
+              <Card>
+                <CardHeader className="px-4 py-3">
+                  <CardTitle className="text-base">Seller profile</CardTitle>
+                </CardHeader>
+                <CardContent className="grid gap-3 px-4 pb-4 text-sm sm:grid-cols-2 xl:grid-cols-1">
+                  <div>
+                    <span className="text-gray-500">Payer code</span>
+                    <div className="flex items-center gap-2 font-mono font-medium break-all">
+                      {merchant.sellerPayerCode}
+                      <button type="button" onClick={() => copy(merchant.sellerPayerCode)} aria-label="Copy">
+                        <Copy className="h-4 w-4 text-gray-400" />
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Display name</span>
+                    <div>{merchant.displayName || "—"}</div>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Channel</span>
+                    <div>{merchant.applicationChannel || "IHUTE"}</div>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Urubuto merchant code</span>
+                    <div className="flex items-center gap-2 font-mono break-all">
+                      {merchant.urubutoMerchantCode || "—"}
+                      {merchant.urubutoMerchantCode && (
+                        <button type="button" onClick={() => copy(merchant.urubutoMerchantCode)} aria-label="Copy">
+                          <Copy className="h-4 w-4 text-gray-400" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="px-4 py-3">
+                  <CardTitle className="text-base">Simulate eligibility</CardTitle>
+                </CardHeader>
+                <CardContent className="px-4 pb-4">
+                  <p className="text-sm text-gray-700 mb-2">{breakdown?.sellerMessage}</p>
+                  <EligibilityChecklist items={breakdown?.checklist ?? []} showFixedBy />
+                  <Button
+                    className="mt-3 w-full"
+                    variant="secondary"
+                    size="sm"
+                    disabled={saving}
+                    onClick={() => void adminAction("rerunUrubutoRemoteCheck", {}, "Remote check refreshed")}
+                  >
+                    Re-run remote check
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Right: workflow */}
+            <div className="space-y-4">
+              <Card>
+                <CardHeader className="px-4 py-3">
+                  <CardTitle className="text-base">Ops actions</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 px-4 pb-4 text-sm">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="text-gray-600">Urubuto merchant code</span>
+                      <input
+                        className="mt-1 w-full rounded border px-2 py-1.5 font-mono"
+                        value={codeInput}
+                        onChange={(e) => setCodeInput(e.target.value)}
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-gray-600">Status</span>
+                      <select
+                        className="mt-1 w-full rounded border px-2 py-1.5"
+                        value={statusInput}
+                        onChange={(e) => setStatusInput(e.target.value)}
+                      >
+                        <option value="PENDING">PENDING</option>
+                        <option value="ACTIVE">ACTIVE</option>
+                        <option value="REJECTED">REJECTED</option>
+                      </select>
+                    </label>
+                  </div>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={onboardingApproved}
+                      onChange={(e) => setOnboardingApproved(e.target.checked)}
+                    />
+                    IHUTE onboarding approved
+                  </label>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                    <Button onClick={() => void saveMerchant()} disabled={saving} className="sm:w-auto">
+                      {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+                      Save merchant
+                    </Button>
+                    <Button
+                      variant="outline"
+                      disabled={saving}
+                      onClick={() =>
+                        void adminAction(
+                          "markUrubutoSubmittedToUrubuto",
+                          {},
+                          "Marked as submitted to Urubuto",
+                        )
+                      }
+                      className="sm:w-auto"
+                    >
+                      Mark submitted to Urubuto
+                    </Button>
+                  </div>
+                  {feedback && (
+                    <p className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-800">
+                      {feedback}
+                    </p>
+                  )}
+                  {onboarding?.submittedToUrubutoAt && (
+                    <p className="text-xs text-gray-500">
+                      Submitted to Urubuto: {onboarding.submittedToUrubutoAt}
+                      {onboarding.submittedToUrubutoBy ? ` by ${onboarding.submittedToUrubutoBy}` : ""}
+                    </p>
+                  )}
+                  <label className="block">
+                    <span className="text-gray-600">Internal note / ticket</span>
+                    <textarea
+                      className="mt-1 w-full rounded border px-2 py-1.5 min-h-[64px]"
+                      value={internalNote}
+                      onChange={(e) => setInternalNote(e.target.value)}
+                    />
+                    <Button
+                      className="mt-2"
+                      variant="secondary"
+                      size="sm"
+                      disabled={saving}
+                      onClick={() =>
+                        void adminAction("saveUrubutoInternalNote", { internalNote }, "Internal note saved")
+                      }
+                    >
+                      Save note
+                    </Button>
+                  </label>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="px-4 py-3">
+                  <CardTitle className="text-base">Documents</CardTitle>
+                </CardHeader>
+                <CardContent className="px-4 pb-4">
+                  {documents.length === 0 && <p className="text-sm text-gray-600">No documents yet.</p>}
+                  <div className="grid gap-3 lg:grid-cols-3">
+                    {documents.map((d) => (
+                      <div key={d.documentId} className="rounded-lg border p-3 space-y-3">
+                        <div className="min-w-0">
+                          <p className="font-medium leading-snug">{DOC_TYPE_LABELS[d.docType]?.en ?? d.docType}</p>
+                          <p className="mt-0.5 break-all text-xs text-gray-500">{d.originalFilename}</p>
+                          <p className="text-xs mt-1">
+                            {d.verified ? (
+                              <span className="text-green-700">Verified by {d.verifiedBy || "—"}</span>
+                            ) : (
+                              <span className="text-amber-700">Not verified</span>
+                            )}
+                          </p>
+                          {d.rejectionReason && (
+                            <p className="text-xs text-red-700">Rejected: {d.rejectionReason}</p>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className={
+                              hasDownloadableDocument(d)
+                                ? "border-green-300 bg-green-50 text-green-800 hover:bg-green-100 hover:text-green-900"
+                                : undefined
+                            }
+                            disabled={downloadingId === d.documentId}
+                            onClick={() => void handleDownload(d.documentId, d.originalFilename)}
+                          >
+                            <Download className="h-4 w-4 mr-1" />
+                            Download
+                          </Button>
+                          <Button
+                            size="sm"
+                            disabled={saving}
+                            onClick={() =>
+                              void adminAction("verifyUrubutoMerchantDocument", {
+                                documentId: d.documentId,
+                              })
+                            }
+                          >
+                            Verify
+                          </Button>
+                        </div>
+                        <div className="flex gap-2">
+                          <input
+                            className="min-w-0 flex-1 rounded border px-2 py-1 text-xs"
+                            placeholder="Rejection reason"
+                            value={rejectReason[d.documentId] ?? ""}
+                            onChange={(e) =>
+                              setRejectReason((prev) => ({ ...prev, [d.documentId]: e.target.value }))
+                            }
+                          />
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            disabled={saving}
+                            onClick={() => {
+                              const r = rejectReason[d.documentId]?.trim()
+                              if (!r) {
+                                alert("Enter rejection reason")
+                                return
+                              }
+                              void adminAction("rejectUrubutoMerchantDocument", {
+                                documentId: d.documentId,
+                                rejectionReason: r,
+                              })
+                            }}
+                          >
+                            Reject
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {audit.length > 0 && (
+                <Card>
+                  <CardHeader className="px-4 py-3">
+                    <CardTitle className="text-base">Activity log</CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-4 pb-4">
+                    <ul className="text-xs space-y-2 max-h-48 overflow-y-auto">
+                      {audit.map((a, i) => (
+                        <li key={i} className="border-b border-gray-100 pb-1">
+                          <span className="font-medium">{a.action}</span>
+                          <span className="text-gray-500"> — {a.actorEmail || "system"} — {a.createdAt}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
