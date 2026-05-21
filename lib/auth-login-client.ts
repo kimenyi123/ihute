@@ -3,6 +3,7 @@
  * Proxies to `POST /api/auth/login` (Java auth).
  */
 import type { User, UserRole } from "@/lib/auth-store"
+import { normalizePhoneDigitsForAuth } from "@/lib/rwanda-phone"
 
 export type ApiLoginOK = {
   ok: true
@@ -96,13 +97,24 @@ export async function loginWithCredentialsResult(
   password: string,
 ): Promise<LoginWithCredentialsResult> {
   const trimmed = phoneOrEmail.trim()
-  const res = await fetch("/api/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: trimmed, password }),
-    credentials: "include",
-  })
-  const json = (await res.json().catch(() => null)) as Record<string, unknown> | null
+  /** Phone field is sent as `email` to Java; canonicalize 07…/8… so it matches `tel` in DB (`250…`). */
+  const emailForJava = trimmed.includes("@")
+    ? trimmed
+    : (normalizePhoneDigitsForAuth(trimmed) || trimmed)
+  const doLogin = (email: string) =>
+    fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+      credentials: "include",
+    })
+
+  let res = await doLogin(emailForJava)
+  let json = (await res.json().catch(() => null)) as Record<string, unknown> | null
+  if ((!res.ok || !json || !(json as { ok?: boolean }).ok) && emailForJava !== trimmed && !trimmed.includes("@")) {
+    res = await doLogin(trimmed)
+    json = (await res.json().catch(() => null)) as Record<string, unknown> | null
+  }
   if (!res.ok || !json || !(json as { ok?: boolean }).ok) {
     const msg = String((json as { error?: string } | null)?.error || "Invalid credentials")
     throw new Error(msg)

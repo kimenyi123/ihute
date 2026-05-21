@@ -1,6 +1,6 @@
 // app/api/fetchSuggestions/route.ts
 import type { NextRequest } from "next/server"
-import { getFetchSuggestionsUrl, getProxyTimeoutMs } from "@/lib/backend-config"
+import { getFetchSuggestionsUrl, getProxyTimeoutMs, warmJavaBackendBase } from "@/lib/backend-config"
 import {
   buildCacheKey,
   getCached,
@@ -50,6 +50,7 @@ function sectorStatsErrorBody(sectorSlug: string, warning: string): string {
 }
 
 async function forward(req: NextRequest) {
+  await warmJavaBackendBase()
   const incoming = new URL(req.url)
   const sectorStatsParam = incoming.searchParams.get("sectorStats")
   const debugSql = isDebugSql(incoming.searchParams)

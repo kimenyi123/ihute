@@ -1,13 +1,15 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   Upload, 
   FileSpreadsheet, 
   CheckCircle, 
   XCircle, 
-  AlertCircle
+  AlertCircle,
+  Loader2,
+  X,
 } from 'lucide-react';
 import { 
   importStockExcel, 
@@ -21,6 +23,18 @@ export default function SupplierStockUploadPage() {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
+  const uploadAbortRef = useRef<AbortController | null>(null);
+  const resultAnchorRef = useRef<HTMLDivElement | null>(null);
+
+  const scrollToResults = () => {
+    requestAnimationFrame(() => {
+      resultAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
+
+  const goToDashboardStock = (count: number) => {
+    router.push(`/supplier/dashboard?stockImport=1&count=${encodeURIComponent(String(count))}`);
+  };
 
   // Session expiration check - check on mount and periodically
   useEffect(() => {
@@ -39,6 +53,12 @@ export default function SupplierStockUploadPage() {
 
     return () => clearInterval(interval);
   }, [checkSession, router]);
+
+  useEffect(() => {
+    return () => {
+      uploadAbortRef.current?.abort();
+    };
+  }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -192,7 +212,9 @@ export default function SupplierStockUploadPage() {
                     )}
                   </button>
                 {uploading && (
-                  <p className="mt-2 text-sm text-gray-500">Parsing file and saving to your catalog. Large files may take a few seconds.</p>
+                  <p className="mt-2 text-sm text-gray-500">
+                    Parsing file and saving to your stock (database + search). Large menus (500+ items) may take 1–3 minutes — keep this tab open.
+                  </p>
                 )}
                 </div>
               )}
@@ -241,6 +263,14 @@ export default function SupplierStockUploadPage() {
                             Backup created
                           </p>
                         )}
+                        <p className="mt-3">
+                          <a
+                            href="/supplier/dashboard"
+                            className="font-semibold text-green-900 underline underline-offset-2"
+                          >
+                            View your stock on the dashboard →
+                          </a>
+                        </p>
                       </div>
                     )}
 

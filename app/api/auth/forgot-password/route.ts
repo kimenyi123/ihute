@@ -1,8 +1,16 @@
 import { NextResponse } from "next/server"
 import { getAuthUrl } from "@/lib/backend-config"
 import { resetPasswordViaMysql } from "@/lib/forgot-password-mysql"
+import { coerceTelRawForPasswordReset, rwJavaResetTelVariants } from "@/lib/rwanda-phone"
 
 const JAVA_AUTH_URL = getAuthUrl()
+
+/** Per-Java-attempt cap so slow Tomcat cannot block the route for many minutes (7 variants × this). */
+function javaResetFetchTimeoutMs(): number {
+  const n = Number(process.env.JAVA_AUTH_RESET_FETCH_MS)
+  if (Number.isFinite(n) && n >= 3_000) return Math.min(n, 90_000)
+  return 18_000
+}
 
 function isUnknownAction(json: { error?: string; code?: string } | null): boolean {
   const e = (json?.error ?? "").toLowerCase()
@@ -31,11 +39,12 @@ export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}))
     const emailTrimmed = String(body?.email ?? "").trim()
-    const tel = String(body?.tel ?? "").trim()
+    const telRaw = coerceTelRawForPasswordReset(String(body?.tel ?? ""))
+    const telVariants = telRaw ? rwJavaResetTelVariants(telRaw) : []
     const streetNumber = String(body?.streetNumber ?? "").trim()
     const newPassword = String(body?.newPassword ?? "")
 
-    const isResetFlow = Boolean(tel && streetNumber && newPassword)
+    const isResetFlow = Boolean(telRaw && streetNumber && newPassword)
 
     if (isResetFlow) {
       if (newPassword.length < 6) {
@@ -45,71 +54,129 @@ export async function POST(req: Request) {
         )
       }
 
-      const form = new URLSearchParams()
-      form.set("action", "resetPassword")
-      if (emailTrimmed) form.set("email", emailTrimmed)
-      form.set("tel", tel)
-      form.set("streetNumber", streetNumber)
-      form.set("newPassword", newPassword)
+      const fbPre = await resetPasswordViaMysql(telRaw, streetNumber, newPassword)
+      if (fbPre.ok) {
+        console.log(`[api/auth/forgot-password][${rid}] MySQL ok in ${Date.now() - t0}ms`)
+        return NextResponse.json({ ok: true, message: "Password updated", rid, via: "mysql" })
+      }
+      if (fbPre.error !== "no_db") {
+        console.warn(`[api/auth/forgot-password][${rid}] mysql (continuing to Java): ${fbPre.error}`)
+      }
 
       const javaUrl = new URL(JAVA_AUTH_URL)
       javaUrl.searchParams.set("action", "resetPassword")
+      const javaFetchMs = javaResetFetchTimeoutMs()
 
-      const res = await fetch(javaUrl.toString(), {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: form.toString(),
-        cache: "no-store",
-      })
+      let lastJson: AuthJson = {}
+      let lastRes: Response | null = null
+      let lastFetchErr: string | null = null
 
-      const text = await res.text()
-      let json: AuthJson
-      try {
-        json = text ? JSON.parse(text) : {}
-      } catch {
-        return NextResponse.json(
-          { ok: false, error: "Bad response from auth server", raw: text.slice(0, 400), rid },
-          { status: 502 }
-        )
-      }
+      type JavaAttempt =
+        | { tel: string; kind: "ok"; res: Response; json: AuthJson }
+        | { tel: string; kind: "fetch_err"; err: string }
+        | { tel: string; kind: "bad_json"; raw: string }
 
-      if (json?.ok === true) {
-        console.log(`[api/auth/forgot-password][${rid}] Java ok in ${Date.now() - t0}ms`)
-        return NextResponse.json({ ok: true, message: json.message ?? "Password updated", rid })
-      }
+      const javaAttempts = await Promise.all(
+        telVariants.map(async (tel): Promise<JavaAttempt> => {
+          const form = new URLSearchParams()
+          form.set("action", "resetPassword")
+          if (emailTrimmed) form.set("email", emailTrimmed)
+          form.set("tel", tel)
+          form.set("streetNumber", streetNumber)
+          form.set("newPassword", newPassword)
+          try {
+            const res = await fetch(javaUrl.toString(), {
+              method: "POST",
+              headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              body: form.toString(),
+              cache: "no-store",
+              signal: AbortSignal.timeout(javaFetchMs),
+            })
+            const text = await res.text()
+            let json: AuthJson
+            try {
+              json = text ? JSON.parse(text) : {}
+            } catch {
+              return { tel, kind: "bad_json" as const, raw: text.slice(0, 400) }
+            }
+            return { tel, kind: "ok" as const, res, json }
+          } catch (e: unknown) {
+            const err = e instanceof Error ? e.message : String(e)
+            return { tel, kind: "fetch_err" as const, err }
+          }
+        })
+      )
 
-      if (!json?.ok && isUnknownAction(json)) {
-        const fb = await resetPasswordViaMysql(tel, streetNumber, newPassword)
-        if (fb.ok) {
-          console.log(`[api/auth/forgot-password][${rid}] MySQL fallback ok in ${Date.now() - t0}ms`)
-          return NextResponse.json({ ok: true, message: "Password updated", rid, via: "mysql" })
-        }
-        if (fb.error !== "no_db") {
+      for (const a of javaAttempts) {
+        if (a.kind === "bad_json") {
           return NextResponse.json(
-            { ok: false, error: fb.error, rid, code: json?.code ?? "AUTH_UNKNOWN_ACTION" },
-            { status: 400 }
+            { ok: false, error: "Bad response from auth server", raw: a.raw, rid },
+            { status: 502 }
           )
         }
+      }
+
+      for (const a of javaAttempts) {
+        if (a.kind === "fetch_err") {
+          lastFetchErr = a.err
+          console.warn(`[api/auth/forgot-password][${rid}] Java fetch failed tel=${a.tel}: ${a.err}`)
+          continue
+        }
+        if (a.kind !== "ok") continue
+        const { tel, res, json } = a
+        lastRes = res
+        lastJson = json
+        console.log(
+          `[api/auth/forgot-password][${rid}] try tel=${tel} http=${res.status} ok=${json?.ok} code=${json?.code ?? ""} error=${json?.error ?? ""}`
+        )
+        if (json?.ok === true) {
+          console.log(`[api/auth/forgot-password][${rid}] Java ok in ${Date.now() - t0}ms (tel=${tel})`)
+          return NextResponse.json({ ok: true, message: json.message ?? "Password updated", rid, via: "java" })
+        }
+      }
+
+      if (isUnknownAction(lastJson)) {
+        const hint =
+          fbPre.error !== "no_db" && fbPre.error
+            ? ` MySQL fallback: ${fbPre.error}`
+            : ""
         return NextResponse.json(
           {
             ok: false,
             error:
-              "Password reset is not available on this server yet. Deploy the latest trading_ai WAR (UserAuthServlet with resetPassword), or set FORGOT_PASSWORD_MYSQL_* / ONBOARDING_MYSQL_* in .env.local for a database fallback.",
-            code: json?.code ?? "AUTH_UNKNOWN_ACTION",
+              "Password reset is not available on this server yet. Deploy the latest trading_ai WAR (UserAuthServlet with resetPassword), or set FORGOT_PASSWORD_MYSQL_* / ONBOARDING_MYSQL_* in .env.local for a database fallback." +
+              hint,
+            code: lastJson?.code ?? "AUTH_UNKNOWN_ACTION",
             rid,
           },
           { status: 503 }
         )
       }
 
+      if (fbPre.error !== "no_db") {
+        const javaErr = String(lastJson?.error ?? "").trim()
+        const merged =
+          javaErr && javaErr !== fbPre.error
+            ? `${javaErr} (${fbPre.error})`
+            : fbPre.error || javaErr || "Could not reset password"
+        return NextResponse.json(
+          { ok: false, error: merged, rid, code: lastJson?.code ?? "AUTH_RESET_FAIL" },
+          { status: 400 }
+        )
+      }
+
+      const st = lastRes?.status && lastRes.status >= 400 && lastRes.status < 600 ? lastRes.status : 400
+      const errOut =
+        lastJson?.error?.trim() ||
+        (lastFetchErr ? `Auth server unreachable or timed out (${lastFetchErr})` : "Could not reset password")
       return NextResponse.json(
         {
           ok: false,
-          error: json?.error || "Could not reset password",
+          error: errOut,
           rid,
-          code: json?.code,
+          code: lastJson?.code ?? (lastFetchErr ? "AUTH_RESET_FETCH" : undefined),
         },
-        { status: res.status >= 400 && res.status < 600 ? res.status : 400 }
+        { status: st }
       )
     }
 

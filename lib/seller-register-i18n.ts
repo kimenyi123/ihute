@@ -180,9 +180,9 @@ export const UMURIRO_UI = {
   },
   imBuying: { en: "I'm buying", rw: "Nagura", fr: "J’achète" },
   imBuyingHint: {
-    en: "Search the catalog in the category above, or type any name.",
-    rw: "Shakisha muri ubu bwoko hejuru, cyangwa wandike uko ukeneye.",
-    fr: "Cherchez dans cette catégorie, ou saisissez un nom libre.",
+    en: "Search an item, set price & quantity, tap Add to my list — repeat for soap, salt, bread, etc.",
+    rw: "Shakisha igicuruzwa, shyiramo igiciro n’umubare, ukande Ongeraho — kongera ku bindi byose.",
+    fr: "Cherchez, prix et quantité, puis Ajouter — répétez pour plusieurs articles.",
   },
   chooseCategory: {
     en: "Choose a shop category first.",
@@ -196,6 +196,32 @@ export const UMURIRO_UI = {
   },
   unitPrice: { en: "Price (RWF)", rw: "Igiciro (RWF)", fr: "Prix (RWF)" },
   quantity: { en: "Quantity", rw: "Umubare", fr: "Quantité" },
+  addToList: {
+    en: "Add to my list",
+    rw: "Ongeraho ku rutonde",
+    fr: "Ajouter à la liste",
+  },
+  cartTitle: {
+    en: "Your items",
+    rw: "Ibicuruzwa byawe",
+    fr: "Vos articles",
+  },
+  cartEmpty: {
+    en: "Search and add items above — soap, salt, bread, and more in one order.",
+    rw: "Shakisha hejuru wongeraho ibicuruzwa — isabune, umunyu, umugati, n’ibindi mu komande imwe.",
+    fr: "Cherchez et ajoutez des articles ci-dessus — tout en une seule commande.",
+  },
+  cartItemCount: {
+    en: "{count} item(s)",
+    rw: "Ibicuruzwa {count}",
+    fr: "{count} article(s)",
+  },
+  removeItem: { en: "Remove", rw: "Kuraho", fr: "Retirer" },
+  emptyCartError: {
+    en: "Add at least one item to your list.",
+    rw: "Ongeraho nibura igicuruzwa kimwe ku rutonde.",
+    fr: "Ajoutez au moins un article.",
+  },
   totalLabel: { en: "Total to pay (RWF)", rw: "Amafaranga yose", fr: "Total (RWF)" },
   ussdLabel: { en: "MTN MoMo USSD", rw: "Kode USSD ya MTN MoMo", fr: "USSD MTN MoMo" },
   sellerSmsPreview: {
@@ -270,6 +296,49 @@ export const UMURIRO_UI = {
     en: "Draft not in MySQL (set ONBOARDING_MYSQL_*).",
     rw: "Ntago byabitswe muri MySQL (shyiraho ONBOARDING_MYSQL_*).",
     fr: "Brouillon absent de MySQL (ONBOARDING_MYSQL_*).",
+  },
+  payHowTitle: {
+    en: "How will you pay?",
+    rw: "Uzishyura ate?",
+    fr: "Comment payez-vous ?",
+  },
+  payMomo: { en: "MoMo (USSD)", rw: "MoMo (USSD)", fr: "MoMo (USSD)" },
+  payCash: { en: "Cash at shop", rw: "Amafaranga ku iduka", fr: "Espèces au magasin" },
+  readMoMoSmsTitle: {
+    en: "Paste MoMo SMS (read confirmation)",
+    rw: "Shyiraho SMS ya MoMo (somaho kwemeza)",
+    fr: "Collez le SMS MoMo (confirmation)",
+  },
+  readMoMoSmsHint: {
+    en: "After paying, copy the MTN message here. We match the RWF amount to your total ({total} RWF).",
+    rw: "Nyuma yo kwishyura, kopiye ubutumwa bwa MTN ubushyire hano. Duhuza amafaranga n’itegeko ({total} RWF).",
+    fr: "Après paiement, collez le SMS MTN. Nous comparons au total ({total} RWF).",
+  },
+  verifySms: { en: "Match to my total", rw: "Gereranya n’itegeko", fr: "Comparer au total" },
+  paymentPaidMatched: {
+    en: "Status: Paid — SMS amount matches your order total.",
+    rw: "Uko biri: Byishyuwe — amafaranga muri SMS ahuye n’itegeko.",
+    fr: "Statut : payé — le SMS correspond au total.",
+  },
+  paymentMismatch: {
+    en: "Not matched — SMS shows {got} RWF but your total is {expected} RWF.",
+    rw: "Ntibihuye — SMS ifite {got} RWF, ariko total ni {expected} RWF.",
+    fr: "Écart — SMS {got} RWF, total {expected} RWF.",
+  },
+  paymentNoAmountInSms: {
+    en: "No RWF amount found — paste the full MoMo SMS.",
+    rw: "Nta mafranga yabonetse — shyiraho SMS yose.",
+    fr: "Aucun montant RWF — collez le SMS complet.",
+  },
+  paymentCashSkipSms: {
+    en: "Cash at shop — no MoMo SMS check. Tell the seller when you pay.",
+    rw: "Amafaranga ku iduka — nta SMS ya MoMo. Menyesha mucuruzi.",
+    fr: "Espèces au magasin — pas de SMS MoMo.",
+  },
+  sellerSmsAfterSave: {
+    en: "SMS to {phone} after save (if Twilio / SMS webhook is configured).",
+    rw: "SMS kuri {phone} nyuma yo kubika (niba Twilio / webhook byashyizweho).",
+    fr: "SMS vers {phone} après enregistrement (si Twilio / webhook est configuré).",
   },
 } satisfies Record<string, Tri>
 
