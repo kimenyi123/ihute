@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense } from "react"
+import { Suspense, useLayoutEffect, useState } from "react"
 import Image from "next/image"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
@@ -8,8 +8,8 @@ import { ArrowLeft } from "lucide-react"
 import { useAuthStore } from "@/lib/auth-store"
 import type { User } from "@/lib/auth-store"
 import { IshyigaLoginCard } from "@/components/ishyiga-login-card"
-import { GRANDMA_PATHS } from "@/lib/grandma-urls"
-import { userCanAccessSellerSpace } from "@/lib/auth-login-client"
+import { GRANDMA_PATHS, readGrandmaSignupRole, writeGrandmaSignupRole } from "@/lib/grandma-urls"
+import { grandmaUserCanUseSellerWorkspace } from "@/lib/auth-login-client"
 
 const shell =
   "min-h-screen bg-[#eef4fb] text-[#17324d] flex flex-col bg-gradient-to-b from-[#e8f5ff] to-[#dff0ff]"
@@ -21,13 +21,22 @@ function GrandmaLoginInner() {
   const redirectTo = searchParams?.get("redirect")
   const phonePrefill = searchParams?.get("phone") ?? ""
 
+  const [registerHref, setRegisterHref] = useState("/register/buyer")
+
+  useLayoutEffect(() => {
+    setRegisterHref(readGrandmaSignupRole() === "seller" ? "/register/seller" : "/register/buyer")
+  }, [])
+
   const isAdminUser = (user: User): boolean =>
     user.role === "admin" || String(user.dbRole ?? "").toUpperCase() === "ADMIN"
 
   const handleSuccess = async (user: User) => {
     loginStore(user)
     try {
-      localStorage.setItem("grandma:mode", userCanAccessSellerSpace(user) ? "seller" : "buyer")
+      const asSeller = grandmaUserCanUseSellerWorkspace(user)
+      const mode = asSeller ? "seller" : "buyer"
+      localStorage.setItem("grandma:mode", mode)
+      writeGrandmaSignupRole(asSeller ? "seller" : "buyer")
     } catch {
       /* ignore */
     }
@@ -81,7 +90,10 @@ function GrandmaLoginInner() {
           description="Sign in with your phone number or email"
           submitLabel="Sign in"
           defaultPhone={phonePrefill}
-          registerHref="/register/buyer"
+          registerHref={registerHref}
+          registerLinkText={
+            registerHref === "/register/seller" ? "Register as seller" : "Register as buyer"
+          }
           forgotHref="/forgot-password"
           loginMode="phoneOrEmail"
           uiVariant="grandma"

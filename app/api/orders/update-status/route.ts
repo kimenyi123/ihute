@@ -5,6 +5,52 @@ import { getOrderStatusUrl } from "@/lib/backend-config"
 
 const ORDER_STATUS_URL = getOrderStatusUrl()
 
+function isLikelyStatusTransitionConflict(res: Response, json: Record<string, unknown> | null): boolean {
+  if (res.status === 409 || res.status === 423) return true
+  const err = String(json?.error ?? json?.message ?? "").toLowerCase()
+  return (
+    err.includes("transition") ||
+    err.includes("invalid status") ||
+    err.includes("cannot change") ||
+    err.includes("not allowed") ||
+    err.includes("conflict") ||
+    err.includes("wrong state")
+  )
+}
+
+function looksAlreadyAtTarget(json: Record<string, unknown> | null, target: string): boolean {
+  const err = String(json?.error ?? json?.message ?? "").toLowerCase()
+  const cur = String(json?.currentStatus ?? json?.orderStatus ?? json?.status ?? "").toLowerCase()
+  if (cur && cur === target.toLowerCase()) return true
+  return err.includes("already") && (err.includes(target) || err.includes("delivered") || err.includes("processing"))
+}
+
+async function postOrderStatus(
+  orderId: number,
+  status: string,
+  publicSiteUrl: string,
+): Promise<{ ok: boolean; res: Response; json: Record<string, unknown> | null }> {
+  const payload: Record<string, unknown> = {
+    orderId: Number(orderId),
+    status: String(status),
+  }
+  if (publicSiteUrl) payload.publicSiteUrl = publicSiteUrl
+
+  const res = await fetch(ORDER_STATUS_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(payload),
+    cache: "no-store",
+  })
+
+  const json = (await res.json().catch(() => null)) as Record<string, unknown> | null
+  const ok = Boolean(res.ok && json?.ok)
+  return { ok, res, json }
+}
+
 export async function GET() {
   return NextResponse.json({
     ok: true,
@@ -64,28 +110,30 @@ export async function POST(req: Request) {
       process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
       (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "")
 
-    const payload: Record<string, unknown> = {
-      orderId: Number(orderId),
-      status: String(status),
+    let { ok, res, json } = await postOrderStatus(Number(orderId), String(status), publicSiteUrl)
+
+    /** Kaos often rejects open → delivered; bridge via `processing` (same for some invoice paths). */
+    const st = String(status)
+    if (!ok && isLikelyStatusTransitionConflict(res, json)) {
+      if (st === "delivered") {
+        console.warn(`[UPDATE-STATUS] conflict on delivered (HTTP ${res.status}); bridging via processing`)
+        await postOrderStatus(Number(orderId), "processing", publicSiteUrl)
+        ;({ ok, res, json } = await postOrderStatus(Number(orderId), "delivered", publicSiteUrl))
+      } else if (st === "invoice") {
+        console.warn(`[UPDATE-STATUS] conflict on invoice (HTTP ${res.status}); bridging via processing`)
+        await postOrderStatus(Number(orderId), "processing", publicSiteUrl)
+        ;({ ok, res, json } = await postOrderStatus(Number(orderId), "invoice", publicSiteUrl))
+      }
     }
-    if (publicSiteUrl) payload.publicSiteUrl = publicSiteUrl
 
-    const res = await fetch(ORDER_STATUS_URL, {
-      method: "POST",
-      headers: { 
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-      },
-      body: JSON.stringify(payload),
-      cache: "no-store",
-    })
+    /** Double-click / replay: treat “already there” as success so UI does not error. */
+    if (!ok && looksAlreadyAtTarget(json, st)) {
+      console.log(`[UPDATE-STATUS] idempotent ok — already at or past ${st}`)
+      return NextResponse.json({ ok: true, ...(json ?? {}), idempotent: true })
+    }
 
-    console.log(`[UPDATE-STATUS] Response status: ${res.status}`)
-
-    const json = await res.json().catch(() => null)
-
-    if (!res.ok || !json?.ok) {
-      const errorMsg = json?.error || `HTTP ${res.status}`
+    if (!ok) {
+      const errorMsg = (json?.error as string) || `HTTP ${res.status}`
       console.error(`[UPDATE-STATUS] Error: ${errorMsg}`)
       return NextResponse.json(
         { ok: false, error: errorMsg },

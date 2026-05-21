@@ -6,8 +6,8 @@ import { ShoppingCart, Send, Trash2, AlertCircle, Users, Plus } from "lucide-rea
 // Mock store hooks - replace with your actual imports
 const useCartStore = () => ({
   items: [
-    { id: 1, name: "Beer", qty: 2, price: 1000, unit: "bottle", selectedUnit: "bottle" },
-    { id: 2, name: "Fries", qty: 1, price: 2000, unit: "plate", selectedUnit: "plate" }
+    { id: 1, name: "Beer", qty: 2, price: 1000, unit: "bottle", selectedUnit: "bottle", lineSignature: "", notes: "" },
+    { id: 2, name: "Fries", qty: 1, price: 2000, unit: "plate", selectedUnit: "plate", lineSignature: "", notes: "" },
   ],
   getTotalPrice: () => 4000,
   clearCart: () => console.log("Clear cart"),

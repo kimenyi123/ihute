@@ -247,16 +247,18 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                   closeSidebar();
                 }}
                 className={cn(
-                  "flex w-full items-center gap-3 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-semibold text-sky-950 shadow-sm transition-colors hover:bg-sky-100",
+                  "flex w-full flex-col gap-0.5 rounded-xl border border-sky-200 bg-gradient-to-br from-sky-50 to-white px-4 py-3 text-left text-sm font-semibold text-sky-950 shadow-sm transition-colors hover:border-sky-300 hover:bg-sky-50/90",
                   pathname?.startsWith("/grandma") && "border-sky-400 bg-sky-100 ring-2 ring-sky-200",
                 )}
               >
-                <Smartphone className="h-5 w-5 shrink-0 text-sky-700" aria-hidden />
-                <span className="leading-tight">Grandma app</span>
+                <span className="flex items-center gap-2">
+                  <Smartphone className="h-5 w-5 shrink-0 text-sky-700" aria-hidden />
+                  <span className="leading-tight">Grandma</span>
+                </span>
+                <span className="pl-7 text-[11px] font-normal leading-snug text-slate-600">
+                  Mobile shop, best seller &amp; top-up tips (seller mode)
+                </span>
               </Link>
-              <p className="mt-1.5 px-1 text-[11px] leading-snug text-slate-500">
-                Shop and orders in the Grandma experience
-              </p>
             </div>
 
             {/* Footer / Logout */}

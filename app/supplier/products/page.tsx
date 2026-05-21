@@ -20,6 +20,7 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 import { generalSellingPrice, parsePackageMultiplier, resolveItemEmballageRaw } from "@/lib/package-price"
+import { roundRwfPrice } from "@/lib/parse-rwf-price"
 
 type ProductStatus = "active" | "inactive" | "out-of-stock"
 
@@ -81,10 +82,10 @@ export default function MyProductsPage() {
   // Price: selling_price (Redis) or SALE_PRICE_INCLUSIVE/price (DB). item_emballage is not price.
   let price = 0
   if (p.selling_price != null) {
-    price = typeof p.selling_price === "number" ? p.selling_price : parseFloat(String(p.selling_price).replace(/[^0-9.-]/g, "")) || 0
+    price = roundRwfPrice(p.selling_price)
   }
   if (price <= 0) {
-    price = parseFloat(p.price || p.SALE_PRICE_INCLUSIVE || 0)
+    price = roundRwfPrice(p.price || p.SALE_PRICE_INCLUSIVE || 0)
   }
 
   const costPrice = Number(

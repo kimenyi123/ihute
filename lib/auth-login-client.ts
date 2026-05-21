@@ -3,6 +3,7 @@
  * Proxies to `POST /api/auth/login` (Java auth).
  */
 import type { User, UserRole } from "@/lib/auth-store"
+import { normalizePhoneDigitsForAuth } from "@/lib/rwanda-phone"
 
 export type ApiLoginOK = {
   ok: true
@@ -96,13 +97,24 @@ export async function loginWithCredentialsResult(
   password: string,
 ): Promise<LoginWithCredentialsResult> {
   const trimmed = phoneOrEmail.trim()
-  const res = await fetch("/api/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: trimmed, password }),
-    credentials: "include",
-  })
-  const json = (await res.json().catch(() => null)) as Record<string, unknown> | null
+  /** Phone field is sent as `email` to Java; canonicalize 07…/8… so it matches `tel` in DB (`250…`). */
+  const emailForJava = trimmed.includes("@")
+    ? trimmed
+    : (normalizePhoneDigitsForAuth(trimmed) || trimmed)
+  const doLogin = (email: string) =>
+    fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+      credentials: "include",
+    })
+
+  let res = await doLogin(emailForJava)
+  let json = (await res.json().catch(() => null)) as Record<string, unknown> | null
+  if ((!res.ok || !json || !(json as { ok?: boolean }).ok) && emailForJava !== trimmed && !trimmed.includes("@")) {
+    res = await doLogin(trimmed)
+    json = (await res.json().catch(() => null)) as Record<string, unknown> | null
+  }
   if (!res.ok || !json || !(json as { ok?: boolean }).ok) {
     const msg = String((json as { error?: string } | null)?.error || "Invalid credentials")
     throw new Error(msg)
@@ -125,6 +137,19 @@ export async function loginWithCredentials(phoneOrEmail: string, password: strin
 export function userCanAccessSellerSpace(user: User | null): boolean {
   if (!user) return false
   if (user.role === "supplier") return true
+  /** Backend may flag twin account_seller without mapping role to supplier yet. */
+  if (user.dualPharmacyRetail) return true
   const db = user.dbRole?.toUpperCase()
   return db === "SELLER"
+}
+
+/**
+ * Grandma MODE + seller UI: same as {@link userCanAccessSellerSpace}, plus `supplier_*` ishyiga accounts
+ * when persisted auth omits role flags (e.g. older sessions).
+ */
+export function grandmaUserCanUseSellerWorkspace(user: User | null): boolean {
+  if (!user) return false
+  if (userCanAccessSellerSpace(user)) return true
+  const acc = user.ishyigaAccount?.trim() ?? ""
+  return /^supplier_/i.test(acc)
 }

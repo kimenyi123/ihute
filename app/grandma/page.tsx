@@ -15,20 +15,31 @@ import { Slider } from "@/components/ui/slider"
 import { useLocationStoreEnhanced, type LocationData } from "@/lib/location-store-enhanced"
 import { getProductImageSrc, NO_IMAGE_URL } from "@/lib/image-utils"
 import { cn } from "@/lib/utils"
-import { Loader2, SlidersHorizontal, Trash2 } from "lucide-react"
+import { LayoutDashboard, Loader2, SlidersHorizontal, Smartphone, Trash2 } from "lucide-react"
 import { grandmaApiService } from "@/lib/grandma-api-service"
 import { getUserPreferences, toggleUserPreference, saveUserPreferences, getCurrentUserId, loadUserPreferences } from "@/lib/user-preferences-api"
-import { GRANDMA_APP_VERSION, GRANDMA_OUTBOUND, GRANDMA_PATHS } from "@/lib/grandma-urls"
+import {
+  GRANDMA_APP_VERSION,
+  GRANDMA_OUTBOUND,
+  GRANDMA_PATHS,
+  writeGrandmaSignupRole,
+} from "@/lib/grandma-urls"
 import {
   GRANDMA_REORDER_STORAGE_KEY,
   type GrandmaReorderPayload,
 } from "@/lib/grandma-reorder"
+import {
+  buildGrandmaBillingReferenceTail,
+  buildGrandmaMtnUssd,
+  computeIhutePlatformFeeRwf,
+  stripShopMomoLabel,
+} from "@/lib/grandma-order-billing"
 import { GRANDMA_CATEGORY_TO_SECTOR_SLUG } from "@/lib/seller-category-sector"
 import { fetchSectorStatsFromApi, productCountFromSupplierRow } from "@/lib/fetch-suggestions-helpers"
 import { useAuthStore } from "@/lib/auth-store"
-import { userCanAccessSellerSpace } from "@/lib/auth-login-client"
+import { grandmaUserCanUseSellerWorkspace } from "@/lib/auth-login-client"
+import { useLanguageStore } from "@/lib/language-store"
 import { GrandmaSellerDashboard } from "@/components/grandma-seller-dashboard"
-import { GrandmaRequestStatsPanel } from "@/components/grandma-request-stats-panel"
 import { GrandmaSellerItemsPanel } from "@/components/grandma-seller-items-panel"
 import { digitsOnly, normalizePhoneDigitsForAuth, normalizeRwandaMobileE164 } from "@/lib/rwanda-phone"
 import { Input } from "@/components/ui/input"
@@ -52,6 +63,11 @@ type Product = {
   price: number
   emoji: string
   imageUrl?: string
+  /**
+   * Kaos `ITEM_CODE` / `item_key_words` for stock decrement — must match `seller_add_stock`, not `liveKey`
+   * (e.g. Burrows uses `liveKey` like `nickname:dedupe…` which must never be sent as `itemCode`).
+   */
+  stockLineCode?: string
   /** Stable key for live-catalog rows (dedupe + React keys) */
   liveKey?: string
   /** Live API `in_stock` — only set for injected catalog rows */
@@ -78,6 +94,8 @@ type BurrowsApiProduct = {
   ITEM_CODE?: string
   item_code?: string
   item_key_words?: string
+  NIKI_CODE?: string
+  niki_code?: string
   item_state?: string
   item_packet?: string
   stock?: number | string
@@ -100,6 +118,9 @@ type BurrowsApiResponse = { ok: boolean; sellers?: BurrowsApiSeller[] }
 
 type LogisticsId = "human" | "bike" | "moto"
 type LogisticsOption = { id: LogisticsId; icon: string; label: string; baseRwf: number; rwfPerKm: number }
+
+/** Buyer chooses delivery vs collecting at shop — avoids mixing modes. */
+type FulfillmentMode = "delivery" | "pickup"
 
 type PaymentId = "momo" | "airtel" | "bk" | "cash"
 type PaymentMode = { id: PaymentId; label: string; iconSrc: string }
@@ -148,6 +169,71 @@ type ShopEntry = {
   payoutAccount?: string
 }
 
+const GRANDMA_ORDERED_SHOPS_LS = "ihute:grandma:orderedShopIds" as const
+
+function readGrandmaOrderedShopIdsFromStorage(): string[] {
+  if (typeof window === "undefined") return []
+  try {
+    const raw = window.localStorage.getItem(GRANDMA_ORDERED_SHOPS_LS)
+    if (!raw) return []
+    const p = JSON.parse(raw) as unknown
+    if (!Array.isArray(p)) return []
+    return [...new Set(p.map((x) => String(x).trim()).filter(Boolean))]
+  } catch {
+    return []
+  }
+}
+
+function persistGrandmaOrderedShopIds(ids: string[]) {
+  try {
+    window.localStorage.setItem(GRANDMA_ORDERED_SHOPS_LS, JSON.stringify(ids.slice(0, 80)))
+  } catch {
+    /* ignore */
+  }
+}
+
+/** After a successful Grandma checkout — powers the “Reorder” shop filter. */
+function appendGrandmaOrderedShopId(shopId: string): string[] {
+  const id = String(shopId ?? "").trim()
+  if (!id) return readGrandmaOrderedShopIdsFromStorage()
+  const prev = readGrandmaOrderedShopIdsFromStorage()
+  const next = [id, ...prev.filter((x) => x !== id)].slice(0, 80)
+  persistGrandmaOrderedShopIds(next)
+  return next
+}
+
+function supplierRowSuggestsOnSale(supplier: Record<string, unknown>): boolean {
+  const pos = (v: unknown) => {
+    const x = Number(v)
+    return Number.isFinite(x) && x > 0
+  }
+  const truthy = (v: unknown) => v === true || v === "true" || v === "1" || v === 1
+  if (truthy(supplier.on_sale) || truthy(supplier.ON_SALE) || truthy(supplier.onSale)) return true
+  if (truthy(supplier.has_promo) || truthy(supplier.HAS_PROMO)) return true
+  if (pos(supplier.promo_count) || pos(supplier.PROMO_COUNT)) return true
+  if (pos(supplier.discount_items) || pos(supplier.DISCOUNT_ITEMS)) return true
+  return false
+}
+
+/** Live sector list has no “trending” flag — approximate with top stock-line counts per category. */
+function annotateShopTrendingByCategory(shops: ShopEntry[]): ShopEntry[] {
+  const groups = new Map<Category, ShopEntry[]>()
+  for (const s of shops) {
+    const g = groups.get(s.category) ?? []
+    g.push(s)
+    groups.set(s.category, g)
+  }
+  return shops.map((s) => {
+    const peers = groups.get(s.category) ?? [s]
+    const sorted = [...peers].sort((a, b) => (b.stockLineCount ?? 0) - (a.stockLineCount ?? 0))
+    const lim = Math.min(12, Math.max(4, Math.ceil(sorted.length * 0.22)))
+    const idx = Math.max(0, Math.min(lim, sorted.length) - 1)
+    const t = sorted[idx]?.stockLineCount ?? 0
+    const trending = t > 0 && (s.stockLineCount ?? 0) >= t
+    return { ...s, trending }
+  })
+}
+
 /** `supplier_ACCOUNT` or `supplier_ACCOUNT__Pharmacy` → Kaos seller account (no prefix / sector suffix). */
 function sellerAccountFromGrandmaShopId(shopId: string | null | undefined): string {
   const raw = String(shopId ?? "").replace(/^supplier_/, "").trim()
@@ -158,6 +244,100 @@ function sellerAccountFromGrandmaShopId(shopId: string | null | undefined): stri
 function sameGrandmaSeller(a: string | null | undefined, b: string | null | undefined): boolean {
   if (!a || !b) return false
   return sellerAccountFromGrandmaShopId(a) === sellerAccountFromGrandmaShopId(b)
+}
+
+/** Normalize seller account from API fields to compare with `sellerAccountFromGrandmaShopId(shop.id)`. */
+function normalizeSellerKeyFromSearch(raw: unknown): string {
+  const s = String(raw ?? "").trim()
+  if (!s) return ""
+  const synthetic = s.toLowerCase().startsWith("supplier_") ? s : `supplier_${s}__x`
+  return sellerAccountFromGrandmaShopId(synthetic).toUpperCase()
+}
+
+/** Collect seller accounts from global search JSON (products + suppliers). */
+function collectSellerAccountsFromGlobalSearchJson(json: Record<string, unknown>): Set<string> {
+  const out = new Set<string>()
+  const add = (raw: unknown) => {
+    const k = normalizeSellerKeyFromSearch(raw)
+    if (k) out.add(k)
+  }
+  const products = Array.isArray(json.products) ? json.products : []
+  for (const p of products) {
+    if (!p || typeof p !== "object") continue
+    const o = p as Record<string, unknown>
+    add(
+      o.supplier_account ??
+        o.SELLER_ISHYIGA_ACCOUNT ??
+        o.supplierAccount ??
+        o.ISHYIGA_ACCOUNT ??
+        o.seller_account ??
+        o.SELLER_ACCOUNT,
+    )
+  }
+  for (const arr of [json.suppliersByProduct, json.suppliersByName]) {
+    const rows = Array.isArray(arr) ? arr : []
+    for (const s of rows) {
+      if (!s || typeof s !== "object") continue
+      const o = s as Record<string, unknown>
+      add(
+        o.supplier_account ??
+          o.SELLER_ISHYIGA_ACCOUNT ??
+          o.supplierAccount ??
+          o.ISHYIGA_ACCOUNT ??
+          o.seller_account,
+      )
+    }
+  }
+  return out
+}
+
+function numPriceish(v: unknown): number {
+  if (typeof v === "number" && Number.isFinite(v)) return v
+  const s = String(v ?? "")
+    .replace(/,/g, "")
+    .replace(/[^\d.\-]/g, "")
+  const n = parseFloat(s)
+  return Number.isFinite(n) ? n : 0
+}
+
+/** Catalog row looks discounted (list vs selling) or explicit promo flags. */
+function productRowLooksDiscounted(o: Record<string, unknown>): boolean {
+  const sell = numPriceish(o.selling_price ?? o.SALE_PRICE_INCLUSIVE ?? o.UNITY_PRICE ?? o.price ?? o.PRICE)
+  const list = numPriceish(
+    o.list_price ??
+      o.LIST_PRICE ??
+      o.PV ??
+      o.MRP ??
+      o.rrp ??
+      o.RRP ??
+      o.prix_public ??
+      o.RECOMMENDED_RETAIL_PRICE ??
+      o.MSRP,
+  )
+  if (list > 0 && sell > 0 && sell < list * 0.995) return true
+  const d = String(o.on_sale ?? o.ON_SALE ?? o.promo ?? o.PROMO ?? o.has_discount ?? "").toLowerCase()
+  return d === "true" || d === "1" || d === "yes" || d === "y"
+}
+
+/** Seller keys (uppercase) that have at least one discounted line in a fetchSuggestions JSON body. */
+function collectDiscountedSellerAccountsFromSearchJson(json: Record<string, unknown>): Set<string> {
+  const out = new Set<string>()
+  const products = Array.isArray(json.products) ? json.products : []
+  for (const p of products) {
+    if (!p || typeof p !== "object") continue
+    const o = p as Record<string, unknown>
+    if (!productRowLooksDiscounted(o)) continue
+    const k = normalizeSellerKeyFromSearch(
+      o.supplier_account ??
+        o.SELLER_ISHYIGA_ACCOUNT ??
+        o.supplierAccount ??
+        o.ISHYIGA_ACCOUNT ??
+        o.seller_account ??
+        o.SELLER_ACCOUNT,
+    )
+    if (k) out.add(k)
+  }
+  return out
 }
 
 function isPreferredGrandmaShop(shopId: string, preferredIds: string[]): boolean {
@@ -256,6 +436,10 @@ const GRANDMA_LABELS: Record<
     yourLocation: string
     yourPhone: string
     yourPhoneHint: string
+    paymentGuestPhoneLabel: string
+    paymentGuestPhonePlaceholder: string
+    paymentGuestPhoneNote: string
+    orderSubmitNeedPhone: string
     eta: string
     etaSub: string
     etaSubNoMode: string
@@ -269,6 +453,23 @@ const GRANDMA_LABELS: Record<
     footerItems: string
     footerSummary: string
     footerPay: string
+    footerDashboard: string
+    footerDashboardShort: string
+    sectionLogistics: string
+    logisticsNote: string
+    logisticsNotePickup: string
+    fulfillmentSectionTitle: string
+    fulfillmentDeliveryTitle: string
+    fulfillmentDeliverySub: string
+    fulfillmentPickupTitle: string
+    fulfillmentPickupSub: string
+    fulfillmentDeliveryModesHint: string
+    etaAtShop: string
+    etaPickupSub: string
+    summaryLineItems: string
+    summaryLineItemsTotal: string
+    summaryLineLogisticsRow: string
+    summaryLineGrandTotal: string
     preferredBadge: string
     logHuman: string
     logBike: string
@@ -294,14 +495,77 @@ const GRANDMA_LABELS: Record<
     reorderSplashTitle: string
     reorderSplashSub: string
     versionLabel: string
-    requestStatsTitle: string
-    requestStatsNone: string
-    requestStatsLine: string
-    requestStatsLastFail: string
+    settingsModeHint: string
+    settingsFormBuyerTitle: string
+    settingsFormSellerTitle: string
+    settingsSellerIntro: string
+    settingsApplyClose: string
+    settingsOpenSellerHome: string
+    settingsOpenSellerOrders: string
+    settingsOpenSellerItems: string
+    settingsSellerNeedLogin: string
+    settingsSellerTapDenied: string
+    /** Seller home — best seller card & top-up panel */
+    sellerDashBestSelling: string
+    sellerDashBestSellingSubtitle: string
+    sellerDashBestSellingEmpty: string
+    sellerDashUnitsSold: string
+    sellerDashLineRevenue: string
+    sellerDashShareRevenue: string
+    sellerDashTopUpTitle: string
+    sellerDashTopUpSubtitle: string
+    sellerDashBulletRestock: string
+    sellerDashBulletPopular: string
+    sellerDashBulletFulfillQueue: string
+    sellerDashGrowthIdle: string
+    sellerDashCtaStock: string
+    /** Opens Shop with Me (NIKI catalog) to add / source products */
+    sellerDashCtaNikiStock: string
+    sellerDashCtaOrders: string
+    sellerDashDeliveredTail: string
+    payStepPanelTitle: string
+    payStepDemoNote: string
+    payStepCommissionNote: string
+    payStepMtnTitle: string
+    payStepMtnPayer: string
+    payStepMtnDial: string
+    payStepAirtelTitle: string
+    payStepAirtelPayer: string
+    payStepAirtelDial: string
+    payStepAirtelHelp: string
+    payStepBkTitle: string
+    payStepBkHelp: string
+    payStepBkCardNumber: string
+    payStepBkExpiry: string
+    payStepBkCvc: string
+    payStepBkOtp: string
+    payStepBkOtpSms: string
+    payStepBkPin: string
+    payStepBkPinHint: string
+    payStepCashTitle: string
+    payStepCashConfirm: string
+    payStepCopy: string
+    payStepCopied: string
+    payStepErrPhone: string
+    payStepErrBkCard: string
+    payStepErrBkExpiry: string
+    payStepErrBkCvc: string
+    payStepErrBkOtp: string
+    payStepErrBkPin: string
+    payStepErrCash: string
+    payStepMtnNoUssd: string
+    payStepMomoPin: string
+    payStepAutoPayHintMtn: string
+    payStepAutoPayHintAirtel: string
+    payStepProcessing: string
+    payStepErrMtnPin: string
+    payStepErrAirtelPin: string
+    payStepCardsAccepted: string
+    payStepAfterCheckoutHint: string
   }
 > = {
   en: {
-    demoLocation: "Kacyiru, Gasabo — demo (set your address in settings)",
+    demoLocation: "Kacyiru, Gasabo - (set your address in settings)",
     titleHome: "Ishyiga Ihute",
     shopsPrefix: "Shops ·",
     titleSummary: "Order Summary",
@@ -324,6 +588,10 @@ const GRANDMA_LABELS: Record<
     yourLocation: "Your location",
     yourPhone: "Your phone (delivery)",
     yourPhoneHint: "The shop uses this to reach you. Leave blank to use your Ihute account phone when signed in.",
+    paymentGuestPhoneLabel: "Mobile Money & updates",
+    paymentGuestPhonePlaceholder: "07… · same wallet we notify",
+    paymentGuestPhoneNote: "Optional when signed in with a phone on your account.",
+    orderSubmitNeedPhone: "Add your mobile number to pay and receive order updates.",
     eta: "Estimated time of arrival",
     etaSub: "From ~{km} km · {mode} delivery",
     etaSubNoMode: "~{km} km from the shop. Choose a delivery option on Summary to see arrival time.",
@@ -338,12 +606,31 @@ const GRANDMA_LABELS: Record<
     footerItems: "Items",
     footerSummary: "Summary",
     footerPay: "Pay",
+    footerDashboard: "Open supplier dashboard",
+    footerDashboardShort: "Dashboard",
+    sectionLogistics: "Shipment · Logistics",
+    logisticsNote:
+      "Delivery fee uses distance to this shop ({km} km) and the option you pick (replace with your pricing API).",
+    logisticsNotePickup:
+      "Self pickup: you collect the order at this shop. No delivery fee — logistics is RWF 0.",
+    fulfillmentSectionTitle: "How do you want to receive this order?",
+    fulfillmentDeliveryTitle: "Delivery",
+    fulfillmentDeliverySub: "Bring it to my address (delivery fee applies).",
+    fulfillmentPickupTitle: "Self pickup",
+    fulfillmentPickupSub: "I will collect at the shop (no delivery fee).",
+    fulfillmentDeliveryModesHint: "Choose how it travels to you:",
+    etaAtShop: "At shop",
+    etaPickupSub: "Pickup at the shop — no courier ETA. Coordinate with the seller after ordering.",
+    summaryLineItems: "Items",
+    summaryLineItemsTotal: "Items total",
+    summaryLineLogisticsRow: "Logistics",
+    summaryLineGrandTotal: "Grand total",
     preferredBadge: "Preferred",
     logHuman: "Human",
     logBike: "Bike",
     logMoto: "Moto",
     amountShop: "Amount to shop",
-    ihuteFees: "Ihute fees (1%)",
+    ihuteFees: "Ihute fee (1%, from shop — not on your total)",
     taxes: "Taxes",
     amountLogistics: "Amount to logistics",
     totalPay: "Total amount to pay",
@@ -363,41 +650,108 @@ const GRANDMA_LABELS: Record<
     reorderSplashTitle: "Adding to your cart…",
     reorderSplashSub: "Loading this shop’s items.",
     versionLabel: "Version",
-    requestStatsTitle: "API requests (this session)",
-    requestStatsNone: "No requests to /api yet in this tab.",
-    requestStatsLine: "This session: {total} requests — {pct}% succeeded ({ok} ok, {fail} failed).",
-    requestStatsLastFail: "Last failed: HTTP {status} — {url}",
+    settingsModeHint: "Choose Buyer or Seller to show the matching form below. Tap Done when finished.",
+    settingsFormBuyerTitle: "Buyer preferences",
+    settingsFormSellerTitle: "Seller / shop",
+    settingsSellerIntro: "Jump to a screen, then tap Done to close settings.",
+    settingsApplyClose: "Done",
+    settingsOpenSellerHome: "Dashboard",
+    settingsOpenSellerOrders: "Orders queue",
+    settingsOpenSellerItems: "Items & stock",
+    settingsSellerNeedLogin: "Sign in with your shop account to use seller mode.",
+    settingsSellerTapDenied: "Sign in with a shop account to switch to Seller.",
+    sellerDashBestSelling: "Best selling",
+    sellerDashBestSellingSubtitle: "Live from delivered orders",
+    sellerDashBestSellingEmpty:
+      "Mark orders as delivered to see your #1 product, units sold, and tailored restock ideas.",
+    sellerDashUnitsSold: "units sold",
+    sellerDashLineRevenue: "Line revenue",
+    sellerDashShareRevenue: "{{pct}}% of line revenue · {{rwf}}",
+    sellerDashTopUpTitle: "Top-up sale",
+    sellerDashTopUpSubtitle: "Short actions that keep your shop stocked and your queue moving.",
+    sellerDashBulletRestock: "Restock priority: {{name}} — {{units}} units on delivered orders.",
+    sellerDashBulletPopular: "Also selling well: {{name}} ({{units}} units).",
+    sellerDashBulletFulfillQueue: "{{n}} open orders — fulfilling updates these insights faster.",
+    sellerDashGrowthIdle: "Deliver orders with line items to unlock best-seller and top-up tips here.",
+    sellerDashCtaStock: "Stock & catalog",
+    sellerDashCtaNikiStock: "Add stock (NIKI)",
+    sellerDashCtaOrders: "Open orders",
+    sellerDashDeliveredTail: "{{n}} delivered",
+    payStepPanelTitle: "Complete this payment method",
+    payStepDemoNote: "",
+    payStepCommissionNote:
+      "The 1% Ihute line is written into your order reference for company commission (from the shop; not added to your total).",
+    payStepMtnTitle: "MTN MoMo",
+    payStepMtnPayer: "Wallet number (07…)",
+    payStepMtnDial: "USSD — copy & dial",
+    payStepAirtelTitle: "Airtel Money",
+    payStepAirtelPayer: "Wallet number (07…)",
+    payStepAirtelDial: "USSD — copy & dial",
+    payStepAirtelHelp: "Pay from the Airtel Money app or *500# to the merchant number shown above.",
+    payStepBkTitle: "Card (BK)",
+    payStepBkHelp: "Enter your card details as required by your bank.",
+    payStepBkCardNumber: "Card number",
+    payStepBkExpiry: "Expiry (MM/YY)",
+    payStepBkCvc: "CVC",
+    payStepBkOtp: "OTP from SMS",
+    payStepBkOtpSms: "Code to {mask} — enter the 6 digits from SMS.",
+    payStepBkPin: "Mobile banking PIN",
+    payStepBkPinHint: "Enter your 4-digit PIN.",
+    payStepCashTitle: "Cash on delivery",
+    payStepCashConfirm: "I will pay cash when I receive the order.",
+    payStepCopy: "Copy",
+    payStepCopied: "Copied",
+    payStepErrPhone: "Enter a valid Rwandan mobile number (07…).",
+    payStepErrBkCard: "Enter 13–16 digits for the card number.",
+    payStepErrBkExpiry: "Enter a valid expiry (MM/YY, not in the past).",
+    payStepErrBkCvc: "Enter 3 or 4 digits for CVC.",
+    payStepErrBkOtp: "Enter 6 digits for the OTP.",
+    payStepErrBkPin: "Enter 4 digits for the PIN.",
+    payStepErrCash: "Confirm cash on delivery to continue.",
+    payStepMtnNoUssd: "MoMo merchant code missing — use the number above or ask the shop.",
+    payStepMomoPin: "Wallet PIN",
+    payStepAutoPayHintMtn: "Payment runs automatically when your 5-digit MTN MoMo PIN is complete.",
+    payStepAutoPayHintAirtel: "Payment runs automatically when your 4-digit Airtel Money PIN is complete.",
+    payStepProcessing: "Processing…",
+    payStepErrMtnPin: "Enter your 5-digit MTN MoMo PIN.",
+    payStepErrAirtelPin: "Enter your 4-digit Airtel Money PIN.",
+    payStepCardsAccepted: "Cards accepted",
+    payStepAfterCheckoutHint: "You get an order ID and a track link — no sign-in required to buy.",
   },
   rw: {
-    demoLocation: "Kacyiru, Gasabo — inyigo (shyiraho aderesi mu buryo)",
+    demoLocation: "Kacyiru, Gasabo (inyigo). Shyiraho aho uri mu buryo.",
     titleHome: "Ishyiga Ihute",
     shopsPrefix: "Amaduka ·",
-    titleSummary: "Incamake y'icyo ugiye gutumiza",
-    titlePayment: "Uburyo bwo kwishyura",
+    titleSummary: "Incamake",
+    titlePayment: "Kwishyura",
     settings: "Igenamiterere",
-    settingsSub: "Ururimi, aho uherereye, amaduka n'uburyo bwo kwishyura",
+    settingsSub: "Ururimi, aho uri, amaduka n'ishyura.",
     language: "Ururimi",
     langEn: "English",
     langRw: "Ikinyarwanda",
     langFr: "Igifaransa",
-    setLocation: "Shyiraho aho uherereye",
+    setLocation: "Shyiraho aho uri",
     locationCurrent: "Ubu",
-    noLocationYet: "Ntacyo cyashyizweho — kanda uhitemo GPS cyangwa akarere",
+    noLocationYet: "Ntabwo byanditse. Kanda uhitemo aho uri.",
     preferredShops: "Amaduka ukunda",
-    preferredHint: "Dutanga aya mbere mu rutonde rw'amaduka.",
-    paymentMode: "Uburyo bwo kwishyura wifuza",
-    payingTo: "Wishyura",
-    bankName: "Izina rya banki",
+    preferredHint: "Aya ni yo abanza.",
+    paymentMode: "Uburyo bwo kwishyura",
+    payingTo: "Wishyura kuri",
+    bankName: "Banki",
     account: "Konti",
-    yourLocation: "Aho uherereye",
-    yourPhone: "Telefoni yawe (kohereza)",
-    yourPhoneHint: "Iduka rikoresha iyi kugufata. Siga ubusa ukoreshe telefoni ya konti yawe Ihute niba winjiye.",
-    eta: "Igihe cyateganyijwe cyo kugera",
-    etaSub: "Kuva kuri km ~{km} · {mode}",
-    etaSubNoMode: "Km ~{km} kuva ku iduka. Hitamo uburyo bwo kohereza ku incamake kugira ngo ubone igihe cyo kugera.",
-    paymentModeSection: "Uburyo bwo kwishyura",
-    sortDistance: " Byagenwe ku ntambwe.",
-    shopsIntro: "Hitamo iduka muri {cat}. Ukunda n'ibyakoreshejwe mbere biri ku rutonde rwa mbere.{sort}",
+    yourLocation: "Aho uri",
+    yourPhone: "Telefoni",
+    yourPhoneHint: "Iduka riguhamagare kuri iyi numero. Niba winjiye birahagije.",
+    paymentGuestPhoneLabel: "MoMo n'amakuru y'komande",
+    paymentGuestPhonePlaceholder: "07… · telefoni y'ishyura",
+    paymentGuestPhoneNote: "Ntibikenewe niba winjiye kandi telefoni iri ku konti.",
+    orderSubmitNeedPhone: "Shyiramo telefoni yawe yo kwishyura no kubona amakuru.",
+    eta: "Igihe cyo kugera",
+    etaSub: "Km ~{km} · {mode}",
+    etaSubNoMode: "Hitamo uburyo bwo kohereza ku incamake.",
+    paymentModeSection: "Kwishyura",
+    sortDistance: " Ku ntambwe.",
+    shopsIntro: "Hitamo iduka muri {cat}. Ukunda ni uwa mbere.{sort}",
     sectorPanelShops: "amaduka",
     sectorPanelItems: "ibintu",
     footerHome: "Ahabanza",
@@ -405,38 +759,118 @@ const GRANDMA_LABELS: Record<
     footerItems: "Ibintu",
     footerSummary: "Incamake",
     footerPay: "Kwishyura",
+    footerDashboard: "Konti y'iduka",
+    footerDashboardShort: "Konti",
+    sectionLogistics: "Kohereza",
+    logisticsNote: "Amafaranga bishingiye ku intera kugeza ku iduka ({km} km) n'uburyo watoranyije.",
+    logisticsNotePickup: "Wakira ku iduka. Nta mafaranga y'ihanyura.",
+    fulfillmentSectionTitle: "Wifuza ite?",
+    fulfillmentDeliveryTitle: "Koherezwa",
+    fulfillmentDeliverySub: "Binkugeza aho uri. Wishyura kugenda.",
+    fulfillmentPickupTitle: "Kwakira ku iduka",
+    fulfillmentPickupSub: "Nzakira ku iduka. Nta mafaranga y'ihanyura.",
+    fulfillmentDeliveryModesHint: "Hitamo uburyo:",
+    etaAtShop: "Ku iduka",
+    etaPickupSub: "Wakira ku iduka. Vugana n'iduka nyuma.",
+    summaryLineItems: "Ibintu",
+    summaryLineItemsTotal: "Igiciro cy'ibintu",
+    summaryLineLogisticsRow: "Kohereza",
+    summaryLineGrandTotal: "Byose hamwe",
     preferredBadge: "Ukunda",
-    logHuman: "Umuntu",
-    logBike: "Igare",
-    logMoto: "Moto",
+    logHuman: "Ku maguru",
+    logBike: "Ku igare",
+    logMoto: "Ku moto",
     amountShop: "Amafaranga y'iduka",
-    ihuteFees: "Amafaranga ya Ihute (1%)",
+    ihuteFees: "Ihute 1% — ku iduka, ntibinjiye ku wishyura wawe",
     taxes: "Imisoro",
-    amountLogistics: "Amafaranga y'uboherezi",
-    totalPay: "Amafaranga yose",
-    sendOrder: "Ohereza komande",
-    deliveryPerson: "Uwohereza",
-    hobbies: "Ibikundwa",
-    kmToShop: "km kugera ku iduka",
-    reviewers: "abasesenguzi",
-    tapCouriers: "Kanda urebe aboherezi 5 ba mbere buri hafi y'iduka",
-    closestToShop: "Bari hafi y'iduka",
-    top5Available: "5 ba mbere bahari",
+    amountLogistics: "Kohereza",
+    totalPay: "Byose",
+    sendOrder: "Ohereza",
+    deliveryPerson: "Uwatwara",
+    hobbies: "Akunda",
+    kmToShop: "Km kugeza ku iduka",
+    reviewers: "bareba",
+    tapCouriers: "Kanda urebe abatwara",
+    closestToShop: "Bari hafi",
+    top5Available: "Ba 5",
     myOrders: "Komande zanjye",
-    viewMyOrders: "Reba komande zawe",
-    signInForOrders: "Injira urebe komande zawe",
+    viewMyOrders: "Reba komande",
+    signInForOrders: "Injira urebe komande",
     signIn: "Injira",
     logOut: "Sohoka",
-    reorderSplashTitle: "Bishyiraho mu iduka…",
-    reorderSplashSub: "Dukurikira ibintu by'iduka.",
+    reorderSplashTitle: "Biri mu iduka…",
+    reorderSplashSub: "Turimo kubona ibintu.",
     versionLabel: "Verisiyo",
-    requestStatsTitle: "Ibyifuzo kuri API (iki gice)",
-    requestStatsNone: "Nta bisubizo kuri /api muri iki tab.",
-    requestStatsLine: "Iki gice: ibisubizo {total} — {pct}% byagenze neza ({ok} byiza, {fail} bitari byiza).",
-    requestStatsLastFail: "Iheruka kutagenwa: HTTP {status} — {url}",
+    settingsModeHint: "Hitamo Buyer cyangwa Seller ngo urebe form ijyanye. Kanda Funga nimara.",
+    settingsFormBuyerTitle: "Amahitamo y'umuguzi",
+    settingsFormSellerTitle: "Iduka / seller",
+    settingsSellerIntro: "Hitamo kimwe mu bikurikira, hanyuma kanda Funga ngo ufunge ibi buryo.",
+    settingsApplyClose: "Funga",
+    settingsOpenSellerHome: "Ahabanza",
+    settingsOpenSellerOrders: "Komande",
+    settingsOpenSellerItems: "Ibintu",
+    settingsSellerNeedLogin: "Injira ukoresheje konti y'iduka ngo ukore uburyo bwa Seller.",
+    settingsSellerTapDenied: "Injira ukoresheje konti y'iduka ngo uhindure uburyo bwa Seller.",
+    sellerDashBestSelling: "Gicuruzwa cy'agurishwa cyane",
+    sellerDashBestSellingSubtitle: "Bivuye muri komande zoherejwe",
+    sellerDashBestSellingEmpty:
+      "Imenyeshe komande ko zageze ngo ubone izina ry'icyagurishwa cyane, ingano, n'ubwita ku stock.",
+    sellerDashUnitsSold: "ibiceri byagurishwe",
+    sellerDashLineRevenue: "Amafaranga ku murongo",
+    sellerDashShareRevenue: "{{pct}}% y'amafaranga ku murongo · {{rwf}}",
+    sellerDashTopUpTitle: "Top-up sale",
+    sellerDashTopUpSubtitle: "Ibikorwa bigufasha kuguma ufite stock neza n'urubanza rw'ibicuruzwa.",
+    sellerDashBulletRestock: "Ongeraho stock: {{name}} — ingano {{units}} ku komande zageze.",
+    sellerDashBulletPopular: "Nacyo gikunzwe: {{name}} ({{units}}).",
+    sellerDashBulletFulfillQueue: "Ufite komande {{n}} zitarahera — zishyira mubereho kugira ngo umenye byihuse.",
+    sellerDashGrowthIdle: "Kugeza komande zifite ibicuruzwa kandi zigeze wabona hano amakuru y'ubucuruzi.",
+    sellerDashCtaStock: "Stock n'ibirimo",
+    sellerDashCtaNikiStock: "Ongeraho stock (NIKI)",
+    sellerDashCtaOrders: "Komande",
+    sellerDashDeliveredTail: "{{n}} zegezwemo",
+    payStepPanelTitle: "Rangiza ubu buryo bwo kwishyura",
+    payStepDemoNote: "",
+    payStepCommissionNote:
+      "1% ya Ihute iandikwa ku makuru y'komande (commission y'ikompanyi, ku iduka; ntiyongeraho ku wishyura rwawe).",
+    payStepMtnTitle: "MTN MoMo",
+    payStepMtnPayer: "Konti MoMo (07…)",
+    payStepMtnDial: "USSD — koporora ukore",
+    payStepAirtelTitle: "Airtel Money",
+    payStepAirtelPayer: "Konti (07…)",
+    payStepAirtelDial: "USSD — koporora ukore",
+    payStepAirtelHelp: "Wishyure *500# cyangwa app kuri nomero y'ucuruzi iri hejuru.",
+    payStepBkTitle: "Kariti (BK)",
+    payStepBkHelp: "Andika amakuru yawe uko banki ibisaba.",
+    payStepBkCardNumber: "Nomero ya kariti",
+    payStepBkExpiry: "Itariki (MM/YY)",
+    payStepBkCvc: "CVC",
+    payStepBkOtp: "OTP ya SMS",
+    payStepBkOtpSms: "Imibare 6 on your pone number.",
+    payStepBkPin: "PIN ya banking kuri telefoni",
+    payStepBkPinHint: "PIN ya Bank gusa (imibare 4).",
+    payStepCashTitle: "Amafaranga kuri delivery",
+    payStepCashConfirm: "Nzishyura cash nigeze nakira komande.",
+    payStepCopy: "Koporora",
+    payStepCopied: "Byakoporowe",
+    payStepErrPhone: "Shyiramo nomero ya telefoni y'u Rwanda (07…).",
+    payStepErrBkCard: "Shyiramo imibare 13–16 ku kariti.",
+    payStepErrBkExpiry: "Shyiramo itariki neza (MM/YY, ntiyarenze).",
+    payStepErrBkCvc: "Shyiramo imibare 3 cyangwa 4 ya CVC.",
+    payStepErrBkOtp: "Shyiramo imibare 6 ya OTP.",
+    payStepErrBkPin: "Shyiramo imibare 4 ya PIN.",
+    payStepErrCash: "Emeza ko uzishyura cash kugira ngo ukomeze.",
+    payStepMtnNoUssd: "Kode ya MoMo y'ucuruzi ntibonetse — koresha nomero iri hejuru cyangwa ubaze iduka.",
+    payStepMomoPin: "PIN",
+    payStepAutoPayHintMtn: "Kwishyura gutangira kimwe PIN ya MTN irangiye (imibare 5).",
+    payStepAutoPayHintAirtel: "Kwishyura gutangira kimwe PIN ya Airtel irangiye (imibare 4).",
+    payStepProcessing: "Biri gukora…",
+    payStepErrMtnPin: "Shyiramo PIN ya MTN MoMo (imibare 5).",
+    payStepErrAirtelPin: "Shyiramo PIN ya Airtel Money (imibare 4).",
+    payStepCardsAccepted: "Kariti zemewe",
+    payStepAfterCheckoutHint: "Uhabwa ID y'komande na link yo gukurikirana — ntusabwe kwinjira.",
   },
   fr: {
-    demoLocation: "Kacyiru, Gasabo — démo (définissez l'adresse dans les réglages)",
+    demoLocation: "Kacyiru, Gasabo — définition dans les réglages",
     titleHome: "Ishyiga Ihute",
     shopsPrefix: "Magasins ·",
     titleSummary: "Récapitulatif",
@@ -459,6 +893,10 @@ const GRANDMA_LABELS: Record<
     yourLocation: "Votre position",
     yourPhone: "Votre téléphone (livraison)",
     yourPhoneHint: "Le magasin vous joint sur ce numéro. Laissez vide pour utiliser le téléphone de votre compte Ihute si vous êtes connecté.",
+    paymentGuestPhoneLabel: "Mobile Money & suivi",
+    paymentGuestPhonePlaceholder: "07… · même numéro pour payer",
+    paymentGuestPhoneNote: "Facultatif si vous êtes connecté avec un téléphone sur le compte.",
+    orderSubmitNeedPhone: "Ajoutez votre mobile pour payer et recevoir les mises à jour.",
     eta: "Heure d'arrivée estimée",
     etaSub: "Depuis ~{km} km · livraison {mode}",
     etaSubNoMode: "À ~{km} km du magasin. Choisissez une livraison sur le récapitulatif pour voir l’heure d’arrivée.",
@@ -472,12 +910,31 @@ const GRANDMA_LABELS: Record<
     footerItems: "Articles",
     footerSummary: "Récapitulatif",
     footerPay: "Payer",
+    footerDashboard: "Ouvrir le tableau vendeur",
+    footerDashboardShort: "Tableau",
+    sectionLogistics: "Livraison · Logistique",
+    logisticsNote:
+      "Les frais utilisent la distance jusqu'à ce magasin ({km} km) et le mode choisi.",
+    logisticsNotePickup:
+      "Retrait au magasin : vous récupérez la commande sur place. Pas de frais de livraison (0 RWF).",
+    fulfillmentSectionTitle: "Comment souhaitez-vous recevoir cette commande ?",
+    fulfillmentDeliveryTitle: "Livraison",
+    fulfillmentDeliverySub: "À mon adresse (frais de livraison).",
+    fulfillmentPickupTitle: "Retrait au magasin",
+    fulfillmentPickupSub: "Je viens chercher au magasin (sans frais de livraison).",
+    fulfillmentDeliveryModesHint: "Choisissez le mode de transport :",
+    etaAtShop: "Au magasin",
+    etaPickupSub: "Retrait sur place — pas d’ETA coursier. Coordonnez-vous avec le vendeur après commande.",
+    summaryLineItems: "Articles",
+    summaryLineItemsTotal: "Total articles",
+    summaryLineLogisticsRow: "Logistique",
+    summaryLineGrandTotal: "Total général",
     preferredBadge: "Favori",
     logHuman: "À pied",
     logBike: "Vélo",
     logMoto: "Moto",
     amountShop: "Montant au magasin",
-    ihuteFees: "Frais Ihute (1 %)",
+    ihuteFees: "Frais Ihute (1 %) — payés par la boutique, pas sur votre total",
     taxes: "Taxes",
     amountLogistics: "Montant logistique",
     totalPay: "Total à payer",
@@ -497,11 +954,87 @@ const GRANDMA_LABELS: Record<
     reorderSplashTitle: "Ajout au panier…",
     reorderSplashSub: "Chargement des articles du magasin.",
     versionLabel: "Version",
-    requestStatsTitle: "Requêtes API (cette session)",
-    requestStatsNone: "Aucune requête /api pour l’instant.",
-    requestStatsLine: "Session : {total} requêtes — {pct}% réussies ({ok} ok, {fail} échouées).",
-    requestStatsLastFail: "Dernier échec : HTTP {status} — {url}",
+    settingsModeHint:
+      "Choisissez Acheteur ou Vendeur pour afficher le formulaire correspondant. Terminé pour revenir à l’app.",
+    settingsFormBuyerTitle: "Préférences acheteur",
+    settingsFormSellerTitle: "Boutique / vendeur",
+    settingsSellerIntro: "Ouvrez un écran ci-dessous, ou Terminé puis utilisez la barre du bas.",
+    settingsApplyClose: "Terminé",
+    settingsOpenSellerHome: "Accueil boutique",
+    settingsOpenSellerOrders: "File des commandes",
+    settingsOpenSellerItems: "Articles & stock",
+    settingsSellerNeedLogin: "Connectez-vous avec un compte boutique pour le mode vendeur.",
+    settingsSellerTapDenied: "Compte boutique requis pour passer en mode vendeur.",
+    sellerDashBestSelling: "Meilleure vente",
+    sellerDashBestSellingSubtitle: "Données des commandes livrées",
+    sellerDashBestSellingEmpty:
+      "Marquez des commandes comme livrées pour voir votre produit n°1, les quantités et des idées de réassort.",
+    sellerDashUnitsSold: "unités vendues",
+    sellerDashLineRevenue: "CA lignes",
+    sellerDashShareRevenue: "{{pct}}% du CA lignes · {{rwf}}",
+    sellerDashTopUpTitle: "Top-up vente",
+    sellerDashTopUpSubtitle: "Actions courtes pour garder le stock et fluidifier la file commandes.",
+    sellerDashBulletRestock: "Réassort prioritaire : {{name}} — {{units}} unités sur commandes livrées.",
+    sellerDashBulletPopular: "Bien vendu aussi : {{name}} ({{units}} unités).",
+    sellerDashBulletFulfillQueue: "{{n}} commandes ouvertes — les traiter actualise ces indicateurs.",
+    sellerDashGrowthIdle: "Livrez des commandes avec lignes produit pour activer ce panneau.",
+    sellerDashCtaStock: "Stock & catalogue",
+    sellerDashCtaNikiStock: "Ajouter stock (NIKI)",
+    sellerDashCtaOrders: "Commandes ouvertes",
+    sellerDashDeliveredTail: "{{n}} livrée(s)",
+    payStepPanelTitle: "Compléter ce mode de paiement",
+    payStepDemoNote: "",
+    payStepCommissionNote:
+      "La ligne 1 % Ihute est inscrite dans la référence de commande (commission société, côté boutique — pas sur votre total).",
+    payStepMtnTitle: "MTN Mobile Money",
+    payStepMtnPayer: "Compte portefeuille (07…)",
+    payStepMtnDial: "USSD — copier & composer",
+    payStepAirtelTitle: "Airtel Money",
+    payStepAirtelPayer: "Compte portefeuille (07…)",
+    payStepAirtelDial: "USSD — copier & composer",
+    payStepAirtelHelp: "Payer via *500# ou l’app vers le numéro marchand ci-dessus.",
+    payStepBkTitle: "Carte bancaire",
+    payStepBkHelp: "Saisissez vos informations conformément aux instructions de votre banque.",
+    payStepBkCardNumber: "Numéro de carte",
+    payStepBkExpiry: "Expiration (MM/AA)",
+    payStepBkCvc: "CVC",
+    payStepBkOtp: "OTP reçu par SMS",
+    payStepBkOtpSms: "Code au {mask} — 6 chiffres.",
+    payStepBkPin: "PIN banque mobile",
+    payStepBkPinHint: "PIN à 4 chiffres.",
+    payStepCashTitle: "Paiement à la livraison",
+    payStepCashConfirm: "Je paierai en espèces à la réception.",
+    payStepCopy: "Copier",
+    payStepCopied: "Copié",
+    payStepErrPhone: "Indiquez un mobile rwandais valide (07…).",
+    payStepErrBkCard: "Saisissez 13 à 16 chiffres pour la carte.",
+    payStepErrBkExpiry: "Indiquez une date d’expiration valide (MM/AA, non expirée).",
+    payStepErrBkCvc: "Indiquez 3 ou 4 chiffres pour le CVC.",
+    payStepErrBkOtp: "Indiquez 6 chiffres pour l'OTP.",
+    payStepErrBkPin: "Indiquez 4 chiffres pour le PIN.",
+    payStepErrCash: "Cochez la confirmation paiement à la livraison.",
+    payStepMtnNoUssd: "Code marchand MoMo manquant — utilisez le numéro ci-dessus ou contactez le magasin.",
+    payStepMomoPin: "PIN portefeuille",
+    payStepAutoPayHintMtn: "Le paiement démarre tout seul quand le PIN MTN MoMo à 5 chiffres est complet.",
+    payStepAutoPayHintAirtel: "Le paiement démarre tout seul quand le PIN Airtel Money à 4 chiffres est complet.",
+    payStepProcessing: "Traitement…",
+    payStepErrMtnPin: "Saisissez le PIN MTN MoMo à 5 chiffres.",
+    payStepErrAirtelPin: "Saisissez le PIN Airtel Money à 4 chiffres.",
+    payStepCardsAccepted: "Cartes acceptées",
+    payStepAfterCheckoutHint: "Vous recevez un n° de commande et un lien de suivi — achat sans compte possible.",
   },
+}
+
+function humanizeGrandmaOrderBackendError(raw: string, lang: GrandmaLang): string {
+  if (!raw?.trim()) return raw
+  const low = raw.toLowerCase()
+  if (low.includes("buyer") && low.includes("null") && low.includes("ishyiga")) {
+    return GRANDMA_LABELS[lang].orderSubmitNeedPhone
+  }
+  if (low.includes("cannot read field") && low.includes("ishyiga_account") && low.includes("buyer")) {
+    return GRANDMA_LABELS[lang].orderSubmitNeedPhone
+  }
+  return raw
 }
 
 function readGrandmaPrefs(): { lang: GrandmaLang; payment: PaymentId; preferred: string[]; mode: AppMode } {
@@ -544,12 +1077,12 @@ switch (paymentMode) {
 case "momo":
 return {
 bankName: "MTN MoMo",
-account: shop.momo?.replace("MTN MoMo: ", "") ?? "—"
+account: stripShopMomoLabel(shop.momo ?? "") || "—",
 }
 case "airtel":
 return {
 bankName: "Airtel Money",
-account: shop.momo?.replace("MTN MoMo: ", "") ?? "—" // Assuming same field for now
+account: stripShopMomoLabel(shop.momo ?? "") || "—",
 }
 case "bk":
 return {
@@ -564,6 +1097,11 @@ account: "—"
 default:
 return shopPayReceivingAccount(shop)
 }
+}
+
+function isGrandmaRwMobileDigits(raw: string): boolean {
+  const n = normalizePhoneDigitsForAuth(raw.trim())
+  return n.length === 12 && n.startsWith("2507")
 }
 
 const SHOP_LOGO_PATHS = [
@@ -915,14 +1453,13 @@ const LOGISTICS: LogisticsOption[] = [
 ]
 
 const PAYMENTS: PaymentMode[] = [
-  { id: "momo", label: "MTN MoMo (Mokash loan @7%)", iconSrc: "/img/momo.png" },
+  { id: "momo", label: "MTN MoMo", iconSrc: "/img/momo.png" },
   { id: "airtel", label: "Airtel Money", iconSrc: "/img/airtel.png" },
-  { id: "bk", label: "BK (QuickLoan @3%)", iconSrc: "/img/bk.png" },
-  { id: "cash", label: "Cash on Delivery", iconSrc: "/img/cash.png" },
+  { id: "bk", label: "Card (BK)", iconSrc: "/img/bk.png" },
+  { id: "cash", label: "Cash on delivery", iconSrc: "/img/cash.png" },
 ]
 
-/** 1% platform fee on items subtotal */
-const IHUTE_FEE_RATE = 0.01
+/** Buyer grand total excludes this; fee is computed via {@link computeIhutePlatformFeeRwf} and stored on order REFERENCE. */
 const TAXES_PLACEHOLDER = 0
 
 function formatRwf(v: number): string {
@@ -1414,6 +1951,36 @@ function sellerOrderWhatsAppHref(phone: string): string {
   return "#"
 }
 
+type ServedSkuAgg = { name: string; units: number; revenueRwf: number }
+
+function aggregateServedOrderProducts(orders: SellerOrder[]): {
+  ranked: ServedSkuAgg[]
+  totalLineRevenue: number
+} {
+  const served = orders.filter((o) => o.status === "sent")
+  const byKey = new Map<string, ServedSkuAgg>()
+  let totalLineRevenue = 0
+  for (const o of served) {
+    for (const L of o.lines) {
+      const name = (L.name || "Item").trim() || "Item"
+      const qty = Math.max(0, Number(L.qty) || 0)
+      const lineRev = Math.max(0, L.totalRwf ?? 0)
+      totalLineRevenue += lineRev
+      const key = name.toLowerCase()
+      const cur = byKey.get(key) ?? { name, units: 0, revenueRwf: 0 }
+      cur.name = name
+      cur.units += qty
+      cur.revenueRwf += lineRev
+      byKey.set(key, cur)
+    }
+  }
+  const ranked = [...byKey.values()].sort((a, b) => {
+    if (b.units !== a.units) return b.units - a.units
+    return b.revenueRwf - a.revenueRwf
+  })
+  return { ranked, totalLineRevenue }
+}
+
 function mapRawSellerOrderToGrandma(raw: Record<string, unknown>): SellerOrder {
   const id = String(raw.ID_ORDER ?? raw.id_order ?? raw.id ?? "").trim() || `tmp-${Date.now()}`
   const createdRaw =
@@ -1500,6 +2067,15 @@ export default function GrandmaPage() {
   const [category, setCategory] = useState<Category>("Boutique")
   const [search, setSearch] = useState("")
   const [shopSearch, setShopSearch] = useState("")
+  /** Seller accounts (uppercase) returned by global product search — shops are included if they sell matching items. */
+  const [shopProductSearchAccounts, setShopProductSearchAccounts] = useState<string[]>([])
+  const [shopProductSearchLoading, setShopProductSearchLoading] = useState(false)
+  /** Shop ids the buyer has successfully ordered from on this device (localStorage). */
+  const [grandmaOrderedShopIds, setGrandmaOrderedShopIds] = useState<string[]>([])
+  /** SELLER_ISHYIGA_ACCOUNT keys (uppercase) from buyer order history — powers Reorder when LS is empty. */
+  const [reorderHistorySellerKeys, setReorderHistorySellerKeys] = useState<string[]>([])
+  /** Sellers that had discounted catalog hits in sector-wide search probes — powers On sale. */
+  const [onsaleSellerAccounts, setOnsaleSellerAccounts] = useState<string[]>([])
   const [shopTab, setShopTab] = useState<ShopFilterTab | null>(null)
   const [useLocationSort, setUseLocationSort] = useState(false)
   const [selectedShopId, setSelectedShopId] = useState<string | null>(null)
@@ -1510,14 +2086,19 @@ export default function GrandmaPage() {
   const [imagePreviewOpen, setImagePreviewOpen] = useState(false)
   const [imagePreviewSrc, setImagePreviewSrc] = useState<string>("")
   const [imagePreviewTitle, setImagePreviewTitle] = useState<string>("")
-  const [selectedLogistics, setSelectedLogistics] = useState<LogisticsId | null>(null)
+  const [selectedLogistics, setSelectedLogistics] = useState<LogisticsId>("moto")
+  const [fulfillmentMode, setFulfillmentMode] = useState<FulfillmentMode>("delivery")
   const [appMode, setAppMode] = useState<AppMode>("buyer")
   const [sellerView, setSellerView] = useState<SellerView>("home")
-  const [language, setLanguage] = useState<GrandmaLang>("rw")
+  const language = useLanguageStore((s) => s.language) as GrandmaLang
+  const setLanguage = useLanguageStore((s) => s.setLanguage)
   const [preferredShopIds, setPreferredShopIds] = useState<string[]>([])
   const [selectedPayment, setSelectedPayment] = useState<PaymentId>("momo")
+  const [grandmaCashConfirm, setGrandmaCashConfirm] = useState(false)
+  const [grandmaUssdCopied, setGrandmaUssdCopied] = useState(false)
   const [prefsHydrated, setPrefsHydrated] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsSellerGuardMsg, setSettingsSellerGuardMsg] = useState<string | null>(null)
   const [filterSheetOpen, setFilterSheetOpen] = useState(false)
   const [itemsSort, setItemsSort] = useState<ItemsSortId>("default")
   const [liveInStockOnly, setLiveInStockOnly] = useState(false)
@@ -1529,6 +2110,7 @@ export default function GrandmaPage() {
   const [grandmaBuyerPhoneInput, setGrandmaBuyerPhoneInput] = useState("")
   const [grandmaOrderSubmitting, setGrandmaOrderSubmitting] = useState(false)
   const [grandmaOrderSubmitError, setGrandmaOrderSubmitError] = useState<string | null>(null)
+  const grandmaOrderSubmitGuardRef = useRef(false)
   const [pendingReorder, setPendingReorder] = useState<GrandmaReorderPayload | null>(null)
   const [reorderSplashOpen, setReorderSplashOpen] = useState(false)
   /** True while fetchProducts() has started (sync) — apply-reorder effect must wait (React state may lag one frame). */
@@ -1585,6 +2167,54 @@ export default function GrandmaPage() {
     return () => {
       cancelled = true
     }
+  }, [])
+
+  /** Debounced global product search so shop list can include stores that sell the query (e.g. “milk”), not only name/tagline matches. */
+  useEffect(() => {
+    let cancelled = false
+    const q = shopSearch.trim()
+    if (q.length < 2) {
+      setShopProductSearchAccounts([])
+      setShopProductSearchLoading(false)
+      return
+    }
+    const ac = new AbortController()
+    const tid = setTimeout(() => {
+      if (cancelled) return
+      void (async () => {
+        setShopProductSearchLoading(true)
+        try {
+          const sector = GRANDMA_CATEGORY_TO_SECTOR_SLUG[category]?.trim()
+          const params = new URLSearchParams({
+            globalSearch: q,
+            limit: "200",
+            Currency: "RWF",
+          })
+          if (sector) params.set("sector", sector)
+          const res = await fetch(`/api/fetchSuggestions?${params.toString()}`, {
+            signal: ac.signal,
+            cache: "no-store",
+          })
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          const json = (await res.json()) as Record<string, unknown>
+          const acc = collectSellerAccountsFromGlobalSearchJson(json)
+          if (!cancelled) setShopProductSearchAccounts([...acc])
+        } catch {
+          if (!cancelled && !ac.signal.aborted) setShopProductSearchAccounts([])
+        } finally {
+          if (!cancelled && !ac.signal.aborted) setShopProductSearchLoading(false)
+        }
+      })()
+    }, 380)
+    return () => {
+      cancelled = true
+      clearTimeout(tid)
+      ac.abort()
+    }
+  }, [shopSearch, category])
+
+  useEffect(() => {
+    setGrandmaOrderedShopIds(readGrandmaOrderedShopIdsFromStorage())
   }, [])
 
   // Combine API products with existing products, preserving quantities - FIXED FOR API INTEGRATION
@@ -1656,14 +2286,17 @@ export default function GrandmaPage() {
   const deliveryKm = selectedShop?.distanceKm ?? 0
 
   const logisticsTotal = useMemo(() => {
-    if (!selectedLogistics) return 0
+    if (fulfillmentMode === "pickup") return 0
     const opt = LOGISTICS.find((x) => x.id === selectedLogistics)
     return opt ? logisticsQuote(opt, deliveryKm) : 0
-  }, [selectedLogistics, deliveryKm])
+  }, [fulfillmentMode, selectedLogistics, deliveryKm])
 
   const etaRange = useMemo(
-    () => deliveryEtaRange(deliveryKm, selectedLogistics),
-    [deliveryKm, selectedLogistics]
+    () =>
+      fulfillmentMode === "pickup"
+        ? { lo: 0, hi: 0 }
+        : deliveryEtaRange(deliveryKm, selectedLogistics),
+    [deliveryKm, selectedLogistics, fulfillmentMode]
   )
 
   const couriersByDistance = useMemo(() => {
@@ -1697,36 +2330,38 @@ export default function GrandmaPage() {
   }, [courierModalOpen])
 
   useEffect(() => {
-    if (!selectedLogistics) setCourierModalOpen(false)
-  }, [selectedLogistics])
-
-  useEffect(() => {
     const prefs = readGrandmaPrefs()
     setLanguage(prefs.lang)
     setPreferredShopIds(prefs.preferred)
     setSelectedPayment(prefs.payment)
     setAppMode(prefs.mode)
+    writeGrandmaSignupRole(prefs.mode === "seller" ? "seller" : "buyer")
+    try {
+      const lsLog = localStorage.getItem("grandma:buyerLogistics")
+      if (lsLog === "human" || lsLog === "bike" || lsLog === "moto") setSelectedLogistics(lsLog)
+      else setSelectedLogistics("moto")
+    } catch {
+      setSelectedLogistics("moto")
+    }
+    try {
+      const lsFul = localStorage.getItem("grandma:fulfillmentMode")
+      if (lsFul === "delivery" || lsFul === "pickup") setFulfillmentMode(lsFul)
+      else setFulfillmentMode("delivery")
+    } catch {
+      setFulfillmentMode("delivery")
+    }
     setPrefsHydrated(true)
   }, [])
 
-  /** S1: persisted "seller" mode without a valid seller session → fall back to buyer */
-  useEffect(() => {
-    if (!prefsHydrated) return
-    const st = useAuthStore.getState()
-    if (appMode === "seller" && (!st.isAuthenticated || !userCanAccessSellerSpace(st.user))) {
-      setAppMode("buyer")
-      setSellerView("home")
-    }
-  }, [prefsHydrated, appMode])
-
-  useEffect(() => {
-    if (typeof window === "undefined" || !prefsHydrated) return
-    localStorage.setItem("grandma:lang", language)
-  }, [language, prefsHydrated])
   useEffect(() => {
     if (typeof window === "undefined" || !prefsHydrated) return
     localStorage.setItem("grandma:payment", selectedPayment)
   }, [selectedPayment, prefsHydrated])
+  useEffect(() => {
+    setGrandmaUssdCopied(false)
+    if (selectedPayment !== "cash") setGrandmaCashConfirm(false)
+  }, [selectedPayment])
+
   useEffect(() => {
     if (typeof window === "undefined" || !prefsHydrated) return
     localStorage.setItem("grandma:preferredShops", JSON.stringify(preferredShopIds))
@@ -1735,6 +2370,28 @@ export default function GrandmaPage() {
     if (typeof window === "undefined" || !prefsHydrated) return
     localStorage.setItem("grandma:mode", appMode)
   }, [appMode, prefsHydrated])
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !prefsHydrated) return
+    try {
+      localStorage.setItem("grandma:buyerLogistics", selectedLogistics)
+    } catch {
+      /* ignore */
+    }
+  }, [selectedLogistics, prefsHydrated])
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !prefsHydrated) return
+    try {
+      localStorage.setItem("grandma:fulfillmentMode", fulfillmentMode)
+    } catch {
+      /* ignore */
+    }
+  }, [fulfillmentMode, prefsHydrated])
+
+  useEffect(() => {
+    if (fulfillmentMode === "pickup") setCourierModalOpen(false)
+  }, [fulfillmentMode])
 
   useEffect(() => {
     if (appMode === "seller" || (page !== 2 && page !== 3)) setFilterSheetOpen(false)
@@ -1785,6 +2442,9 @@ export default function GrandmaPage() {
             const thumb = liveCatalogThumbUrl(p, targetCategory, nickname, key, name)
             const sectionLabel = resolveLiveMenuSectionCategory(p)
             const menuCat = menuCategoryTitleFromCanon(menuCategoryCanon(sectionLabel))
+            const stockLineCode = String(
+              p.ITEM_CODE ?? p.item_code ?? p.item_key_words ?? p.NIKI_CODE ?? p.niki_code ?? ""
+            ).trim()
             return {
               id,
               category: targetCategory,
@@ -1793,6 +2453,7 @@ export default function GrandmaPage() {
               emoji: emojiForLiveCategory(targetCategory, name),
               imageUrl: thumb,
               liveKey: `${nickname}:${key}`,
+              stockLineCode: stockLineCode || undefined,
               liveInStock: p.in_stock === true,
               liveCategory: menuCat,
               qty: 0,
@@ -1940,7 +2601,7 @@ export default function GrandmaPage() {
             favorite: false,
             orderedBefore: false,
             trending: false,
-            onSale: false,
+            onSale: supplierRowSuggestsOnSale(supplier as Record<string, unknown>),
             distanceKm: Math.random() * 5 + 0.5, // Mock distance
             momo: `MTN MoMo: ${supplier.seller_momo || 'N/A'}`,
             rating: 4.0,
@@ -1950,7 +2611,23 @@ export default function GrandmaPage() {
           }
         })
         
-        setAllAvailableShops(transformedShops)
+        let shopsWithImages = transformedShops
+        try {
+          const imageRes = await fetch("/api/images/overrides?scope=shop", { cache: "no-store" })
+          const imageData = await imageRes.json().catch(() => ({}))
+          const imageMap = (imageData?.map ?? {}) as Record<string, string>
+          if (imageMap && typeof imageMap === "object") {
+            shopsWithImages = transformedShops.map((shop) => {
+              const account = sellerAccountFromGrandmaShopId(shop.id).toUpperCase()
+              const img = account ? imageMap[account] : ""
+              return img ? { ...shop, logoSrc: img } : shop
+            })
+          }
+        } catch {
+          // keep default logos if override fetch fails
+        }
+
+        setAllAvailableShops(annotateShopTrendingByCategory(shopsWithImages))
         console.log('setAllAvailableShops called with:', transformedShops.length, 'shops')
         console.log('Shop IDs in allAvailableShops:', transformedShops.map(s => s.id))
         console.log('Current preferredShopIds:', preferredShopIds)
@@ -2074,23 +2751,52 @@ export default function GrandmaPage() {
           imageUrl: products[0]?.imageUrl
         })
         
+        let productImageMap: Record<string, string> = {}
+        try {
+          const mapRes = await fetch(
+            `/api/images/overrides?scope=product&account=${encodeURIComponent(baseSupplierId)}`,
+            { cache: "no-store" }
+          )
+          const mapData = await mapRes.json().catch(() => ({}))
+          if (mapData?.ok && mapData?.map && typeof mapData.map === "object") {
+            productImageMap = mapData.map as Record<string, string>
+          }
+        } catch {
+          // keep backend product images when override fetch fails
+        }
+
         // Transform products to Product format - fix field mapping based on actual Redis data
         const transformedProducts = products.map((product: any, index: number) => {
           // Extract numeric price from '9000 RWF' format
           const priceString = product.selling_price || product.SALE_PRICE_INCLUSIVE || product.price || '0'
           const numericPrice = Number(String(priceString).replace(/[^\d.]/g, '')) || 0
           const itemCode = String(
-            product.ITEM_CODE || product.item_code || product.item_key_words || ""
+            product.ITEM_CODE ||
+              product.item_code ||
+              product.item_key_words ||
+              product.NIKI_CODE ||
+              product.niki_code ||
+              ""
           ).trim()
 
+          const overrideImage = itemCode ? productImageMap[itemCode.toUpperCase()] : ""
           return {
             id: 2000 + index,
             category: selectedShop.category,
             name: String(product.item_commercial_name || product.ITEM_NAME || product.item_name || product.name || "Product"),
             price: numericPrice,
             emoji: "ð¦",
-            imageUrl: product.image_url || product.item_image_url || product.IMAGE_URL || product.image || product.img || product.imageUrl || "/img/shops/default.png",
+            imageUrl:
+              overrideImage ||
+              product.image_url ||
+              product.item_image_url ||
+              product.IMAGE_URL ||
+              product.image ||
+              product.img ||
+              product.imageUrl ||
+              "/img/shops/default.png",
             qty: 0,
+            stockLineCode: itemCode || undefined,
             liveKey: itemCode || undefined,
           }
         })
@@ -2119,7 +2825,7 @@ export default function GrandmaPage() {
     }
   }, [selectedShopId, selectedShop])
 
-  /** Pay page (page 5) only — other screens stay English */
+  /** Summary (page 4) + Pay (page 5) — follows selected language */
   const tPay = GRANDMA_LABELS[language]
 
   /** Pay page (last screen) — fallback line follows selected language */
@@ -2136,14 +2842,24 @@ export default function GrandmaPage() {
 
   const settingsUi = GRANDMA_LABELS[language]
 
-  const ihuteFees = useMemo(() => Math.round(itemsTotal * IHUTE_FEE_RATE), [itemsTotal])
+  const ihuteFees = useMemo(() => computeIhutePlatformFeeRwf(itemsTotal), [itemsTotal])
   const grandTotal = useMemo(
-    () => itemsTotal + logisticsTotal + ihuteFees + TAXES_PLACEHOLDER,
-    [itemsTotal, logisticsTotal, ihuteFees]
+    () => itemsTotal + logisticsTotal + TAXES_PLACEHOLDER,
+    [itemsTotal, logisticsTotal]
   )
 
-  const toggleLogistics = (id: LogisticsId) => {
-    setSelectedLogistics((prev) => (prev === id ? null : id))
+  const grandmaMtnUssd = useMemo(() => {
+    if (!selectedShop || selectedPayment !== "momo") return ""
+    return buildGrandmaMtnUssd(selectedShop.momo ?? "", Math.round(grandTotal))
+  }, [selectedShop, selectedPayment, grandTotal])
+
+  const grandmaAirtelUssd = useMemo(() => {
+    if (!selectedShop || selectedPayment !== "airtel") return ""
+    return buildGrandmaMtnUssd(selectedShop.momo ?? "", Math.round(grandTotal))
+  }, [selectedShop, selectedPayment, grandTotal])
+
+  const selectLogisticsMode = (id: LogisticsId) => {
+    setSelectedLogistics(id)
   }
 
   const addPrescriptionFiles = (list: FileList | null) => {
@@ -2168,6 +2884,9 @@ export default function GrandmaPage() {
 
   const grandmaBuyerSession = useAuthStore((s) => s.user)
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+  /** Must be true before treating `user` as final — avoids seller mode snapping back to buyer on load. */
+  const authHasHydrated = useAuthStore((s) => s.hasHydrated)
+
   const sellerShopLabel = useAuthStore((s) => {
     const u = s.user
     if (!u) return ""
@@ -2186,6 +2905,35 @@ export default function GrandmaPage() {
     return u.phone?.trim() ?? ""
   })
   const logout = useAuthStore((s) => s.logout)
+
+  /** S1: persisted "seller" mode without a valid seller session → fall back to buyer (after auth rehydrate). */
+  useEffect(() => {
+    if (!prefsHydrated) return
+    if (!authHasHydrated) return
+    const st = useAuthStore.getState()
+    if (appMode === "seller" && (!st.isAuthenticated || !grandmaUserCanUseSellerWorkspace(st.user))) {
+      setAppMode("buyer")
+      setSellerView("home")
+      try {
+        localStorage.setItem("grandma:mode", "buyer")
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [
+    prefsHydrated,
+    appMode,
+    authHasHydrated,
+    isAuthenticated,
+    grandmaBuyerSession?.id,
+    grandmaBuyerSession?.role,
+    grandmaBuyerSession?.dualPharmacyRetail,
+    grandmaBuyerSession?.dbRole,
+    grandmaBuyerSession?.ishyigaAccount,
+  ])
+
+  const showSupplierDashboardNav =
+    isAuthenticated && grandmaUserCanUseSellerWorkspace(grandmaBuyerSession) && appMode === "buyer"
 
   const sellerAccountForOrders = sellerIshyigaAccount.trim()
   const loadSellerOrders = useCallback(async () => {
@@ -2415,11 +3163,124 @@ export default function GrandmaPage() {
     return []
   }, [category, allAvailableShops, allShopsLoading])
 
-  const visibleShops = useMemo(() => {
-    const q = shopSearch.trim().toLowerCase()
-    let list = shopsInCategory.filter(
-      (s) => !q || s.name.toLowerCase().includes(q) || s.tagline.toLowerCase().includes(q)
-    )
+  const reorderSellerKeySet = useMemo(() => {
+    const set = new Set<string>()
+    for (const id of grandmaOrderedShopIds) {
+      const k = sellerAccountFromGrandmaShopId(id).toUpperCase()
+      if (k) set.add(k)
+    }
+    for (const k of reorderHistorySellerKeys) {
+      if (k) set.add(k.toUpperCase())
+    }
+    return set
+  }, [grandmaOrderedShopIds, reorderHistorySellerKeys])
+
+  const onsaleSellerKeysSet = useMemo(
+    () => new Set(onsaleSellerAccounts.map((x) => String(x).trim().toUpperCase()).filter(Boolean)),
+    [onsaleSellerAccounts],
+  )
+
+  useEffect(() => {
+    if (!isAuthenticated || !grandmaBuyerSession?.ishyigaAccount) {
+      setReorderHistorySellerKeys([])
+      return
+    }
+    let cancel = false
+    const ac = new AbortController()
+    void (async () => {
+      try {
+        const res = await fetch("/api/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            buyerAccount: grandmaBuyerSession.ishyigaAccount,
+            page: 1,
+            pageSize: 50,
+          }),
+          cache: "no-store",
+          signal: ac.signal,
+        })
+        if (!res.ok) return
+        const json = (await res.json()) as { transactions?: unknown[]; orders?: unknown[] }
+        const rawList = (Array.isArray(json.transactions)
+          ? json.transactions
+          : Array.isArray(json.orders)
+            ? json.orders
+            : []) as Record<string, unknown>[]
+        const keys = new Set<string>()
+        for (const raw of rawList) {
+          const acc = String(raw.SELLER_ISHYIGA_ACCOUNT ?? raw.seller_account ?? "").trim()
+          if (!acc) continue
+          const base = acc.replace(/^supplier_/i, "").split("__")[0].trim()
+          if (base) keys.add(base.toUpperCase())
+        }
+        if (!cancel) setReorderHistorySellerKeys([...keys])
+      } catch {
+        if (!cancel) setReorderHistorySellerKeys([])
+      }
+    })()
+    return () => {
+      cancel = true
+      ac.abort()
+    }
+  }, [isAuthenticated, grandmaBuyerSession?.ishyigaAccount])
+
+  useEffect(() => {
+    const sector = GRANDMA_CATEGORY_TO_SECTOR_SLUG[category]?.trim()
+    if (!sector || allAvailableShops.length === 0) {
+      setOnsaleSellerAccounts([])
+      return
+    }
+    let cancel = false
+    const ac = new AbortController()
+    const probes = ["a", "e", "i", "1"]
+    const tid = setTimeout(() => {
+      void (async () => {
+        const merged = new Set<string>()
+        for (const g of probes) {
+          if (cancel || ac.signal.aborted) break
+          try {
+            const params = new URLSearchParams({
+              globalSearch: g,
+              limit: "120",
+              Currency: "RWF",
+              sector,
+            })
+            const res = await fetch(`/api/fetchSuggestions?${params.toString()}`, {
+              signal: ac.signal,
+              cache: "no-store",
+            })
+            if (!res.ok) continue
+            const json = (await res.json()) as Record<string, unknown>
+            collectDiscountedSellerAccountsFromSearchJson(json).forEach((x) => merged.add(x))
+          } catch {
+            /* ignore */
+          }
+        }
+        if (!cancel) setOnsaleSellerAccounts([...merged])
+      })()
+    }, 600)
+    return () => {
+      cancel = true
+      clearTimeout(tid)
+      ac.abort()
+    }
+  }, [category, allAvailableShops.length])
+
+  const shopListFilterResult = useMemo(() => {
+    const qRaw = shopSearch.trim().toLowerCase()
+    const tokens = qRaw.split(/\s+/).filter(Boolean)
+    const productAccountSet = new Set(shopProductSearchAccounts)
+
+    const shopMatchesQuery = (s: ShopEntry): boolean => {
+      if (!tokens.length) return true
+      const sellerKey = sellerAccountFromGrandmaShopId(s.id).toUpperCase()
+      const productHit = productAccountSet.has(sellerKey)
+      const hay = `${s.name} ${s.tagline} ${s.momo ?? ""} ${s.id}`.toLowerCase()
+      const textHit = tokens.every((t) => hay.includes(t))
+      return textHit || productHit
+    }
+
     const prefBoost = (a: ShopEntry, b: ShopEntry) => {
       const pref =
         Number(isPreferredGrandmaShop(b.id, preferredShopIds)) -
@@ -2427,32 +3288,96 @@ export default function GrandmaPage() {
       if (pref !== 0) return pref
       return 0
     }
-    if (shopTab === "favorites") list = list.filter((s) => s.favorite)
-    else if (shopTab === "reorder") list = list.filter((s) => s.orderedBefore)
-    else if (shopTab === "trending") list = list.filter((s) => s.trending)
-    else if (shopTab === "onsale") list = list.filter((s) => s.onSale)
-    else {
-      list = [...list].sort((a, b) => {
-        // Preferred shops (Settings) first — e.g. Burrows + Rite when you mark them
+
+    const shopOrderedRecently = (s: ShopEntry) => {
+      const k = sellerAccountFromGrandmaShopId(s.id).toUpperCase()
+      return reorderSellerKeySet.has(k) || s.orderedBefore
+    }
+
+    const sortList = (list: ShopEntry[]) =>
+      [...list].sort((a, b) => {
+        if (tokens.length && productAccountSet.size > 0) {
+          const ak = sellerAccountFromGrandmaShopId(a.id).toUpperCase()
+          const bk = sellerAccountFromGrandmaShopId(b.id).toUpperCase()
+          const ap = productAccountSet.has(ak) ? 1 : 0
+          const bp = productAccountSet.has(bk) ? 1 : 0
+          if (ap !== bp) return bp - ap
+        }
         const p = prefBoost(a, b)
         if (p !== 0) return p
         if (a.favorite !== b.favorite) return a.favorite ? -1 : 1
-        if (a.orderedBefore !== b.orderedBefore) return a.orderedBefore ? -1 : 1
+        if (shopOrderedRecently(a) !== shopOrderedRecently(b)) return shopOrderedRecently(b) ? -1 : 1
         if (useLocationSort) return a.distanceKm - b.distanceKm
         return a.name.localeCompare(b.name)
       })
+
+    const applyTab = (list: ShopEntry[]): ShopEntry[] => {
+      if (shopTab === "favorites") {
+        if (preferredShopIds.includes(PREFERRED_ALL_ID)) return list
+        const prefs = preferredShopIds.filter((x) => x !== PREFERRED_ALL_ID)
+        return list.filter(
+          (s) => s.favorite || (prefs.length > 0 && prefs.some((pid) => sameGrandmaSeller(pid, s.id))),
+        )
+      }
+      if (shopTab === "reorder") {
+        if (reorderSellerKeySet.size === 0) return []
+        return list.filter((s) => reorderSellerKeySet.has(sellerAccountFromGrandmaShopId(s.id).toUpperCase()))
+      }
+      if (shopTab === "trending") return list.filter((s) => s.trending)
+      if (shopTab === "onsale") {
+        return list.filter((s) => {
+          if (s.onSale) return true
+          return onsaleSellerKeysSet.has(sellerAccountFromGrandmaShopId(s.id).toUpperCase())
+        })
+      }
       return list
     }
-    list = [...list].sort((a, b) => {
-      const p = prefBoost(a, b)
-      if (p !== 0) return p
-      if (a.favorite !== b.favorite) return a.favorite ? -1 : 1
-      if (a.orderedBefore !== b.orderedBefore) return a.orderedBefore ? -1 : 1
-      if (useLocationSort) return a.distanceKm - b.distanceKm
-      return a.name.localeCompare(b.name)
-    })
-    return list
-  }, [shopsInCategory, shopSearch, shopTab, useLocationSort, preferredShopIds])
+
+    const base = shopsInCategory
+    let relaxedNote: string | null = null
+
+    if (!tokens.length) {
+      const list = shopTab ? applyTab(base) : base
+      return { shops: sortList(list), relaxedNote: null }
+    }
+
+    const searchHits = base.filter(shopMatchesQuery)
+    if (!shopTab) {
+      return { shops: sortList(searchHits), relaxedNote: null }
+    }
+
+    const tabbed = applyTab(base)
+    const tabAndSearch = tabbed.filter(shopMatchesQuery)
+    if (tabAndSearch.length > 0) {
+      return { shops: sortList(tabAndSearch), relaxedNote: null }
+    }
+
+    if (searchHits.length > 0) {
+      relaxedNote =
+        language === "rw"
+          ? "Nta duka riri muri uyu muhuza (Reorder, …) rihuye n'uko wanditse — reba amaduka yose ahuye n'uko wanditse."
+          : language === "fr"
+            ? "Aucun commerce ne correspond à ce filtre + recherche — affichage de tous les commerces correspondant à votre recherche."
+            : "No shop matches this filter plus your search — showing all shops that match your search."
+      return { shops: sortList(searchHits), relaxedNote }
+    }
+
+    return { shops: sortList([]), relaxedNote: null }
+  }, [
+    shopsInCategory,
+    shopSearch,
+    shopTab,
+    useLocationSort,
+    preferredShopIds,
+    language,
+    shopProductSearchAccounts,
+    grandmaOrderedShopIds,
+    reorderSellerKeySet,
+    onsaleSellerKeysSet,
+  ])
+
+  const visibleShops = shopListFilterResult.shops
+  const shopSearchRelaxedNote = shopListFilterResult.relaxedNote
 
   const isAllPreferred = useMemo(() => preferredShopIds.includes(PREFERRED_ALL_ID), [preferredShopIds])
   const multiShopMode = useMemo(() => isAllPreferred && !selectedShopId, [isAllPreferred, selectedShopId])
@@ -2667,6 +3592,23 @@ export default function GrandmaPage() {
     setApiProducts((prev) => prev.map((p) => (p.id === id ? { ...p, qty: safeQty } : p)))
   }
 
+  /** Cart qty field: blank when 0 (no leading “0”), digits only in onChange. */
+  const qtyInputDisplay = (q: number) => {
+    const n = Math.max(0, Math.floor(Number(q) || 0))
+    return n === 0 ? "" : String(n)
+  }
+
+  const applyQtyFromInput = (id: number, raw: string) => {
+    const digits = raw.replace(/\D/g, "")
+    const stripped = digits.replace(/^0+/, "")
+    if (stripped === "") {
+      setQtyDirect(id, 0)
+      return
+    }
+    const parsed = Number.parseInt(stripped, 10)
+    if (Number.isFinite(parsed)) setQtyDirect(id, parsed)
+  }
+
   useEffect(() => {
     if (typeof window === "undefined") return
     try {
@@ -2676,6 +3618,7 @@ export default function GrandmaPage() {
       if (p?.v !== 1 || !p.shopId || !Array.isArray(p.lines) || p.lines.length === 0) return
       sessionStorage.removeItem(GRANDMA_REORDER_STORAGE_KEY)
       setPendingReorder(p)
+      setGrandmaOrderedShopIds(appendGrandmaOrderedShopId(p.shopId))
       setReorderSplashOpen(true)
       setSelectedShopId(p.shopId)
       setAppMode("buyer")
@@ -2837,26 +3780,58 @@ export default function GrandmaPage() {
     }
   }, [sellerOrders, sellerInventoryKpi])
 
+  const sellerRetailInsights = useMemo(() => {
+    const dash = GRANDMA_LABELS[language]
+    const { ranked, totalLineRevenue } = aggregateServedOrderProducts(sellerOrders)
+    const best = ranked[0] ?? null
+    const runners = ranked.slice(1, 3)
+    let pctOfLines: number | null = null
+    if (best && totalLineRevenue > 0) {
+      pctOfLines = Math.min(100, Math.round((best.revenueRwf / totalLineRevenue) * 100))
+    }
+
+    const bullets: string[] = []
+    if (best) {
+      bullets.push(
+        dash.sellerDashBulletRestock.replace("{{name}}", best.name).replace("{{units}}", String(best.units)),
+      )
+    }
+    for (const r of runners) {
+      if (bullets.length >= 3) break
+      bullets.push(dash.sellerDashBulletPopular.replace("{{name}}", r.name).replace("{{units}}", String(r.units)))
+    }
+    if (sellerDashboard.open.count > 0 && bullets.length < 4) {
+      bullets.push(dash.sellerDashBulletFulfillQueue.replace("{{n}}", String(sellerDashboard.open.count)))
+    }
+    if (!best && bullets.length === 0) {
+      bullets.push(dash.sellerDashGrowthIdle)
+    }
+
+    return { best, pctOfLines, totalLineRevenue, bullets }
+  }, [sellerOrders, sellerDashboard.open.count, language])
+
   const etaSubText = useMemo(() => {
     const tr = GRANDMA_LABELS[language]
+    if (fulfillmentMode === "pickup") return tr.etaPickupSub
     const km = deliveryKm.toFixed(1)
-    if (!selectedLogistics) return tr.etaSubNoMode.replace("{km}", km)
     const mode =
       selectedLogistics === "human" ? tr.logHuman : selectedLogistics === "bike" ? tr.logBike : tr.logMoto
     return tr.etaSub.replace("{km}", km).replace("{mode}", mode)
-  }, [language, deliveryKm, selectedLogistics])
+  }, [language, deliveryKm, selectedLogistics, fulfillmentMode])
 
   const submitGrandmaOrder = useCallback(async () => {
     if (!selectedShop || selectedProducts.length === 0) {
       const msg =
         language === "rw"
-          ? "Shyiramo ibintu mbere yo kohereza komande."
+          ? "Tangaho ibintu mbere."
           : language === "fr"
             ? "Ajoutez des articles avant de payer."
             : "Add items before sending your order."
       window.alert(msg)
       return
     }
+    if (grandmaOrderSubmitGuardRef.current) return
+    grandmaOrderSubmitGuardRef.current = true
     setGrandmaOrderSubmitting(true)
     setGrandmaOrderSubmitError(null)
     try {
@@ -2874,6 +3849,67 @@ export default function GrandmaPage() {
       const phoneFromInput = normalizePhoneDigitsForAuth(grandmaBuyerPhoneInput.trim()).slice(0, 15)
       const buyerPhone = (phoneFromAccount || phoneFromInput).slice(0, 15)
 
+      const trSubmit = GRANDMA_LABELS[language]
+      if (!buyerPhone) {
+        setGrandmaOrderSubmitError(trSubmit.orderSubmitNeedPhone)
+        return
+      }
+
+      if (selectedPayment === "momo" || selectedPayment === "airtel") {
+        const payerRaw = phoneFromAccount || grandmaBuyerPhoneInput.trim()
+        if (!isGrandmaRwMobileDigits(payerRaw)) {
+          setGrandmaOrderSubmitError(trSubmit.payStepErrPhone)
+          return
+        }
+      }
+      if (selectedPayment === "cash" && !grandmaCashConfirm) {
+        setGrandmaOrderSubmitError(trSubmit.payStepErrCash)
+        return
+      }
+
+      const piRes = await fetch("/api/grandma/payment-intent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          channel: selectedPayment,
+          grandTotalRwf: Math.round(grandTotal),
+          platformFeeRwf: ihuteFees,
+          itemsSubtotalRwf: Math.round(itemsTotal),
+          logisticsRwf: Math.round(logisticsTotal),
+          sellerAccount,
+        }),
+      })
+      const piJson = (await piRes.json().catch(() => ({}))) as {
+        ok?: boolean
+        intentId?: string
+        error?: string
+      }
+      if (!piRes.ok || piJson.ok !== true || !piJson.intentId) {
+        setGrandmaOrderSubmitError(
+          piJson.error ||
+            (language === "rw"
+              ? "Kwemeza kwishyura byanze."
+              : language === "fr"
+                ? "Étape de paiement échouée."
+                : "Payment confirmation failed."),
+        )
+        return
+      }
+
+      const payerDigits =
+        selectedPayment === "momo" || selectedPayment === "airtel"
+          ? normalizePhoneDigitsForAuth(buyerPhone)
+          : undefined
+      const billingTail = buildGrandmaBillingReferenceTail({
+        intentId: String(piJson.intentId),
+        ihuteFeeRwf: ihuteFees,
+        itemsSubtotalRwf: Math.round(itemsTotal),
+        logisticsRwf: Math.round(logisticsTotal),
+        buyerGrandTotalRwf: Math.round(grandTotal),
+        paymentChannel: selectedPayment,
+        payerDigits,
+      })
+
       const locParts = [
         locationData?.province,
         locationData?.district,
@@ -2890,12 +3926,24 @@ export default function GrandmaPage() {
       const momoDigits = selectedShop.momo.replace(/\D/g, "").slice(-12)
       const sellerPhone = momoDigits ? (momoDigits.startsWith("250") ? momoDigits : `250${momoDigits}`) : ""
 
-      const items = selectedProducts.map((p) => ({
-        itemCode: String(p.liveKey ?? p.id),
-        name: p.name,
-        qty: p.qty,
-        unitPrice: p.price,
-      }))
+      const items = selectedProducts.map((p) => {
+        const code = String(p.stockLineCode ?? p.liveKey ?? p.id).trim()
+        return {
+          itemCode: code,
+          item_key_words: code,
+          ITEM_CODE: code,
+          name: p.name,
+          qty: p.qty,
+          unitPrice: p.price,
+        }
+      })
+
+      const referenceParts =
+        fulfillmentMode === "pickup"
+          ? ["SELF-PICKUP", orderNotes.trim()].filter(Boolean)
+          : [`DELIVERY-${selectedLogistics}`, orderNotes.trim()].filter(Boolean)
+      const baseRef = referenceParts.length ? referenceParts.join(" | ") : ""
+      const reference = (baseRef + billingTail).slice(0, 500)
 
       const res = await fetch("/api/grandma/order", {
         method: "POST",
@@ -2911,7 +3959,8 @@ export default function GrandmaPage() {
           paymentName: grandmaPaymentToOrdersPaymentName(selectedPayment),
           currency: "RWF",
           items,
-          reference: orderNotes.trim() || undefined,
+          reference,
+          subtotal: Math.round(itemsTotal),
         }),
       })
       const data = (await res.json().catch(() => ({}))) as {
@@ -2922,7 +3971,9 @@ export default function GrandmaPage() {
       }
 
       if (!res.ok || data.ok === false) {
-        setGrandmaOrderSubmitError(data.error || `Order failed (${res.status})`)
+        setGrandmaOrderSubmitError(
+          humanizeGrandmaOrderBackendError(data.error || `Order failed (${res.status})`, language)
+        )
         return
       }
 
@@ -2934,6 +3985,7 @@ export default function GrandmaPage() {
 
       try {
         localStorage.setItem("grandma:lastOrderId", String(oid))
+        setGrandmaOrderedShopIds(appendGrandmaOrderedShopId(selectedShop.id))
       } catch {
         /* ignore */
       }
@@ -2966,8 +4018,10 @@ export default function GrandmaPage() {
       if (sellerPhoneParam) q.set("sellerPhone", sellerPhoneParam)
       router.push(`/order-success?${q.toString()}`)
     } catch (e: unknown) {
-      setGrandmaOrderSubmitError(e instanceof Error ? e.message : "Order request failed")
+      const raw = e instanceof Error ? e.message : "Order request failed"
+      setGrandmaOrderSubmitError(humanizeGrandmaOrderBackendError(raw, language))
     } finally {
+      grandmaOrderSubmitGuardRef.current = false
       setGrandmaOrderSubmitting(false)
     }
   }, [
@@ -2977,10 +4031,16 @@ export default function GrandmaPage() {
     selectedProducts,
     selectedShop,
     selectedPayment,
+    selectedLogistics,
+    fulfillmentMode,
     locationData,
     displayUserLocationEn,
     grandTotal,
     grandmaBuyerPhoneInput,
+    grandmaCashConfirm,
+    ihuteFees,
+    itemsTotal,
+    logisticsTotal,
   ])
 
   const featuredCourierSafe = useMemo(() => {
@@ -3002,7 +4062,14 @@ export default function GrandmaPage() {
         :root{
           --blue:#1897e0;--blue-dark:#127fc0;--bg:#eef4fb;--card:#ffffff;--text:#17324d;
           --muted:#6f8399;--line:#dbe7f3;--green:#22c55e;
+          --pay:#1897e0;--pay2:#127fc0;--pay-soft:#f0f8ff;--pay-ring:rgba(24,151,224,.24);
         }
+        #page5-pay.page.active .primary-btn{background:linear-gradient(90deg,var(--pay),var(--pay2));box-shadow:0 10px 22px rgba(18,127,192,.22);}
+        #page5-pay .pay-item{transition:border-color .2s ease,background .2s ease,box-shadow .2s ease;}
+        #page5-pay .pay-item.active{border-color:#a8d7f4;background:var(--pay-soft);box-shadow:0 0 0 1px #d6ecfb;}
+        #page5-pay .pay-item.active .radio{border-color:var(--pay);}
+        #page5-pay .pay-item.active .radio::after{background:var(--pay);}
+        #page5-pay .pay-input-tap:focus-visible{outline:none;box-shadow:0 0 0 3px var(--pay-ring);border-color:#2e9ad9!important;}
         *{box-sizing:border-box}
         body{margin:0;font-family:Arial, Helvetica, sans-serif;background:var(--bg);color:var(--text);}
         .app{max-width:430px;margin:0 auto;min-height:100vh;background:linear-gradient(180deg,#f7fbff 0%,#eef4fb 100%);padding-bottom:calc(120px + env(safe-area-inset-bottom));}
@@ -3067,9 +4134,9 @@ export default function GrandmaPage() {
         .emoji{font-size:28px;text-align:center;}
         .p-name{font-size:16px;font-weight:700;}
         .p-price{margin-top:4px;color:var(--muted);font-size:14px;}
-        .qty{display:flex;align-items:center;gap:8px;background:#f1f8ff;border-radius:12px;padding:6px;}
-        .qty input{width:72px;height:32px;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--text);font-weight:700;text-align:center;padding:0 6px;outline:none;}
-        .qty input:focus{border-color:var(--blue);box-shadow:0 0 0 2px rgba(24,151,224,.16);}
+        .qty{display:flex;align-items:center;gap:10px;background:#f1f8ff;border-radius:14px;padding:8px 10px;}
+        .qty input{width:min(32vw,112px);min-width:88px;height:48px;border:2px solid var(--line);border-radius:12px;background:#fff;color:var(--text);font-weight:800;font-size:20px;text-align:center;padding:0 8px;outline:none;}
+        .qty input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(24,151,224,.18);}
         .bottom-bar{position:sticky;bottom:74px;margin-top:12px;background:linear-gradient(90deg,var(--blue),var(--blue-dark));color:#fff;border-radius:16px;padding:14px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-weight:700;box-shadow:0 10px 20px rgba(24,151,224,.22);cursor:pointer;}
         .bottom-bar:active{transform:scale(.995);}
         .bottom-bar-left{display:flex;align-items:center;gap:8px;}
@@ -3086,10 +4153,12 @@ export default function GrandmaPage() {
         .summary-remove-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:none;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:12px;font-weight:700;color:#b42318;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.04);}
         .summary-remove-btn svg{width:16px;height:16px;flex-shrink:0;}
         .summary-remove-btn:active{transform:scale(.98);background:#fff5f5;}
+        .fulfillment-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;}
+        .fulfill-sub{font-size:12px;font-weight:600;color:var(--muted);margin-top:6px;line-height:1.3;text-align:center;padding:0 4px;}
         .logistics-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px;}
         .log-option{background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px 8px;text-align:center;cursor:pointer;box-shadow:0 8px 18px rgba(24,151,224,.06);}
         .log-option.active{border:2px solid var(--blue);background:#f2f9ff;}
-        .log-icon{font-size:24px;display:block;margin-bottom:6px;}
+        .log-icon{font-size:28px;display:block;margin-bottom:6px;line-height:1;}
         .log-label{font-weight:700;font-size:14px;}
         .log-price{color:var(--muted);margin-top:4px;font-size:13px;font-weight:700;}
         .shop-box{display:flex;align-items:flex-start;gap:12px;padding:14px;margin-bottom:12px;}
@@ -3157,9 +4226,12 @@ export default function GrandmaPage() {
         .courier-modal-row.selected{border-color:var(--blue);background:#eef6fc;}
         .courier-modal-rank{font-size:12px;font-weight:800;color:var(--muted);width:22px;flex-shrink:0;}
         .stars{color:#f4b400;font-weight:700;}
-        .footer{position:fixed;left:50%;transform:translateX(-50%);bottom:0;width:100%;max-width:430px;background:rgba(255,255,255,.96);border-top:1px solid var(--line);display:flex;justify-content:space-around;padding:10px 6px calc(18px + env(safe-area-inset-bottom));z-index:20;}
-        .footer button{border:none;background:none;color:var(--muted);font-size:10px;display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;flex:1;min-width:0;padding:4px 2px;}
+        .footer{position:fixed;left:50%;transform:translateX(-50%);bottom:0;width:100%;max-width:430px;background:rgba(255,255,255,.96);border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:2px;padding:10px 6px calc(18px + env(safe-area-inset-bottom));z-index:20;}
+        .footer.footer--supplier-6{grid-template-columns:repeat(6,minmax(0,1fr));}
+        .footer button{border:none;background:none;color:var(--muted);font-size:10px;display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;min-width:0;padding:4px 2px;}
         .footer button.active{color:var(--blue-dark);font-weight:700;}
+        .footer .footer-dash-icon{width:22px;height:22px;color:var(--blue-dark);}
+        .footer.footer--supplier-6 button{font-size:9px;}
         .seller-mode .page,.seller-mode .footer{display:none!important;}
         .seller-screen{padding:14px;}
         .seller-shop-head{display:flex;align-items:flex-start;justify-content:space-between;padding:12px 14px;margin-bottom:10px;gap:12px;}
@@ -3334,10 +4406,38 @@ export default function GrandmaPage() {
           itemsStockValueRwf={sellerHomeKpis.itemsStockValueRwf}
           salesDeliveredCount={sellerHomeKpis.salesDeliveredCount}
           salesDeliveredRwf={sellerHomeKpis.salesDeliveredRwf}
+          bestSelling={
+            sellerRetailInsights.best
+              ? {
+                  name: sellerRetailInsights.best.name,
+                  unitsSold: sellerRetailInsights.best.units,
+                  revenueRwf: sellerRetailInsights.best.revenueRwf,
+                  pctOfLineRevenue: sellerRetailInsights.pctOfLines,
+                }
+              : null
+          }
+          topUpBullets={sellerRetailInsights.bullets}
+          copy={{
+            bestTitle: GRANDMA_LABELS[language].sellerDashBestSelling,
+            bestSubtitle: GRANDMA_LABELS[language].sellerDashBestSellingSubtitle,
+            bestEmpty: GRANDMA_LABELS[language].sellerDashBestSellingEmpty,
+            unitsSold: GRANDMA_LABELS[language].sellerDashUnitsSold,
+            lineRevenue: GRANDMA_LABELS[language].sellerDashLineRevenue,
+            shareTemplate: GRANDMA_LABELS[language].sellerDashShareRevenue,
+            topUpTitle: GRANDMA_LABELS[language].sellerDashTopUpTitle,
+            topUpSubtitle: GRANDMA_LABELS[language].sellerDashTopUpSubtitle,
+            ctaStock: GRANDMA_LABELS[language].sellerDashCtaStock,
+            ctaNikiStock: GRANDMA_LABELS[language].sellerDashCtaNikiStock,
+            ctaOrders: GRANDMA_LABELS[language].sellerDashCtaOrders,
+            deliveredTail: GRANDMA_LABELS[language].sellerDashDeliveredTail,
+          }}
           formatRwf={formatRwf}
           onOrders={() => setSellerView("orders")}
           onClients={() => window.alert("Clients — coming soon")}
           onItems={() => setSellerView("items")}
+          onNikiStock={() => {
+            router.push("/register/seller?step=2")
+          }}
           onSales={() => setSellerView("orders")}
         />
       ) : null}
@@ -3711,7 +4811,12 @@ export default function GrandmaPage() {
           <button
             type="button"
             className="shop-trio-btn"
-            onClick={() => alert("List your shop on Ihute — seller onboarding (coming from your admin / API).")}
+            onClick={() => {
+              writeGrandmaSignupRole("seller")
+              router.push(
+                `${GRANDMA_OUTBOUND.registerSeller}?redirect=${encodeURIComponent(GRANDMA_PATHS.appRoot)}`,
+              )
+            }}
           >
             List your shop
           </button>
@@ -3729,8 +4834,8 @@ export default function GrandmaPage() {
           <input
             value={shopSearch}
             onChange={(e) => setShopSearch(e.target.value)}
-            placeholder="Search shops"
-            aria-label="Search shops"
+            placeholder="Search shops or products (e.g. milk, bread)"
+            aria-label="Search shops or products"
           />
         </div>
 
@@ -3748,6 +4853,11 @@ export default function GrandmaPage() {
             </button>
           ))}
         </div>
+        {shopSearchRelaxedNote ? (
+          <p className="card note" style={{ marginTop: 8, marginBottom: 0, fontSize: 12, color: "#92400e", background: "#fffbeb", borderColor: "#fcd34d" }}>
+            {shopSearchRelaxedNote}
+          </p>
+        ) : null}
 
         <div className="shop-list" id="shopList">
           {allShopsLoading ? (
@@ -3768,7 +4878,38 @@ export default function GrandmaPage() {
               {!GRANDMA_SHOW_DEMO_SHOPS && allAvailableShops.length === 0 ? (
                 <p style={{ marginBottom: 10, color: "#5a6b7a", fontSize: "0.92rem" }}>{GRANDMA_NO_LIVE_SHOPS_HINT}</p>
               ) : null}
-              No shops match. Try another filter or search.
+              {shopSearch.trim() ? (
+                shopProductSearchLoading ? (
+                  <p style={{ margin: 0 }}>
+                    {language === "rw"
+                      ? "Turimo gushakisha ibicuruzya kugira ngo tubone amaduka abibamo…"
+                      : language === "fr"
+                        ? "Recherche des produits pour afficher les boutiques concernées…"
+                        : "Searching the product catalog for shops that carry matching items…"}
+                  </p>
+                ) : language === "rw" ? (
+                  <p style={{ margin: 0 }}>
+                    Nta duka ryahuye na <strong>&quot;{shopSearch.trim()}&quot;</strong> ku izina cyangwa ibicuruzya.
+                    {shopTab ? " Gerageza gukura filtere." : ""} Gerageza andi magambo cyangwa siba uko wanditse.
+                  </p>
+                ) : language === "fr" ? (
+                  <p style={{ margin: 0 }}>
+                    Aucun commerce ne correspond à <strong>&quot;{shopSearch.trim()}&quot;</strong> (nom ou produits du
+                    catalogue).
+                    {shopTab ? " Essayez de désactiver le filtre actif." : ""} Essayez d&apos;autres mots ou effacez la
+                    recherche.
+                  </p>
+                ) : (
+                  <p style={{ margin: 0 }}>
+                    No shops match <strong>&quot;{shopSearch.trim()}&quot;</strong> by shop name, MoMo, or catalog
+                    products
+                    {shopTab ? " with the current filter." : "."} Try different words, clear the search box, or tap the
+                    active filter again to turn it off.
+                  </p>
+                )
+              ) : (
+                <p style={{ margin: 0 }}>No shops match. Try another filter or search.</p>
+              )}
             </div>
           ) : null}
           {!allShopsLoading && !shopsLoading && !shopsError && visibleShops.length > 0 ? (
@@ -3812,10 +4953,20 @@ export default function GrandmaPage() {
                     {isPreferredGrandmaShop(s.id, preferredShopIds) ? (
                       <span className="shop-badge">★ Preferred</span>
                     ) : null}
-                    {s.favorite ? <span className="shop-badge">★ Favorite</span> : null}
-                    {s.orderedBefore ? <span className="shop-badge">Reorder</span> : null}
+                    {preferredShopIds.includes(PREFERRED_ALL_ID) ||
+                    s.favorite ||
+                    preferredShopIds
+                      .filter((x) => x !== PREFERRED_ALL_ID)
+                      .some((pid) => sameGrandmaSeller(pid, s.id)) ? (
+                      <span className="shop-badge">★ Favorite</span>
+                    ) : null}
+                    {reorderSellerKeySet.has(sellerAccountFromGrandmaShopId(s.id).toUpperCase()) || s.orderedBefore ? (
+                      <span className="shop-badge">Reorder</span>
+                    ) : null}
                     {s.trending ? <span className="shop-badge">Trending</span> : null}
-                    {s.onSale ? <span className="shop-badge sale">On sale</span> : null}
+                    {s.onSale || onsaleSellerKeysSet.has(sellerAccountFromGrandmaShopId(s.id).toUpperCase()) ? (
+                      <span className="shop-badge sale">On sale</span>
+                    ) : null}
                   </div>
                 </div>
                 <div className="shop-row-dist">{s.distanceKm.toFixed(1)} km</div>
@@ -3895,16 +5046,15 @@ export default function GrandmaPage() {
                   </div>
                   <div className="qty" aria-label="Set quantity">
                     <input
-                      type="number"
-                      min={0}
-                      step={1}
-                      value={Math.max(0, products.find((p) => p.id === o.productId)?.qty ?? 0)}
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      value={qtyInputDisplay(products.find((p) => p.id === o.productId)?.qty ?? 0)}
                       onClick={(e) => e.stopPropagation()}
                       onChange={(e) => {
                         e.stopPropagation()
                         if (o.shopId) setSelectedShopId(o.shopId)
-                        const parsed = Number.parseInt(e.target.value, 10)
-                        if (Number.isFinite(parsed)) setQtyDirect(o.productId, parsed)
+                        applyQtyFromInput(o.productId, e.target.value)
                       }}
                       aria-label="Quantity"
                     />
@@ -3938,14 +5088,11 @@ export default function GrandmaPage() {
                   </div>
                   <div className="qty">
                     <input
-                      type="number"
-                      min={0}
-                      step={1}
-                      value={p.qty}
-                      onChange={(e) => {
-                        const parsed = Number.parseInt(e.target.value, 10)
-                        if (Number.isFinite(parsed)) setQtyDirect(p.id, parsed)
-                      }}
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      value={qtyInputDisplay(p.qty)}
+                      onChange={(e) => applyQtyFromInput(p.id, e.target.value)}
                       aria-label={`Quantity for ${p.name}`}
                     />
                   </div>
@@ -4058,9 +5205,53 @@ export default function GrandmaPage() {
 
       {/* Page 4 — shipment, shop, totals, notes, pay */}
       <section className={`page ${page === 4 ? "active" : ""}`} id="page4-summary">
-        <div className="section-title">Shipment / Logistics</div>
+        <div className="section-title">{tPay.sectionLogistics}</div>
+        <div className="order-extras-label" style={{ marginBottom: 8 }}>
+          {tPay.fulfillmentSectionTitle}
+        </div>
+        <div className="fulfillment-row" role="group" aria-label={tPay.fulfillmentSectionTitle}>
+          <div
+            className={`log-option ${fulfillmentMode === "delivery" ? "active" : ""}`}
+            onClick={() => setFulfillmentMode("delivery")}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault()
+                setFulfillmentMode("delivery")
+              }
+            }}
+          >
+            <span className="log-icon" aria-hidden>
+              🚚
+            </span>
+            <div className="log-label">{tPay.fulfillmentDeliveryTitle}</div>
+            <div className="fulfill-sub">{tPay.fulfillmentDeliverySub}</div>
+          </div>
+          <div
+            className={`log-option ${fulfillmentMode === "pickup" ? "active" : ""}`}
+            onClick={() => setFulfillmentMode("pickup")}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault()
+                setFulfillmentMode("pickup")
+              }
+            }}
+          >
+            <span className="log-icon" aria-hidden>
+              🏪
+            </span>
+            <div className="log-label">{tPay.fulfillmentPickupTitle}</div>
+            <div className="fulfill-sub">{tPay.fulfillmentPickupSub}</div>
+          </div>
+        </div>
+
         <p className="note" style={{ marginTop: 0, marginBottom: 10 }}>
-          Delivery fees use this shop’s distance ({deliveryKm.toFixed(1)} km) × mode rate (demo — replace with your pricing API).
+          {fulfillmentMode === "delivery"
+            ? tPay.logisticsNote.replace("{km}", deliveryKm.toFixed(1))
+            : tPay.logisticsNotePickup}
         </p>
 
         <div className="card shop-box">
@@ -4085,47 +5276,56 @@ export default function GrandmaPage() {
           </div>
         </div>
 
-        <div className="logistics-row" id="logisticsRow">
-          {LOGISTICS.map((opt) => (
-            <div
-              key={opt.id}
-              className={`log-option ${selectedLogistics === opt.id ? "active" : ""}`}
-              onClick={() => toggleLogistics(opt.id)}
-              role="button"
-              tabIndex={0}
-            >
-              <span className="log-icon" aria-hidden>
-                {opt.icon}
-              </span>
-              <div className="log-label">{opt.label}</div>
-              <div className="log-price">{formatRwf(logisticsQuote(opt, deliveryKm))}</div>
+        {fulfillmentMode === "delivery" ? (
+          <>
+            <div className="order-extras-label" style={{ marginBottom: 8 }}>
+              {tPay.fulfillmentDeliveryModesHint}
             </div>
-          ))}
-        </div>
+            <div className="logistics-row" id="logisticsRow">
+              {LOGISTICS.map((opt) => (
+                <div
+                  key={opt.id}
+                  className={`log-option ${selectedLogistics === opt.id ? "active" : ""}`}
+                  onClick={() => selectLogisticsMode(opt.id)}
+                  role="button"
+                  tabIndex={0}
+                >
+                  <span className="log-icon" aria-hidden>
+                    {opt.icon}
+                  </span>
+                  <div className="log-label">
+                    {opt.id === "human" ? tPay.logHuman : opt.id === "bike" ? tPay.logBike : tPay.logMoto}
+                  </div>
+                  <div className="log-price">{formatRwf(logisticsQuote(opt, deliveryKm))}</div>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : null}
 
         <div className="card summary-card">
           <div className="summary-row">
-            <span>Items</span>
+            <span>{tPay.summaryLineItems}</span>
             <strong id="sumItemsCount">{itemsCount}</strong>
           </div>
           <div className="summary-row">
-            <span>Total Items</span>
+            <span>{tPay.summaryLineItemsTotal}</span>
             <strong id="sumItemsTotal">{formatRwf(itemsTotal)}</strong>
           </div>
-          <div className="summary-row">
+          <div className="summary-row" style={{ color: "var(--muted)", fontSize: 13 }}>
             <span>{tPay.ihuteFees}</span>
             <strong id="sumIhuteFees">{formatRwf(ihuteFees)}</strong>
           </div>
           <div className="summary-row">
-            <span>Taxes</span>
+            <span>{tPay.taxes}</span>
             <strong id="sumTaxes">{formatRwf(TAXES_PLACEHOLDER)}</strong>
           </div>
           <div className="summary-row">
-            <span>Logistics</span>
+            <span>{tPay.summaryLineLogisticsRow}</span>
             <strong id="sumLogistics">{formatRwf(logisticsTotal)}</strong>
           </div>
           <div className="summary-row">
-            <span>Grand Total</span>
+            <span>{tPay.summaryLineGrandTotal}</span>
             <strong id="sumGrand">{formatRwf(grandTotal)}</strong>
           </div>
         </div>
@@ -4222,13 +5422,7 @@ export default function GrandmaPage() {
           <div className="pay-detail-row">
             <span className="pay-detail-label">{tPay.eta}</span>
             <span className="pay-detail-value">
-              {selectedLogistics ? (
-                <>
-                  {etaRange.lo}–{etaRange.hi} min
-                </>
-              ) : (
-                "—"
-              )}
+              {fulfillmentMode === "pickup" ? tPay.etaAtShop : `${etaRange.lo}–${etaRange.hi} min`}
             </span>
           </div>
           <div className="pay-detail-sub" style={{ paddingTop: 2 }}>
@@ -4257,12 +5451,186 @@ export default function GrandmaPage() {
           ))}
         </div>
 
+        {selectedShop && selectedPayment !== "bk" ? (
+          <div
+            className="card pay-method-form"
+            style={{ textAlign: "left", marginTop: 12, marginBottom: 12, padding: "14px 16px" }}
+          >
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontWeight: 800, fontSize: 15, color: "var(--text)" }}>{tPay.payStepPanelTitle}</div>
+              {tPay.payStepDemoNote.trim() ? (
+                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4, lineHeight: 1.35 }}>
+                  {tPay.payStepDemoNote}
+                </div>
+              ) : null}
+            </div>
+
+            {!grandmaBuyerSession?.phone?.trim() ? (
+              <div className="mb-4 space-y-2">
+                <div className="flex items-start gap-2">
+                  <Smartphone className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700" aria-hidden />
+                  <Label htmlFor="grandma-guest-phone" className="text-sm font-bold leading-snug text-emerald-950">
+                    {tPay.paymentGuestPhoneLabel}
+                  </Label>
+                </div>
+                <Input
+                  id="grandma-guest-phone"
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  placeholder={tPay.paymentGuestPhonePlaceholder}
+                  value={grandmaBuyerPhoneInput}
+                  onChange={(e) => setGrandmaBuyerPhoneInput(e.target.value)}
+                  className="pay-input-tap min-h-[48px] border-emerald-200 bg-white text-base focus-visible:ring-emerald-500/30"
+                />
+                <p className="text-xs leading-snug text-emerald-900/80">
+                  {tPay.paymentGuestPhoneNote}{" "}
+                  <a
+                    href={`${GRANDMA_PATHS.login}?redirect=${encodeURIComponent(GRANDMA_PATHS.appRoot)}`}
+                    className="font-semibold text-emerald-800 underline underline-offset-2"
+                  >
+                    {tPay.signIn}
+                  </a>
+                </p>
+              </div>
+            ) : null}
+
+            {selectedPayment === "momo" ? (
+              <div className="space-y-3">
+                <div style={{ fontWeight: 700, fontSize: 13 }}>{tPay.payStepMtnTitle}</div>
+                {grandmaMtnUssd ? (
+                  <div>
+                    <span className="text-xs font-bold text-[#166534]">{tPay.payStepMtnDial}</span>
+                    <div style={{ display: "flex", gap: 8, marginTop: 6, alignItems: "stretch" }}>
+                      <code
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          wordBreak: "break-all",
+                          fontSize: 12,
+                          padding: "10px 10px",
+                          background: "var(--pay-soft)",
+                          borderRadius: 10,
+                          border: "1px solid #bbf7d0",
+                          lineHeight: 1.35,
+                        }}
+                      >
+                        {grandmaMtnUssd}
+                      </code>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="shrink-0 self-center border-blue-200 text-xs font-bold text-blue-900 hover:bg-blue-50"
+                        onClick={() => {
+                          void (async () => {
+                            try {
+                              await navigator.clipboard.writeText(grandmaMtnUssd)
+                              setGrandmaUssdCopied(true)
+                              window.setTimeout(() => setGrandmaUssdCopied(false), 2000)
+                            } catch {
+                              window.alert(grandmaMtnUssd)
+                            }
+                          })()
+                        }}
+                      >
+                        {grandmaUssdCopied ? tPay.payStepCopied : tPay.payStepCopy}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <p style={{ fontSize: 12, color: "#b45309", margin: 0 }}>{tPay.payStepMtnNoUssd}</p>
+                )}
+              </div>
+            ) : selectedPayment === "airtel" ? (
+              <div className="space-y-3">
+                <div style={{ fontWeight: 700, fontSize: 13 }}>{tPay.payStepAirtelTitle}</div>
+                {grandmaAirtelUssd ? (
+                  <div>
+                    <span className="text-xs font-bold text-[#166534]">{tPay.payStepAirtelDial}</span>
+                    <div style={{ display: "flex", gap: 8, marginTop: 6, alignItems: "stretch" }}>
+                      <code
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          wordBreak: "break-all",
+                          fontSize: 12,
+                          padding: "10px 10px",
+                          background: "var(--pay-soft)",
+                          borderRadius: 10,
+                          border: "1px solid #bbf7d0",
+                          lineHeight: 1.35,
+                        }}
+                      >
+                        {grandmaAirtelUssd}
+                      </code>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="shrink-0 self-center border-blue-200 text-xs font-bold text-blue-900 hover:bg-blue-50"
+                        onClick={() => {
+                          void (async () => {
+                            try {
+                              await navigator.clipboard.writeText(grandmaAirtelUssd)
+                              setGrandmaUssdCopied(true)
+                              window.setTimeout(() => setGrandmaUssdCopied(false), 2000)
+                            } catch {
+                              window.alert(grandmaAirtelUssd)
+                            }
+                          })()
+                        }}
+                      >
+                        {grandmaUssdCopied ? tPay.payStepCopied : tPay.payStepCopy}
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+                <p style={{ fontSize: 11, color: "var(--muted)", margin: 0, lineHeight: 1.45 }}>{tPay.payStepAirtelHelp}</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div style={{ fontWeight: 700, fontSize: 13 }}>{tPay.payStepCashTitle}</div>
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 10,
+                    cursor: "pointer",
+                    fontSize: 13,
+                    lineHeight: 1.45,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={grandmaCashConfirm}
+                    onChange={(e) => setGrandmaCashConfirm(e.target.checked)}
+                    style={{ marginTop: 3, width: 16, height: 16, flexShrink: 0 }}
+                  />
+                  <span>{tPay.payStepCashConfirm}</span>
+                </label>
+              </div>
+            )}
+
+            <p
+              style={{
+                fontSize: 11,
+                color: "var(--muted)",
+                margin: "14px 0 0",
+                lineHeight: 1.45,
+                borderTop: "1px solid var(--line)",
+                paddingTop: 10,
+              }}
+            >
+              {tPay.payStepCommissionNote}
+            </p>
+          </div>
+        ) : null}
+
         <div className="card breakdown">
           <div className="summary-row">
             <span>{tPay.amountShop}</span>
             <strong id="payShop">{formatRwf(itemsTotal)}</strong>
           </div>
-          <div className="summary-row">
+          <div className="summary-row" style={{ color: "var(--muted)", fontSize: 13 }}>
             <span>{tPay.ihuteFees}</span>
             <strong id="payIhuteFees">{formatRwf(ihuteFees)}</strong>
           </div>
@@ -4280,49 +5648,49 @@ export default function GrandmaPage() {
           </div>
         </div>
 
-        {selectedLogistics ? (
-        <div
-          className="card rider-card"
-          onClick={() => setCourierModalOpen(true)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault()
-              setCourierModalOpen(true)
-            }
-          }}
-          role="button"
-          tabIndex={0}
-          aria-label="View couriers near the shop"
-        >
-          <div className="rider-card-inner">
-            <div className="rider-avatar" aria-hidden>
-              {featuredCourierSafe.avatarEmoji}
-            </div>
-            <div className="rider-body">
-              <div className="rider-name">{featuredCourierSafe.name}</div>
-              <div className="rider-role">{tPay.deliveryPerson}</div>
-              <div className="rider-hobbies">
-                <span>{tPay.hobbies}</span>
-                {featuredCourierSafe.hobbies}
+        {fulfillmentMode === "delivery" ? (
+          <div
+            className="card rider-card"
+            onClick={() => setCourierModalOpen(true)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault()
+                setCourierModalOpen(true)
+              }
+            }}
+            role="button"
+            tabIndex={0}
+            aria-label="View couriers near the shop"
+          >
+            <div className="rider-card-inner">
+              <div className="rider-avatar" aria-hidden>
+                {featuredCourierSafe.avatarEmoji}
               </div>
-              <div className="rider-meta-row">
-                <span className="rider-stars" aria-hidden>
-                  {courierStarGlyphs(featuredCourierSafe.rating)}
-                </span>
-                <span className="rider-reviews">
-                  {featuredCourierSafe.rating.toFixed(1)} · {featuredCourierSafe.reviewCount} {tPay.reviewers}
-                </span>
-                <span className="rider-dist">
-                  {featuredCourierSafe.distanceToShopKm.toFixed(2)} {tPay.kmToShop}
-                </span>
+              <div className="rider-body">
+                <div className="rider-name">{featuredCourierSafe.name}</div>
+                <div className="rider-role">{tPay.deliveryPerson}</div>
+                <div className="rider-hobbies">
+                  <span>{tPay.hobbies}</span>
+                  {featuredCourierSafe.hobbies}
+                </div>
+                <div className="rider-meta-row">
+                  <span className="rider-stars" aria-hidden>
+                    {courierStarGlyphs(featuredCourierSafe.rating)}
+                  </span>
+                  <span className="rider-reviews">
+                    {featuredCourierSafe.rating.toFixed(1)} · {featuredCourierSafe.reviewCount} {tPay.reviewers}
+                  </span>
+                  <span className="rider-dist">
+                    {featuredCourierSafe.distanceToShopKm.toFixed(2)} {tPay.kmToShop}
+                  </span>
+                </div>
               </div>
             </div>
+            <div className="rider-tap-hint">{tPay.tapCouriers}</div>
           </div>
-          <div className="rider-tap-hint">{tPay.tapCouriers}</div>
-        </div>
         ) : null}
 
-        {selectedLogistics && courierModalOpen ? (
+        {fulfillmentMode === "delivery" && courierModalOpen ? (
           <div
             className="courier-modal-backdrop"
             role="presentation"
@@ -4397,62 +5765,53 @@ export default function GrandmaPage() {
             {grandmaOrderSubmitError}
           </div>
         ) : null}
-        {!grandmaBuyerSession?.phone?.trim() ? (
-          <div className="card" style={{ marginBottom: 14, textAlign: "left" }}>
-            <Label htmlFor="grandma-guest-phone" className="text-sm font-bold text-[#17324d]">
-              Phone (optional)
-            </Label>
-            <Input
-              id="grandma-guest-phone"
-              type="tel"
-              inputMode="tel"
-              autoComplete="tel"
-              placeholder="e.g. 0788 123 456 — to link SMS or follow-up"
-              value={grandmaBuyerPhoneInput}
-              onChange={(e) => setGrandmaBuyerPhoneInput(e.target.value)}
-              className="mt-2 border-[#dbe7f3]"
-            />
-            <p className="card note" style={{ marginTop: 10, fontSize: 11, lineHeight: 1.45, color: "var(--muted)" }}>
-              Like guest checkout elsewhere: you can skip this and still complete the order using your track link.{" "}
-              <a
-                href={`${GRANDMA_PATHS.login}?redirect=${encodeURIComponent(GRANDMA_PATHS.appRoot)}`}
-                className="font-semibold text-[#1897e0] underline"
-              >
-                Sign in
-              </a>{" "}
-              to save orders on your account, or add a phone above to tie this purchase to your number.
-            </p>
-          </div>
-        ) : null}
         <button
           type="button"
-          className="primary-btn"
+          className="primary-btn inline-flex min-h-[52px] items-center justify-center gap-2 transition-transform duration-150 active:scale-[0.99]"
           disabled={grandmaOrderSubmitting}
           onClick={() => void submitGrandmaOrder()}
         >
-          {grandmaOrderSubmitting ? "…" : tPay.sendOrder}
+          {grandmaOrderSubmitting ? (
+            <>
+              <Loader2 className="h-5 w-5 shrink-0 animate-spin" aria-hidden />
+              <span>{tPay.payStepProcessing}</span>
+            </>
+          ) : (
+            tPay.sendOrder
+          )}
         </button>
         <p className="card note" style={{ marginTop: 12, fontSize: 12, color: "var(--muted)" }}>
-          After checkout you get an <strong>order id</strong> and a <strong>track link</strong>. No sign-in required to buy — use the link to follow status, or sign in / add phone above to link the sale to you.
+          {tPay.payStepAfterCheckoutHint}
         </p>
       </section>
 
-      <div className="footer">
-        <button className={page === 1 ? "active" : ""} onClick={() => goToPage(1)}>
-          🏠<span>Home</span>
+      <div className={cn("footer", showSupplierDashboardNav && "footer--supplier-6")}>
+        <button type="button" className={page === 1 ? "active" : ""} onClick={() => goToPage(1)}>
+          🏠<span>{settingsUi.footerHome}</span>
         </button>
-        <button className={page === 2 ? "active" : ""} onClick={() => goToPage(2)}>
-          🏬<span>Shops</span>
+        <button type="button" className={page === 2 ? "active" : ""} onClick={() => goToPage(2)}>
+          🏬<span>{settingsUi.footerShops}</span>
         </button>
-        <button className={page === 3 ? "active" : ""} onClick={() => goToPage(3)}>
-          🛍️<span>Items</span>
+        <button type="button" className={page === 3 ? "active" : ""} onClick={() => goToPage(3)}>
+          🛍️<span>{settingsUi.footerItems}</span>
         </button>
-        <button className={page === 4 ? "active" : ""} onClick={() => goToPage(4)}>
-          📦<span>Summary</span>
+        <button type="button" className={page === 4 ? "active" : ""} onClick={() => goToPage(4)}>
+          📦<span>{settingsUi.footerSummary}</span>
         </button>
-        <button className={page === 5 ? "active" : ""} onClick={() => goToPage(5)}>
-          💳<span>Pay</span>
+        <button type="button" className={page === 5 ? "active" : ""} onClick={() => goToPage(5)}>
+          💳<span>{settingsUi.footerPay}</span>
         </button>
+        {showSupplierDashboardNav ? (
+          <button
+            type="button"
+            title={settingsUi.footerDashboard}
+            aria-label={settingsUi.footerDashboard}
+            onClick={() => router.push("/supplier/dashboard")}
+          >
+            <LayoutDashboard className="footer-dash-icon" aria-hidden />
+            <span>{settingsUi.footerDashboardShort}</span>
+          </button>
+        ) : null}
       </div>
 
       <Sheet open={filterSheetOpen} onOpenChange={setFilterSheetOpen}>
@@ -4684,239 +6043,339 @@ export default function GrandmaPage() {
         </SheetContent>
       </Sheet>
 
-      <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
+      <Sheet
+        open={settingsOpen}
+        onOpenChange={(open) => {
+          setSettingsOpen(open)
+          if (!open) setSettingsSellerGuardMsg(null)
+        }}
+      >
         <SheetContent
           side="right"
-          className="flex w-full max-w-[min(100vw,420px)] flex-col gap-0 overflow-y-auto border-l p-0"
+          className="flex h-full max-h-[100dvh] w-full max-w-[min(100vw,420px)] flex-col gap-0 overflow-hidden border-l p-0"
         >
-          <SheetHeader className="border-b border-border px-4 py-4 text-left">
+          <SheetHeader className="shrink-0 border-b border-border px-4 py-4 text-left">
             <SheetTitle>{settingsUi.settings}</SheetTitle>
             <SheetDescription>{settingsUi.settingsSub}</SheetDescription>
             <p className="mt-2 text-xs text-muted-foreground">
               {settingsUi.versionLabel} {GRANDMA_APP_VERSION}
             </p>
           </SheetHeader>
-          <div className="space-y-6 px-4 py-4">
-            <GrandmaRequestStatsPanel
-              open={settingsOpen}
-              labels={{
-                title: settingsUi.requestStatsTitle,
-                none: settingsUi.requestStatsNone,
-                line: settingsUi.requestStatsLine,
-                lastFail: settingsUi.requestStatsLastFail,
-              }}
-            />
-            <div>
-              <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Mode</div>
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                {(["buyer", "seller"] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => {
-                      if (mode === "buyer") {
-                        setAppMode("buyer")
-                        setSellerView("home")
-                        return
-                      }
-                      const u = useAuthStore.getState().user
-                      if (u && userCanAccessSellerSpace(u)) {
-                        setAppMode("seller")
-                        setSellerView("home")
-                        setPage(1)
-                        setSettingsOpen(false)
-                        return
-                      }
-                      setSettingsOpen(false)
-                      router.push(
-                        `${GRANDMA_PATHS.login}?redirect=${encodeURIComponent(GRANDMA_PATHS.appRoot)}`,
-                      )
-                    }}
-                    className={cn(
-                      "rounded-xl border px-3 py-2.5 text-sm font-bold transition-colors",
-                      appMode === mode
-                        ? "border-blue-600 bg-blue-50 text-blue-900"
-                        : "border-border bg-background text-foreground hover:bg-muted/60",
-                    )}
-                  >
-                    {mode === "buyer" ? "Buyer" : "Seller"}
-                  </button>
-                ))}
-              </div>
-            </div>
 
-            {appMode === "buyer" ? (
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+            <div className="space-y-6">
               <div>
-                <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{settingsUi.myOrders}</div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {isAuthenticated ? settingsUi.viewMyOrders : settingsUi.signInForOrders}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSettingsOpen(false)
-                    const target = GRANDMA_PATHS.buyerOrders
-                    if (isAuthenticated) router.push(target)
-                    else
-                      router.push(
-                        `${GRANDMA_PATHS.login}?redirect=${encodeURIComponent(target)}`,
-                      )
-                  }}
-                  className="mt-2 w-full rounded-xl border border-border bg-background px-3 py-2.5 text-left text-sm font-bold hover:bg-muted/60"
-                >
-                  {isAuthenticated ? settingsUi.viewMyOrders : settingsUi.signIn}
-                </button>
+                <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Mode</div>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  {(["buyer", "seller"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => {
+                        if (mode === "buyer") {
+                          setSettingsSellerGuardMsg(null)
+                          writeGrandmaSignupRole("buyer")
+                          setAppMode("buyer")
+                          setSellerView("home")
+                          setPage(1)
+                          try {
+                            localStorage.setItem("grandma:mode", "buyer")
+                          } catch {
+                            /* ignore */
+                          }
+                          return
+                        }
+                        writeGrandmaSignupRole("seller")
+                        const st = useAuthStore.getState()
+                        const u = st.user
+                        if (u && grandmaUserCanUseSellerWorkspace(u)) {
+                          setSettingsSellerGuardMsg(null)
+                          setAppMode("seller")
+                          setPage(1)
+                          setSellerView("home")
+                          try {
+                            localStorage.setItem("grandma:mode", "seller")
+                          } catch {
+                            /* ignore */
+                          }
+                          return
+                        }
+                        setSettingsSellerGuardMsg(settingsUi.settingsSellerTapDenied)
+                      }}
+                      className={cn(
+                        "rounded-xl border px-3 py-2.5 text-sm font-bold transition-colors",
+                        appMode === mode
+                          ? "border-blue-600 bg-blue-50 text-blue-900"
+                          : "border-border bg-background text-foreground hover:bg-muted/60",
+                      )}
+                    >
+                      {mode === "buyer" ? "Buyer" : "Seller"}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">{settingsUi.settingsModeHint}</p>
+                {settingsSellerGuardMsg ? (
+                  <p className="mt-2 text-sm font-medium text-red-800">{settingsSellerGuardMsg}</p>
+                ) : null}
               </div>
-            ) : null}
 
-            <div>
-              <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{settingsUi.language}</div>
-              <div className="mt-2 flex gap-2">
-                {(["en", "rw", "fr"] as const).map((lang) => (
-                  <button
-                    key={lang}
-                    type="button"
-                    onClick={() => setLanguage(lang)}
-                    className={cn(
-                      "min-w-0 flex-1 rounded-xl border px-2 py-2.5 text-xs font-bold transition-colors",
-                      language === lang
-                        ? "border-blue-600 bg-blue-50 text-blue-900"
-                        : "border-border bg-background text-foreground hover:bg-muted/60",
-                    )}
-                  >
-                    {lang === "en" ? settingsUi.langEn : lang === "rw" ? settingsUi.langRw : settingsUi.langFr}
-                  </button>
-                ))}
-              </div>
-            </div>
+              {appMode === "buyer" ? (
+                <div className="space-y-6 rounded-xl border border-border bg-muted/20 p-3">
+                  <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    {settingsUi.settingsFormBuyerTitle}
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{settingsUi.myOrders}</div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {isAuthenticated ? settingsUi.viewMyOrders : settingsUi.signInForOrders}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSettingsOpen(false)
+                        const target = GRANDMA_PATHS.buyerOrders
+                        if (isAuthenticated) router.push(target)
+                        else
+                          router.push(
+                            `${GRANDMA_PATHS.login}?redirect=${encodeURIComponent(target)}`,
+                          )
+                      }}
+                      className="mt-2 w-full rounded-xl border border-border bg-background px-3 py-2.5 text-left text-sm font-bold hover:bg-muted/60"
+                    >
+                      {isAuthenticated ? settingsUi.viewMyOrders : settingsUi.signIn}
+                    </button>
+                  </div>
 
-            <div>
-              <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{settingsUi.setLocation}</div>
-              <p className="mt-1 text-sm text-muted-foreground">
-                <span className="font-semibold text-foreground">{settingsUi.locationCurrent}:</span>{" "}
-                {locationData ? displayUserLocationEn : settingsUi.noLocationYet}
-              </p>
-              <button
-                type="button"
-                onClick={() => setLocationDialogOpen(true)}
-                className="mt-2 w-full rounded-xl border border-border bg-background px-3 py-2.5 text-left text-sm font-bold hover:bg-muted/60"
-              >
-                {settingsUi.setLocation}
-              </button>
-            </div>
-
-            <div>
-              <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{settingsUi.preferredShops}</div>
-              <p className="mt-1 text-xs text-muted-foreground">{settingsUi.preferredHint}</p>
-              <div className="mt-2 max-h-52 space-y-1 overflow-y-auto rounded-xl border border-border p-2">
-                <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 hover:bg-muted/50">
-                  <input
-                    type="checkbox"
-                    checked={preferredShopIds.includes(PREFERRED_ALL_ID)}
-                    onChange={() => togglePreferredShop(PREFERRED_ALL_ID)}
-                    className="h-4 w-4 shrink-0 accent-blue-600"
-                  />
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-white text-sm font-extrabold">
-                    ALL
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-sm font-semibold">All shops</span>
-                </label>
-                <div className="space-y-4">
-                  {allShopsLoading ? (
-                    <div className="flex items-center justify-center py-4">
-                      <div className="text-sm text-muted-foreground">Loading shops...</div>
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{settingsUi.language}</div>
+                    <div className="mt-2 flex gap-2">
+                      {(["en", "rw", "fr"] as const).map((lang) => (
+                        <button
+                          key={lang}
+                          type="button"
+                          onClick={() => setLanguage(lang)}
+                          className={cn(
+                            "min-w-0 flex-1 rounded-xl border px-2 py-2.5 text-xs font-bold transition-colors",
+                            language === lang
+                              ? "border-blue-600 bg-blue-50 text-blue-900"
+                              : "border-border bg-background text-foreground hover:bg-muted/60",
+                          )}
+                        >
+                          {lang === "en" ? settingsUi.langEn : lang === "rw" ? settingsUi.langRw : settingsUi.langFr}
+                        </button>
+                      ))}
                     </div>
-                  ) : allShopsError ? (
-                    <div className="flex items-center justify-center py-4">
-                      <div className="text-sm text-red-500">Error loading shops</div>
-                    </div>
-                  ) : allAvailableShops.length > 0 ? (
-                    allAvailableShops.map((shop) => (
-                      <label
-                        key={shop.id}
-                        className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-muted/50"
-                      >
+                  </div>
+
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{settingsUi.setLocation}</div>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      <span className="font-semibold text-foreground">{settingsUi.locationCurrent}:</span>{" "}
+                      {locationData ? displayUserLocationEn : settingsUi.noLocationYet}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setLocationDialogOpen(true)}
+                      className="mt-2 w-full rounded-xl border border-border bg-background px-3 py-2.5 text-left text-sm font-bold hover:bg-muted/60"
+                    >
+                      {settingsUi.setLocation}
+                    </button>
+                  </div>
+
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{settingsUi.preferredShops}</div>
+                    <p className="mt-1 text-xs text-muted-foreground">{settingsUi.preferredHint}</p>
+                    <div className="mt-2 max-h-52 space-y-1 overflow-y-auto rounded-xl border border-border bg-background p-2">
+                      <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 hover:bg-muted/50">
                         <input
                           type="checkbox"
-                          data-shop-id={shop.id}
-                          checked={isPreferredGrandmaShop(shop.id, preferredShopIds)}
-                          onChange={() => togglePreferredShop(shop.id)}
+                          checked={preferredShopIds.includes(PREFERRED_ALL_ID)}
+                          onChange={() => togglePreferredShop(PREFERRED_ALL_ID)}
                           className="h-4 w-4 shrink-0 accent-blue-600"
                         />
-                        <img src={shop.logoSrc} alt="" className="h-8 w-8 shrink-0 rounded-md border border-border bg-white object-contain" />
-                        <span className="min-w-0 flex-1 truncate text-sm font-semibold">{shop.name}</span>
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-white text-sm font-extrabold">
+                          ALL
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-sm font-semibold">All shops</span>
                       </label>
-                    ))
-                  ) : (
-                    <div className="flex items-center justify-center py-4">
-                      <div className="text-sm text-muted-foreground">No shops available</div>
+                      <div className="space-y-4">
+                        {allShopsLoading ? (
+                          <div className="flex items-center justify-center py-4">
+                            <div className="text-sm text-muted-foreground">Loading shops...</div>
+                          </div>
+                        ) : allShopsError ? (
+                          <div className="flex items-center justify-center py-4">
+                            <div className="text-sm text-red-500">Error loading shops</div>
+                          </div>
+                        ) : allAvailableShops.length > 0 ? (
+                          allAvailableShops.map((shop) => (
+                            <label
+                              key={shop.id}
+                              className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-muted/50"
+                            >
+                              <input
+                                type="checkbox"
+                                data-shop-id={shop.id}
+                                checked={isPreferredGrandmaShop(shop.id, preferredShopIds)}
+                                onChange={() => togglePreferredShop(shop.id)}
+                                className="h-4 w-4 shrink-0 accent-blue-600"
+                              />
+                              <img src={shop.logoSrc} alt="" className="h-8 w-8 shrink-0 rounded-md border border-border bg-white object-contain" />
+                              <span className="min-w-0 flex-1 truncate text-sm font-semibold">{shop.name}</span>
+                            </label>
+                          ))
+                        ) : (
+                          <div className="flex items-center justify-center py-4">
+                            <div className="text-sm text-muted-foreground">No shops available</div>
+                          </div>
+                        )}
+                      </div>
                     </div>
+                  </div>
+
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{settingsUi.paymentMode}</div>
+                    <div className="mt-2 space-y-2">
+                      {PAYMENTS.map((mode) => (
+                        <button
+                          key={mode.id}
+                          type="button"
+                          onClick={() => setSelectedPayment(mode.id)}
+                          className={cn(
+                            "flex w-full items-center justify-between gap-2 rounded-xl border px-3 py-2.5 text-left text-sm font-bold transition-colors",
+                            selectedPayment === mode.id
+                              ? "border-blue-600 bg-blue-50 text-blue-950"
+                              : "border-border bg-background hover:bg-muted/60",
+                          )}
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-white">
+                              <img src={mode.iconSrc} alt="" className="h-full w-full object-contain" />
+                            </span>
+                            <span className="min-w-0 leading-tight">{mode.label}</span>
+                          </span>
+                          <span
+                            className={cn(
+                              "h-4 w-4 shrink-0 rounded-full border-2",
+                              selectedPayment === mode.id ? "border-blue-600 bg-blue-600" : "border-muted-foreground",
+                            )}
+                            aria-hidden
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4 rounded-xl border border-border bg-muted/20 p-3">
+                  <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    {settingsUi.settingsFormSellerTitle}
+                  </div>
+                  {grandmaUserCanUseSellerWorkspace(grandmaBuyerSession) ? (
+                    <>
+                      <p className="text-sm text-muted-foreground">{settingsUi.settingsSellerIntro}</p>
+                      <div className="text-base font-bold text-foreground">{sellerShopLabel || "—"}</div>
+                      <div>
+                        <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                          {settingsUi.language}
+                        </div>
+                        <div className="mt-2 flex gap-2">
+                          {(["en", "rw", "fr"] as const).map((lang) => (
+                            <button
+                              key={lang}
+                              type="button"
+                              onClick={() => setLanguage(lang)}
+                              className={cn(
+                                "min-w-0 flex-1 rounded-xl border px-2 py-2.5 text-xs font-bold transition-colors",
+                                language === lang
+                                  ? "border-blue-600 bg-blue-50 text-blue-900"
+                                  : "border-border bg-background text-foreground hover:bg-muted/60",
+                              )}
+                            >
+                              {lang === "en"
+                                ? settingsUi.langEn
+                                : lang === "rw"
+                                  ? settingsUi.langRw
+                                  : settingsUi.langFr}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="grid gap-2">
+                        <button
+                          type="button"
+                          className="rounded-xl border border-border bg-background px-3 py-2.5 text-left text-sm font-bold hover:bg-muted/60"
+                          onClick={() => {
+                            setSellerView("home")
+                            setSettingsOpen(false)
+                          }}
+                        >
+                          {settingsUi.settingsOpenSellerHome}
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-xl border border-border bg-background px-3 py-2.5 text-left text-sm font-bold hover:bg-muted/60"
+                          onClick={() => {
+                            setSellerView("orders")
+                            setSettingsOpen(false)
+                          }}
+                        >
+                          {settingsUi.settingsOpenSellerOrders}
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-xl border border-border bg-background px-3 py-2.5 text-left text-sm font-bold hover:bg-muted/60"
+                          onClick={() => {
+                            setSellerView("items")
+                            setSettingsOpen(false)
+                          }}
+                        >
+                          {settingsUi.settingsOpenSellerItems}
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">{settingsUi.settingsSellerNeedLogin}</p>
                   )}
                 </div>
-              </div>
-            </div>
-
-            <div>
-              <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{settingsUi.paymentMode}</div>
-              <div className="mt-2 space-y-2">
-                {PAYMENTS.map((mode) => (
-                  <button
-                    key={mode.id}
-                    type="button"
-                    onClick={() => setSelectedPayment(mode.id)}
-                    className={cn(
-                      "flex w-full items-center justify-between gap-2 rounded-xl border px-3 py-2.5 text-left text-sm font-bold transition-colors",
-                      selectedPayment === mode.id
-                        ? "border-blue-600 bg-blue-50 text-blue-950"
-                        : "border-border bg-background hover:bg-muted/60",
-                    )}
-                  >
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-white">
-                        <img src={mode.iconSrc} alt="" className="h-full w-full object-contain" />
-                      </span>
-                      <span className="min-w-0 leading-tight">{mode.label}</span>
-                    </span>
-                    <span
-                      className={cn(
-                        "h-4 w-4 shrink-0 rounded-full border-2",
-                        selectedPayment === mode.id ? "border-blue-600 bg-blue-600" : "border-muted-foreground",
-                      )}
-                      aria-hidden
-                    />
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="border-t border-border pt-4">
-              {isAuthenticated ? (
-                <button
-                  type="button"
-                  className="w-full rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-center text-sm font-bold text-red-900 transition-colors hover:bg-red-100"
-                  onClick={() => {
-                    setSettingsOpen(false)
-                    logout()
-                    router.push(GRANDMA_PATHS.login)
-                  }}
-                >
-                  {settingsUi.logOut}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="w-full rounded-xl border border-blue-200 bg-blue-50 px-3 py-3 text-center text-sm font-bold text-blue-900 transition-colors hover:bg-blue-100"
-                  onClick={() => {
-                    setSettingsOpen(false)
-                    router.push(
-                      `${GRANDMA_PATHS.login}?redirect=${encodeURIComponent(GRANDMA_PATHS.appRoot)}`,
-                    )
-                  }}
-                >
-                  {settingsUi.signIn}
-                </button>
               )}
             </div>
+          </div>
+
+          <div className="shrink-0 space-y-2 border-t border-border bg-background px-4 py-3">
+            <button
+              type="button"
+              className="w-full rounded-xl bg-[#1a4d8c] px-4 py-3 text-sm font-bold text-white shadow-sm"
+              onClick={() => setSettingsOpen(false)}
+            >
+              {settingsUi.settingsApplyClose}
+            </button>
+            {isAuthenticated ? (
+              <button
+                type="button"
+                className="w-full rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-center text-sm font-bold text-red-900 transition-colors hover:bg-red-100"
+                onClick={() => {
+                  setSettingsOpen(false)
+                  logout()
+                  router.push(GRANDMA_PATHS.login)
+                }}
+              >
+                {settingsUi.logOut}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="w-full rounded-xl border border-blue-200 bg-blue-50 px-3 py-3 text-center text-sm font-bold text-blue-900 transition-colors hover:bg-blue-100"
+                onClick={() => {
+                  setSettingsOpen(false)
+                  router.push(
+                    `${GRANDMA_PATHS.login}?redirect=${encodeURIComponent(GRANDMA_PATHS.appRoot)}`,
+                  )
+                }}
+              >
+                {settingsUi.signIn}
+              </button>
+            )}
           </div>
         </SheetContent>
       </Sheet>

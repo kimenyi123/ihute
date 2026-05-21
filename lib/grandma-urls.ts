@@ -21,3 +21,25 @@ export const GRANDMA_OUTBOUND = {
   /** Quick MoMo / USSD flow (Umuriro boarding). */
   umuriro: "/register/umuriro",
 } as const
+
+/** Drives `/grandma/login` “Register” link: last MODE choice in settings (buyer vs seller intent). */
+export const GRANDMA_SIGNUP_ROLE_LS_KEY = "grandma:signupRole" as const
+export type GrandmaSignupRole = "buyer" | "seller"
+
+export function readGrandmaSignupRole(): GrandmaSignupRole {
+  if (typeof window === "undefined") return "buyer"
+  try {
+    return localStorage.getItem(GRANDMA_SIGNUP_ROLE_LS_KEY) === "seller" ? "seller" : "buyer"
+  } catch {
+    return "buyer"
+  }
+}
+
+export function writeGrandmaSignupRole(role: GrandmaSignupRole): void {
+  if (typeof window === "undefined") return
+  try {
+    localStorage.setItem(GRANDMA_SIGNUP_ROLE_LS_KEY, role)
+  } catch {
+    /* ignore */
+  }
+}
