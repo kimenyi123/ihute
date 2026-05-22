@@ -559,7 +559,31 @@ export function UmuriroBoarding() {
   useEffect(() => {
     setSmsPayCheck(null)
     setSmsMatchResult(null)
+    if (payChannel !== "momo") setMomoSmsPaste("")
   }, [payChannel, totalRwf])
+
+  useEffect(() => {
+    if (payChannel !== "momo") return
+    const text = momoSmsPaste.trim()
+    if (text.length < 8) {
+      if (!text) {
+        setSmsPayCheck(null)
+        setSmsMatchResult(null)
+      }
+      return
+    }
+    const timer = window.setTimeout(() => {
+      const r = matchMoMoSmsToOrderTotal(text, totalRwf)
+      setSmsMatchResult(r)
+      if (!r.candidates.length) setSmsPayCheck("no_amount")
+      else if (r.matched) setSmsPayCheck("paid")
+      else setSmsPayCheck("mismatch")
+    }, 450)
+    return () => window.clearTimeout(timer)
+  }, [momoSmsPaste, totalRwf, payChannel])
+
+  const umuriroCanSaveOrder =
+    payChannel === "cash" || (payChannel === "momo" && smsPayCheck === "paid")
 
   const sectorSlug =
     mode === "advanced" && shopCategory ? shopCategoryToSectorSlug(shopCategory) : ""
@@ -574,6 +598,10 @@ export function UmuriroBoarding() {
       return
     }
     if (!validate(mode)) return
+    if (payChannel === "momo" && smsPayCheck !== "paid") {
+      setErr(pickLang(UMURIRO_UI.saveOrderErrMomoSms, lang))
+      return
+    }
 
     setLoading(true)
     try {
@@ -640,16 +668,15 @@ export function UmuriroBoarding() {
       persistLocalShop()
 
       if (mode === "quick") {
-        const ridStr = typeof json.rid === "string" ? json.rid : ""
+        const ridStr = typeof json.rid === "string" ? json.rid.trim() : ""
         const persisted = json.persisted === true
-        const base = pickLang(UMURIRO_UI.orderSentQuick, lang)
-        const extra =
-          persisted && ridStr
-            ? ` · ${pickLang(UMURIRO_UI.savedDraftStored, lang).replace("{rid}", ridStr)}`
-            : !persisted
-              ? ` — ${pickLang(UMURIRO_UI.savedEchoShort, lang)}`
-              : ""
-        setDoneMsg(`${base}${extra}`)
+        if (persisted && ridStr) {
+          setDoneMsg(pickLang(UMURIRO_UI.orderSentQuickWithRef, lang).replace("{rid}", ridStr))
+        } else if (persisted) {
+          setDoneMsg(pickLang(UMURIRO_UI.orderSentQuick, lang))
+        } else {
+          setDoneMsg(pickLang(UMURIRO_UI.orderSentQuickPendingShop, lang))
+        }
         setCartLines([])
       } else {
         setDoneMsg(pickLang(UMURIRO_UI.orderSentAdvanced, lang))
@@ -1262,21 +1289,27 @@ export function UmuriroBoarding() {
                 )}
               </div>
 
-              <Button
-                type="button"
-                disabled={loading}
-                onClick={submit}
-                className="min-w-0 w-full max-w-full bg-gradient-to-r from-[#1897e0] to-[#127fc0] text-white shadow-[0_10px_20px_rgba(24,151,224,.22)] hover:opacity-95"
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    {pickLang(SELLER_UI.saving, lang)}
-                  </>
-                ) : (
-                  pickLang(UMURIRO_UI.saveOrder, lang)
-                )}
-              </Button>
+              {umuriroCanSaveOrder ? (
+                <Button
+                  type="button"
+                  disabled={loading}
+                  onClick={submit}
+                  className="min-w-0 w-full max-w-full bg-gradient-to-r from-[#1897e0] to-[#127fc0] text-white shadow-[0_10px_20px_rgba(24,151,224,.22)] hover:opacity-95"
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      {pickLang(SELLER_UI.saving, lang)}
+                    </>
+                  ) : (
+                    pickLang(UMURIRO_UI.saveOrder, lang)
+                  )}
+                </Button>
+              ) : payChannel === "momo" ? (
+                <p className="rounded-lg border border-[#dbe7f3] bg-[#f7fbff] px-3 py-3 text-center text-sm leading-relaxed text-[#6f8399]">
+                  {pickLang(UMURIRO_UI.saveOrderLocked, lang)}
+                </p>
+              ) : null}
             </CardContent>
           </Card>
         </div>

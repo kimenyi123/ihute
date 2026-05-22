@@ -54,8 +54,14 @@ async function forward(req: NextRequest) {
   const incoming = new URL(req.url)
   const sectorStatsParam = incoming.searchParams.get("sectorStats")
   const debugSql = isDebugSql(incoming.searchParams)
+  const supplierProductsParamEarly = incoming.searchParams.get("supplierProducts")?.trim() || ""
+  const limitN = Number(incoming.searchParams.get("limit"))
   /** Sector totals (`shops` / `items`) must track stock syncs; do not serve a 5‑min cached snapshot here. */
-  const skipSuggestionsCache = Boolean(sectorStatsParam?.trim()) || debugSql
+  /** Full-shop catalog (Grandma page 3): bypass stale Redis snapshots capped at old limits. */
+  const skipSuggestionsCache =
+    Boolean(sectorStatsParam?.trim()) ||
+    debugSql ||
+    (Boolean(supplierProductsParamEarly) && Number.isFinite(limitN) && limitN >= 1000)
   const target = new URL(getFetchSuggestionsUrl())
 
   // Copy query params. Backend must always search Redis first, then DB (see docs/backend-redis-search.md).
@@ -73,12 +79,13 @@ async function forward(req: NextRequest) {
       const globalSearchQ = incoming.searchParams.get("globalSearch")?.trim()
       // Drop expired lots first so dedupe never picks an expired row as representative when a valid batch exists.
       stripExpiredFromFetchSuggestionsBody(parsed)
-      if (
-        globalSearchQ &&
+      // Full-shop catalog (`supplierProducts` only): keep every stock line — do not collapse lots to one card.
+      const dedupeProducts =
+        Boolean(globalSearchQ) &&
         Array.isArray(parsed.products) &&
         parsed.products.length > 1
-      ) {
-        parsed.products = dedupeSearchProductsByItemCodeAndSellingPrice(parsed.products)
+      if (dedupeProducts && parsed.products) {
+        parsed.products = dedupeSearchProductsByItemCodeAndSellingPrice(parsed.products) as typeof parsed.products
       }
       enrichFetchSuggestionsProducts(parsed)
       return new Response(JSON.stringify(parsed), {
@@ -210,7 +217,7 @@ async function forward(req: NextRequest) {
       })
     }
 
-    const supplierProductsParam = incoming.searchParams.get("supplierProducts") || ""
+    const supplierProductsParam = incoming.searchParams.get("supplierProducts")?.trim() || ""
     if (Array.isArray(parsed)) {
       console.log(
         "[fetchSuggestions] Data source: array payload | rows:",
@@ -267,7 +274,7 @@ async function forward(req: NextRequest) {
     // Remove strictly expired lots before dedupe so merged rows reflect sellable batches only (same idea Kaos validateStock should use).
     stripExpiredFromFetchSuggestionsBody(parsed ?? {})
 
-    // Keyword search: collapse same supplier + item code + selling price (multiple lots → one card).
+    // Collapse duplicate lots for keyword search only — not for `supplierProducts` shop catalog (Grandma page 3).
     const globalSearchQ = incoming.searchParams.get("globalSearch")?.trim()
     if (
       globalSearchQ &&
@@ -282,7 +289,8 @@ async function forward(req: NextRequest) {
           "[fetchSuggestions] Deduped products (code + price per supplier):",
           before,
           "→",
-          parsed.products.length
+          parsed.products.length,
+          "| globalSearch"
         )
       }
     }

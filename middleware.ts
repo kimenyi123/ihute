@@ -19,8 +19,17 @@ export function middleware(req: NextRequest) {
         return redirectParam.startsWith("/grandma")
       }
     })()
-    const grandmaReferer = referer.includes("/grandma")
-    if (grandmaHost || grandmaRedirect || grandmaReferer) {
+    const adminRedirect = (() => {
+      if (!redirectParam) return false
+      try {
+        const decoded = decodeURIComponent(redirectParam)
+        return decoded.startsWith("/admin")
+      } catch {
+        return redirectParam.startsWith("/admin")
+      }
+    })()
+    const grandmaReferer = referer.includes("/grandma") && !adminRedirect
+    if (!adminRedirect && (grandmaHost || grandmaRedirect || grandmaReferer)) {
       const url = req.nextUrl.clone()
       url.pathname = "/grandma/login"
       return NextResponse.redirect(url, 307)

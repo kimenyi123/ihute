@@ -2,6 +2,7 @@
 "use client"
 
 import { create } from "zustand"
+import { orderIdKey } from "@/lib/order-id"
 
 export type OrderItem = {
   id: string
@@ -80,7 +81,8 @@ export const useOrdersStore = create<OrdersState>()((set, get) => ({
 
   upsertOrder: (o) =>
     set((s) => {
-      const i = s.orders.findIndex((x) => x.id === o.id)
+      const key = orderIdKey(o.id)
+      const i = s.orders.findIndex((x) => orderIdKey(x.id) === key)
       if (i === -1) return { orders: [o, ...s.orders] }
       const next = [...s.orders]
       next[i] = { ...next[i], ...o }

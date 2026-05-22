@@ -1,25 +1,30 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { useAuthStore } from '@/lib/auth-store'
+import { isAdminUser } from '@/lib/auth-login-client'
 
 interface AdminGuardProps {
     children: React.ReactNode
 }
 
 /**
- * AdminGuard - Protects admin routes from unauthorized access
+ * AdminGuard - Protects /admin/* and /admin_grandma/*
  *
- * - Waits for Zustand persist hydration (same pattern as supplier guarded pages)
- * - Redirects to /login if not authenticated or session expired
- * - Redirects to / if user is not admin
- * - Renders children only when an authenticated admin session is confirmed (no flash of dashboard)
+ * Requires Java account with TYPE/role ADMIN (see isAdminUser).
  */
 export function AdminGuard({ children }: AdminGuardProps) {
     const router = useRouter()
-    const { user, isAuthenticated, checkSession, loginTime, sessionTimeout } = useAuthStore()
+    const pathname = usePathname()
+    const { user, isAuthenticated, checkSession, loginTime, lastActivityAt, sessionTimeout } =
+        useAuthStore()
     const [hydrated, setHydrated] = useState(false)
+    const [denyReason, setDenyReason] = useState<'session' | 'not_admin' | null>(null)
+
+    const adminTarget =
+        pathname?.startsWith('/admin') ? pathname : '/admin/dashboard'
 
     useEffect(() => {
         const setNow = () => setHydrated(true)
@@ -30,38 +35,61 @@ export function AdminGuard({ children }: AdminGuardProps) {
         }
     }, [])
 
+    const sessionAnchor = lastActivityAt ?? loginTime
     const sessionFresh =
-        loginTime != null && Date.now() - loginTime <= sessionTimeout
+        sessionAnchor != null && Date.now() - sessionAnchor <= sessionTimeout
 
-    const allowed =
-        hydrated &&
-        isAuthenticated &&
-        user?.role === 'admin' &&
-        sessionFresh
+    const isAdmin = isAdminUser(user)
+
+    const allowed = hydrated && isAuthenticated && isAdmin && sessionFresh
 
     useEffect(() => {
-        if (!hydrated) {
-            return
-        }
+        if (!hydrated) return
 
+        setDenyReason(null)
         const sessionValid = checkSession()
 
         if (!sessionValid || !isAuthenticated) {
-            router.replace('/login')
+            setDenyReason('session')
+            router.replace(
+                '/login?redirect=' + encodeURIComponent(adminTarget),
+            )
             return
         }
 
-        if (user?.role !== 'admin') {
+        if (!isAdminUser(user)) {
+            setDenyReason('not_admin')
             router.replace('/')
         }
-    }, [hydrated, isAuthenticated, user?.role, checkSession, router])
+    }, [hydrated, isAuthenticated, user, checkSession, router, adminTarget])
 
     if (!hydrated || !allowed) {
+        if (denyReason === 'not_admin') {
+            return (
+                <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
+                    <div className="max-w-md rounded-xl border border-amber-200 bg-white p-6 text-center shadow-sm">
+                        <p className="text-sm font-semibold text-gray-900">Admin access only</p>
+                        <p className="mt-2 text-sm text-gray-600">
+                            This account is not an admin on the server (needs{' '}
+                            <code className="rounded bg-gray-100 px-1">TYPE = ADMIN</code> in Java). Sign in with
+                            your admin email or phone linked to an admin account.
+                        </p>
+                        <Link
+                            href="/login?redirect=%2Fadmin%2Fdashboard"
+                            className="mt-4 inline-block text-sm font-medium text-blue-600 hover:underline"
+                        >
+                            Sign in as admin
+                        </Link>
+                    </div>
+                </div>
+            )
+        }
+
         return (
-            <div className="flex items-center justify-center min-h-screen bg-gray-50">
+            <div className="flex min-h-screen items-center justify-center bg-gray-50">
                 <div className="text-center">
-                    <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-600 mx-auto"></div>
-                    <p className="mt-4 text-sm text-gray-600">Loading...</p>
+                    <div className="mx-auto h-16 w-16 animate-spin rounded-full border-b-4 border-blue-600"></div>
+                    <p className="mt-4 text-sm text-gray-600">Loading admin…</p>
                 </div>
             </div>
         )

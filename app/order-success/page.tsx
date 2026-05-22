@@ -18,6 +18,7 @@ import { formatPaymentMethod } from "@/lib/payment-utils"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { RatingModal } from "@/components/RatingModal"
 import { useTableCommandStore } from "@/lib/table-command-store"
+import { GRANDMA_PATHS } from "@/lib/grandma-urls"
 
 function normalizePhone(raw?: string | null): string {
   const v = (raw || "").replace(/\s|-/g, "")
@@ -399,20 +400,33 @@ function OrderSuccessPageInner() {
           )}
 
           {/* Action Buttons */}
-          <div className="flex gap-3 pt-2">
-            <Button
-              variant="secondary"
-              className="flex-1 bg-white text-slate-900 hover:bg-white/90"
-              onClick={() => router.push(homeHref)}
-            >
-              {fromGrandma ? "Back to Grandma" : "Continue shopping"}
-            </Button>
-            <Button className="flex-1 bg-white text-[#0369a1] hover:bg-white/90" asChild>
-              <Link href={trackPath} className="inline-flex items-center justify-center gap-2">
-                Track order
-                <ArrowRight className="h-4 w-4 shrink-0" aria-hidden />
-              </Link>
-            </Button>
+          <div className="flex flex-col gap-3 pt-2">
+            {fromGrandma && orderId ? (
+              <Button className="w-full bg-white text-[#0369a1] hover:bg-white/90" asChild>
+                <Link
+                  href={`${GRANDMA_PATHS.buyerOrders}?orderId=${encodeURIComponent(orderId)}`}
+                  className="inline-flex items-center justify-center gap-2"
+                >
+                  View in my orders
+                  <ArrowRight className="h-4 w-4 shrink-0" aria-hidden />
+                </Link>
+              </Button>
+            ) : null}
+            <div className="flex gap-3">
+              <Button
+                variant="secondary"
+                className="flex-1 bg-white text-slate-900 hover:bg-white/90"
+                onClick={() => router.push(homeHref)}
+              >
+                {fromGrandma ? "Back to Grandma" : "Continue shopping"}
+              </Button>
+              <Button className="flex-1 bg-white text-[#0369a1] hover:bg-white/90" asChild>
+                <Link href={trackPath} className="inline-flex items-center justify-center gap-2">
+                  Track order
+                  <ArrowRight className="h-4 w-4 shrink-0" aria-hidden />
+                </Link>
+              </Button>
+            </div>
           </div>
       </main>
 

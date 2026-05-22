@@ -245,20 +245,17 @@ export const UMURIRO_UI = {
     rw: "Byabitswe. Hamagara kode kuri telefoni.",
     fr: "Enregistré. Composez le code pour payer.",
   },
-  /** Shown when ONBOARDING_MYSQL_* is set and INSERT succeeded — data is in shop_onboarding_draft, not account_seller. */
+  /** Appended when server saved the draft (dev: shop_onboarding_draft). */
   savedDraftStored: {
-    en: "Stored in MySQL table shop_onboarding_draft (request id: {rid}).",
-    rw: "Byabitswe muri MySQL (shop_onboarding_draft, id: {rid}).",
-    fr: "Enregistré dans MySQL (shop_onboarding_draft, id : {rid}).",
+    en: "Reference: {rid}.",
+    rw: "Nimero y’icyemezo: {rid}.",
+    fr: "Référence : {rid}.",
   },
-  /** Shown when MySQL env is missing or INSERT failed — not a CORS issue; configure Node → MySQL. */
+  /** Dev-only hint when draft storage is unavailable (not shown to buyers in Quick Shop success). */
   savedEchoOnly: {
-    en:
-      "Not saved to MySQL yet. Set ONBOARDING_MYSQL_HOST, USER, PASSWORD, DATABASE in .env.local, run sql/shop_onboarding_draft.sql, restart Next. Umuriro writes drafts only (shop_onboarding_draft), not account_seller.",
-    rw:
-      "Ntibitswe muri MySQL. Shyiraho ONBOARDING_MYSQL_* muri .env.local, koresha sql/shop_onboarding_draft.sql, ongera utangire Next. Umuriro ibika muri shop_onboarding_draft, atari account_seller.",
-    fr:
-      "Pas encore enregistré en MySQL. Définissez ONBOARDING_MYSQL_* dans .env.local, exécutez sql/shop_onboarding_draft.sql, redémarrez Next. Umuriro écrit les brouillons (shop_onboarding_draft), pas account_seller.",
+    en: "Order received on this device. The shop will confirm when the system is connected.",
+    rw: "Twakiriye komande. Iduka rizasubira vuba.",
+    fr: "Commande reçue. Le magasin confirmera dès que possible.",
   },
   loginRequired: {
     en: "Sign in to save shops to your account.",
@@ -270,9 +267,19 @@ export const UMURIRO_UI = {
   modeAdvanced: { en: "Advanced", rw: "Buruzuye", fr: "Complet" },
   saveOrder: { en: "Save order", rw: "Bika komande", fr: "Enregistrer la commande" },
   orderSentQuick: {
-    en: "Order sent. We received your request — complete payment on your phone when ready.",
-    rw: "Komande yoherejwe. Twakiriye — ishure kuri telefoni iyo ubasha.",
-    fr: "Commande envoyée. Paiement MoMo sur votre téléphone quand vous voulez.",
+    en: "Order sent successfully! Pay on your phone with the MoMo code when you are ready.",
+    rw: "Komande yoherejwe neza! Ishyura kuri telefoni ukoresheje kode ya MoMo iyo waba witeguye.",
+    fr: "Commande envoyée ! Payez sur votre téléphone avec le code MoMo quand vous êtes prêt.",
+  },
+  orderSentQuickWithRef: {
+    en: "Order sent successfully! Reference {rid}. Pay on your phone with MoMo when ready.",
+    rw: "Komande yoherejwe neza! Nimero {rid}. Ishyura kuri telefoni ukoresheje MoMo iyo waba witeguye.",
+    fr: "Commande envoyée ! Référence {rid}. Payez par MoMo sur votre téléphone quand vous voulez.",
+  },
+  orderSentQuickPendingShop: {
+    en: "Order sent! We received your items — the shop will confirm shortly.",
+    rw: "Komande yoherejwe! Twakiriye ibicuruzwa byawe — iduka rizasubira vuba.",
+    fr: "Commande envoyée ! Nous avons reçu vos articles — le magasin confirmera bientôt.",
   },
   orderSentAdvanced: {
     en: "Order saved. Track it under My orders.",
@@ -293,9 +300,9 @@ export const UMURIRO_UI = {
   },
   createBuyer: { en: "Create buyer account", rw: "Kora konti y'umuguzi", fr: "Créer un compte acheteur" },
   savedEchoShort: {
-    en: "Draft not in MySQL (set ONBOARDING_MYSQL_*).",
-    rw: "Ntago byabitswe muri MySQL (shyiraho ONBOARDING_MYSQL_*).",
-    fr: "Brouillon absent de MySQL (ONBOARDING_MYSQL_*).",
+    en: "The shop will confirm your order shortly.",
+    rw: "Iduka rizasubira vuba rihite ibyo wateguye.",
+    fr: "Le magasin confirmera votre commande sous peu.",
   },
   payHowTitle: {
     en: "How will you pay?",
@@ -334,6 +341,16 @@ export const UMURIRO_UI = {
     en: "Cash at shop — no MoMo SMS check. Tell the seller when you pay.",
     rw: "Amafaranga ku iduka — nta SMS ya MoMo. Menyesha mucuruzi.",
     fr: "Espèces au magasin — pas de SMS MoMo.",
+  },
+  saveOrderLocked: {
+    en: "Pay with MoMo, paste the confirmation SMS, then the Save order button will appear.",
+    rw: "Wishyure ukoreshe MoMo, shyiraho SMS yo kwemeza, hanyuma buto ya Bika komande izagaragara.",
+    fr: "Payez par MoMo, collez le SMS, puis le bouton Enregistrer apparaîtra.",
+  },
+  saveOrderErrMomoSms: {
+    en: "Confirm MoMo payment with the SMS before saving the order.",
+    rw: "Emeza kwishyura na SMS ya MoMo mbere yo kubika komande.",
+    fr: "Confirmez le paiement MoMo avec le SMS avant d'enregistrer.",
   },
   sellerSmsAfterSave: {
     en: "SMS to {phone} after save (if Twilio / SMS webhook is configured).",
