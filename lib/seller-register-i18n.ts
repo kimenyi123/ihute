@@ -327,6 +327,11 @@ export const UMURIRO_UI = {
     rw: "Uko biri: Byishyuwe — amafaranga muri SMS ahuye n’itegeko.",
     fr: "Statut : payé — le SMS correspond au total.",
   },
+  paymentPaidMatchedWithTxn: {
+    en: "Paid — amount matches your order. MoMo TxId: {txnId}.",
+    rw: "Byishyuwe — amafaranga ahuye n’itegeko. TxId: {txnId}.",
+    fr: "Payé — montant conforme. TxId MoMo : {txnId}.",
+  },
   paymentMismatch: {
     en: "Not matched — SMS shows {got} RWF but your total is {expected} RWF.",
     rw: "Ntibihuye — SMS ifite {got} RWF, ariko total ni {expected} RWF.",

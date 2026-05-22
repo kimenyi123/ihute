@@ -37,8 +37,27 @@ export type MoMoSmsMatchResult = {
   matched: boolean
   /** Amount that matched the order (within tolerance), if any */
   amount: number | null
+  /** MTN TxId / transaction id when present in pasted SMS */
+  txId: string | null
   /** All amounts seen in the SMS (debug / UX) */
   candidates: number[]
+}
+
+/** MTN MoMo confirmation SMS — e.g. `TxId:28066831087*S*Your payment of…` */
+export function extractMoMoTxIdFromSms(text: string): string | null {
+  const s = String(text ?? "")
+  const patterns = [
+    /\bTxId:\s*(\d+)/i,
+    /\bTxn\s*Id[:\s]*(\d+)/i,
+    /\bTransaction\s*(?:ID|Id|id)[:\s]*(\d+)/i,
+    /\bRef(?:erence)?[:\s]*(\d{8,})/i,
+  ]
+  for (const re of patterns) {
+    const m = s.match(re)
+    const id = m?.[1]?.trim()
+    if (id && /^\d{6,}$/.test(id)) return id
+  }
+  return null
 }
 
 /**
@@ -50,10 +69,16 @@ export function matchMoMoSmsToOrderTotal(
   toleranceRwf = 2,
 ): MoMoSmsMatchResult {
   const candidates = extractRwfAmountCandidatesFromText(sms)
+  const txId = extractMoMoTxIdFromSms(sms)
   if (!Number.isFinite(orderTotalRwf) || orderTotalRwf < 1) {
-    return { matched: false, amount: null, candidates }
+    return { matched: false, amount: null, txId, candidates }
   }
   const hit = candidates.find((n) => Math.abs(n - orderTotalRwf) <= toleranceRwf)
-  if (hit != null) return { matched: true, amount: hit, candidates }
-  return { matched: false, amount: candidates.length ? candidates[candidates.length - 1] : null, candidates }
+  if (hit != null) return { matched: true, amount: hit, txId, candidates }
+  return {
+    matched: false,
+    amount: candidates.length ? candidates[candidates.length - 1] : null,
+    txId,
+    candidates,
+  }
 }

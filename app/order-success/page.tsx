@@ -19,6 +19,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { RatingModal } from "@/components/RatingModal"
 import { useTableCommandStore } from "@/lib/table-command-store"
 import { GRANDMA_PATHS } from "@/lib/grandma-urls"
+import { isValidRwandaMobileE164, normalizeRwandaMobileE164 } from "@/lib/rwanda-phone"
 
 function normalizePhone(raw?: string | null): string {
   const v = (raw || "").replace(/\s|-/g, "")
@@ -36,6 +37,20 @@ function waHrefFor(phone: string, text: string) {
   return `https://wa.me/${p}?text=${encoded}`
 }
 
+/** Prefer seller mobile from order API — query `sellerPhone` may be a MoMo merchant code. */
+function resolveSellerPhoneForWhatsApp(
+  queryPhone: string | null | undefined,
+  orderDetails: Record<string, unknown> | null | undefined,
+): string {
+  const fromOrder = normalizeRwandaMobileE164(
+    String(orderDetails?.SELLER_PHONE ?? orderDetails?.sellerPhone ?? ""),
+  )
+  if (fromOrder && isValidRwandaMobileE164(fromOrder)) return fromOrder
+  const fromQuery = normalizeRwandaMobileE164(String(queryPhone ?? ""))
+  if (fromQuery && isValidRwandaMobileE164(fromQuery)) return fromQuery
+  return ""
+}
+
 function OrderSuccessPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -47,6 +62,9 @@ function OrderSuccessPageInner() {
   const buyerPhone = searchParams.get("buyerPhone")
   const total = searchParams.get("total")
   const fromGrandma = searchParams.get("from") === "grandma"
+  const autoWhatsApp = searchParams.get("autoWhatsApp") === "1"
+  const momoTxId = searchParams.get("momoTxId")?.trim() || ""
+  const paymentQuery = searchParams.get("payment")?.trim() || ""
   const homeHref = fromGrandma ? "/grandma" : "/"
 
   const [copied, setCopied] = useState(false)
@@ -64,6 +82,7 @@ function OrderSuccessPageInner() {
   const [tableShareLink, setTableShareLink] = useState<string>("")
   const [tableName, setTableName] = useState<string>("")
   const hasShownAlert = useRef(false)
+  const autoWhatsAppOpened = useRef(false)
 
   // Check if user is table creator and show shareable link
   useEffect(() => {
@@ -187,55 +206,80 @@ function OrderSuccessPageInner() {
       })
 
       // Determine paid amount based on payment method
-      const paymentMethod = orderDetails.paymentMethod || 'Unknown'
-      const isPaid = paymentMethod && !paymentMethod.toLowerCase().includes('delivery')
+      const paymentMethod =
+        orderDetails.paymentMethod || paymentQuery || "Unknown"
+      const isPaid = paymentMethod && !paymentMethod.toLowerCase().includes("delivery")
       const paidAmount = isPaid ? orderDetails.total : 0
 
       console.log("[Order Success] Building WhatsApp message - Payment:", paymentMethod, "isPaid:", isPaid)
 
       message = [
-        'Order',
-        '',
+        "Order",
+        "",
         `Shop: ${sellerName || orderDetails.sellerName}`,
-        orderDetails.buyerLocation ? `Location: ${orderDetails.buyerLocation}` : '',
+        orderDetails.buyerLocation ? `Location: ${orderDetails.buyerLocation}` : "",
         `Order ID: ${displayOrderNo}`,
-        '',
-        '```',
+        momoTxId ? `MoMo TxId: ${momoTxId}` : "",
+        "",
+        "```",
         header,
         sep,
         ...lines,
-        '```',
-        '',
+        "```",
+        "",
         `Total: ${formatCurrency(orderDetails.total)}`,
         `Discount: ${formatCurrency(0)}`,
         `Paid: ${formatCurrency(paidAmount)}`,
-        '',
+        "",
         `Paid at: ${formatPaymentMethod(paymentMethod)}`,
-        `Message: ${displayOrderNo ? `ORDER ${displayOrderNo}` : '-'}`,
+        `Message: ${displayOrderNo ? `ORDER ${displayOrderNo}` : "-"}`,
         `My phone: ${buyerPhone}`,
-        '',
-        `Follow: ${trackingUrl}`
-      ].filter(Boolean).join('\n')
+        "",
+        `Follow: ${trackingUrl}`,
+      ]
+        .filter(Boolean)
+        .join("\n")
     } else {
       // Fallback message without product details
       message = [
-        'Order',
-        '',
+        "Order",
+        "",
         `Shop: ${sellerName}`,
         `Order ID: ${displayOrderNo}`,
-        '',
+        momoTxId ? `MoMo TxId: ${momoTxId}` : "",
+        "",
         `Total: ${Number(total).toLocaleString()} RWF`,
         `My phone: ${buyerPhone}`,
-        '',
-        `Follow: ${trackingUrl}`
-      ].filter(Boolean).join('\n')
+        "",
+        `Follow: ${trackingUrl}`,
+      ]
+        .filter(Boolean)
+        .join("\n")
     }
 
-    const sellerPhoneNormalized = normalizePhone(sellerPhone)
+    const sellerPhoneNormalized = resolveSellerPhoneForWhatsApp(sellerPhone, orderDetails)
     const href = sellerPhoneNormalized ? waHrefFor(sellerPhoneNormalized, message) : ""
 
     return { whatsappMessage: message, whatsappHref: href }
-  }, [orderDetails, orderId, displayOrderNo, sellerName, sellerPhone, buyerPhone, total, trackingUrl])
+  }, [
+    orderDetails,
+    orderId,
+    displayOrderNo,
+    sellerName,
+    sellerPhone,
+    buyerPhone,
+    total,
+    trackingUrl,
+    momoTxId,
+    paymentQuery,
+  ])
+
+  useEffect(() => {
+    if (!fromGrandma || !autoWhatsApp || loadingDetails || !whatsappHref) return
+    if (autoWhatsAppOpened.current) return
+    autoWhatsAppOpened.current = true
+    window.open(whatsappHref, "_blank", "noopener,noreferrer")
+  }, [fromGrandma, autoWhatsApp, loadingDetails, whatsappHref])
 
   const copyTrackingUrl = async () => {
     try {
@@ -358,7 +402,7 @@ function OrderSuccessPageInner() {
         </Card>
 
           {/* WhatsApp Notification */}
-          {normalizePhone(sellerPhone) && (
+          {whatsappHref ? (
             <Card className="border-0 shadow-xl rounded-2xl border-2 border-green-100 bg-white text-slate-900">
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">

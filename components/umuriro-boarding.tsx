@@ -1269,7 +1269,12 @@ export function UmuriroBoarding() {
                       </Button>
                       {smsPayCheck === "paid" ? (
                         <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-2 text-xs font-medium text-emerald-900">
-                          {pickLang(UMURIRO_UI.paymentPaidMatched, lang)}
+                          {smsMatchResult?.txId
+                            ? pickLang(UMURIRO_UI.paymentPaidMatchedWithTxn, lang).replace(
+                                "{txnId}",
+                                smsMatchResult.txId,
+                              )
+                            : pickLang(UMURIRO_UI.paymentPaidMatched, lang)}
                         </div>
                       ) : null}
                       {smsPayCheck === "no_amount" ? (
