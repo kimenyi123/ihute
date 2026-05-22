@@ -9,7 +9,7 @@ import { useAuthStore } from "@/lib/auth-store"
 import type { User } from "@/lib/auth-store"
 import { IshyigaLoginCard } from "@/components/ishyiga-login-card"
 import { GRANDMA_PATHS, readGrandmaSignupRole, writeGrandmaSignupRole } from "@/lib/grandma-urls"
-import { grandmaUserCanUseSellerWorkspace } from "@/lib/auth-login-client"
+import { grandmaUserCanUseSellerWorkspace, isAdminUser } from "@/lib/auth-login-client"
 
 const shell =
   "min-h-screen bg-[#eef4fb] text-[#17324d] flex flex-col bg-gradient-to-b from-[#e8f5ff] to-[#dff0ff]"
@@ -18,6 +18,9 @@ function GrandmaLoginInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const loginStore = useAuthStore((s) => s.login)
+  const user = useAuthStore((s) => s.user)
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+  const hasHydrated = useAuthStore((s) => s.hasHydrated)
   const redirectTo = searchParams?.get("redirect")
   const phonePrefill = searchParams?.get("phone") ?? ""
 
@@ -27,8 +30,12 @@ function GrandmaLoginInner() {
     setRegisterHref(readGrandmaSignupRole() === "seller" ? "/register/seller" : "/register/buyer")
   }, [])
 
-  const isAdminUser = (user: User): boolean =>
-    user.role === "admin" || String(user.dbRole ?? "").toUpperCase() === "ADMIN"
+  useLayoutEffect(() => {
+    if (!hasHydrated || !isAuthenticated || !user) return
+    if (isAdminUser(user)) {
+      router.replace("/admin/dashboard")
+    }
+  }, [hasHydrated, isAuthenticated, user, router])
 
   const handleSuccess = async (user: User) => {
     loginStore(user)

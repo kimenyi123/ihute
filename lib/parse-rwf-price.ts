@@ -7,7 +7,7 @@ export function parseRwfAmount(raw: unknown): number {
 
   let s = String(raw ?? "")
     .replace(/^\uFEFF/, "")
-    .replace(/(?i)\s*RWF\s*/g, "")
+    .replace(/\s*RWF\s*/gi, "")
     .replace(/[\s\u00A0\u202F]/g, "")
     .trim()
   if (!s) return 0
