@@ -132,8 +132,7 @@ function normalizeProduct(
     image_url: p.image_url,
     item_image_url: p.item_image_url,
     IMAGE_URL: p.IMAGE_URL,
-    // Also preserve famille for KAOS paths
-    famille: p.famille,
+    // Preserve raw FAMILLE for KAOS paths; `famille` below is normalized
     FAMILLE: p.FAMILLE,
     momo: p.momo,
     // keep any server-provided category hint

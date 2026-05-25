@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
@@ -20,6 +20,8 @@ import {
 import { ArrowLeft, Loader2 } from "lucide-react"
 import { PasswordInputWithToggle } from "@/components/password-input-with-toggle"
 import { cn } from "@/lib/utils"
+import { useAuthStore } from "@/lib/auth-store"
+import { coerceTelRawForPasswordReset, digitsOnly, normalizePhoneDigitsForAuth } from "@/lib/rwanda-phone"
 
 const cardClass =
   "rounded-2xl border-[#dbe7f3] bg-white shadow-[0_8px_18px_rgba(24,151,224,.08)]"
@@ -28,8 +30,39 @@ const btnPrimary =
 const btnDialogPrimary =
   "bg-gradient-to-r from-[#1897e0] to-[#127fc0] hover:from-[#1589cc] hover:to-[#0f6ba3] text-white border-0"
 
+function phoneHintFromSessionUser(): { phone: string; locationHint: string } {
+  const u = useAuthStore.getState().user
+  if (!u) return { phone: "", locationHint: "" }
+  const fromPhone = u.phone?.trim() ?? ""
+  const dPhone = digitsOnly(fromPhone)
+  let phoneOut = ""
+  if (dPhone.length >= 9) {
+    const canon = normalizePhoneDigitsForAuth(fromPhone) || dPhone
+    phoneOut =
+      canon.length === 12 && canon.startsWith("250") && canon[3] === "7"
+        ? `0${canon.slice(3)}`
+        : fromPhone
+  }
+  if (!phoneOut && u.email?.includes("@")) {
+    const local = u.email.split("@")[0] ?? ""
+    if (digitsOnly(local).length >= 9) {
+      const canon = normalizePhoneDigitsForAuth(local) || digitsOnly(local)
+      phoneOut =
+        canon.length === 12 && canon.startsWith("250") && canon[3] === "7"
+          ? `0${canon.slice(3)}`
+          : local
+    }
+  }
+  const loc = (u.location ?? "").trim()
+  const locationHint = loc.length > 80 ? `${loc.slice(0, 80)}…` : loc
+  return { phone: phoneOut, locationHint }
+}
+
 export default function ForgotPasswordPage() {
   const router = useRouter()
+  const hasHydrated = useAuthStore((s) => s.hasHydrated)
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+  const sessionPrefilled = useRef(false)
   const [phone, setPhone] = useState("")
   const [streetNumber, setStreetNumber] = useState("")
   const [pwdOpen, setPwdOpen] = useState(false)
@@ -38,6 +71,24 @@ export default function ForgotPasswordPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState(false)
+
+  useEffect(() => {
+    if (!hasHydrated || sessionPrefilled.current) return
+    sessionPrefilled.current = true
+    const { phone: p, locationHint } = phoneHintFromSessionUser()
+    if (!p.trim()) return
+    setPhone((prev) => (prev.trim() ? prev : p))
+    setStreetNumber((prev) => {
+      if (prev.trim()) return prev
+      if (!locationHint) return prev
+      const tokens = locationHint
+        .split(/[·,;|]/)
+        .map((x) => x.trim())
+        .filter(Boolean)
+      const short = tokens.find((t) => t.length >= 2 && t.length <= 12 && /[a-zA-Z0-9]/.test(t))
+      return short ?? prev
+    })
+  }, [hasHydrated])
 
   const openPasswordDialog = (e: React.FormEvent) => {
     e.preventDefault()
@@ -65,7 +116,7 @@ export default function ForgotPasswordPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          tel: phone.trim(),
+          tel: coerceTelRawForPasswordReset(phone.trim()),
           streetNumber: streetNumber.trim(),
           newPassword,
         }),
@@ -121,7 +172,9 @@ export default function ForgotPasswordPage() {
             <CardHeader className="space-y-2">
               <CardTitle className="text-xl text-[#17324d]">Reset your password</CardTitle>
               <CardDescription className="text-[#6f8399]">
-                Use the phone you registered with and the street line from your address (same as at signup).
+                Use your registered phone number (07… or 250…), not your email. If you are signed in on this device,
+                we pre-fill your phone and a location hint from your profile — you can edit them. For address, match a
+                fragment from your saved location (e.g. Gasabo, kn9) — same as in shop settings (dots · are OK).
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -136,6 +189,11 @@ export default function ForgotPasswordPage() {
                 </div>
               ) : (
                 <form onSubmit={openPasswordDialog} className="space-y-4">
+                  {isAuthenticated && (
+                    <p className="rounded-lg border border-[#dbe7f3] bg-[#f7fbff] px-3 py-2 text-xs text-[#5a6d82]">
+                      Signed in — phone and address hint below come from your saved profile when this page opened.
+                    </p>
+                  )}
                   <div className="space-y-2">
                     <Label htmlFor="phone" className="text-[#17324d]">
                       Phone number

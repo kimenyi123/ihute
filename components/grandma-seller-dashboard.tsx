@@ -18,6 +18,8 @@ export type GrandmaSellerInsightsCopy = {
   topUpTitle: string
   topUpSubtitle: string
   ctaStock: string
+  /** Shop with Me — NIKI catalog / add stock flow */
+  ctaNikiStock: string
   ctaOrders: string
   /** "{{n}}" = served count */
   deliveredTail: string
@@ -51,6 +53,8 @@ export type GrandmaSellerDashboardProps = {
   onOrders: () => void
   onClients: () => void
   onItems: () => void
+  /** Opens Shop with Me for the seller nickname (NIKI product source). */
+  onNikiStock: () => void
   onSales: () => void
   formatRwf: (n: number) => string
 }
@@ -71,6 +75,7 @@ export function GrandmaSellerDashboard({
   onOrders,
   onClients,
   onItems,
+  onNikiStock,
   onSales,
   formatRwf,
 }: GrandmaSellerDashboardProps) {
@@ -187,6 +192,15 @@ export function GrandmaSellerDashboard({
               onClick={onItems}
             >
               {copy.ctaStock}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-9 border-blue-200 bg-white text-blue-900 hover:bg-blue-50"
+              onClick={onNikiStock}
+            >
+              {copy.ctaNikiStock}
             </Button>
             <Button
               type="button"

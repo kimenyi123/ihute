@@ -1,13 +1,15 @@
 "use client"
 
-import { useMemo } from "react"
-import { useRouter } from "next/navigation"
+import { Suspense, useMemo } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { BuyerOrdersPanel } from "@/components/buyer-orders-panel"
 import { GRANDMA_PATHS } from "@/lib/grandma-urls"
 
-/** Buyer order history inside the Grandma shell (same lists as /buyer/orders, no main-site Buyer Panel). */
-export default function GrandmaBuyerOrdersPage() {
+function GrandmaBuyerOrdersInner() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const highlightOrderId = searchParams.get("orderId")
+
   const loginRedirect = useMemo(
     () => `/login?redirect=${encodeURIComponent(GRANDMA_PATHS.buyerOrders)}`,
     [],
@@ -40,7 +42,26 @@ export default function GrandmaBuyerOrdersPage() {
           </div>
         </div>
       </header>
-      <BuyerOrdersPanel variant="grandma" loginRedirect={loginRedirect} />
+      <BuyerOrdersPanel
+        variant="grandma"
+        loginRedirect={loginRedirect}
+        highlightOrderId={highlightOrderId}
+      />
     </div>
+  )
+}
+
+/** Buyer order history inside the Grandma shell (same lists as /buyer/orders, no main-site Buyer Panel). */
+export default function GrandmaBuyerOrdersPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-[#eef4fb] text-sm text-[#17324d]">
+          Loading orders…
+        </div>
+      }
+    >
+      <GrandmaBuyerOrdersInner />
+    </Suspense>
   )
 }

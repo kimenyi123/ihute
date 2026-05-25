@@ -1,82 +1,139 @@
 import { NextResponse } from "next/server"
-import { getAuthUrl } from "@/lib/backend-config"
+import { getJavaAuthUrlCandidates, isTomcatMissingServlet, warmJavaBackendBase } from "@/lib/backend-config"
 import { getJavaSetCookieValues, rewriteForwardedSetCookie } from "@/lib/java-proxy-cookies"
+import { rwJavaLoginIdentifiers } from "@/lib/rwanda-phone"
 
-const JAVA_AUTH_URL = getAuthUrl()
+/** First servlet URL that returned JSON (not Tomcat 404 HTML); avoids probing every login attempt. */
+let cachedJavaAuthUrl: string | null = null
 
 export async function POST(req: Request) {
   const rid = crypto.randomUUID()
   const t0 = Date.now()
 
   try {
-    console.log(`[api/auth/login][proxyRid=${rid}] START JAVA_AUTH_URL=${JAVA_AUTH_URL}`)
+    await warmJavaBackendBase()
 
-    const { email, password } = await req.json()
-    const emailTrimmed = String(email ?? "").trim()
+    const authUrls = cachedJavaAuthUrl ? [cachedJavaAuthUrl] : getJavaAuthUrlCandidates()
     console.log(
-      `[api/auth/login][proxyRid=${rid}] request email=${emailTrimmed || "(empty)"} passwordLen=${password?.length ?? 0}`
+      `[api/auth/login][proxyRid=${rid}] START authUrlCandidates=${authUrls.length} first=${authUrls[0] ?? "(none)"}${cachedJavaAuthUrl ? " (cached)" : ""}`
     )
 
-    if (!JAVA_AUTH_URL) {
-      console.error(`[api/auth/login][proxyRid=${rid}] FATAL: JAVA_AUTH_URL not set`)
+    const { email, password } = await req.json()
+    const rawLogin = String(email ?? "").trim()
+    const loginCandidates = rwJavaLoginIdentifiers(rawLogin)
+    console.log(
+      `[api/auth/login][proxyRid=${rid}] request raw=${rawLogin || "(empty)"} passwordLen=${password?.length ?? 0} try=${loginCandidates.join(" | ")}`
+    )
+
+    if (authUrls.length === 0 || !authUrls[0]) {
+      console.error(`[api/auth/login][proxyRid=${rid}] FATAL: no auth URLs`)
       return NextResponse.json({ ok: false, error: "Auth backend not configured", rid }, { status: 500 })
     }
-
-    const form = new URLSearchParams()
-    form.set("action", "login")
-    form.set("email", emailTrimmed)
-    form.set("password", String(password || ""))
 
     const loginTimeoutMs = Math.min(
       300_000,
       Math.max(8_000, Number(process.env.JAVA_AUTH_TIMEOUT_MS) || 90_000)
     )
     console.log(
-      `[api/auth/login][proxyRid=${rid}] → Java POST ${JAVA_AUTH_URL} (loginTimeoutMs=${loginTimeoutMs})`
+      `[api/auth/login][proxyRid=${rid}] → Java POST (try ${authUrls.length} base URL(s), loginTimeoutMs=${loginTimeoutMs})`
     )
 
     const ac = new AbortController()
     const to = setTimeout(() => ac.abort(), loginTimeoutMs)
-
     const inboundCookie = req.headers.get("cookie") || ""
-    const res = await fetch(JAVA_AUTH_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        ...(inboundCookie ? { Cookie: inboundCookie } : {}),
-      },
-      body: form.toString(),
-      cache: "no-store",
-      signal: ac.signal,
-    })
-    clearTimeout(to)
+    const pwd = String(password || "")
 
-    console.log(`[api/auth/login][proxyRid=${rid}] ← Java HTTP ${res.status}`)
+    let json: Record<string, unknown> | null = null
+    let res: Response | null = null
+    let lastParseError: unknown = null
 
-    const text = await res.text()
-    console.log(`[api/auth/login][proxyRid=${rid}] body (first 500 chars): ${text.slice(0, 500)}`)
-
-    let json: any
     try {
-      json = JSON.parse(text)
-      const javaRid = json?.rid
-      const javaCode = json?.code
-      console.log(
-        `[api/auth/login][proxyRid=${rid}] parsed ok=${json?.ok} javaRid=${javaRid ?? "n/a"} code=${javaCode ?? "n/a"} error=${json?.error ?? "n/a"}`
-      )
-    } catch (parseError) {
-      console.error(`[api/auth/login][proxyRid=${rid}] FATAL: invalid JSON from Java`, parseError)
-      console.error(`[api/auth/login][proxyRid=${rid}] raw (800): ${text.slice(0, 800)}`)
+      outer: for (const loginId of loginCandidates) {
+        const form = new URLSearchParams()
+        form.set("action", "login")
+        form.set("email", loginId)
+        form.set("password", pwd)
+
+        inner: for (const javaAuthUrl of authUrls) {
+          const attempt = await fetch(javaAuthUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+              ...(inboundCookie ? { Cookie: inboundCookie } : {}),
+            },
+            body: form.toString(),
+            cache: "no-store",
+            signal: ac.signal,
+          })
+          const text = await attempt.text()
+          if (isTomcatMissingServlet(text, attempt.status)) {
+            console.warn(
+              `[api/auth/login][proxyRid=${rid}] skip url (404 or HTML) loginId=${loginId} url=${javaAuthUrl}`
+            )
+            continue inner
+          }
+
+          let parsed: Record<string, unknown>
+          try {
+            parsed = text ? (JSON.parse(text) as Record<string, unknown>) : {}
+          } catch (pe) {
+            lastParseError = pe
+            console.error(
+              `[api/auth/login][proxyRid=${rid}] invalid JSON for loginId=${loginId} url=${javaAuthUrl} raw=${text.slice(0, 200)}`
+            )
+            continue inner
+          }
+
+          cachedJavaAuthUrl = javaAuthUrl
+
+          console.log(
+            `[api/auth/login][proxyRid=${rid}] try loginId=${loginId} url=${javaAuthUrl} http=${attempt.status} ok=${parsed?.ok} code=${String(parsed?.code ?? "")}`
+          )
+
+          if (!attempt.ok && attempt.status >= 500) {
+            clearTimeout(to)
+            return NextResponse.json(
+              {
+                ok: false,
+                error: (parsed?.error as string) || `Auth failed (${attempt.status})`,
+                rid,
+                javaRid: typeof parsed?.rid === "string" ? parsed.rid : undefined,
+                code: typeof parsed?.code === "string" ? parsed.code : undefined,
+              },
+              { status: attempt.status >= 400 && attempt.status < 600 ? attempt.status : 502 }
+            )
+          }
+
+          res = attempt
+          json = parsed
+          if (attempt.ok && parsed?.ok === true) {
+            break outer
+          }
+          // Reached Java with valid JSON (e.g. wrong password); do not try other base URLs for this loginId.
+          break inner
+        }
+      }
+    } finally {
+      clearTimeout(to)
+    }
+
+    if (!json || !res) {
+      console.error(`[api/auth/login][proxyRid=${rid}] FATAL: no response`, lastParseError)
       return NextResponse.json(
-        { ok: false, error: "Bad JSON from auth server", raw: text.slice(0, 800), rid },
+        {
+          ok: false,
+          error:
+            "Could not reach Java login on any probed URL (Tomcat 404). Start Tomcat and deploy this WAR, or set BACKEND_URL / JAVA_BACKEND_BASE (e.g. http://localhost:8080/Trading). Probe uses localhost ports 8080–8082 and contexts Trading, Ihute, trading_ai.",
+          rid,
+        },
         { status: 502 },
       )
     }
 
     const javaMeta = {
       rid,
-      javaRid: typeof json?.rid === "string" ? json.rid : undefined,
-      code: typeof json?.code === "string" ? json.code : undefined,
+      javaRid: typeof json.rid === "string" ? json.rid : undefined,
+      code: typeof json.code === "string" ? json.code : undefined,
     }
 
     if (!res.ok) {
@@ -86,7 +143,7 @@ export async function POST(req: Request) {
       return NextResponse.json(
         {
           ok: false,
-          error: json?.error || `Auth failed (${res.status})`,
+          error: (json.error as string) || `Auth failed (${res.status})`,
           ...javaMeta,
         },
         { status: 401 }
@@ -95,12 +152,12 @@ export async function POST(req: Request) {
 
     if (!json?.ok) {
       console.warn(
-        `[api/auth/login][proxyRid=${rid}] login rejected javaRid=${javaMeta.javaRid ?? "n/a"} code=${javaMeta.code ?? "n/a"} error=${json?.error}`
+        `[api/auth/login][proxyRid=${rid}] login rejected javaRid=${javaMeta.javaRid ?? "n/a"} code=${javaMeta.code ?? "n/a"} error=${String(json?.error ?? "")}`
       )
       return NextResponse.json(
         {
           ok: false,
-          error: json?.error || "Login failed",
+          error: (json.error as string) || "Login failed",
           ...javaMeta,
         },
         { status: 401 }
@@ -109,16 +166,16 @@ export async function POST(req: Request) {
 
     const mcp = json?.mustChangePassword ?? json?.must_change_password
     const okEmail =
-      typeof json?.user?.email === "string"
-        ? json.user.email.trim()
-        : typeof json?.email === "string"
+      typeof (json.user as { email?: string } | undefined)?.email === "string"
+        ? String((json.user as { email: string }).email).trim()
+        : typeof json.email === "string"
           ? String(json.email).trim()
-          : emailTrimmed
+          : rawLogin
     console.log(
-      `[user-auth] logged in as ${okEmail || emailTrimmed} role=${String(json?.role ?? "").toLowerCase() || "n/a"}`
+      `[user-auth] logged in as ${okEmail || rawLogin} role=${String(json?.role ?? "").toLowerCase() || "n/a"}`
     )
     console.log(
-      `[api/auth/login][proxyRid=${rid}] SUCCESS role=${json?.role} ishyiga=${json?.ishyiga ?? "n/a"} javaRid=${javaMeta.javaRid ?? "n/a"} mustChangePassword=${String(mcp)} (type=${typeof mcp})`
+      `[api/auth/login][proxyRid=${rid}] SUCCESS role=${String(json?.role)} ishyiga=${String(json?.ishyiga ?? "n/a")} javaRid=${javaMeta.javaRid ?? "n/a"} mustChangePassword=${String(mcp)} (type=${typeof mcp})`
     )
 
     // Forward Set-Cookie headers from Java backend to client

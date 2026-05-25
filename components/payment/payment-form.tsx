@@ -1,100 +1,281 @@
-'use client';
+"use client"
 
-import { useState } from 'react';
-import { UrubutoApi } from '@/lib/urubuto-api';
-import { PaymentInitiationRequest } from '@/lib/payment-types';
-import { 
-  PAYMENT_METHODS, 
-  mapToUrubutoChannel, 
+import { useMemo, useState } from "react"
+import { CheckCircle2, CreditCard, Loader2, Smartphone, XCircle } from "lucide-react"
+import { UrubutoApi } from "@/lib/urubuto-api"
+import type { PaymentInitiationRequest } from "@/lib/payment-types"
+import {
+  PAYMENT_METHODS,
+  mapToUrubutoChannel,
   isUrubutoPaySupported,
   getPaymentMethodInfo,
-  formatPaymentMethod 
-} from '@/lib/payment-utils';
+  formatPaymentMethod,
+} from "@/lib/payment-utils"
+import { digitsOnly } from "@/lib/rwanda-phone"
+import { cn } from "@/lib/utils"
+import { AcceptedCardNetworksStrip } from "@/components/payment/AcceptedCardNetworksStrip"
 
 interface PaymentFormProps {
-  onPaymentInitiated?: (response: any) => void;
-  defaultPayerCode?: string;
-  defaultAmount?: number;
-  defaultMethod?: string;
+  onPaymentInitiated?: (response: unknown) => void
+  defaultPayerCode?: string
+  defaultAmount?: number
+  defaultMethod?: string
 }
 
-export default function PaymentForm({ 
-  onPaymentInitiated, 
-  defaultPayerCode = '',
+type CardNetwork = "VISA" | "MASTERCARD" | "AMEX" | "VERVE"
+
+function parseAmountRwf(raw: string): number {
+  const n = Number.parseFloat(raw.replace(/,/g, "").trim())
+  return Number.isFinite(n) ? n : NaN
+}
+
+const methodOrder = [
+  PAYMENT_METHODS.MOMO,
+  PAYMENT_METHODS.CARD,
+  PAYMENT_METHODS.BANK,
+  PAYMENT_METHODS.COD,
+] as const
+
+const cardChoices: { id: CardNetwork; label: string }[] = [
+  { id: "VISA", label: "Visa" },
+  { id: "MASTERCARD", label: "Mastercard" },
+  { id: "AMEX", label: "Amex" },
+  { id: "VERVE", label: "Verve" },
+]
+
+export default function PaymentForm({
+  onPaymentInitiated,
+  defaultPayerCode = "",
   defaultAmount = 0,
-  defaultMethod = PAYMENT_METHODS.MOMO 
+  defaultMethod = PAYMENT_METHODS.MOMO,
 }: PaymentFormProps) {
   const [formData, setFormData] = useState({
     payer_code: defaultPayerCode,
-    amount: defaultAmount,
+    amount: defaultAmount > 0 ? String(defaultAmount) : "",
     internal_method: defaultMethod,
-    phone_number: '',
-    payer_names: '',
-    payer_email: '',
-  });
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string>('');
+    phone_number: "",
+    payer_names: "",
+    payer_email: "",
+  })
+  const [selectedCard, setSelectedCard] = useState<CardNetwork | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [waiting, setWaiting] = useState(false)
+  const [paymentState, setPaymentState] = useState<"success" | "failed" | null>(null)
+  const [error, setError] = useState("")
+
+  const amountParsed = useMemo(() => parseAmountRwf(formData.amount), [formData.amount])
+  const showPhone = formData.internal_method !== PAYMENT_METHODS.COD && formData.internal_method !== PAYMENT_METHODS.CARD
+  const showCardPicker = formData.internal_method === PAYMENT_METHODS.CARD
+  const showCardFields = showCardPicker && selectedCard !== null
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError('');
+    e.preventDefault()
+    setLoading(true)
+    setWaiting(false)
+    setPaymentState(null)
+    setError("")
 
     try {
-      // Check if method is supported by UrubutoPay
       if (!isUrubutoPaySupported(formData.internal_method)) {
-        throw new Error(`Payment method ${formatPaymentMethod(formData.internal_method)} is not supported for online payments`);
+        throw new Error(
+          `Payment method ${formatPaymentMethod(formData.internal_method)} is not supported for online payments`,
+        )
       }
 
-      // Convert to UrubutoPay request
+      const amount = parseAmountRwf(formData.amount)
+      if (!Number.isFinite(amount) || amount < 100) {
+        throw new Error("Enter a valid amount (minimum 100 RWF).")
+      }
+
+      const needsPhone =
+        formData.internal_method !== PAYMENT_METHODS.COD && formData.internal_method !== PAYMENT_METHODS.CARD
+      if (needsPhone) {
+        const tel = digitsOnly(formData.phone_number)
+        if (tel.length < 9) {
+          throw new Error("Enter a valid mobile money number.")
+        }
+      }
+
+      if (showCardPicker && !selectedCard) {
+        throw new Error("Select a card type to continue.")
+      }
+
       const urubutoRequest: PaymentInitiationRequest = {
-        payer_code: formData.payer_code,
-        amount: formData.amount,
+        payer_code: formData.payer_code.trim(),
+        amount: Math.round(amount),
         channel_name: mapToUrubutoChannel(formData.internal_method),
-        phone_number: formData.phone_number,
-        payer_names: formData.payer_names,
-        payer_email: formData.payer_email,
-        card_type_to_be_used: formData.internal_method === PAYMENT_METHODS.CARD ? 'VISA' : 'NOT_APPLICABLE',
-      };
-
-      const response = await UrubutoApi.initiatePayment(urubutoRequest);
-      onPaymentInitiated?.(response);
-      
-      // Redirect to card processing URL if available
-      if (response.card_processing_url) {
-        window.open(response.card_processing_url, '_blank');
+        phone_number: formData.phone_number.trim(),
+        payer_names: formData.payer_names.trim(),
+        payer_email: formData.payer_email.trim(),
+        card_type_to_be_used: showCardPicker ? selectedCard ?? "VISA" : "NOT_APPLICABLE",
       }
+
+      setWaiting(true)
+      const response = await UrubutoApi.initiatePayment(urubutoRequest)
+      onPaymentInitiated?.(response)
+
+      const cardUrl =
+        response && typeof response === "object" && "card_processing_url" in response
+          ? (response as { card_processing_url?: string }).card_processing_url
+          : undefined
+      if (cardUrl) {
+        window.open(cardUrl, "_blank", "noopener,noreferrer")
+      }
+
+      setPaymentState("success")
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Payment initiation failed');
+      setPaymentState("failed")
+      setError(err instanceof Error ? err.message : "Payment initiation failed")
     } finally {
-      setLoading(false);
+      setWaiting(false)
+      setLoading(false)
     }
-  };
+  }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({
+    const { name, value } = e.target
+    setFormData((prev) => ({
       ...prev,
-      [name]: name === 'amount' ? parseFloat(value) || 0 : value,
-    }));
-  };
+      [name]: value,
+    }))
+  }
 
-  const paymentMethodInfo = getPaymentMethodInfo(formData.internal_method);
+  const paymentMethodInfo = getPaymentMethodInfo(formData.internal_method)
 
   return (
-    <div className="max-w-md mx-auto bg-white p-6 rounded-lg shadow-md">
-      <h2 className="text-2xl font-bold mb-6 text-gray-800">Initiate Payment</h2>
-      
-      {error && (
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+    <div className="mx-auto max-w-md rounded-2xl border border-blue-100 bg-gradient-to-b from-blue-50/50 to-white p-6 shadow-lg shadow-blue-900/5">
+      <div className="mb-5 flex items-center gap-2">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-md shadow-blue-600/25">
+          <Smartphone className="h-5 w-5" aria-hidden />
+        </div>
+        <div>
+          <h2 className="text-lg font-bold tracking-tight text-blue-950">Urubuto</h2>
+          <p className="text-xs text-blue-800/80">Secure checkout</p>
+        </div>
+      </div>
+
+      {error ? (
+        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">
           {error}
         </div>
-      )}
+      ) : null}
+
+      {waiting ? (
+        <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+          Waiting for confirmation...
+        </div>
+      ) : null}
+
+      {paymentState === "success" ? (
+        <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+          <span className="inline-flex items-center gap-1 font-semibold">
+            <CheckCircle2 className="h-4 w-4" aria-hidden /> Payment request sent
+          </span>
+        </div>
+      ) : null}
+
+      {paymentState === "failed" && !error ? (
+        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+          <span className="inline-flex items-center gap-1 font-semibold">
+            <XCircle className="h-4 w-4" aria-hidden /> Payment failed
+          </span>
+        </div>
+      ) : null}
 
       <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="space-y-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-blue-900/70">Method</span>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {methodOrder.map((m) => {
+              const info = getPaymentMethodInfo(m)
+              const active = formData.internal_method === m
+              return (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => {
+                    setFormData((p) => ({ ...p, internal_method: m }))
+                    if (m !== PAYMENT_METHODS.CARD) setSelectedCard(null)
+                  }}
+                  className={cn(
+                    "flex min-h-[48px] flex-col items-center justify-center gap-0.5 rounded-xl border-2 px-2 py-2 text-center text-[11px] font-bold transition-all duration-200",
+                    active
+                      ? "border-blue-500 bg-blue-50 text-blue-950 shadow-sm"
+                      : "border-slate-200 bg-white text-slate-600 hover:border-blue-200",
+                  )}
+                >
+                  <span className="text-base leading-none" aria-hidden>
+                    {info.icon}
+                  </span>
+                  <span className="leading-tight">{info.name}</span>
+                </button>
+              )
+            })}
+          </div>
+          {!isUrubutoPaySupported(formData.internal_method) ? (
+            <p className="text-xs font-medium text-amber-700">Manual processing - not available online.</p>
+          ) : null}
+        </div>
+
+        {showCardPicker ? (
+          <div className="rounded-xl border border-blue-100 bg-white/90 p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-blue-800">Select card</p>
+              <AcceptedCardNetworksStrip className="max-w-[180px]" />
+            </div>
+            <div className="grid grid-cols-4 gap-2">
+              {cardChoices.map((card) => (
+                <button
+                  key={card.id}
+                  type="button"
+                  onClick={() => setSelectedCard(card.id)}
+                  className={cn(
+                    "flex min-h-[44px] items-center justify-center rounded-lg border text-xs font-semibold transition",
+                    selectedCard === card.id
+                      ? "border-blue-500 bg-blue-50 text-blue-900"
+                      : "border-slate-200 bg-white text-slate-700 hover:border-blue-300",
+                  )}
+                  aria-pressed={selectedCard === card.id}
+                >
+                  {card.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {showCardFields ? (
+          <div className="space-y-3 rounded-xl border border-blue-100 bg-blue-50/40 p-3">
+            <div className="flex items-center gap-2 text-xs font-semibold text-blue-900">
+              <CreditCard className="h-4 w-4" aria-hidden />
+              {selectedCard} details
+            </div>
+            <input
+              type="text"
+              disabled
+              placeholder="Card number"
+              className="min-h-[44px] w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-500"
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="text"
+                disabled
+                placeholder="MM/YY"
+                className="min-h-[44px] w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-500"
+              />
+              <input
+                type="text"
+                disabled
+                placeholder="CVV"
+                className="min-h-[44px] w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-500"
+              />
+            </div>
+          </div>
+        ) : null}
+
         <div>
-          <label htmlFor="payer_code" className="block text-sm font-medium text-gray-700">
-            Payer Code *
+          <label htmlFor="payer_code" className="mb-1 block text-xs font-semibold text-blue-900">
+            Payer code
           </label>
           <input
             type="text"
@@ -103,56 +284,32 @@ export default function PaymentForm({
             value={formData.payer_code}
             onChange={handleChange}
             required
-            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+            className="min-h-[48px] w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base outline-none transition-shadow focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15"
           />
         </div>
 
         <div>
-          <label htmlFor="amount" className="block text-sm font-medium text-gray-700">
-            Amount (RWF) *
+          <label htmlFor="amount" className="mb-1 block text-xs font-semibold text-blue-900">
+            Amount (RWF)
           </label>
           <input
-            type="number"
+            type="text"
             id="amount"
             name="amount"
+            inputMode="decimal"
             value={formData.amount}
             onChange={handleChange}
-            min="0"
-            step="0.01"
             required
-            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+            className="min-h-[48px] w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base outline-none transition-shadow focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15"
+            placeholder="15,000"
           />
         </div>
 
-        <div>
-          <label htmlFor="internal_method" className="block text-sm font-medium text-gray-700">
-            Payment Method *
-          </label>
-          <select
-            id="internal_method"
-            name="internal_method"
-            value={formData.internal_method}
-            onChange={handleChange}
-            required
-            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-          >
-            <option value={PAYMENT_METHODS.MOMO}>Mobile Money (MoMo)</option>
-            <option value={PAYMENT_METHODS.CARD}>Credit/Debit Card</option>
-            <option value={PAYMENT_METHODS.BANK}>Bank Transfer</option>
-            <option value={PAYMENT_METHODS.COD}>Cash on Delivery</option>
-          </select>
-          <p className="text-xs text-gray-500 mt-1">
-            Selected: <span className={paymentMethodInfo.color}>{paymentMethodInfo.icon} {paymentMethodInfo.name}</span>
-            {!isUrubutoPaySupported(formData.internal_method) && (
-              <span className="text-orange-600 ml-2">(Not available for online payment)</span>
-            )}
-          </p>
-        </div>
-
-        {formData.internal_method !== PAYMENT_METHODS.COD && formData.internal_method !== PAYMENT_METHODS.CARD && (
+        {showPhone ? (
           <div>
-            <label htmlFor="phone_number" className="block text-sm font-medium text-gray-700">
-              Phone Number *
+            <label htmlFor="phone_number" className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-blue-900">
+              <Smartphone className="h-3.5 w-3.5 text-blue-700" aria-hidden />
+              Mobile Money number
             </label>
             <input
               type="tel"
@@ -160,54 +317,347 @@ export default function PaymentForm({
               name="phone_number"
               value={formData.phone_number}
               onChange={handleChange}
-              required={formData.internal_method !== PAYMENT_METHODS.CARD}
-              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+              required
+              className="min-h-[48px] w-full rounded-xl border border-blue-200 bg-white px-3 py-2 text-base outline-none transition-shadow focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15"
+              placeholder="+250 7..."
+              autoComplete="tel"
+            />
+            <p className="mt-1 text-xs text-blue-900/80">You will receive a prompt on your phone to confirm this payment.</p>
+          </div>
+        ) : null}
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label htmlFor="payer_names" className="mb-1 block text-xs font-semibold text-blue-900">
+              Name <span className="font-normal text-slate-500">(opt.)</span>
+            </label>
+            <input
+              type="text"
+              id="payer_names"
+              name="payer_names"
+              value={formData.payer_names}
+              onChange={handleChange}
+              className="min-h-[44px] w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15"
             />
           </div>
-        )}
-
-        <div>
-          <label htmlFor="payer_names" className="block text-sm font-medium text-gray-700">
-            Payer Names
-          </label>
-          <input
-            type="text"
-            id="payer_names"
-            name="payer_names"
-            value={formData.payer_names}
-            onChange={handleChange}
-            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-          />
-        </div>
-
-        <div>
-          <label htmlFor="payer_email" className="block text-sm font-medium text-gray-700">
-            Payer Email
-          </label>
-          <input
-            type="email"
-            id="payer_email"
-            name="payer_email"
-            value={formData.payer_email}
-            onChange={handleChange}
-            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-          />
+          <div>
+            <label htmlFor="payer_email" className="mb-1 block text-xs font-semibold text-blue-900">
+              Email <span className="font-normal text-slate-500">(opt.)</span>
+            </label>
+            <input
+              type="email"
+              id="payer_email"
+              name="payer_email"
+              value={formData.payer_email}
+              onChange={handleChange}
+              className="min-h-[44px] w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15"
+            />
+          </div>
         </div>
 
         <button
           type="submit"
           disabled={loading || !isUrubutoPaySupported(formData.internal_method)}
-          className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="flex min-h-[52px] w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-blue-700 px-4 text-base font-bold text-white shadow-lg shadow-blue-700/25 transition hover:from-blue-500 hover:to-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {loading ? 'Processing...' : `Pay ${formData.amount.toLocaleString()} RWF`}
+          {loading ? (
+            <>
+              <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+              Sending request...
+            </>
+          ) : (
+            <>
+              Pay {Number.isFinite(amountParsed) ? amountParsed.toLocaleString() : "-"} RWF
+              <span className="sr-only">{paymentMethodInfo.name}</span>
+            </>
+          )}
         </button>
-
-        {!isUrubutoPaySupported(formData.internal_method) && (
-          <p className="text-sm text-orange-600 text-center">
-            This payment method requires manual processing
-          </p>
-        )}
       </form>
     </div>
-  );
+  )
+}
+"use client"
+
+import { useMemo, useState } from "react"
+import { Loader2, Smartphone } from "lucide-react"
+import { UrubutoApi } from "@/lib/urubuto-api"
+import type { PaymentInitiationRequest } from "@/lib/payment-types"
+import {
+  PAYMENT_METHODS,
+  mapToUrubutoChannel,
+  isUrubutoPaySupported,
+  getPaymentMethodInfo,
+  formatPaymentMethod,
+} from "@/lib/payment-utils"
+import { digitsOnly } from "@/lib/rwanda-phone"
+import { cn } from "@/lib/utils"
+import { AcceptedCardNetworksStrip } from "@/components/payment/AcceptedCardNetworksStrip"
+
+interface PaymentFormProps {
+  onPaymentInitiated?: (response: unknown) => void
+  defaultPayerCode?: string
+  defaultAmount?: number
+  defaultMethod?: string
+}
+
+function parseAmountRwf(raw: string): number {
+  const n = Number.parseFloat(raw.replace(/,/g, "").trim())
+  return Number.isFinite(n) ? n : NaN
+}
+
+const methodOrder = [
+  PAYMENT_METHODS.MOMO,
+  PAYMENT_METHODS.CARD,
+  PAYMENT_METHODS.BANK,
+  PAYMENT_METHODS.COD,
+] as const
+
+export default function PaymentForm({
+  onPaymentInitiated,
+  defaultPayerCode = "",
+  defaultAmount = 0,
+  defaultMethod = PAYMENT_METHODS.MOMO,
+}: PaymentFormProps) {
+  const [formData, setFormData] = useState({
+    payer_code: defaultPayerCode,
+    amount: defaultAmount > 0 ? String(defaultAmount) : "",
+    internal_method: defaultMethod,
+    phone_number: "",
+    payer_names: "",
+    payer_email: "",
+  })
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
+
+  const amountParsed = useMemo(() => parseAmountRwf(formData.amount), [formData.amount])
+  const showPhone = formData.internal_method !== PAYMENT_METHODS.COD && formData.internal_method !== PAYMENT_METHODS.CARD
+  const showCardStrip = formData.internal_method === PAYMENT_METHODS.CARD
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+    setError("")
+
+    try {
+      if (!isUrubutoPaySupported(formData.internal_method)) {
+        throw new Error(
+          `Payment method ${formatPaymentMethod(formData.internal_method)} is not supported for online payments`,
+        )
+      }
+
+      const amount = parseAmountRwf(formData.amount)
+      if (!Number.isFinite(amount) || amount < 100) {
+        throw new Error("Enter a valid amount (minimum 100 RWF).")
+      }
+
+      const needsPhone =
+        formData.internal_method !== PAYMENT_METHODS.COD && formData.internal_method !== PAYMENT_METHODS.CARD
+      if (needsPhone) {
+        const tel = digitsOnly(formData.phone_number)
+        if (tel.length < 9) {
+          throw new Error("Enter a valid mobile money number.")
+        }
+      }
+
+      const urubutoRequest: PaymentInitiationRequest = {
+        payer_code: formData.payer_code.trim(),
+        amount: Math.round(amount),
+        channel_name: mapToUrubutoChannel(formData.internal_method),
+        phone_number: formData.phone_number.trim(),
+        payer_names: formData.payer_names.trim(),
+        payer_email: formData.payer_email.trim(),
+        card_type_to_be_used: formData.internal_method === PAYMENT_METHODS.CARD ? "VISA" : "NOT_APPLICABLE",
+      }
+
+      const response = await UrubutoApi.initiatePayment(urubutoRequest)
+      onPaymentInitiated?.(response)
+
+      const cardUrl =
+        response && typeof response === "object" && "card_processing_url" in response
+          ? (response as { card_processing_url?: string }).card_processing_url
+          : undefined
+      if (cardUrl) {
+        window.open(cardUrl, "_blank", "noopener,noreferrer")
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Payment initiation failed")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = e.target
+    setFormData((prev) => ({
+      ...prev,
+      [name]: value,
+    }))
+  }
+
+  const paymentMethodInfo = getPaymentMethodInfo(formData.internal_method)
+
+  return (
+    <div className="mx-auto max-w-md rounded-2xl border border-emerald-100 bg-gradient-to-b from-emerald-50/50 to-white p-6 shadow-lg shadow-emerald-900/5">
+      <div className="mb-5 flex items-center gap-2">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-md shadow-emerald-600/25">
+          <Smartphone className="h-5 w-5" aria-hidden />
+        </div>
+        <div>
+          <h2 className="text-lg font-bold tracking-tight text-emerald-950">Urubuto</h2>
+          <p className="text-xs text-emerald-800/80">Secure checkout</p>
+        </div>
+      </div>
+
+      {error ? (
+        <div
+          className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+          role="alert"
+        >
+          {error}
+        </div>
+      ) : null}
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="space-y-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-emerald-900/70">Method</span>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {methodOrder.map((m) => {
+              const info = getPaymentMethodInfo(m)
+              const active = formData.internal_method === m
+              return (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setFormData((p) => ({ ...p, internal_method: m }))}
+                  className={cn(
+                    "flex min-h-[48px] flex-col items-center justify-center gap-0.5 rounded-xl border-2 px-2 py-2 text-center text-[11px] font-bold transition-all duration-200",
+                    active
+                      ? "border-emerald-500 bg-emerald-50 text-emerald-950 shadow-sm"
+                      : "border-slate-200 bg-white text-slate-600 hover:border-emerald-200",
+                  )}
+                >
+                  <span className="text-base leading-none" aria-hidden>
+                    {info.icon}
+                  </span>
+                  <span className="leading-tight">{info.name}</span>
+                </button>
+              )
+            })}
+          </div>
+          {!isUrubutoPaySupported(formData.internal_method) ? (
+            <p className="text-xs font-medium text-amber-700">Manual processing — not available online.</p>
+          ) : null}
+        </div>
+
+        {showCardStrip ? (
+          <div className="rounded-xl border border-emerald-100 bg-white/80 p-3">
+            <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-emerald-800">Cards accepted</p>
+            <AcceptedCardNetworksStrip />
+          </div>
+        ) : null}
+
+        <div>
+          <label htmlFor="payer_code" className="mb-1 block text-xs font-semibold text-emerald-900">
+            Payer code
+          </label>
+          <input
+            type="text"
+            id="payer_code"
+            name="payer_code"
+            value={formData.payer_code}
+            onChange={handleChange}
+            required
+            className="min-h-[48px] w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base outline-none transition-shadow focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/15"
+          />
+        </div>
+
+        <div>
+          <label htmlFor="amount" className="mb-1 block text-xs font-semibold text-emerald-900">
+            Amount (RWF)
+          </label>
+          <input
+            type="text"
+            id="amount"
+            name="amount"
+            inputMode="decimal"
+            value={formData.amount}
+            onChange={handleChange}
+            required
+            className="min-h-[48px] w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base outline-none transition-shadow focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/15"
+            placeholder="15,000"
+          />
+        </div>
+
+        {showPhone ? (
+          <div>
+            <label htmlFor="phone_number" className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-emerald-900">
+              <Smartphone className="h-3.5 w-3.5 text-emerald-700" aria-hidden />
+              Mobile Money number
+            </label>
+            <input
+              type="tel"
+              id="phone_number"
+              name="phone_number"
+              value={formData.phone_number}
+              onChange={handleChange}
+              required
+              className="min-h-[48px] w-full rounded-xl border border-emerald-200 bg-white px-3 py-2 text-base outline-none transition-shadow focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/15"
+              placeholder="+250 7…"
+              autoComplete="tel"
+            />
+          </div>
+        ) : null}
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label htmlFor="payer_names" className="mb-1 block text-xs font-semibold text-emerald-900">
+              Name <span className="font-normal text-slate-500">(opt.)</span>
+            </label>
+            <input
+              type="text"
+              id="payer_names"
+              name="payer_names"
+              value={formData.payer_names}
+              onChange={handleChange}
+              className="min-h-[44px] w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/15"
+            />
+          </div>
+          <div>
+            <label htmlFor="payer_email" className="mb-1 block text-xs font-semibold text-emerald-900">
+              Email <span className="font-normal text-slate-500">(opt.)</span>
+            </label>
+            <input
+              type="email"
+              id="payer_email"
+              name="payer_email"
+              value={formData.payer_email}
+              onChange={handleChange}
+              className="min-h-[44px] w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/15"
+            />
+          </div>
+        </div>
+
+        <button
+          type="submit"
+          disabled={loading || !isUrubutoPaySupported(formData.internal_method)}
+          className="flex min-h-[52px] w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-700 px-4 text-base font-bold text-white shadow-lg shadow-emerald-700/25 transition hover:from-emerald-500 hover:to-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {loading ? (
+            <>
+              <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+              Processing…
+            </>
+          ) : (
+            <>
+              Pay{" "}
+              {Number.isFinite(amountParsed) ? amountParsed.toLocaleString() : "—"} RWF
+              <span className="sr-only">
+                {paymentMethodInfo.name}
+              </span>
+            </>
+          )}
+        </button>
+      </form>
+    </div>
+  )
 }
