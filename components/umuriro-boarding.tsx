@@ -23,7 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { useLanguageStore } from "@/lib/language-store"
+import { useHydratedLanguage } from "@/lib/language-store"
 import { LanguageSelector } from "@/components/language-selector"
 import { L, pickLang, SELLER_UI, UMURIRO_UI } from "@/lib/seller-register-i18n"
 import { useAuthStore } from "@/lib/auth-store"
@@ -132,7 +132,7 @@ function parseSupplierProductsResponse(json: unknown): CatalogHit[] {
 
 type UmuriroMode = "quick" | "advanced"
 type UmuriroPayChannel = "momo" | "cash"
-type SmsPayCheck = "paid" | "mismatch" | "no_amount" | null
+type SmsPayCheck = "paid" | "mismatch" | "no_amount" | "expired_sms" | "wrong_merchant" | "no_txid" | null
 
 type UmuriroCartLine = {
   id: string
@@ -164,7 +164,7 @@ function buildUssd(merchantCode: string, totalRwf: number): string {
 }
 
 export function UmuriroBoarding() {
-  const lang = useLanguageStore((s) => s.language)
+  const lang = useHydratedLanguage()
   const user = useAuthStore((s) => s.user)
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
   const hasHydrated = useAuthStore((s) => s.hasHydrated)
@@ -543,18 +543,31 @@ export function UmuriroBoarding() {
     return true
   }
 
+  const applySmsResult = useCallback((r: MoMoSmsMatchResult) => {
+    setSmsMatchResult(r)
+    if (r.matched) {
+      setSmsPayCheck("paid")
+    } else {
+      const map: Record<string, SmsPayCheck> = {
+        no_amount: "no_amount",
+        amount_mismatch: "mismatch",
+        expired_sms: "expired_sms",
+        wrong_merchant: "wrong_merchant",
+        no_txid: "no_txid",
+      }
+      setSmsPayCheck(map[r.rejectReason] ?? "mismatch")
+    }
+  }, [])
+
   const verifyMoMoSms = useCallback(() => {
     setSmsPayCheck(null)
     setSmsMatchResult(null)
     if (payChannel !== "momo" || totalRwf < 1) return
     const t = momoSmsPaste.trim()
     if (!t) return
-    const r = matchMoMoSmsToOrderTotal(t, totalRwf)
-    setSmsMatchResult(r)
-    if (!r.candidates.length) setSmsPayCheck("no_amount")
-    else if (r.matched) setSmsPayCheck("paid")
-    else setSmsPayCheck("mismatch")
-  }, [payChannel, totalRwf, momoSmsPaste])
+    const r = matchMoMoSmsToOrderTotal(t, totalRwf, 2, momoDigits)
+    applySmsResult(r)
+  }, [payChannel, totalRwf, momoSmsPaste, momoDigits, applySmsResult])
 
   useEffect(() => {
     setSmsPayCheck(null)
@@ -573,14 +586,11 @@ export function UmuriroBoarding() {
       return
     }
     const timer = window.setTimeout(() => {
-      const r = matchMoMoSmsToOrderTotal(text, totalRwf)
-      setSmsMatchResult(r)
-      if (!r.candidates.length) setSmsPayCheck("no_amount")
-      else if (r.matched) setSmsPayCheck("paid")
-      else setSmsPayCheck("mismatch")
+      const r = matchMoMoSmsToOrderTotal(text, totalRwf, 2, momoDigits)
+      applySmsResult(r)
     }, 450)
     return () => window.clearTimeout(timer)
-  }, [momoSmsPaste, totalRwf, payChannel])
+  }, [momoSmsPaste, totalRwf, payChannel, momoDigits, applySmsResult])
 
   const umuriroCanSaveOrder =
     payChannel === "cash" || (payChannel === "momo" && smsPayCheck === "paid")
@@ -652,6 +662,7 @@ export function UmuriroBoarding() {
         payment: {
           channel: payChannel,
           momoSmsMatched: payChannel === "momo" ? smsPayCheck === "paid" : null,
+          momoTxId: payChannel === "momo" ? smsMatchResult?.txId ?? null : null,
         },
         ussd,
         submittedAt: new Date().toISOString(),
@@ -1249,11 +1260,13 @@ export function UmuriroBoarding() {
                       <Textarea
                         value={momoSmsPaste}
                         onChange={(e) => {
+                          if (smsPayCheck === "paid") return
                           setMomoSmsPaste(e.target.value)
                           setSmsPayCheck(null)
                           setSmsMatchResult(null)
                         }}
-                        className="min-h-[88px] resize-y border-[#dbe7f3] text-sm"
+                        readOnly={smsPayCheck === "paid"}
+                        className={`min-h-[88px] resize-y border-[#dbe7f3] text-sm ${smsPayCheck === "paid" ? "bg-emerald-50/50 opacity-75 cursor-not-allowed" : ""}`}
                         placeholder="MTN MoMo…"
                         aria-label={pickLang(UMURIRO_UI.readMoMoSmsTitle, lang)}
                       />
@@ -1285,8 +1298,23 @@ export function UmuriroBoarding() {
                       {smsPayCheck === "mismatch" && smsMatchResult ? (
                         <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-2 text-xs text-red-900">
                           {pickLang(UMURIRO_UI.paymentMismatch, lang)
-                            .replace("{got}", String(smsMatchResult.amount ?? "—"))
+                            .replace("{got}", String(smsMatchResult.amount ?? "\u2014"))
                             .replace("{expected}", totalRwf.toLocaleString())}
+                        </div>
+                      ) : null}
+                      {smsPayCheck === "expired_sms" ? (
+                        <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-2 text-xs text-red-900">
+                          {pickLang(UMURIRO_UI.paymentExpiredSms, lang)}
+                        </div>
+                      ) : null}
+                      {smsPayCheck === "wrong_merchant" ? (
+                        <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-2 text-xs text-red-900">
+                          {pickLang(UMURIRO_UI.paymentWrongMerchant, lang)}
+                        </div>
+                      ) : null}
+                      {smsPayCheck === "no_txid" ? (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-2 text-xs text-amber-950">
+                          {pickLang(UMURIRO_UI.paymentNoTxId, lang)}
                         </div>
                       ) : null}
                     </div>

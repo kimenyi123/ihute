@@ -12,6 +12,212 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Search, RotateCw, Calendar } from "lucide-react"
 import { SdcInfoCell, sdcRaw } from "@/components/sdc-info-cell"
+import { useLanguageStore, type Language } from "@/lib/language-store"
+
+// ===========================================
+// Multilingual UI strings
+// ===========================================
+const ORDERS_UI: Record<Language, {
+  statusLabels: Record<string, string>
+  noSupplierAccount: string
+  checkingSession: string
+  wrongSeller: string
+  viewMyOrders: string
+  myOrders: string
+  refresh: string
+  loading: string
+  searchPlaceholder: string
+  searchByDates: string
+  today: string
+  last7Days: string
+  clearDates: string
+  allPayment: string
+  paid: string
+  unpaid: string
+  allStatus: string
+  allOrders: string
+  selfOrderKiosk: string
+  perPage10: string
+  perPage25: string
+  perPage50: string
+  perPage100: string
+  showAll: string
+  loadAllOrders: string
+  showing: string
+  of: string
+  orderSingular: string
+  orderPlural: string
+  filtered: string
+  colOrderNum: string
+  colUser: string
+  colCompany: string
+  colServedAmount: string
+  colDate: string
+  colSdcInfo: string
+  colTotal: string
+  colPayment: string
+  colStatus: string
+  colActions: string
+  noOrdersYet: string
+  noOrdersMatch: string
+  view: string
+  exportLabel: string
+  prev: string
+  page: string
+  next: string
+  errorUpdatingOrder: string
+}> = {
+  en: {
+    statusLabels: { open: "Open", processing: "Processing", invoice: "Invoice", "in-transit": "Out for Delivery", delivered: "Delivered" },
+    noSupplierAccount: "No supplier account found. Please log out and log in again so your supplier account is loaded.",
+    checkingSession: "Checking session\u2026",
+    wrongSeller: "This link is for another seller. You\u2019re logged in as",
+    viewMyOrders: "View my orders",
+    myOrders: "My Orders",
+    refresh: "Refresh",
+    loading: "Loading...",
+    searchPlaceholder: "Search by order #, customer, date, total, payment, status...",
+    searchByDates: "Search by dates",
+    today: "Today",
+    last7Days: "Last 7 days",
+    clearDates: "Clear dates",
+    allPayment: "All payment",
+    paid: "Paid",
+    unpaid: "Unpaid",
+    allStatus: "All status",
+    allOrders: "All orders",
+    selfOrderKiosk: "Self Order (kiosk)",
+    perPage10: "10 per page",
+    perPage25: "25 per page",
+    perPage50: "50 per page",
+    perPage100: "100 per page",
+    showAll: "Show all",
+    loadAllOrders: "Load all orders",
+    showing: "Showing",
+    of: "of",
+    orderSingular: "order",
+    orderPlural: "orders",
+    filtered: "(filtered)",
+    colOrderNum: "Order #",
+    colUser: "User",
+    colCompany: "Company",
+    colServedAmount: "Served Amount",
+    colDate: "Date",
+    colSdcInfo: "SDC Info",
+    colTotal: "Total",
+    colPayment: "Payment",
+    colStatus: "Status",
+    colActions: "Actions",
+    noOrdersYet: "No orders yet. Orders from customers will appear here.",
+    noOrdersMatch: "No orders match your search or filters. Try different criteria.",
+    view: "View",
+    exportLabel: "Export",
+    prev: "Prev",
+    page: "Page",
+    next: "Next",
+    errorUpdatingOrder: "Error updating order:",
+  },
+  rw: {
+    statusLabels: { open: "Bifunguye", processing: "Birimo gukorwa", invoice: "Inyemezabuguzi", "in-transit": "Biri mu nzira", delivered: "Byageze" },
+    noSupplierAccount: "Nta konti y\u2019umucuruzi yabonetse. Nyamuneka sohoka wongere winjire kugira ngo konti yawe ishyirweho.",
+    checkingSession: "Birimo gutangira\u2026",
+    wrongSeller: "Iyi linki ni iy\u2019undi mucuruzi. Winjiye nka",
+    viewMyOrders: "Reba ibitumijwe byanjye",
+    myOrders: "Ibitumijwe byanjye",
+    refresh: "Kura amakuru",
+    loading: "Birimo gutangira...",
+    searchPlaceholder: "Shakisha ukoresheje nimero, umukiriya, itariki, igiteranyo...",
+    searchByDates: "Shakisha ukurikije itariki",
+    today: "Uyu munsi",
+    last7Days: "Iminsi 7 ishize",
+    clearDates: "Siba itariki",
+    allPayment: "Uburyo bwose bwo kwishyura",
+    paid: "Byishyuwe",
+    unpaid: "Bitishyuwe",
+    allStatus: "Imiterere yose",
+    allOrders: "Ibitumijwe byose",
+    selfOrderKiosk: "Kwigurira (kiosk)",
+    perPage10: "10 kuri buri paji",
+    perPage25: "25 kuri buri paji",
+    perPage50: "50 kuri buri paji",
+    perPage100: "100 kuri buri paji",
+    showAll: "Erekana byose",
+    loadAllOrders: "Shyiramo ibitumijwe byose",
+    showing: "Kwerekana",
+    of: "mu",
+    orderSingular: "igitumijwe",
+    orderPlural: "ibitumijwe",
+    filtered: "(byatoranyijwe)",
+    colOrderNum: "Nimero",
+    colUser: "Umukiriya",
+    colCompany: "Isosiyete",
+    colServedAmount: "Amafaranga yishyuwe",
+    colDate: "Itariki",
+    colSdcInfo: "Amakuru ya SDC",
+    colTotal: "Igiteranyo",
+    colPayment: "Kwishyura",
+    colStatus: "Imiterere",
+    colActions: "Ibikorwa",
+    noOrdersYet: "Nta bitumijwe bihari. Ibitumijwe by\u2019abakiriya bizagaragara hano.",
+    noOrdersMatch: "Nta bitumijwe bihuye n\u2019ibyo ushakisha. Gerageza ibindi.",
+    view: "Reba",
+    exportLabel: "Kohereza hanze",
+    prev: "Inyuma",
+    page: "Paji",
+    next: "Komeza",
+    errorUpdatingOrder: "Ikosa mu guhindura igitumijwe:",
+  },
+  fr: {
+    statusLabels: { open: "Ouvert", processing: "En cours", invoice: "Facture", "in-transit": "En cours de livraison", delivered: "Livr\u00e9" },
+    noSupplierAccount: "Aucun compte fournisseur trouv\u00e9. Veuillez vous d\u00e9connecter et vous reconnecter pour charger votre compte.",
+    checkingSession: "V\u00e9rification de la session\u2026",
+    wrongSeller: "Ce lien est destin\u00e9 \u00e0 un autre vendeur. Vous \u00eates connect\u00e9 en tant que",
+    viewMyOrders: "Voir mes commandes",
+    myOrders: "Mes commandes",
+    refresh: "Actualiser",
+    loading: "Chargement...",
+    searchPlaceholder: "Rechercher par n\u00b0 de commande, client, date, total, paiement, statut...",
+    searchByDates: "Rechercher par dates",
+    today: "Aujourd\u2019hui",
+    last7Days: "7 derniers jours",
+    clearDates: "Effacer les dates",
+    allPayment: "Tous les paiements",
+    paid: "Pay\u00e9",
+    unpaid: "Impay\u00e9",
+    allStatus: "Tous les statuts",
+    allOrders: "Toutes les commandes",
+    selfOrderKiosk: "Commande libre-service (kiosque)",
+    perPage10: "10 par page",
+    perPage25: "25 par page",
+    perPage50: "50 par page",
+    perPage100: "100 par page",
+    showAll: "Tout afficher",
+    loadAllOrders: "Charger toutes les commandes",
+    showing: "Affichage",
+    of: "sur",
+    orderSingular: "commande",
+    orderPlural: "commandes",
+    filtered: "(filtr\u00e9)",
+    colOrderNum: "N\u00b0 commande",
+    colUser: "Utilisateur",
+    colCompany: "Soci\u00e9t\u00e9",
+    colServedAmount: "Montant servi",
+    colDate: "Date",
+    colSdcInfo: "Info SDC",
+    colTotal: "Total",
+    colPayment: "Paiement",
+    colStatus: "Statut",
+    colActions: "Actions",
+    noOrdersYet: "Aucune commande pour le moment. Les commandes des clients appara\u00eetront ici.",
+    noOrdersMatch: "Aucune commande ne correspond \u00e0 votre recherche. Essayez d\u2019autres crit\u00e8res.",
+    view: "Voir",
+    exportLabel: "Exporter",
+    prev: "Pr\u00e9c\u00e9dent",
+    page: "Page",
+    next: "Suivant",
+    errorUpdatingOrder: "Erreur lors de la mise \u00e0 jour :",
+  },
+}
 
 // ===========================================
 // Constants
@@ -102,6 +308,8 @@ function pickAnyNum(row: Record<string, unknown>, ...keys: string[]): number | n
 // Inline Status Picker Component
 // ===========================================
 function InlineStatusPicker({ order, orders, setOrders }: { order: Order, orders: Order[], setOrders: (orders: Order[]) => void }) {
+  const language = useLanguageStore((s) => s.language)
+  const ui = ORDERS_UI[language] ?? ORDERS_UI.en
   const current = order.supplierStatus as SupplierStatusKey
   const [isUpdating, setIsUpdating] = useState(false)
 
@@ -127,7 +335,7 @@ function InlineStatusPicker({ order, orders, setOrders }: { order: Order, orders
       if (!res.ok) throw new Error(json?.error || "Update failed")
     } catch (e: any) {
       setOrders(orders.map(o => o.id === order.id ? { ...o, status: previousStatus, supplierStatus: current } : o))
-      alert(`Error updating order: ${e.message}`)
+      alert(`${ui.errorUpdatingOrder} ${e.message}`)
     } finally {
       setIsUpdating(false)
     }
@@ -137,13 +345,13 @@ function InlineStatusPicker({ order, orders, setOrders }: { order: Order, orders
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition bg-slate-50 text-slate-700 border-slate-300`}>
-          {current}
+          {ui.statusLabels[current] ?? current}
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48">
         {SUPPLIER_STATUS.map(opt => (
           <DropdownMenuItem key={opt.key} onClick={() => setStatus(opt.key)}>
-            {opt.label}
+            {ui.statusLabels[opt.key] ?? opt.label}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
@@ -161,6 +369,8 @@ export default function SupplierOrdersPage() {
   const accountFromUrl = searchParams?.get("account")?.trim() ?? ""
   const { user, isAuthenticated } = useAuthStore()
   const { orders, setOrders } = useOrdersStore()
+  const language = useLanguageStore((s) => s.language)
+  const ui = ORDERS_UI[language] ?? ORDERS_UI.en
 
   const [hydrated, setHydrated] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -216,7 +426,7 @@ export default function SupplierOrdersPage() {
   const loadOrders = useCallback(async () => {
     const sellerAccount = user?.ishyigaAccount?.trim()
     if (!sellerAccount) {
-      setErr("No supplier account found. Please log out and log in again so your supplier account (ishyigaAccount) is loaded.")
+      setErr(ui.noSupplierAccount)
       setLoading(false)
       return
     }
@@ -383,7 +593,7 @@ export default function SupplierOrdersPage() {
       setErr(null)
       loadOrders()
     } else {
-      setErr("No supplier account found. Please log out and log in again so your supplier account is loaded.")
+      setErr(ui.noSupplierAccount)
     }
   }, [isAuthenticated, user, user?.ishyigaAccount, loadOrders, isWrongSeller, setOrders])
 
@@ -495,7 +705,7 @@ export default function SupplierOrdersPage() {
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <div className="text-center text-slate-600">
           <RotateCw className="h-8 w-8 animate-spin mx-auto mb-2" />
-          <p>Checking session…</p>
+          <p>{ui.checkingSession}</p>
         </div>
       </div>
     )

@@ -338,3 +338,67 @@ html {
 .sticky-offset {
   scroll-margin-top: 5rem;
 }
+
+/* ── i18n / multilingual typography ─────────────────────────────────── */
+
+:root {
+  --i18n-line-height: 1.6;
+}
+
+html[lang="rw"] {
+  --i18n-line-height: 1.7;
+}
+
+html[lang="rw"] body {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  hyphens: auto;
+  -webkit-hyphens: auto;
+  line-height: var(--i18n-line-height);
+  letter-spacing: 0.01em;
+}
+
+html[lang="fr"] body {
+  hyphens: auto;
+  -webkit-hyphens: auto;
+}
+
+html[lang="rw"] button:not(.logo):not(.back-btn):not(.more-btn):not(.orders-btn),
+html[lang="rw"] .btn,
+html[lang="rw"] [role="button"] {
+  white-space: normal;
+  min-height: 2.5rem;
+  padding-inline: 0.875rem;
+  line-height: 1.35;
+  text-align: center;
+}
+
+html[lang="rw"] h1,
+html[lang="rw"] h2,
+html[lang="rw"] h3 {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.3;
+}
+
+html[lang="rw"] td,
+html[lang="rw"] th {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  padding-inline: 0.5rem;
+}
+
+html[lang="rw"] .text-truncate,
+html[lang="fr"] .text-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+html[lang="rw"] .text-wrap-i18n,
+html[lang="fr"] .text-wrap-i18n {
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}

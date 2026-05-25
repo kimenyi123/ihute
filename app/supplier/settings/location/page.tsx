@@ -4,10 +4,213 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/auth-store";
+import { useLanguageStore, type Language } from "@/lib/language-store";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { MapPin, Navigation, Save, History, ArrowLeft, Loader2, Search } from "lucide-react";
 import dynamic from "next/dynamic";
+
+const SETTINGS_UI: Record<Language, {
+  locationDetected: string;
+  failedLocation: string;
+  geoNotSupported: string;
+  locationSaved: string;
+  profileSaved: string;
+  loadingSettings: string;
+  backToDashboard: string;
+  locationSettings: string;
+  updateLocation: string;
+  searchAddress: string;
+  startTyping: string;
+  typePlaceholder: string;
+  noResults: string;
+  setYourLocation: string;
+  clickOnMap: string;
+  gettingLocation: string;
+  useCurrentLocation: string;
+  saving: string;
+  saveLocation: string;
+  yourRating: string;
+  noRatingsYet: string;
+  currentCoordinates: string;
+  latitude: string;
+  longitude: string;
+  accuracyMeters: string;
+  notes: string;
+  businessProfile: string;
+  businessNameOwner: string;
+  noBusinessName: string;
+  shopProfileImage: string;
+  uploadImage: string;
+  uploading: string;
+  preferredCategories: string;
+  selectCategory: string;
+  momoNumber: string;
+  preferredPayment: string;
+  selectMethod: string;
+  mobileMoney: string;
+  bankTransfer: string;
+  cash: string;
+  province: string;
+  district: string;
+  cellSector: string;
+  sellerNickname: string;
+  saveProfile: string;
+  savingProfile: string;
+  saveProfileHint: string;
+  recentUpdates: string;
+}> = {
+  en: {
+    locationDetected: "Current location detected!",
+    failedLocation: "Failed to get location:",
+    geoNotSupported: "Geolocation not supported by your browser",
+    locationSaved: "Location saved successfully!",
+    profileSaved: "Profile saved successfully!",
+    loadingSettings: "Loading location settings...",
+    backToDashboard: "Back to Dashboard",
+    locationSettings: "Location Settings",
+    updateLocation: "Update your business location for better customer visibility",
+    searchAddress: "Search Address",
+    startTyping: "Start typing to search for your location (min 3 characters)",
+    typePlaceholder: "Type location: Kimironko, Rusororo, KN 3 Ave...",
+    noResults: "No results found. Try different spelling or nearby landmarks.",
+    setYourLocation: "Set Your Location",
+    clickOnMap: "Click on the map or use your current location",
+    gettingLocation: "Getting Location...",
+    useCurrentLocation: "Use Current Location",
+    saving: "Saving...",
+    saveLocation: "Save Location",
+    yourRating: "Your Rating",
+    noRatingsYet: "No ratings yet",
+    currentCoordinates: "Current Coordinates",
+    latitude: "Latitude",
+    longitude: "Longitude",
+    accuracyMeters: "Accuracy (meters)",
+    notes: "Notes",
+    businessProfile: "Business Profile",
+    businessNameOwner: "Business Name (OWNER)",
+    noBusinessName: "No business name saved yet",
+    shopProfileImage: "Shop profile image",
+    uploadImage: "Upload image",
+    uploading: "Uploading...",
+    preferredCategories: "Preferred Categories",
+    selectCategory: "Select category",
+    momoNumber: "Mobile Money Number",
+    preferredPayment: "Preferred Payment Method",
+    selectMethod: "Select method",
+    mobileMoney: "Mobile Money",
+    bankTransfer: "Bank Transfer",
+    cash: "Cash",
+    province: "Province",
+    district: "District",
+    cellSector: "Cell/Sector",
+    sellerNickname: "Seller Nickname",
+    saveProfile: "Save Profile",
+    savingProfile: "Saving Profile...",
+    saveProfileHint: "Save business profile without changing location",
+    recentUpdates: "Recent Updates",
+  },
+  rw: {
+    locationDetected: "Aho uri haboneke!",
+    failedLocation: "Kubona aho uri byanze:",
+    geoNotSupported: "Murandura yawe ntishyigikira kubona aho uri",
+    locationSaved: "Aho uri byabitswe neza!",
+    profileSaved: "Umwirondoro wabitswe neza!",
+    loadingSettings: "Birimo gutangira ibigenga aho uri...",
+    backToDashboard: "Subira ku rupapuro rw'ibanze",
+    locationSettings: "Ibigenga aho uri",
+    updateLocation: "Hindura aho ubucuruzi bwawe buherereye kugira ngo abakiriya bakubone neza",
+    searchAddress: "Shakisha aderesi",
+    startTyping: "Tangira kwandika ushakisha aho uri (nibura inyuguti 3)",
+    typePlaceholder: "Andika aho uri: Kimironko, Rusororo, KN 3 Ave...",
+    noResults: "Nta bisubizo byabonetse. Gerageza izindi nyandiko cyangwa ahantu hazwi hafi.",
+    setYourLocation: "Shyiraho aho uri",
+    clickOnMap: "Kanda kuri ikarita cyangwa ukoreshe aho uri ubu",
+    gettingLocation: "Birimo gushaka aho uri...",
+    useCurrentLocation: "Koresha aho uri ubu",
+    saving: "Birimo kubika...",
+    saveLocation: "Bika aho uri",
+    yourRating: "Amanota yawe",
+    noRatingsYet: "Nta manota ahari",
+    currentCoordinates: "Aho hantu nyahantu",
+    latitude: "Latitude",
+    longitude: "Longitude",
+    accuracyMeters: "Ubuziranenge (metero)",
+    notes: "Ibyanditswe",
+    businessProfile: "Umwirondoro w'ubucuruzi",
+    businessNameOwner: "Izina ry'ubucuruzi (NYIR'UBUCURUZI)",
+    noBusinessName: "Nta zina ry'ubucuruzi ryabitswe",
+    shopProfileImage: "Ifoto y'iduka",
+    uploadImage: "Ohereza ifoto",
+    uploading: "Birimo kohereza...",
+    preferredCategories: "Ubwoko bwatoranijwe",
+    selectCategory: "Hitamo ubwoko",
+    momoNumber: "Nimero ya Mobile Money",
+    preferredPayment: "Uburyo bw'ubwishyu bwatoranijwe",
+    selectMethod: "Hitamo uburyo",
+    mobileMoney: "Mobile Money",
+    bankTransfer: "Kohereza mu banki",
+    cash: "Amafaranga y'ibiganza",
+    province: "Intara",
+    district: "Akarere",
+    cellSector: "Akagari/Umurenge",
+    sellerNickname: "Izina ry'umucuruzi",
+    saveProfile: "Bika umwirondoro",
+    savingProfile: "Birimo kubika umwirondoro...",
+    saveProfileHint: "Bika umwirondoro w'ubucuruzi utahinduye aho uri",
+    recentUpdates: "Amakuru mashya",
+  },
+  fr: {
+    locationDetected: "Position actuelle détectée !",
+    failedLocation: "Échec de la localisation :",
+    geoNotSupported: "La géolocalisation n'est pas prise en charge par votre navigateur",
+    locationSaved: "Localisation enregistrée avec succès !",
+    profileSaved: "Profil enregistré avec succès !",
+    loadingSettings: "Chargement des paramètres de localisation...",
+    backToDashboard: "Retour au tableau de bord",
+    locationSettings: "Paramètres de localisation",
+    updateLocation: "Mettez à jour la localisation de votre entreprise pour une meilleure visibilité",
+    searchAddress: "Rechercher une adresse",
+    startTyping: "Commencez à taper pour rechercher votre localisation (min. 3 caractères)",
+    typePlaceholder: "Tapez le lieu : Kimironko, Rusororo, KN 3 Ave...",
+    noResults: "Aucun résultat trouvé. Essayez une orthographe différente ou des points de repère à proximité.",
+    setYourLocation: "Définir votre localisation",
+    clickOnMap: "Cliquez sur la carte ou utilisez votre position actuelle",
+    gettingLocation: "Obtention de la position...",
+    useCurrentLocation: "Utiliser la position actuelle",
+    saving: "Enregistrement...",
+    saveLocation: "Enregistrer la localisation",
+    yourRating: "Votre note",
+    noRatingsYet: "Aucune évaluation pour le moment",
+    currentCoordinates: "Coordonnées actuelles",
+    latitude: "Latitude",
+    longitude: "Longitude",
+    accuracyMeters: "Précision (mètres)",
+    notes: "Notes",
+    businessProfile: "Profil professionnel",
+    businessNameOwner: "Nom de l'entreprise (PROPRIÉTAIRE)",
+    noBusinessName: "Aucun nom d'entreprise enregistré",
+    shopProfileImage: "Image de profil du magasin",
+    uploadImage: "Télécharger l'image",
+    uploading: "Téléchargement...",
+    preferredCategories: "Catégories préférées",
+    selectCategory: "Sélectionner une catégorie",
+    momoNumber: "Numéro Mobile Money",
+    preferredPayment: "Mode de paiement préféré",
+    selectMethod: "Sélectionner une méthode",
+    mobileMoney: "Mobile Money",
+    bankTransfer: "Virement bancaire",
+    cash: "Espèces",
+    province: "Province",
+    district: "District",
+    cellSector: "Cellule/Secteur",
+    sellerNickname: "Surnom du vendeur",
+    saveProfile: "Enregistrer le profil",
+    savingProfile: "Enregistrement du profil...",
+    saveProfileHint: "Enregistrer le profil sans modifier la localisation",
+    recentUpdates: "Mises à jour récentes",
+  },
+};
 
 const SupplierLocationMap = dynamic(
     () => import("@/components/supplier-location-map").then((mod) => mod.SupplierLocationMap),
@@ -66,6 +269,8 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
 function SupplierLocationSettings() {
     const router = useRouter();
     const { user, isAuthenticated, hasHydrated } = useAuthStore();
+    const language = useLanguageStore((s) => s.language);
+    const ui = SETTINGS_UI[language] ?? SETTINGS_UI.en;
     const ENABLE_NEARBY_LANDMARKS = false;
 
     const [location, setLocation] = useState<LocationData | null>(null);
@@ -370,11 +575,11 @@ out body 15;
                     setSelectedLng(position.coords.longitude);
                     setAccuracy(position.coords.accuracy);
                     setGettingLocation(false);
-                    alert(`✅ Current location detected!\nAccuracy: ${Math.round(position.coords.accuracy)}m`);
+                    alert(`✅ ${ui.locationDetected}\nAccuracy: ${Math.round(position.coords.accuracy)}m`);
                 },
                 (error) => {
                     setGettingLocation(false);
-                    alert("❌ Failed to get location: " + error.message);
+                    alert("❌ " + ui.failedLocation + " " + error.message);
                 },
                 {
                     enableHighAccuracy: true,
@@ -384,7 +589,7 @@ out body 15;
             );
         } else {
             setGettingLocation(false);
-            alert("❌ Geolocation not supported by your browser");
+            alert("❌ " + ui.geoNotSupported);
         }
     };
 
@@ -429,7 +634,7 @@ out body 15;
             const data = await res.json();
 
             if (data.ok) {
-                alert("✅ Location saved successfully!");
+                alert("✅ " + ui.locationSaved);
                 fetchLocation();
                 fetchHistory();
             } else {
@@ -470,7 +675,7 @@ out body 15;
             const data = await res.json();
 
             if (data.ok) {
-                alert("✅ Profile saved successfully!");
+                alert("✅ " + ui.profileSaved);
                 fetchLocation();
             } else {
                 setError(data.error || "Failed to save profile");
@@ -518,7 +723,7 @@ out body 15;
             <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
                 <div className="text-center">
                     <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto mb-4" />
-                    <p className="text-slate-600">Loading location settings...</p>
+                    <p className="text-slate-600">{ui.loadingSettings}</p>
                 </div>
             </div>
         );
@@ -531,12 +736,12 @@ out body 15;
                 <div className="container mx-auto px-4 sm:px-6 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
                     <Button variant="outline" size="sm" onClick={() => router.push("/supplier/dashboard")}>
                         <ArrowLeft className="h-4 w-4 mr-2" />
-                        Back to Dashboard
+                        {ui.backToDashboard}
                     </Button>
                     <div className="flex-1">
-                        <h1 className="text-2xl font-bold text-slate-900">Location Settings</h1>
+                        <h1 className="text-2xl font-bold text-slate-900">{ui.locationSettings}</h1>
                         <p className="text-sm text-slate-600">
-                            Update your business location for better customer visibility
+                            {ui.updateLocation}
                         </p>
                     </div>
                 </div>
@@ -557,10 +762,10 @@ out body 15;
                             <CardHeader>
                                 <CardTitle className="flex items-center gap-2">
                                     <Search className="h-5 w-5" />
-                                    Search Address
+                                    {ui.searchAddress}
                                 </CardTitle>
                                 <CardDescription>
-                                    Start typing to search for your location (min 3 characters)
+                                    {ui.startTyping}
                                 </CardDescription>
                             </CardHeader>
                             <CardContent>
@@ -569,7 +774,7 @@ out body 15;
                                         type="text"
                                         value={addressSearch}
                                         onChange={(e) => setAddressSearch(e.target.value)}
-                                        placeholder="Type location: Kimironko, Rusororo, KN 3 Ave..."
+                                        placeholder={ui.typePlaceholder}
                                         className="w-full px-4 py-2 pr-12 border rounded-lg text-sm"
                                     />
                                     {searching && (
@@ -601,7 +806,7 @@ out body 15;
 
                                 {addressSearch.length >= 3 && !searching && searchResults.length === 0 && (
                                     <div className="mt-3 text-sm text-slate-500 text-center py-2">
-                                        No results found. Try different spelling or nearby landmarks.
+                                        {ui.noResults}
                                     </div>
                                 )}
                             </CardContent>
@@ -612,10 +817,10 @@ out body 15;
                             <CardHeader>
                                 <CardTitle className="flex items-center gap-2">
                                     <MapPin className="h-5 w-5" />
-                                    Set Your Location
+                                    {ui.setYourLocation}
                                 </CardTitle>
                                 <CardDescription>
-                                    Click on the map or use your current location
+                                    {ui.clickOnMap}
                                 </CardDescription>
                             </CardHeader>
                             <CardContent>
@@ -637,12 +842,12 @@ out body 15;
                                         {gettingLocation ? (
                                             <>
                                                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                                Getting Location...
+                                                {ui.gettingLocation}
                                             </>
                                         ) : (
                                             <>
                                                 <Navigation className="h-4 w-4 mr-2" />
-                                                Use Current Location
+                                                {ui.useCurrentLocation}
                                             </>
                                         )}
                                     </Button>
@@ -655,12 +860,12 @@ out body 15;
                                         {saving ? (
                                             <>
                                                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                                Saving...
+                                                {ui.saving}
                                             </>
                                         ) : (
                                             <>
                                                 <Save className="h-4 w-4 mr-2" />
-                                                Save Location
+                                                {ui.saveLocation}
                                             </>
                                         )}
                                     </Button>
@@ -674,7 +879,7 @@ out body 15;
                         {/* Rating Display */}
                         <Card>
                             <CardHeader>
-                                <CardTitle className="text-lg">Your Rating</CardTitle>
+                                <CardTitle className="text-lg">{ui.yourRating}</CardTitle>
                             </CardHeader>
                             <CardContent>
                                
@@ -702,7 +907,7 @@ out body 15;
                                                 <span key={star} className="text-2xl text-gray-300">★</span>
                                             ))}
                                         </div>
-                                        <p className="text-sm text-slate-600">No ratings yet</p>
+                                        <p className="text-sm text-slate-600">{ui.noRatingsYet}</p>
                                     </div>
                                 )}
                             </CardContent>
@@ -711,11 +916,11 @@ out body 15;
                         {/* Current Location Info */}
                         <Card>
                             <CardHeader>
-                                <CardTitle className="text-lg">Current Coordinates</CardTitle>
+                                <CardTitle className="text-lg">{ui.currentCoordinates}</CardTitle>
                             </CardHeader>
                             <CardContent className="space-y-3">
                                 <div>
-                                    <label className="text-xs font-medium text-slate-600">Latitude</label>
+                                    <label className="text-xs font-medium text-slate-600">{ui.latitude}</label>
                                     <input
                                         type="number"
                                         step="0.000001"
@@ -725,7 +930,7 @@ out body 15;
                                     />
                                 </div>
                                 <div>
-                                    <label className="text-xs font-medium text-slate-600">Longitude</label>
+                                    <label className="text-xs font-medium text-slate-600">{ui.longitude}</label>
                                     <input
                                         type="number"
                                         step="0.000001"
@@ -735,7 +940,7 @@ out body 15;
                                     />
                                 </div>
                                 <div>
-                                    <label className="text-xs font-medium text-slate-600">Accuracy (meters)</label>
+                                    <label className="text-xs font-medium text-slate-600">{ui.accuracyMeters}</label>
                                     <input
                                         type="number"
                                         value={accuracy}
@@ -744,7 +949,7 @@ out body 15;
                                     />
                                 </div>
                                 <div>
-                                    <label className="text-xs font-medium text-slate-600">Notes</label>
+                                    <label className="text-xs font-medium text-slate-600">{ui.notes}</label>
                                     <textarea
                                         value={notes}
                                         onChange={(e) => setNotes(e.target.value)}
@@ -759,30 +964,30 @@ out body 15;
                         {/* Profile Settings */}
                         <Card>
                             <CardHeader>
-                                <CardTitle className="text-lg">Business Profile</CardTitle>
+                                <CardTitle className="text-lg">{ui.businessProfile}</CardTitle>
                             </CardHeader>
                             <CardContent className="space-y-3">
                                 <div>
                                     <label className="text-xs font-medium text-slate-600 flex items-center justify-between">
-                                        <span>Business Name (OWNER)</span>
-                                        {loading && <span className="text-xs text-blue-600">Loading...</span>}
+                                        <span>{ui.businessNameOwner}</span>
+                                        {loading && <span className="text-xs text-blue-600">{ui.loadingSettings.split("...")[0]}...</span>}
                                     </label>
                                     <input
                                         type="text"
                                         value={owner}
                                         onChange={(e) => setOwner(e.target.value)}
                                         className="w-full mt-1 px-3 py-2 border rounded-lg text-sm"
-                                        placeholder={loading ? "Loading..." : "Enter business name"}
+                                        placeholder={loading ? ui.saving : ui.businessNameOwner}
                                         disabled={loading}
                                     />
                                     {!loading && !owner && (
                                         <p className="text-xs text-amber-600 mt-1">
-                                            ⚠️ No business name saved yet
+                                            ⚠️ {ui.noBusinessName}
                                         </p>
                                     )}
                                 </div>
                                 <div>
-                                    <label className="text-xs font-medium text-slate-600">Shop profile image</label>
+                                    <label className="text-xs font-medium text-slate-600">{ui.shopProfileImage}</label>
                                     <div className="mt-2 flex items-center gap-3">
                                         <img
                                             src={shopImageUrl || "/img/shops/default.png"}
@@ -803,19 +1008,19 @@ out body 15;
                                                 onClick={handleShopImageUpload}
                                                 disabled={!shopImageFile || uploadingImage}
                                             >
-                                                {uploadingImage ? "Uploading..." : "Upload image"}
+                                                {uploadingImage ? ui.uploading : ui.uploadImage}
                                             </Button>
                                         </div>
                                     </div>
                                 </div>
                                 <div>
-                                    <label className="text-xs font-medium text-slate-600">Preferred Categories</label>
+                                    <label className="text-xs font-medium text-slate-600">{ui.preferredCategories}</label>
                                     <select
                                         value={preferredCategories}
                                         onChange={(e) => setPreferredCategories(e.target.value)}
                                         className="w-full mt-1 px-3 py-2 border rounded-lg text-sm"
                                     >
-                                        <option value="">Select category</option>
+                                        <option value="">{ui.selectCategory}</option>
                                         {categories.map((cat) => (
                                             <option key={cat.id} value={cat.id}>
                                                 {cat.name}
@@ -824,7 +1029,7 @@ out body 15;
                                     </select>
                                 </div>
                                 <div>
-                                    <label className="text-xs font-medium text-slate-600">Mobile Money Number</label>
+                                    <label className="text-xs font-medium text-slate-600">{ui.momoNumber}</label>
                                     <input
                                         type="tel"
                                         value={momo}
@@ -834,20 +1039,20 @@ out body 15;
                                     />
                                 </div>
                                 <div>
-                                    <label className="text-xs font-medium text-slate-600">Preferred Payment Method</label>
+                                    <label className="text-xs font-medium text-slate-600">{ui.preferredPayment}</label>
                                     <select
                                         value={preferredPay}
                                         onChange={(e) => setPreferredPay(e.target.value)}
                                         className="w-full mt-1 px-3 py-2 border rounded-lg text-sm"
                                     >
-                                        <option value="">Select method</option>
-                                        <option value="MOMO">Mobile Money</option>
-                                        <option value="BANK">Bank Transfer</option>
-                                        <option value="CASH">Cash</option>
+                                        <option value="">{ui.selectMethod}</option>
+                                        <option value="MOMO">{ui.mobileMoney}</option>
+                                        <option value="BANK">{ui.bankTransfer}</option>
+                                        <option value="CASH">{ui.cash}</option>
                                     </select>
                                 </div>
                                 <div>
-                                    <label className="text-xs font-medium text-slate-600">Province</label>
+                                    <label className="text-xs font-medium text-slate-600">{ui.province}</label>
                                     <input
                                         type="text"
                                         value={locProvince}
@@ -857,7 +1062,7 @@ out body 15;
                                     />
                                 </div>
                                 <div>
-                                    <label className="text-xs font-medium text-slate-600">District</label>
+                                    <label className="text-xs font-medium text-slate-600">{ui.district}</label>
                                     <input
                                         type="text"
                                         value={locDistrict}
@@ -867,7 +1072,7 @@ out body 15;
                                     />
                                 </div>
                                 <div>
-                                    <label className="text-xs font-medium text-slate-600">Cell/Sector</label>
+                                    <label className="text-xs font-medium text-slate-600">{ui.cellSector}</label>
                                     <input
                                         type="text"
                                         value={locCell}
@@ -877,7 +1082,7 @@ out body 15;
                                     />
                                 </div>
                                 <div>
-                                    <label className="text-xs font-medium text-slate-600">Seller Nickname</label>
+                                    <label className="text-xs font-medium text-slate-600">{ui.sellerNickname}</label>
                                     <input
                                         type="text"
                                         value={preferredSellerNickname}
@@ -897,17 +1102,17 @@ out body 15;
                                         {saving ? (
                                             <>
                                                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                                Saving Profile...
+                                                {ui.savingProfile}
                                             </>
                                         ) : (
                                             <>
                                                 <Save className="h-4 w-4 mr-2" />
-                                                Save Profile
+                                                {ui.saveProfile}
                                             </>
                                         )}
                                     </Button>
                                     <p className="text-xs text-gray-500 mt-2 text-center">
-                                        Save business profile without changing location
+                                        {ui.saveProfileHint}
                                     </p>
                                 </div>
                             </CardContent>
@@ -965,7 +1170,7 @@ out body 15;
                                 <CardHeader>
                                     <CardTitle className="text-lg flex items-center gap-2">
                                         <History className="h-4 w-4" />
-                                        Recent Updates
+                                        {ui.recentUpdates}
                                     </CardTitle>
                                 </CardHeader>
                                 <CardContent>

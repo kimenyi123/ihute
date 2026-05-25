@@ -1,0 +1,237 @@
+{
+  "header": {
+    "searchPlaceholder": "Rechercher produits, marques ou scanner un code-barres…",
+    "login": "Connexion",
+    "logout": "Déconnexion",
+    "allLocations": "Tous les emplacements"
+  },
+  "hero": {
+    "title": "Achetez auprès d'entreprises locales",
+    "subtitle": "Connectez-vous avec des fournisseurs de confiance à travers le Rwanda. Trouvez des produits de qualité livrés à votre porte.",
+    "shopNow": "Acheter maintenant",
+    "becomeSupplier": "Devenir fournisseur"
+  },
+  "stats": {
+    "suppliers": "Fournisseurs",
+    "customers": "Clients",
+    "paymentMethods": "Moyens de paiement",
+    "fastDelivery": "Livraison rapide"
+  },
+  "categories": {
+    "shopByCategory": "Acheter par catégorie",
+    "findWhatYouNeed": "Trouvez exactement ce que vous cherchez",
+    "viewMore": "Voir plus de catégories",
+    "viewLess": "Voir moins",
+    "pharmacy": "Pharmacie",
+    "liquorStore": "Caviste",
+    "boutique": "Boutique",
+    "barResto": "Bar & Restaurant",
+    "supermarket": "Supermarché",
+    "coffeeShop": "Café",
+    "beauty": "Beauté & Cosmétiques",
+    "generalStore": "Magasin général",
+    "pharmacyDesc": "Produits de santé et bien-être",
+    "liquorStoreDesc": "Vins, spiritueux et boissons",
+    "boutiqueDesc": "Mode et accessoires",
+    "barRestoDesc": "Restauration et boissons",
+    "supermarketDesc": "Alimentation et articles ménagers",
+    "coffeeShopDesc": "Café et pâtisseries",
+    "beautyDesc": "Soins de la peau et maquillage",
+    "generalStoreDesc": "Tout le reste"
+  },
+  "shops": {
+    "nickname": "Surnom",
+    "noNickname": "Pas de surnom",
+    "linkDisabledHint": "Ajoutez un surnom pour ce fournisseur pour activer Shop With Me.",
+    "shops": "magasins",
+    "items": "articles",
+    "browseByPrefix": "Acheter dans",
+    "browseBySuffix": "par :",
+    "chooseShop": "Choisir un magasin",
+    "chooseItem": "Choisir un article",
+    "shopsHint": "Choisissez un magasin pour voir son catalogue.",
+    "pickShopForProducts": "Choisissez un magasin ci-dessus pour voir les produits.",
+    "family": "Famille",
+    "familyAny": "Toutes",
+    "trendingSort": "Tendances",
+    "trendingHint": "Top 20 en aperçu — scores complets bientôt disponibles.",
+    "allItemsInSector": "Tous les articles de ce secteur",
+    "useHeaderSearchProducts": "Utilisez la barre de recherche en haut pour trouver des produits ou des marques. Ici, triez et filtrez par famille pour ce secteur uniquement.",
+    "shopGridHint": "Trouvez un magasin via la recherche en haut, puis ouvrez-le ci-dessous. Option : filtrer par zone — tient compte du lieu défini dans l'en-tête.",
+    "locationFilter": "Zone",
+    "locationAll": "Toutes les zones",
+    "locationMatchesHeader": "Lieu de l'en-tête appliqué"
+  },
+  "filters": {
+    "sortProducts": "Trier les produits",
+    "sortHint": "En « Choisir un article » sur une catégorie, ceci définit l'ordre des produits.",
+    "featured": "À la une",
+    "priceLow": "Prix : croissant",
+    "priceHigh": "Prix : décroissant",
+    "newest": "Plus récents",
+    "rating": "Mieux notés",
+    "done": "Terminé"
+  },
+  "howItWorks": {
+    "title": "Comment ça marche",
+    "step1Title": "Parcourir les produits",
+    "step1Desc": "Explorez les produits de fournisseurs locaux de votre région",
+    "step2Title": "Ajouter au panier",
+    "step2Desc": "Sélectionnez les articles et quantités qui vous conviennent",
+    "step3Title": "Livraison rapide",
+    "step3Desc": "Recevez votre commande rapidement à l'adresse de votre choix"
+  },
+  "payment": {
+    "title": "Nous acceptons",
+    "mobileMoney": "Mobile Money",
+    "creditCard": "Carte de crédit",
+    "debitCard": "Carte de débit",
+    "bankTransfer": "Virement bancaire",
+    "cashOnDelivery": "Paiement à la livraison"
+  },
+  "partners": {
+    "title": "Nos partenaires de confiance"
+  },
+  "cta": {
+    "readyToStart": "Prêt à commencer à vendre ?",
+    "joinSuppliers": "Rejoignez des centaines de fournisseurs qui vendent déjà sur ihute.rw",
+    "becomeCustomer": "Devenir client"
+  },
+  "footer": {
+    "aboutUs": "À propos de nous",
+    "aboutDesc": "ihute.rw connecte les entreprises avec les clients à travers le Rwanda, facilitant l'achat et la vente de produits en ligne.",
+    "quickLinks": "Liens rapides",
+    "home": "Accueil",
+    "categories": "Catégories",
+    "suppliers": "Fournisseurs",
+    "howItWorks": "Comment ça marche",
+    "customerService": "Service client",
+    "help": "Centre d'aide",
+    "shipping": "Informations de livraison",
+    "returns": "Retours",
+    "contactUs": "Nous contacter",
+    "contact": "Contact",
+    "email": "E-mail",
+    "phone": "Téléphone",
+    "address": "Adresse",
+    "kigaliRwanda": "Kigali, Rwanda",
+    "allRightsReserved": "Tous droits réservés."
+  },
+  "product": {
+    "addToCart": "Ajouter au panier",
+    "quantity": "Quantité",
+    "unit": "Unité",
+    "price": "Prix",
+    "inStock": "En stock",
+    "outOfStock": "Rupture de stock",
+    "supplier": "Fournisseur"
+  },
+  "cart": {
+    "title": "Panier",
+    "empty": "Votre panier est vide",
+    "continueShopping": "Continuer les achats",
+    "checkout": "Passer la commande",
+    "subtotal": "Sous-total",
+    "delivery": "Livraison",
+    "total": "Total"
+  },
+  "favorites": {
+    "title": "Mes favoris",
+    "empty": "Aucun favori pour le moment",
+    "add": "Ajouter aux favoris",
+    "remove": "Retirer des favoris"
+  },
+  "units": {
+    "piece": "Pièce",
+    "box": "Boîte",
+    "carton": "Carton",
+    "crate": "Caisse",
+    "pack": "Paquet"
+  },
+  "auth": {
+    "signIn": "Se connecter",
+    "signUp": "S'inscrire",
+    "name": "Nom",
+    "emailAddress": "Adresse e-mail",
+    "password": "Mot de passe",
+    "location": "Emplacement",
+    "role": "Je suis",
+    "customer": "Client",
+    "businessName": "Nom de l'entreprise",
+    "businessCategory": "Catégorie d'entreprise",
+    "register": "S'inscrire",
+    "alreadyHaveAccount": "Vous avez déjà un compte ?",
+    "dontHaveAccount": "Vous n'avez pas de compte ?"
+  },
+  "tutorial": {
+    "howToUse": "Comment utiliser ihute.rw",
+    "watchVideoGuide": "Regardez notre guide vidéo simple pour commencer",
+    "watchTutorial": "Regarder le tutoriel",
+    "step1": "Parcourir les produits de fournisseurs locaux",
+    "step2": "Ajouter des articles à votre panier avec quantités",
+    "step3": "Finaliser la commande et obtenir la livraison"
+  },
+  "validation": {
+    "required": "Ce champ est obligatoire",
+    "invalidEmail": "Veuillez saisir une adresse e-mail valide",
+    "invalidPhone": "Veuillez saisir un numéro de téléphone valide",
+    "passwordMin": "Le mot de passe doit contenir au moins 6 caractères",
+    "passwordMismatch": "Les mots de passe ne correspondent pas",
+    "selectOption": "Veuillez sélectionner une option"
+  },
+  "common": {
+    "loading": "Chargement…",
+    "save": "Enregistrer",
+    "cancel": "Annuler",
+    "confirm": "Confirmer",
+    "delete": "Supprimer",
+    "edit": "Modifier",
+    "close": "Fermer",
+    "back": "Retour",
+    "next": "Suivant",
+    "previous": "Précédent",
+    "search": "Rechercher",
+    "noResults": "Aucun résultat trouvé",
+    "retry": "Réessayer",
+    "yes": "Oui",
+    "no": "Non",
+    "ok": "OK",
+    "error": "Une erreur est survenue",
+    "success": "Succès",
+    "warning": "Attention"
+  },
+  "orders": {
+    "title": "Mes commandes",
+    "orderNumber": "Commande n°",
+    "date": "Date",
+    "status": "Statut",
+    "total": "Total",
+    "details": "Voir les détails",
+    "empty": "Vous n'avez aucune commande",
+    "pending": "En attente",
+    "confirmed": "Confirmée",
+    "inTransit": "En cours de livraison",
+    "delivered": "Livrée",
+    "cancelled": "Annulée",
+    "trackOrder": "Suivre la commande"
+  },
+  "seller": {
+    "dashboard": "Tableau de bord vendeur",
+    "myShop": "Ma boutique",
+    "addProduct": "Ajouter un produit",
+    "inventory": "Inventaire",
+    "sales": "Ventes",
+    "earnings": "Revenus",
+    "customers": "Clients",
+    "reviews": "Avis clients",
+    "settings": "Paramètres"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "empty": "Aucune notification",
+    "markAllRead": "Tout marquer comme lu",
+    "newOrder": "Nouvelle commande reçue",
+    "orderUpdate": "Statut de commande mis à jour",
+    "paymentReceived": "Paiement reçu"
+  }
+}
