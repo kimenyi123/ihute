@@ -1,0 +1,237 @@
+{
+  "header": {
+    "searchPlaceholder": "Shakisha ibicuruzwa, ubwoko, cyangwa scan code…",
+    "login": "Injira",
+    "logout": "Sohoka",
+    "allLocations": "Ahantu hose"
+  },
+  "hero": {
+    "title": "Gura mu maduka yo hafi",
+    "subtitle": "Shakisha abacuruzi bizewe mu Rwanda hose. Ibicuruzwa byiza bikazanwa ku rugi rwawe.",
+    "shopNow": "Gura nonaha",
+    "becomeSupplier": "Ba umucuruzi"
+  },
+  "stats": {
+    "suppliers": "Abacuruzi",
+    "customers": "Abakiriya",
+    "paymentMethods": "Uburyo bwo kwishyura",
+    "fastDelivery": "Ibyagurishijwe byihuta"
+  },
+  "categories": {
+    "shopByCategory": "Gura ukurikije ubwoko",
+    "findWhatYouNeed": "Shakisha icyo ukeneye cyose",
+    "viewMore": "Reba ubundi bwoko",
+    "viewLess": "Reba bike",
+    "pharmacy": "Farumasi",
+    "liquorStore": "Iduka ry'inzoga",
+    "boutique": "Butike",
+    "barResto": "Bari na Resitora",
+    "supermarket": "Suparimarike",
+    "coffeeShop": "Iduka ry'ikawa",
+    "beauty": "Ubwiza n'Imiti y'uruhu",
+    "generalStore": "Iduka rusange",
+    "pharmacyDesc": "Imiti n'ibicuruzwa by'ubuzima",
+    "liquorStoreDesc": "Divayi, inzoga n'ibinyobwa",
+    "boutiqueDesc": "Imyambaro n'ibikoresho",
+    "barRestoDesc": "Ibiryo n'ibinyobwa",
+    "supermarketDesc": "Ibiribwa n'ibikoresho byo mu rugo",
+    "coffeeShopDesc": "Ikawa n'ibikarangwa",
+    "beautyDesc": "Ibicuruzwa by'uruhu n'ubwiza",
+    "generalStoreDesc": "Ibindi byose"
+  },
+  "shops": {
+    "nickname": "Izina ry'iduka",
+    "noNickname": "Nta zina ryashyizweho",
+    "linkDisabledHint": "Shyiraho izina ry'iduka kugira ngo ubashe gukoresha Shop With Me.",
+    "shops": "amaduka",
+    "items": "ibicuruzwa",
+    "browseByPrefix": "Gura muri",
+    "browseBySuffix": "ukurikije:",
+    "chooseShop": "Hitamo iduka",
+    "chooseItem": "Hitamo igicuruzwa",
+    "shopsHint": "Hitamo iduka kugira ngo urebe ibicuruzwa byaryo.",
+    "pickShopForProducts": "Hitamo iduka hejuru kugira ngo urebe ibicuruzwa.",
+    "family": "Ubwoko",
+    "familyAny": "Byose",
+    "trendingSort": "Ibisanzwe bigurishwa",
+    "trendingHint": "20 by'ibanze — amanota yuzuye araza vuba.",
+    "allItemsInSector": "Ibicuruzwa byose muri iki cyiciro",
+    "useHeaderSearchProducts": "Koresha umwanya wo gushakisha uri hejuru kugira ngo ushake ibicuruzwa cyangwa ubwoko. Hano ushobora gutondeka no gushungura mu bwoko bw'iki cyiciro gusa.",
+    "shopGridHint": "Shakisha iduka ukoresheje umwanya wo gushakisha uri hejuru, uhitemo hepfo. Ushobora no gushungura hakurikijwe ahantu — bihura n'ahantu wahisemo hejuru.",
+    "locationFilter": "Ahantu",
+    "locationAll": "Ahantu hose",
+    "locationMatchesHeader": "Ahantu wahisemo hejuru harakoreshwa"
+  },
+  "filters": {
+    "sortProducts": "Tondeka ibicuruzwa",
+    "sortHint": "Mu «Hitamo igicuruzwa» ku rupapuro rw'ubwoko, ibi bigenzura uko ibicuruzwa bitondekwa.",
+    "featured": "Ibyihariye",
+    "priceLow": "Igiciro: Kuva ku gito",
+    "priceHigh": "Igiciro: Kuva ku kinini",
+    "newest": "Ibishya mbere",
+    "rating": "Ibyubahwe cyane",
+    "done": "Emeza"
+  },
+  "howItWorks": {
+    "title": "Uko bikorwa",
+    "step1Title": "Reba ibicuruzwa",
+    "step1Desc": "Shakisha ibicuruzwa biva mu maduka yo hafi yawe",
+    "step2Title": "Shyira mu gitebo",
+    "step2Desc": "Hitamo ibicuruzwa n'ingano ushaka",
+    "step3Title": "Ibyagurishijwe biragera vuba",
+    "step3Desc": "Ibyo watumije biragushikira vuba aho uri"
+  },
+  "payment": {
+    "title": "Twakira",
+    "mobileMoney": "Mobile Money",
+    "creditCard": "Ikarita y'inguzanyo",
+    "debitCard": "Ikarita ya debit",
+    "bankTransfer": "Kohereza mu banki",
+    "cashOnDelivery": "Kwishyura iyo ubihawe"
+  },
+  "partners": {
+    "title": "Abafatanyabikorwa bacu"
+  },
+  "cta": {
+    "readyToStart": "Witeguye gutangira kugurisha?",
+    "joinSuppliers": "Jya hamwe n'abacuruzi bagurisha kuri ihute.rw",
+    "becomeCustomer": "Ba umukiriya"
+  },
+  "footer": {
+    "aboutUs": "Abo turi bo",
+    "aboutDesc": "ihute.rw ihuza abacuruzi n'abakiriya mu Rwanda hose, bikoroshya kugura no kugurisha ibicuruzwa kuri interineti.",
+    "quickLinks": "Aho ujya vuba",
+    "home": "Ahabanza",
+    "categories": "Ibyiciro",
+    "suppliers": "Abacuruzi",
+    "howItWorks": "Uko bikorwa",
+    "customerService": "Serivisi y'abakiriya",
+    "help": "Ubufasha",
+    "shipping": "Amakuru y'ubugendesheje",
+    "returns": "Gusubiza ibicuruzwa",
+    "contactUs": "Twandikire",
+    "contact": "Aho uduhera",
+    "email": "Imeyili",
+    "phone": "Telefoni",
+    "address": "Aderesi",
+    "kigaliRwanda": "Kigali, u Rwanda",
+    "allRightsReserved": "Uburenganzira bwose burarinzwe."
+  },
+  "product": {
+    "addToCart": "Shyira mu gitebo",
+    "quantity": "Ingano",
+    "unit": "Igipimo",
+    "price": "Igiciro",
+    "inStock": "Irahari",
+    "outOfStock": "Irabuze",
+    "supplier": "Umucuruzi"
+  },
+  "cart": {
+    "title": "Igitebo cyawe",
+    "empty": "Igitebo cyawe ni ubusa",
+    "continueShopping": "Komeza kugura",
+    "checkout": "Ishyura",
+    "subtotal": "Igiteranyo",
+    "delivery": "Ubugendesheje",
+    "total": "Igiciro cyose hamwe"
+  },
+  "favorites": {
+    "title": "Ibyo nkunda",
+    "empty": "Nta bicuruzwa wahisemo ngo ukunde",
+    "add": "Shyira mu byo nkunda",
+    "remove": "Kuraho mu byo nkunda"
+  },
+  "units": {
+    "piece": "Kimwe",
+    "box": "Agasanduku",
+    "carton": "Ikarito",
+    "crate": "Ikesi",
+    "pack": "Ipaki"
+  },
+  "auth": {
+    "signIn": "Injira",
+    "signUp": "Iyandikishe",
+    "name": "Amazina",
+    "emailAddress": "Imeyili",
+    "password": "Ijambo ry'ibanga",
+    "location": "Aho utuye",
+    "role": "Ndi",
+    "customer": "Umukiriya",
+    "businessName": "Izina ry'iduka",
+    "businessCategory": "Ubwoko bw'iduka",
+    "register": "Iyandikishe",
+    "alreadyHaveAccount": "Usanzwe ufite konti?",
+    "dontHaveAccount": "Nta konti ufite?"
+  },
+  "tutorial": {
+    "howToUse": "Uko wakoresha ihute.rw",
+    "watchVideoGuide": "Reba videwo yacu yoroshye kugira ngo utangire",
+    "watchTutorial": "Reba inyigisho",
+    "step1": "Reba ibicuruzwa biva mu maduka yo hafi",
+    "step2": "Shyira ibicuruzwa mu gitebo n'ingano ushaka",
+    "step3": "Ishyura hanyuma ubihabwe"
+  },
+  "validation": {
+    "required": "Iki kibanza kirakenewe",
+    "invalidEmail": "Andika imeyili iboneye",
+    "invalidPhone": "Andika nimero ya telefoni iboneye",
+    "passwordMin": "Ijambo ry'ibanga rigomba kuba nibura inyuguti 6",
+    "passwordMismatch": "Amagambo y'ibanga ntabwo ahura",
+    "selectOption": "Hitamo kimwe"
+  },
+  "common": {
+    "loading": "Birimo gutunganywa…",
+    "save": "Bika",
+    "cancel": "Hagarika",
+    "confirm": "Emeza",
+    "delete": "Siba",
+    "edit": "Hindura",
+    "close": "Funga",
+    "back": "Subira inyuma",
+    "next": "Komeza",
+    "previous": "Ibyo mbere",
+    "search": "Shakisha",
+    "noResults": "Nta bisubizo byabonetse",
+    "retry": "Ongera ugerageze",
+    "yes": "Yego",
+    "no": "Oya",
+    "ok": "Sawa",
+    "error": "Hari ikitagenze neza",
+    "success": "Byagenze neza",
+    "warning": "Icyitonderwa"
+  },
+  "orders": {
+    "title": "Ibyo natumije",
+    "orderNumber": "Itumiza #",
+    "date": "Itariki",
+    "status": "Uko bihagaze",
+    "total": "Igiciro cyose",
+    "details": "Reba birambuye",
+    "empty": "Ntibyo watumije",
+    "pending": "Birategereje",
+    "confirmed": "Byemejwe",
+    "inTransit": "Birimo koherezwa",
+    "delivered": "Byageze",
+    "cancelled": "Byahagaritswe",
+    "trackOrder": "Kurikirana itumiza"
+  },
+  "seller": {
+    "dashboard": "Ikibaho cy'umucuruzi",
+    "myShop": "Iduka ryanjye",
+    "addProduct": "Ongeraho igicuruzwa",
+    "inventory": "Ibicuruzwa mu bubiko",
+    "sales": "Ibyagurishijwe",
+    "earnings": "Amafaranga yinjiye",
+    "customers": "Abakiriya",
+    "reviews": "Ibitekerezo by'abakiriya",
+    "settings": "Igenamiterere"
+  },
+  "notifications": {
+    "title": "Amakuru mashya",
+    "empty": "Nta makuru mashya",
+    "markAllRead": "Shyira yose nk'ayasomwe",
+    "newOrder": "Itumiza nshya yakiriwe",
+    "orderUpdate": "Uko itumiza ihagaze byahinduwe",
+    "paymentReceived": "Ubwishyu bwakiriwe"
+  }
+}

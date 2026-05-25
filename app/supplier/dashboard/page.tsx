@@ -1,10 +1,11 @@
-"use client";
+﻿"use client";
 
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { LanguageSelector } from "@/components/language-selector";
 import { useAuthStore } from "@/lib/auth-store";
+import { useLanguageStore, type Language } from "@/lib/language-store";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -88,9 +89,366 @@ function formatSupplierProductLastSync(p: Record<string, unknown>): string {
 
 const QRCode = dynamic(() => import("react-qr-code"), { ssr: false });
 
+/* ─── supplier-dashboard i18n ─── */
+const DASH_UI: Record<Language, {
+  loadingProducts: string; error: string; retry: string;
+  supplierDashboard: string; supplierPanel: string; myProfile: string;
+  myPurchases: string; logout: string;
+  dailySales: string; ordersToday: string; totalProducts: string;
+  allProducts: string; lastSync: string; inventoryValue: string;
+  totalStockValue: string; lowStockItems: string; itemsBelow10Units: string;
+  outOfStock: string; itemsWith0Stock: string;
+  lowStockAlerts: string; viewAll: string; left: string;
+  bestSellingToday: string; rankedByUnitsSold: string; unitsSold: string;
+  ofTodaysLineRevenue: string; rwfLineTotal: string;
+  noOrdersYetToday: string; weSee: string; ordersTodayNoLines: string;
+  topUpSale: string; stockAndRevenueActions: string;
+  stockAndCatalog: string; openOrders: string;
+  restockPriority: string; ledTodayWith: string; runnerUp: string;
+  units: string; lowStockColon: string; only: string;
+  topUpBeforeRunsOut: string; ordersRecordedNoLines: string;
+  fulfillOrdersTip: string;
+  qrCodes: string; qrExpandedDesc: string; qrCollapsedDesc: string;
+  shopNicknameLabel: string; barOrRestaurant: string; setFromAccount: string;
+  tableName: string; linkForCustomers: string; copyLink: string;
+  scanToOpenOrders: string; scanWithPhoneDesc: string;
+  myProductsTitle: string; products: string; bulkUpload: string;
+  bulkPriceUpdate: string; addStockFromNiki: string; addProduct: string;
+  searchByName: string; allCategories: string; allStatus: string;
+  activeStockFilter: string; lowStockFilter: string; outOfStockFilter: string;
+  noProductsMatchingFilters: string; noProductsFound: string;
+  addYourFirstProduct: string;
+  thProduct: string; thSellingPrice: string; thCostPrice: string;
+  thPackage: string; thBatch: string; thExpiry: string; thStock: string;
+  thLastSync: string; thStatus: string; thValue: string; thImage: string;
+  thActions: string;
+  noPrice: string; expired: string; check: string;
+  statusOutOfStock: string; statusLowStock: string; statusActive: string;
+  show: string; entries: string; showing: string; to: string; of: string;
+  previous: string; next: string;
+  bulkPriceTitle: string; bulkPriceDesc: string; percentageChange: string;
+  percentageHint: string; cancel: string; updating: string; apply: string;
+  showingFirst50: string;
+}> = {
+  en: {
+    loadingProducts: "Loading products…",
+    error: "Error",
+    retry: "Retry",
+    supplierDashboard: "Supplier Dashboard",
+    supplierPanel: "Supplier Panel",
+    myProfile: "My profile",
+    myPurchases: "My purchases",
+    logout: "Logout",
+    dailySales: "Daily Sales",
+    ordersToday: "orders today",
+    totalProducts: "Total Products",
+    allProducts: "All products",
+    lastSync: "Last sync",
+    inventoryValue: "Inventory Value",
+    totalStockValue: "Total stock value",
+    lowStockItems: "Low Stock Items",
+    itemsBelow10Units: "Items below 10 units",
+    outOfStock: "Out of Stock",
+    itemsWith0Stock: "Items with 0 stock",
+    lowStockAlerts: "Low stock alerts",
+    viewAll: "View all",
+    left: "left",
+    bestSellingToday: "Best selling today",
+    rankedByUnitsSold: "orders today · ranked by units sold",
+    unitsSold: "units sold",
+    ofTodaysLineRevenue: "of today\u2019s line revenue",
+    rwfLineTotal: "RWF line total",
+    noOrdersYetToday: "No orders yet today \u2014 best seller appears when you have sales.",
+    weSee: "We see",
+    ordersTodayNoLines: "orders today, but no product lines were returned for aggregation. After updating the backend, pull to refresh \u2014 your #1 product name will show here.",
+    topUpSale: "Top-up sale",
+    stockAndRevenueActions: "Stock and revenue actions for your shop",
+    stockAndCatalog: "Stock & catalog",
+    openOrders: "Open orders",
+    restockPriority: "Restock priority:",
+    ledTodayWith: "led today with",
+    runnerUp: "Runner-up:",
+    units: "units",
+    lowStockColon: "Low stock:",
+    only: "only",
+    topUpBeforeRunsOut: "Top up before it runs out.",
+    ordersRecordedNoLines: "Orders are recorded for today, but line items were empty. Deploy the latest backend (SellerOrdersServlet fix) and refresh \u2014 best-selling names will appear here.",
+    fulfillOrdersTip: "Fulfill orders and keep fast movers in stock \u2014 tailored tips appear here from your live sales and inventory.",
+    qrCodes: "QR Codes",
+    qrExpandedDesc: "Customer shop link + scan to open your orders. Click to collapse.",
+    qrCollapsedDesc: "Shop link for customers and scan-to-open-orders for you. Click to expand.",
+    shopNicknameLabel: "Your shop nickname *",
+    barOrRestaurant: "Bar or Restaurant",
+    setFromAccount: "(set from your account)",
+    tableName: "Table name",
+    linkForCustomers: "Link (for customers)",
+    copyLink: "Copy link",
+    scanToOpenOrders: "Scan to open your orders",
+    scanWithPhoneDesc: "Scan with your phone to open this link. Log in with your supplier account \u2014 you\u2019ll be returned here to view only your orders.",
+    myProductsTitle: "My Products",
+    products: "Products",
+    bulkUpload: "Bulk Upload",
+    bulkPriceUpdate: "Bulk price update",
+    addStockFromNiki: "Add stock from NIKI",
+    addProduct: "Add Product",
+    searchByName: "Search by name…",
+    allCategories: "All Categories",
+    allStatus: "All Status",
+    activeStockFilter: "Active Stock (>10)",
+    lowStockFilter: "Low Stock (1-10)",
+    outOfStockFilter: "Out of Stock (0)",
+    noProductsMatchingFilters: "No products found matching your filters",
+    noProductsFound: "No products found",
+    addYourFirstProduct: "Add Your First Product",
+    thProduct: "Product",
+    thSellingPrice: "Selling Price",
+    thCostPrice: "Cost Price",
+    thPackage: "Package",
+    thBatch: "Batch",
+    thExpiry: "Expiry",
+    thStock: "Stock",
+    thLastSync: "Last sync",
+    thStatus: "Status",
+    thValue: "Value",
+    thImage: "Image",
+    thActions: "Actions",
+    noPrice: "No price",
+    expired: "Expired",
+    check: "Check",
+    statusOutOfStock: "Out of Stock",
+    statusLowStock: "Low Stock",
+    statusActive: "Active",
+    show: "Show",
+    entries: "entries",
+    showing: "Showing",
+    to: "to",
+    of: "of",
+    previous: "Previous",
+    next: "Next",
+    bulkPriceTitle: "Bulk price update",
+    bulkPriceDesc: "Select products and apply a percentage change to their prices. Prices are updated via your stock API.",
+    percentageChange: "Percentage change (%)",
+    percentageHint: "Positive = increase, negative = decrease",
+    cancel: "Cancel",
+    updating: "Updating\u2026",
+    apply: "Apply",
+    showingFirst50: "Showing first 50. Use filters to narrow.",
+  },
+  rw: {
+    loadingProducts: "Birimo gutangira ibicuruzwa\u2026",
+    error: "Ikosa",
+    retry: "Ongera ugerageze",
+    supplierDashboard: "Ikibaho cy\u2019Umucuruzi",
+    supplierPanel: "Ikibaho cy\u2019Umucuruzi",
+    myProfile: "Umwirondoro wanjye",
+    myPurchases: "Ibyo naguze",
+    logout: "Gusohoka",
+    dailySales: "Igurisha ry\u2019Umunsi",
+    ordersToday: "ibitumijwe uyu munsi",
+    totalProducts: "Ibicuruzwa Byose",
+    allProducts: "Ibicuruzwa byose",
+    lastSync: "Igihe cyanyuma",
+    inventoryValue: "Agaciro k\u2019Ibicuruzwa",
+    totalStockValue: "Agaciro k\u2019isitoki yose",
+    lowStockItems: "Sitoki Nke",
+    itemsBelow10Units: "Ibicuruzwa munsi ya 10",
+    outOfStock: "Nta Sitoki",
+    itemsWith0Stock: "Ibicuruzwa bifite 0",
+    lowStockAlerts: "Iburira rya sitoki nke",
+    viewAll: "Reba byose",
+    left: "bisigaye",
+    bestSellingToday: "Ibyagurishijwe cyane uyu munsi",
+    rankedByUnitsSold: "ibitumijwe uyu munsi \u00b7 ukurikije ingano zagurishijwe",
+    unitsSold: "zagurishijwe",
+    ofTodaysLineRevenue: "by\u2019amafaranga y\u2019uyu munsi",
+    rwfLineTotal: "RWF igiteranyo",
+    noOrdersYetToday: "Nta bitumijwe uyu munsi \u2014 igicuruzwa cyagurishijwe cyane kizagaragara iyo ufite ibyo wagurishije.",
+    weSee: "Tubona",
+    ordersTodayNoLines: "ibitumijwe uyu munsi, ariko nta micuruzwa igaragara. Nyuma yo gushyiraho uburyo bushya, ongera ukure amakuru \u2014 izina ry\u2019igicuruzwa cya mbere rizagaragara hano.",
+    topUpSale: "Ongera sitoki",
+    stockAndRevenueActions: "Ibikorwa kuri sitoki n\u2019amafaranga y\u2019iduka ryawe",
+    stockAndCatalog: "Sitoki n\u2019ibicuruzwa",
+    openOrders: "Ibitumijwe",
+    restockPriority: "Ibya mbere yo kwongera sitoki:",
+    ledTodayWith: "yayoboye uyu munsi afite",
+    runnerUp: "Uwakurikiye:",
+    units: "ingano",
+    lowStockColon: "Sitoki nke:",
+    only: "gusa",
+    topUpBeforeRunsOut: "Ongera sitoki mbere yuko irangira.",
+    ordersRecordedNoLines: "Ibitumijwe byanditswe uyu munsi, ariko imirongo y\u2019ibicuruzwa nta cyo igaragaza. Shyiraho uburyo bushya maze usubire ukure amakuru \u2014 amazina y\u2019ibicuruzwa bizagaragara hano.",
+    fulfillOrdersTip: "Kora ibitumijwe kandi ugumane ibicuruzwa bigurishwa cyane \u2014 inama zihujwe n\u2019ubucuruzi bwawe zizagaragara hano.",
+    qrCodes: "Kode QR",
+    qrExpandedDesc: "Umuyoboro w\u2019iduka rya klijenti + gusikana kugirango ufungure ibitumijwe byawe. Kanda kugabanya.",
+    qrCollapsedDesc: "Umuyoboro w\u2019iduka ku bakoresha na kode yo gufungura ibitumijwe. Kanda kwagura.",
+    shopNicknameLabel: "Izina ry\u2019iduka ryawe *",
+    barOrRestaurant: "Bari cyangwa Resitora",
+    setFromAccount: "(byashyizweho na konti yawe)",
+    tableName: "Izina ry\u2019ameza",
+    linkForCustomers: "Umuyoboro (ku bakoresha)",
+    copyLink: "Gukoporora umuyoboro",
+    scanToOpenOrders: "Sikana kugirango ufungure ibitumijwe",
+    scanWithPhoneDesc: "Sikana kuri telefoni yawe kugirango ufungure uyu muyoboro. Injira na konti yawe \u2014 uzasubizwa hano kubona ibitumijwe byawe gusa.",
+    myProductsTitle: "Ibicuruzwa Byanjye",
+    products: "Ibicuruzwa",
+    bulkUpload: "Kohereza byinshi",
+    bulkPriceUpdate: "Guhindura ibiciro byinshi",
+    addStockFromNiki: "Ongeraho sitoki kuva NIKI",
+    addProduct: "Ongeraho Igicuruzwa",
+    searchByName: "Shakisha izina\u2026",
+    allCategories: "Ibyiciro Byose",
+    allStatus: "Imimerere Yose",
+    activeStockFilter: "Sitoki Nzima (>10)",
+    lowStockFilter: "Sitoki Nke (1-10)",
+    outOfStockFilter: "Nta Sitoki (0)",
+    noProductsMatchingFilters: "Nta bicuruzwa bihuye n\u2019ibyo ushaka",
+    noProductsFound: "Nta bicuruzwa byabonetse",
+    addYourFirstProduct: "Ongeraho Igicuruzwa cya Mbere",
+    thProduct: "Igicuruzwa",
+    thSellingPrice: "Igiciro cyo Kugurisha",
+    thCostPrice: "Igiciro cy\u2019Igurisha",
+    thPackage: "Ipaki",
+    thBatch: "Umukumbi",
+    thExpiry: "Igihe Kirangirira",
+    thStock: "Sitoki",
+    thLastSync: "Igihe cyanyuma",
+    thStatus: "Imimerere",
+    thValue: "Agaciro",
+    thImage: "Ishusho",
+    thActions: "Ibikorwa",
+    noPrice: "Nta giciro",
+    expired: "Byarenze igihe",
+    check: "Suzuma",
+    statusOutOfStock: "Nta Sitoki",
+    statusLowStock: "Sitoki Nke",
+    statusActive: "Bikoreshwa",
+    show: "Erekana",
+    entries: "umurongo",
+    showing: "Kwerekana",
+    to: "kugeza",
+    of: "muri",
+    previous: "Inyuma",
+    next: "Komeza",
+    bulkPriceTitle: "Guhindura ibiciro byinshi",
+    bulkPriceDesc: "Hitamo ibicuruzwa uhindure ibiciro mu ijanisha. Ibiciro bihindurwa binyuze muri API y\u2019isitoki yawe.",
+    percentageChange: "Ihinduka ry\u2019ijanisha (%)",
+    percentageHint: "Umubare mwiza = kwiyongera, mubi = kugabanya",
+    cancel: "Hagarika",
+    updating: "Birimo guhindura\u2026",
+    apply: "Shyira mu bikorwa",
+    showingFirst50: "Irekanwa 50 za mbere. Koresha ibisasu kugabanya.",
+  },
+  fr: {
+    loadingProducts: "Chargement des produits\u2026",
+    error: "Erreur",
+    retry: "R\u00e9essayer",
+    supplierDashboard: "Tableau de bord Fournisseur",
+    supplierPanel: "Panneau Fournisseur",
+    myProfile: "Mon profil",
+    myPurchases: "Mes achats",
+    logout: "D\u00e9connexion",
+    dailySales: "Ventes du jour",
+    ordersToday: "commandes aujourd\u2019hui",
+    totalProducts: "Total Produits",
+    allProducts: "Tous les produits",
+    lastSync: "Derni\u00e8re synchro",
+    inventoryValue: "Valeur du Stock",
+    totalStockValue: "Valeur totale du stock",
+    lowStockItems: "Stock Faible",
+    itemsBelow10Units: "Articles sous 10 unit\u00e9s",
+    outOfStock: "Rupture de Stock",
+    itemsWith0Stock: "Articles avec 0 en stock",
+    lowStockAlerts: "Alertes de stock faible",
+    viewAll: "Tout voir",
+    left: "restant(s)",
+    bestSellingToday: "Meilleures ventes du jour",
+    rankedByUnitsSold: "commandes aujourd\u2019hui \u00b7 class\u00e9es par unit\u00e9s vendues",
+    unitsSold: "unit\u00e9s vendues",
+    ofTodaysLineRevenue: "du chiffre d\u2019affaires du jour",
+    rwfLineTotal: "RWF total ligne",
+    noOrdersYetToday: "Aucune commande aujourd\u2019hui \u2014 le meilleur vendeur appara\u00eet quand vous avez des ventes.",
+    weSee: "Nous voyons",
+    ordersTodayNoLines: "commandes aujourd\u2019hui, mais aucun d\u00e9tail de produit n\u2019a \u00e9t\u00e9 retourn\u00e9. Apr\u00e8s la mise \u00e0 jour du backend, actualisez \u2014 le nom de votre produit #1 appara\u00eetra ici.",
+    topUpSale: "R\u00e9approvisionnement",
+    stockAndRevenueActions: "Actions de stock et de revenus pour votre boutique",
+    stockAndCatalog: "Stock & catalogue",
+    openOrders: "Commandes ouvertes",
+    restockPriority: "Priorit\u00e9 de r\u00e9appro :",
+    ledTodayWith: "a men\u00e9 aujourd\u2019hui avec",
+    runnerUp: "Deuxi\u00e8me :",
+    units: "unit\u00e9s",
+    lowStockColon: "Stock faible :",
+    only: "seulement",
+    topUpBeforeRunsOut: "R\u00e9approvisionnez avant la rupture.",
+    ordersRecordedNoLines: "Des commandes ont \u00e9t\u00e9 enregistr\u00e9es aujourd\u2019hui, mais les lignes de produits \u00e9taient vides. Mettez \u00e0 jour le backend et actualisez \u2014 les noms des best-sellers appara\u00eetront ici.",
+    fulfillOrdersTip: "Traitez les commandes et gardez vos produits phares en stock \u2014 des conseils adapt\u00e9s apparaissent ici depuis vos ventes et inventaire.",
+    qrCodes: "Codes QR",
+    qrExpandedDesc: "Lien boutique client + scan pour ouvrir vos commandes. Cliquez pour r\u00e9duire.",
+    qrCollapsedDesc: "Lien boutique pour clients et scan pour vos commandes. Cliquez pour agrandir.",
+    shopNicknameLabel: "Nom de votre boutique *",
+    barOrRestaurant: "Bar ou Restaurant",
+    setFromAccount: "(d\u00e9fini depuis votre compte)",
+    tableName: "Nom de la table",
+    linkForCustomers: "Lien (pour les clients)",
+    copyLink: "Copier le lien",
+    scanToOpenOrders: "Scannez pour ouvrir vos commandes",
+    scanWithPhoneDesc: "Scannez avec votre t\u00e9l\u00e9phone pour ouvrir ce lien. Connectez-vous avec votre compte fournisseur \u2014 vous serez redirig\u00e9 ici pour voir uniquement vos commandes.",
+    myProductsTitle: "Mes Produits",
+    products: "Produits",
+    bulkUpload: "Import en masse",
+    bulkPriceUpdate: "Mise \u00e0 jour des prix en masse",
+    addStockFromNiki: "Ajouter du stock depuis NIKI",
+    addProduct: "Ajouter un Produit",
+    searchByName: "Rechercher par nom\u2026",
+    allCategories: "Toutes les Cat\u00e9gories",
+    allStatus: "Tous les Statuts",
+    activeStockFilter: "Stock Actif (>10)",
+    lowStockFilter: "Stock Faible (1-10)",
+    outOfStockFilter: "Rupture de Stock (0)",
+    noProductsMatchingFilters: "Aucun produit ne correspond \u00e0 vos filtres",
+    noProductsFound: "Aucun produit trouv\u00e9",
+    addYourFirstProduct: "Ajoutez votre Premier Produit",
+    thProduct: "Produit",
+    thSellingPrice: "Prix de Vente",
+    thCostPrice: "Prix de Revient",
+    thPackage: "Emballage",
+    thBatch: "Lot",
+    thExpiry: "Expiration",
+    thStock: "Stock",
+    thLastSync: "Derni\u00e8re synchro",
+    thStatus: "Statut",
+    thValue: "Valeur",
+    thImage: "Image",
+    thActions: "Actions",
+    noPrice: "Pas de prix",
+    expired: "Expir\u00e9",
+    check: "V\u00e9rifier",
+    statusOutOfStock: "Rupture",
+    statusLowStock: "Stock Faible",
+    statusActive: "Actif",
+    show: "Afficher",
+    entries: "entr\u00e9es",
+    showing: "Affichage de",
+    to: "\u00e0",
+    of: "sur",
+    previous: "Pr\u00e9c\u00e9dent",
+    next: "Suivant",
+    bulkPriceTitle: "Mise \u00e0 jour des prix en masse",
+    bulkPriceDesc: "S\u00e9lectionnez des produits et appliquez un pourcentage de changement \u00e0 leurs prix. Les prix sont mis \u00e0 jour via votre API de stock.",
+    percentageChange: "Variation en pourcentage (%)",
+    percentageHint: "Positif = augmentation, n\u00e9gatif = diminution",
+    cancel: "Annuler",
+    updating: "Mise \u00e0 jour\u2026",
+    apply: "Appliquer",
+    showingFirst50: "Affichage des 50 premiers. Utilisez les filtres pour affiner.",
+  },
+};
+
 function SupplierDashboard() {
   const router = useRouter();
   const { user, isAuthenticated, logout } = useAuthStore();
+  const language = useLanguageStore((s) => s.language);
+  const ui = DASH_UI[language] ?? DASH_UI.en;
   const [supplierProducts, setSupplierProducts] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
@@ -482,19 +840,19 @@ function SupplierDashboard() {
     if (analytics?.bestSelling?.[0]) {
       const b = analytics.bestSelling[0];
       bullets.push(
-        `Restock priority: “${b.name}” led today with ${b.quantity} units sold (${Number(b.total ?? 0).toLocaleString()} RWF).`,
+        `${ui.restockPriority} "${b.name}" ${ui.ledTodayWith} ${b.quantity} ${ui.unitsSold} (${Number(b.total ?? 0).toLocaleString()} RWF).`,
       );
     }
     if (analytics?.bestSelling?.[1]) {
       const b = analytics.bestSelling[1];
       bullets.push(
-        `Runner-up: “${b.name}” · ${b.quantity} units · ${Number(b.total ?? 0).toLocaleString()} RWF.`,
+        `${ui.runnerUp} "${b.name}" · ${b.quantity} ${ui.units} · ${Number(b.total ?? 0).toLocaleString()} RWF.`,
       );
     }
     const low = supplierProducts.filter((p) => p.stock <= 10 && p.stock > 0).slice(0, 2);
     for (const p of low) {
-      const nm = String(p.itemName || p.ITEM_NAME || "Product").trim();
-      bullets.push(`Low stock: ${nm} — only ${p.stock} left. Top up before it runs out.`);
+      const nm = String(p.itemName || p.ITEM_NAME || ui.thProduct).trim();
+      bullets.push(`${ui.lowStockColon} ${nm} — ${ui.only} ${p.stock} ${ui.left}. ${ui.topUpBeforeRunsOut}`);
     }
     if (
       analytics &&
@@ -502,16 +860,16 @@ function SupplierDashboard() {
       (!analytics.bestSelling || analytics.bestSelling.length === 0)
     ) {
       bullets.push(
-        "Orders are recorded for today, but line items were empty. Deploy the latest backend (SellerOrdersServlet fix) and refresh — best-selling names will appear here.",
+        ui.ordersRecordedNoLines,
       );
     }
     if (bullets.length === 0) {
       bullets.push(
-        "Fulfill orders and keep fast movers in stock — tailored tips appear here from your live sales and inventory.",
+        ui.fulfillOrdersTip,
       );
     }
     return bullets.slice(0, 4);
-  }, [analytics, supplierProducts]);
+  }, [analytics, supplierProducts, ui]);
 
   const handleDelete = async (product: any) => {
     const itemName = product.ITEM_NAME || product.itemName || "this product";
@@ -598,7 +956,7 @@ function SupplierDashboard() {
       <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100">
         <div className="text-center">
           <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-b-2 border-blue-600"></div>
-          <p className="text-slate-600">Loading products...</p>
+          <p className="text-slate-600">{ui.loadingProducts}</p>
         </div>
       </div>
     );
@@ -609,12 +967,12 @@ function SupplierDashboard() {
       <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100">
         <Card className="max-w-md">
           <CardHeader>
-            <CardTitle className="text-red-600">Error</CardTitle>
+            <CardTitle className="text-red-600">{ui.error}</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-slate-700">{error}</p>
             <Button onClick={() => window.location.reload()} className="mt-4">
-              Retry
+              {ui.retry}
             </Button>
           </CardContent>
         </Card>
@@ -630,10 +988,10 @@ function SupplierDashboard() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <h1 className="text-2xl font-bold text-slate-900">
-                {user?.businessName || "Supplier Dashboard"}
+                {user?.businessName || ui.supplierDashboard}
               </h1>
               <p className="break-words text-sm text-slate-600">
-                {user?.businessCategory || "Supplier Panel"} • Account: {user?.ishyigaAccount}
+                {user?.businessCategory || ui.supplierPanel} • Account: {user?.ishyigaAccount}
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -641,20 +999,20 @@ function SupplierDashboard() {
               <Button variant="ghost" asChild className="gap-2">
                 <Link href="/account">
                   <User className="h-4 w-4" />
-                  My profile
+                  {ui.myProfile}
                 </Link>
               </Button>
               {user?.dualPharmacyRetail && (
                 <Button variant="ghost" asChild className="gap-2">
                   <Link href="/buyer/orders">
                     <Package className="h-4 w-4" />
-                    My purchases
+                    {ui.myPurchases}
                   </Link>
                 </Button>
               )}
               <Button variant="outline" onClick={handleLogout} className="gap-2">
                 <LogOut className="h-4 w-4" />
-                Logout
+                {ui.logout}
               </Button>
             </div>
           </div>
@@ -667,7 +1025,7 @@ function SupplierDashboard() {
           <Card className="bg-card shadow-md transition-shadow hover:shadow-lg">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-slate-600 ">
-                Daily Sales
+                {ui.dailySales}
               </CardTitle>
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 ">
                 <TrendingUp className="h-5 w-5 text-emerald-600 " />
@@ -678,7 +1036,7 @@ function SupplierDashboard() {
                 {Number(analytics?.dailySalesTotal ?? 0).toLocaleString()} RWF
               </div>
               <p className="mt-1 text-xs text-slate-500 ">
-                {Number(analytics?.dailyOrdersCount ?? 0)} orders today
+                {Number(analytics?.dailyOrdersCount ?? 0)} {ui.ordersToday}
               </p>
             </CardContent>
           </Card>
@@ -686,7 +1044,7 @@ function SupplierDashboard() {
           <Card className="bg-card shadow-md transition-shadow hover:shadow-lg">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-slate-600 ">
-                Total Products
+                {ui.totalProducts}
               </CardTitle>
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 ">
                 <Package className="h-5 w-5 text-blue-600 " />
@@ -696,10 +1054,10 @@ function SupplierDashboard() {
               <div className="text-3xl font-bold text-slate-900 ">
                 {totalProducts}
               </div>
-              <p className="mt-1 text-xs text-slate-500 ">All products</p>
+              <p className="mt-1 text-xs text-slate-500 ">{ui.allProducts}</p>
               {latestInventorySyncLabel != null && (
                 <p className="mt-1.5 border-t border-slate-100 pt-1 text-xs text-slate-500">
-                  Last sync  {latestInventorySyncLabel}
+                  {ui.lastSync}  {latestInventorySyncLabel}
                 </p>
               )}
             </CardContent>
@@ -708,7 +1066,7 @@ function SupplierDashboard() {
           <Card className="bg-card shadow-md transition-shadow hover:shadow-lg">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-slate-600 ">
-                Inventory Value
+                {ui.inventoryValue}
               </CardTitle>
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-100 ">
                 <TrendingUp className="h-5 w-5 text-green-600 " />
@@ -718,14 +1076,14 @@ function SupplierDashboard() {
               <div className="text-3xl font-bold text-slate-900 ">
                 {totalValue.toLocaleString()} RWF
               </div>
-              <p className="mt-1 text-xs text-slate-500 ">Total stock value</p>
+              <p className="mt-1 text-xs text-slate-500 ">{ui.totalStockValue}</p>
             </CardContent>
           </Card>
 
           <Card className="bg-card shadow-md transition-shadow hover:shadow-lg">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-slate-600 ">
-                Low Stock Items
+                {ui.lowStockItems}
               </CardTitle>
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-yellow-100 ">
                 <AlertTriangle className="h-5 w-5 text-yellow-600 " />
@@ -735,14 +1093,14 @@ function SupplierDashboard() {
               <div className="text-3xl font-bold text-yellow-700 ">
                 {lowStock}
               </div>
-              <p className="mt-1 text-xs text-slate-500 ">Items below 10 units</p>
+              <p className="mt-1 text-xs text-slate-500 ">{ui.itemsBelow10Units}</p>
             </CardContent>
           </Card>
 
           <Card className="bg-card shadow-md transition-shadow hover:shadow-lg">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-slate-600 ">
-                Out of Stock
+                {ui.outOfStock}
               </CardTitle>
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-red-100 ">
                 <AlertTriangle className="h-5 w-5 text-red-600 " />
@@ -752,7 +1110,7 @@ function SupplierDashboard() {
               <div className="text-3xl font-bold text-red-700 ">
                 {outOfStock}
               </div>
-              <p className="mt-1 text-xs text-slate-500 ">Items with 0 stock</p>
+              <p className="mt-1 text-xs text-slate-500 ">{ui.itemsWith0Stock}</p>
             </CardContent>
           </Card>
         </div>
@@ -764,9 +1122,9 @@ function SupplierDashboard() {
           return (
             <Card className="mb-6 bg-card shadow-md">
               <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-yellow-700 ">Low stock alerts</CardTitle>
+                <CardTitle className="text-sm font-medium text-yellow-700 ">{ui.lowStockAlerts}</CardTitle>
                 <Button variant="ghost" size="sm" onClick={() => setStatusFilter("low")}>
-                  View all ({lowStock})
+                  {ui.viewAll} ({lowStock})
                 </Button>
               </CardHeader>
               <CardContent>
@@ -781,11 +1139,11 @@ function SupplierDashboard() {
                           {p.itemName || p.ITEM_NAME}
                         </span>
                         <span className="mt-0.5 block text-xs text-slate-500 ">
-                          Last sync: {formatSupplierProductLastSync(p as Record<string, unknown>)}
+                          {ui.lastSync}: {formatSupplierProductLastSync(p as Record<string, unknown>)}
                         </span>
                       </div>
                       <span className="text-yellow-700 font-medium shrink-0">
-                        {p.stock ?? p.STOCK} left
+                        {p.stock ?? p.STOCK} {ui.left}
                       </span>
                     </li>
                   ))}
@@ -814,10 +1172,10 @@ function SupplierDashboard() {
                   </span>
                   <div className="min-w-0">
                     <CardTitle className="text-xs font-extrabold uppercase tracking-[0.12em] text-amber-900/80">
-                      Best selling today
+                      {ui.bestSellingToday}
                     </CardTitle>
                     <CardDescription className="mt-0.5 text-[11px] font-medium text-slate-600">
-                      {analytics.dailyOrdersCount} orders today · ranked by units sold
+                      {analytics.dailyOrdersCount} {ui.rankedByUnitsSold}
                     </CardDescription>
                   </div>
                 </div>
@@ -831,16 +1189,16 @@ function SupplierDashboard() {
                     <div className="mt-3 flex flex-wrap gap-2">
                       <span className="inline-flex items-center rounded-full border border-amber-200 bg-white/95 px-2.5 py-1 text-[11px] font-bold text-amber-950 shadow-sm">
                         {bestSellingHero.top.quantity.toLocaleString()}{" "}
-                        <span className="ml-1 font-semibold opacity-80">units sold</span>
+                        <span className="ml-1 font-semibold opacity-80">{ui.unitsSold}</span>
                       </span>
                       {bestSellingHero.pct != null ? (
                         <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-950">
-                          {bestSellingHero.pct}% of today&apos;s line revenue ·{" "}
+                          {bestSellingHero.pct}% {ui.ofTodaysLineRevenue} ·{" "}
                           {Number(bestSellingHero.top.total ?? 0).toLocaleString()} RWF
                         </span>
                       ) : (
                         <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-bold text-slate-800">
-                          {Number(bestSellingHero.top.total ?? 0).toLocaleString()} RWF line total
+                          {Number(bestSellingHero.top.total ?? 0).toLocaleString()} {ui.rwfLineTotal}
                         </span>
                       )}
                     </div>
@@ -861,12 +1219,10 @@ function SupplierDashboard() {
                   <div className="space-y-2">
                     {analytics.dailyOrdersCount > 0 ? (
                       <p className="text-sm font-medium leading-relaxed text-amber-900/90">
-                        We see {analytics.dailyOrdersCount} orders today, but no product lines were returned for
-                        aggregation. After updating the backend, pull to refresh — your #1 product name will show
-                        here.
+                        {ui.weSee} {analytics.dailyOrdersCount} {ui.ordersTodayNoLines}
                       </p>
                     ) : (
-                      <p className="text-sm text-slate-600">No orders yet today — best seller appears when you have sales.</p>
+                      <p className="text-sm text-slate-600">{ui.noOrdersYetToday}</p>
                     )}
                   </div>
                 )}
@@ -881,10 +1237,10 @@ function SupplierDashboard() {
                   </span>
                   <div className="min-w-0">
                     <CardTitle className="text-xs font-extrabold uppercase tracking-[0.12em] text-emerald-900/80">
-                      Top-up sale
+                      {ui.topUpSale}
                     </CardTitle>
                     <CardDescription className="mt-0.5 text-[11px] font-medium text-slate-600">
-                      Stock and revenue actions for your shop
+                      {ui.stockAndRevenueActions}
                     </CardDescription>
                   </div>
                 </div>
@@ -903,10 +1259,10 @@ function SupplierDashboard() {
                 </ul>
                 <div className="flex flex-wrap gap-2 border-t border-emerald-100 pt-3">
                   <Button variant="outline" size="sm" className="border-emerald-200 bg-white text-emerald-900" asChild>
-                    <a href="#supplier-products">Stock &amp; catalog</a>
+                    <a href="#supplier-products">{ui.stockAndCatalog}</a>
                   </Button>
                   <Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700" asChild>
-                    <Link href="/supplier/orders">Open orders</Link>
+                    <Link href="/supplier/orders">{ui.openOrders}</Link>
                   </Button>
                 </div>
               </CardContent>
@@ -924,11 +1280,11 @@ function SupplierDashboard() {
               <div className="flex items-center gap-2">
                 <Share2 className="h-6 w-6 shrink-0 text-blue-600 " />
                 <div>
-                  <CardTitle className="text-xl">QR Codes</CardTitle>
+                  <CardTitle className="text-xl">{ui.qrCodes}</CardTitle>
                   <CardDescription className="mt-1">
                     {shopWithMeQROpen
-                      ? "Customer shop link + scan to open your orders. Click to collapse."
-                      : "Shop link for customers and scan-to-open-orders for you. Click to expand."}
+                      ? ui.qrExpandedDesc
+                      : ui.qrCollapsedDesc}
                   </CardDescription>
                 </div>
               </div>
@@ -948,7 +1304,7 @@ function SupplierDashboard() {
             <CardContent className="p-6 space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
-                  <Label htmlFor="shop-nickname">Your shop nickname *</Label>
+                  <Label htmlFor="shop-nickname">{ui.shopNicknameLabel}</Label>
                   <Input
                     id="shop-nickname"
                     placeholder="known as"
@@ -969,15 +1325,15 @@ function SupplierDashboard() {
                       htmlFor="bar-restaurant"
                       className={isBarOrRestaurantFromAccount ? "cursor-not-allowed text-muted-foreground" : "cursor-pointer"}
                     >
-                      Bar or Restaurant
-                      {isBarOrRestaurantFromAccount && " (set from your account)"}
+                      {ui.barOrRestaurant}
+                      {isBarOrRestaurantFromAccount && ` ${ui.setFromAccount}`}
                     </Label>
                   </div>
                 )}
               </div>
               {showBarOrRestaurantOption && isBarOrRestaurant && (
                 <div className="space-y-2 max-w-xs">
-                  <Label htmlFor="table-name">Table name (for QR link)</Label>
+                  <Label htmlFor="table-name">{ui.tableName}</Label>
                   <Input
                     id="table-name"
                     placeholder="e.g. TEST ISHYIGA2 or Table 5"
@@ -992,11 +1348,11 @@ function SupplierDashboard() {
                     <QRCode value={shopWithMeLink} size={180} />
                   </div>
                   <div className="min-w-0 flex-1 space-y-2">
-                    <Label className="text-slate-600 ">Link (for customers)</Label>
+                    <Label className="text-slate-600 ">{ui.linkForCustomers}</Label>
                     <p className="break-all font-mono text-sm text-slate-700 ">{shopWithMeLink}</p>
                     <Button variant="outline" size="sm" onClick={copyShopWithMeLink} className="gap-2">
                       <Copy className="h-4 w-4" />
-                      Copy link
+                      {ui.copyLink}
                     </Button>
                   </div>
                 </div>
@@ -1009,9 +1365,9 @@ function SupplierDashboard() {
                     <QRCode value={supplierOrdersLink} size={180} />
                   </div>
                   <div className="min-w-0 flex-1 space-y-2">
-                    <Label className="text-slate-600 ">Scan to open your orders</Label>
+                    <Label className="text-slate-600 ">{ui.scanToOpenOrders}</Label>
                     <p className="text-sm text-slate-700 ">
-                      Scan with your phone to open this link. Log in with your supplier account — you’ll be returned here to view only your orders.
+                      {ui.scanWithPhoneDesc}
                     </p>
                     <p className="break-all font-mono text-sm text-slate-500 ">{supplierOrdersLink}</p>
                     <Button
@@ -1023,7 +1379,7 @@ function SupplierDashboard() {
                       className="gap-2"
                     >
                       <Copy className="h-4 w-4" />
-                      Copy link
+                      {ui.copyLink}
                     </Button>
                   </div>
                 </div>
@@ -1037,9 +1393,9 @@ function SupplierDashboard() {
           <CardHeader className="border-b bg-slate-50">
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
-                <CardTitle className="text-xl">My Products</CardTitle>
+                <CardTitle className="text-xl">{ui.myProductsTitle}</CardTitle>
                 <CardDescription className="mt-1">
-                  Products ({filteredProducts.length} of {totalProducts})
+                  {ui.products} ({filteredProducts.length} {ui.of} {totalProducts})
                 </CardDescription>
               </div>
 
@@ -1047,7 +1403,7 @@ function SupplierDashboard() {
                 <Button asChild variant="outline" className="gap-2">
                   <Link href="/supplier/products/add">
                     <Package className="h-4 w-4" />
-                    Bulk Upload
+                    {ui.bulkUpload}
                   </Link>
                 </Button>
                 <Button
@@ -1059,12 +1415,12 @@ function SupplierDashboard() {
                   }}
                   className="gap-2"
                 >
-                  Bulk price update
+                  {ui.bulkPriceUpdate}
                 </Button>
                 <Button asChild variant="outline" className="gap-2 border-emerald-200 text-emerald-900 hover:bg-emerald-50">
                   <Link href="/register/seller?step=2">
                     <Layers className="h-4 w-4" />
-                    Add stock from NIKI
+                    {ui.addStockFromNiki}
                   </Link>
                 </Button>
                 <Button
@@ -1075,7 +1431,7 @@ function SupplierDashboard() {
                   className="gap-2 bg-blue-600 hover:bg-blue-700"
                 >
                   <Plus className="h-4 w-4" />
-                  Add Product
+                  {ui.addProduct}
                 </Button>
               </div>
             </div>
@@ -1088,7 +1444,7 @@ function SupplierDashboard() {
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transform text-slate-400 " />
                 <input
                   type="text"
-                  placeholder="Search by name..."
+                  placeholder={ui.searchByName}
                   className="w-full rounded-lg border border-slate-300 bg-background py-2 pl-10 pr-4 text-slate-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
                   value={searchTerm}
                   onChange={(e) => {
@@ -1106,7 +1462,7 @@ function SupplierDashboard() {
                   setCurrentPage(1);
                 }}
               >
-                <option value="all">All Categories</option>
+                <option value="all">{ui.allCategories}</option>
                 {categories.map((cat) => (
                   <option key={cat} value={cat}>
                     {cat}
@@ -1122,10 +1478,10 @@ function SupplierDashboard() {
                   setCurrentPage(1);
                 }}
               >
-                <option value="all">All Status</option>
-                <option value="active">Active Stock (&gt;10)</option>
-                <option value="low">Low Stock (1-10)</option>
-                <option value="out">Out of Stock (0)</option>
+                <option value="all">{ui.allStatus}</option>
+                <option value="active">{ui.activeStockFilter}</option>
+                <option value="low">{ui.lowStockFilter}</option>
+                <option value="out">{ui.outOfStockFilter}</option>
               </select>
             </div>
 
@@ -1135,12 +1491,12 @@ function SupplierDashboard() {
                 <Package className="h-12 w-12 text-slate-300 mx-auto mb-4" />
                 <p className="text-slate-500 text-lg">
                   {searchTerm || categoryFilter !== "all" || statusFilter !== "all"
-                    ? "No products found matching your filters"
-                    : "No products found"}
+                    ? ui.noProductsMatchingFilters
+                    : ui.noProductsFound}
                 </p>
                 {supplierProducts.length === 0 && (
                   <Button asChild className="mt-4">
-                    <Link href="/supplier/products/add">Add Your First Product</Link>
+                    <Link href="/supplier/products/add">{ui.addYourFirstProduct}</Link>
                   </Button>
                 )}
               </div>
@@ -1151,40 +1507,40 @@ function SupplierDashboard() {
                     <thead className="border-b border-slate-200 bg-slate-100">
                       <tr>
                         <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 ">
-                          Product
+                          {ui.thProduct}
                         </th>
                         <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 ">
-                          Selling Price
+                          {ui.thSellingPrice}
                         </th>
                         <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 ">
-                          Cost Price
+                          {ui.thCostPrice}
                         </th>
                         <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 ">
-                          Package
+                          {ui.thPackage}
                         </th>
                         <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 ">
-                          Batch
+                          {ui.thBatch}
                         </th>
                         <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700  whitespace-nowrap">
-                          Expiry
+                          {ui.thExpiry}
                         </th>
                         <th className="px-4 py-3 text-center text-sm font-semibold text-slate-700 ">
-                          Stock
+                          {ui.thStock}
                         </th>
                         <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700  whitespace-nowrap">
-                          Last sync
+                          {ui.thLastSync}
                         </th>
                         <th className="px-4 py-3 text-center text-sm font-semibold text-slate-700 ">
-                          Status
+                          {ui.thStatus}
                         </th>
                         <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 ">
-                          Value
+                          {ui.thValue}
                         </th>
                         <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 ">
-                          Image
+                          {ui.thImage}
                         </th>
                         <th className="px-4 py-3 text-center text-sm font-semibold text-slate-700 ">
-                          Actions
+                          {ui.thActions}
                         </th>
                       </tr>
                     </thead>
@@ -1246,7 +1602,7 @@ function SupplierDashboard() {
                                 </span>
                               ) : (
                                 <span className="text-slate-400 text-sm italic">
-                                  No price
+                                  {ui.noPrice}
                                 </span>
                               )}
                             </td>
@@ -1297,12 +1653,12 @@ function SupplierDashboard() {
                                     {expiryLabel}
                                     {isExpired ? (
                                       <span className="ml-1.5 inline-flex items-center rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-red-800">
-                                        Expired
+                                        {ui.expired}
                                       </span>
                                     ) : null}
                                     {expiryRaw && !isExpired ? (
                                       <span className="ml-1.5 inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-900">
-                                        Check
+                                        {ui.check}
                                       </span>
                                     ) : null}
                                   </span>
@@ -1337,7 +1693,7 @@ function SupplierDashboard() {
                                     : "bg-blue-100 text-blue-700"
                                 }`}
                               >
-                                {p.stock === 0 ? "Out of Stock" : p.stock <= 10 ? "Low Stock" : "Active"}
+                                {p.stock === 0 ? ui.statusOutOfStock : p.stock <= 10 ? ui.statusLowStock : ui.statusActive}
                               </span>
                             </td>
                             <td className="px-4 py-4">
@@ -1389,7 +1745,7 @@ function SupplierDashboard() {
                 {/* Pagination */}
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-6">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm text-slate-600">Show</span>
+                    <span className="text-sm text-slate-600">{ui.show}</span>
                     <select
                       className="rounded-lg border border-slate-300 bg-background px-3 py-1 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       value={itemsPerPage}
@@ -1403,14 +1759,14 @@ function SupplierDashboard() {
                       <option value={20}>20</option>
                       <option value={50}>50</option>
                     </select>
-                    <span className="text-sm text-slate-600">entries</span>
+                    <span className="text-sm text-slate-600">{ui.entries}</span>
                   </div>
 
                   <div className="flex items-center gap-2">
                     <span className="text-sm text-slate-600">
-                      Showing {startIndex + 1} to{" "}
-                      {Math.min(endIndex, filteredProducts.length)} of{" "}
-                      {filteredProducts.length} entries
+                      {ui.showing} {startIndex + 1} {ui.to}{" "}
+                      {Math.min(endIndex, filteredProducts.length)} {ui.of}{" "}
+                      {filteredProducts.length} {ui.entries}
                     </span>
                   </div>
 
@@ -1423,7 +1779,7 @@ function SupplierDashboard() {
                       className="gap-1"
                     >
                       <ChevronLeft className="h-4 w-4" />
-                      Previous
+                      {ui.previous}
                     </Button>
 
                     <div className="flex gap-1">
@@ -1466,7 +1822,7 @@ function SupplierDashboard() {
                       disabled={currentPage === totalPages}
                       className="gap-1"
                     >
-                      Next
+                      {ui.next}
                       <ChevronRight className="h-4 w-4" />
                     </Button>
                   </div>
@@ -1480,21 +1836,21 @@ function SupplierDashboard() {
         <Dialog open={bulkPriceOpen} onOpenChange={setBulkPriceOpen}>
           <DialogContent className="max-w-md">
             <DialogHeader>
-              <DialogTitle>Bulk price update</DialogTitle>
+              <DialogTitle>{ui.bulkPriceTitle}</DialogTitle>
               <DialogDescription>
-                Select products and apply a percentage change to their prices. Prices are updated via your stock API.
+                {ui.bulkPriceDesc}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-2">
               <div className="space-y-2">
-                <Label>Percentage change (%)</Label>
+                <Label>{ui.percentageChange}</Label>
                 <Input
                   type="number"
                   placeholder="e.g. 10 or -5"
                   value={bulkPricePercent}
                   onChange={(e) => setBulkPricePercent(e.target.value)}
                 />
-                <p className="text-xs text-slate-500">Positive = increase, negative = decrease</p>
+                <p className="text-xs text-slate-500">{ui.percentageHint}</p>
               </div>
               <div className="max-h-48 overflow-y-auto border rounded p-2 space-y-2">
                 {filteredProducts.slice(0, 50).map((p) => {
@@ -1519,12 +1875,12 @@ function SupplierDashboard() {
                   );
                 })}
                 {filteredProducts.length > 50 && (
-                  <p className="text-xs text-slate-500">Showing first 50. Use filters to narrow.</p>
+                  <p className="text-xs text-slate-500">{ui.showingFirst50}</p>
                 )}
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setBulkPriceOpen(false)}>Cancel</Button>
+              <Button variant="outline" onClick={() => setBulkPriceOpen(false)}>{ui.cancel}</Button>
               <Button
                 disabled={bulkPriceSubmitting || bulkPriceSelected.size === 0 || !bulkPricePercent.trim()}
                 onClick={async () => {
@@ -1558,7 +1914,7 @@ function SupplierDashboard() {
                   }
                 }}
               >
-                {bulkPriceSubmitting ? "Updating…" : "Apply"}
+                {bulkPriceSubmitting ? ui.updating : ui.apply}
               </Button>
             </DialogFooter>
           </DialogContent>

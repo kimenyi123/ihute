@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useCallback, useEffect, useState } from "react"
 import { useAuthStore } from "@/lib/auth-store"
@@ -12,6 +12,125 @@ import {
 } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Users, ExternalLink, RefreshCw, Table2, Trash2, ChevronLeft, ChevronRight } from "lucide-react"
+import { useLanguageStore, type Language } from "@/lib/language-store"
+
+const TABLES_UI: Record<Language, {
+  pageTitle: string;
+  signInPrompt: string;
+  allTablesDesc: string;
+  activeHint: string;
+  sentHint: string;
+  closedHint: string;
+  expiredHint: string;
+  perPage: string;
+  refresh: string;
+  clearAllCompleted: (n: number) => string;
+  clearing: string;
+  confirmClearAll: (n: number) => string;
+  loadingTables: string;
+  noTablesTitle: string;
+  noTablesDesc: string;
+  unnamedTable: string;
+  joined: (n: number) => string;
+  total: string;
+  createdBy: (name: string) => string;
+  created: string;
+  viewOrder: (id: number) => string;
+  removeFromList: string;
+  removing: string;
+  showing: (from: number, to: number, total: number) => string;
+  previous: string;
+  next: string;
+  pageOf: (page: number, total: number) => string;
+}> = {
+  en: {
+    pageTitle: "Tables",
+    signInPrompt: "Sign in as a supplier to see your tables.",
+    allTablesDesc: "All tables (manual and from QR). People who joined and linked orders appear here.",
+    activeHint: "ACTIVE — in use (cannot remove)",
+    sentHint: "SENT — order sent (can remove)",
+    closedHint: "CLOSED — completed (can remove)",
+    expiredHint: "EXPIRED — no longer active (can remove)",
+    perPage: "Per page:",
+    refresh: "Refresh",
+    clearAllCompleted: (n) => `Clear all completed (${n})`,
+    clearing: "Clearing…",
+    confirmClearAll: (n) => `Remove all ${n} completed table(s) (CLOSED, SENT, EXPIRED) from this list? ACTIVE tables will not be changed.`,
+    loadingTables: "Loading tables…",
+    noTablesTitle: "No tables yet",
+    noTablesDesc: "Tables appear here when you create one (e.g. from Dashboard \"Shop with me\" QR) or when someone opens a table link and joins. Create a table from your Dashboard to get a shareable link.",
+    unnamedTable: "Unnamed table",
+    joined: (n) => `${n} joined`,
+    total: "Total:",
+    createdBy: (name) => `Created by ${name}`,
+    created: "Created",
+    viewOrder: (id) => `View order #${id}`,
+    removeFromList: "Remove from list",
+    removing: "Removing…",
+    showing: (from, to, total) => `Showing ${from}–${to} of ${total} tables`,
+    previous: "Previous",
+    next: "Next",
+    pageOf: (page, total) => `Page ${page} of ${total}`,
+  },
+  rw: {
+    pageTitle: "Ameza",
+    signInPrompt: "Injira nk'umugurisha kugira ngo ubone ameza yawe.",
+    allTablesDesc: "Ameza yose (yakozwe n'intoki n'ayo QR). Abantu binjiye n'amatumiza bashyizeho bagaragara hano.",
+    activeHint: "IKORESHWA — irikoreshwa (ntushobora gukuraho)",
+    sentHint: "YOHEREJWE — itumiza ryoherejwe (ushobora gukuraho)",
+    closedHint: "YARANGIYE — yarangiye (ushobora gukuraho)",
+    expiredHint: "YARANGIYE IGIHE — ntikiri active (ushobora gukuraho)",
+    perPage: "Kuri buri paji:",
+    refresh: "Ongera usuzume",
+    clearAllCompleted: (n) => `Siba yarangiye (${n})`,
+    clearing: "Birimo gusibwa…",
+    confirmClearAll: (n) => `Kuraho ameza ${n} yarangiye (YARANGIYE, YOHEREJWE, YARANGIYE IGIHE)? Ameza akoreshwa ntazahinduka.`,
+    loadingTables: "Ameza arimo gutegerezwa…",
+    noTablesTitle: "Nta meza arahari",
+    noTablesDesc: "Ameza agaragara hano iyo uyakoze (urugero: kuva kuri Dashboard \"Gura hamwe nanjye\" QR) cyangwa iyo umuntu afunguye link y'imeza akinjiramo.",
+    unnamedTable: "Imeza itagira izina",
+    joined: (n) => `${n} binjiye`,
+    total: "Igiteranyo:",
+    createdBy: (name) => `Yakozwe na ${name}`,
+    created: "Yakozwe",
+    viewOrder: (id) => `Reba itumiza #${id}`,
+    removeFromList: "Kuraho ku rutonde",
+    removing: "Birimo gukurwaho…",
+    showing: (from, to, total) => `Kwerekana ${from}–${to} muri ${total} ameza`,
+    previous: "Ibibanziriza",
+    next: "Ibikurikira",
+    pageOf: (page, total) => `Paji ${page} kuri ${total}`,
+  },
+  fr: {
+    pageTitle: "Tables",
+    signInPrompt: "Connectez-vous en tant que fournisseur pour voir vos tables.",
+    allTablesDesc: "Toutes les tables (manuelles et QR). Les personnes inscrites et les commandes associées apparaissent ici.",
+    activeHint: "ACTIVE — en cours (ne peut pas être supprimée)",
+    sentHint: "ENVOYÉE — commande envoyée (peut être supprimée)",
+    closedHint: "FERMÉE — terminée (peut être supprimée)",
+    expiredHint: "EXPIRÉE — plus active (peut être supprimée)",
+    perPage: "Par page :",
+    refresh: "Actualiser",
+    clearAllCompleted: (n) => `Supprimer les terminées (${n})`,
+    clearing: "Suppression…",
+    confirmClearAll: (n) => `Supprimer les ${n} table(s) terminée(s) (FERMÉES, ENVOYÉES, EXPIRÉES) de cette liste ? Les tables ACTIVES ne seront pas modifiées.`,
+    loadingTables: "Chargement des tables…",
+    noTablesTitle: "Aucune table",
+    noTablesDesc: "Les tables apparaissent ici lorsque vous en créez une (par ex. depuis le QR \"Achetez avec moi\" du tableau de bord) ou quand quelqu'un ouvre un lien de table et la rejoint.",
+    unnamedTable: "Table sans nom",
+    joined: (n) => `${n} inscrit(s)`,
+    total: "Total :",
+    createdBy: (name) => `Créée par ${name}`,
+    created: "Créée",
+    viewOrder: (id) => `Voir commande #${id}`,
+    removeFromList: "Retirer de la liste",
+    removing: "Suppression…",
+    showing: (from, to, total) => `Affichage de ${from}–${to} sur ${total} tables`,
+    previous: "Précédent",
+    next: "Suivant",
+    pageOf: (page, total) => `Page ${page} sur ${total}`,
+  },
+}
 
 const PAGE_SIZE_OPTIONS = [6, 12, 24] as const
 
@@ -30,6 +149,8 @@ type TableRow = {
 }
 
 export default function SupplierTablesPage() {
+  const language = useLanguageStore((s) => s.language)
+  const ui = TABLES_UI[language] ?? TABLES_UI.en
   const { user } = useAuthStore()
   const account = user?.ishyigaAccount ?? ""
   const [tables, setTables] = useState<TableRow[]>([])
@@ -74,7 +195,7 @@ export default function SupplierTablesPage() {
   async function handleClearAllCompleted() {
     if (!account || completedCount === 0) return
     const ok = window.confirm(
-      `Remove all ${completedCount} completed table(s) (CLOSED, SENT, EXPIRED) from this list? ACTIVE tables will not be changed.`
+      ui.confirmClearAll(completedCount)
     )
     if (!ok) return
     setClearingAll(true)
@@ -146,8 +267,8 @@ export default function SupplierTablesPage() {
   if (!account) {
     return (
       <div className="space-y-4">
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Tables</h1>
-        <p className="text-slate-600 dark:text-slate-400">Sign in as a supplier to see your tables.</p>
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{ui.pageTitle}</h1>
+        <p className="text-slate-600 dark:text-slate-400">{ui.signInPrompt}</p>
       </div>
     )
   }
@@ -158,20 +279,20 @@ export default function SupplierTablesPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
             <Table2 className="h-7 w-7" />
-            Tables
+            {ui.pageTitle}
           </h1>
           <p className="text-slate-600 dark:text-slate-400 mt-1">
-            All tables (manual and from QR). People who joined and linked orders appear here.
+            {ui.allTablesDesc}
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
-            <span><strong>ACTIVE</strong> — in use (cannot remove)</span>
-            <span><strong>SENT</strong> — order sent (can remove)</span>
-            <span><strong>CLOSED</strong> — completed (can remove)</span>
-            <span><strong>EXPIRED</strong> — no longer active (can remove)</span>
+            <span>{ui.activeHint}</span>
+            <span>{ui.sentHint}</span>
+            <span>{ui.closedHint}</span>
+            <span>{ui.expiredHint}</span>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-sm text-slate-600 dark:text-slate-400">Per page:</span>
+          <span className="text-sm text-slate-600 dark:text-slate-400">{ui.perPage}</span>
           <select
             value={pageSize}
             onChange={(e) => {
@@ -186,7 +307,7 @@ export default function SupplierTablesPage() {
           </select>
           <Button variant="outline" size="sm" onClick={fetchTables} disabled={loading}>
             <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
-            Refresh
+            {ui.refresh}
           </Button>
           {completedCount > 0 && (
             <Button
@@ -197,7 +318,7 @@ export default function SupplierTablesPage() {
               className="text-amber-700 border-amber-300 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-700 dark:hover:bg-amber-950/30"
             >
               <Trash2 className="h-4 w-4 mr-2" />
-              {clearingAll ? "Clearing…" : `Clear all completed (${completedCount})`}
+              {clearingAll ? ui.clearing : ui.clearAllCompleted(completedCount)}
             </Button>
           )}
         </div>
@@ -214,16 +335,15 @@ export default function SupplierTablesPage() {
       {loading && tables.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center text-slate-500">
-            Loading tables…
+            {ui.loadingTables}
           </CardContent>
         </Card>
       ) : tables.length === 0 ? (
         <Card>
           <CardHeader>
-            <CardTitle>No tables yet</CardTitle>
+            <CardTitle>{ui.noTablesTitle}</CardTitle>
             <CardDescription>
-              Tables appear here when you create one (e.g. from Dashboard “Shop with me” QR) or when
-              someone opens a table link and joins. Create a table from your Dashboard to get a shareable link.
+              {ui.noTablesDesc}
             </CardDescription>
           </CardHeader>
         </Card>
@@ -235,7 +355,7 @@ export default function SupplierTablesPage() {
                 <CardHeader className="pb-2">
                   <div className="flex items-start justify-between gap-2">
                     <CardTitle className="text-lg font-semibold truncate" title={t.tableName}>
-                      {t.tableName || "Unnamed table"}
+                      {t.tableName || ui.unnamedTable}
                     </CardTitle>
                     {statusBadge(t.status)}
                   </div>
@@ -246,22 +366,22 @@ export default function SupplierTablesPage() {
                 <CardContent className="flex-1 space-y-3">
                   <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
                     <Users className="h-4 w-4 shrink-0" />
-                    <span>{t.participantsJoined} joined</span>
+                    <span>{ui.joined(t.participantsJoined)}</span>
                   </div>
                   {t.totalAmount > 0 && (
                     <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                      Total: {Number(t.totalAmount).toLocaleString()} RWF
+                      {ui.total} {Number(t.totalAmount).toLocaleString()} RWF
                     </p>
                   )}
                   {t.createdBy && (
-                    <p className="text-xs text-slate-500">Created by {t.createdBy}</p>
+                    <p className="text-xs text-slate-500">{ui.createdBy(t.createdBy)}</p>
                   )}
-                  <p className="text-xs text-slate-500">Created {formatDate(t.createdAt)}</p>
+                  <p className="text-xs text-slate-500">{ui.created} {formatDate(t.createdAt)}</p>
                   {t.masterOrderId && (
                     <Button asChild variant="secondary" size="sm" className="w-full">
                       <Link href={`/supplier/orders/${t.masterOrderId}`}>
                         <ExternalLink className="h-3.5 w-3.5 mr-2" />
-                        View order #{t.masterOrderId}
+                        {ui.viewOrder(t.masterOrderId)}
                       </Link>
                     </Button>
                   )}
@@ -274,7 +394,7 @@ export default function SupplierTablesPage() {
                       disabled={deletingId === t.id}
                     >
                       <Trash2 className="h-3.5 w-3.5 mr-2" />
-                      {deletingId === t.id ? "Removing…" : "Remove from list"}
+                      {deletingId === t.id ? ui.removing : ui.removeFromList}
                     </Button>
                   )}
                 </CardContent>
@@ -285,7 +405,7 @@ export default function SupplierTablesPage() {
           {totalPages > 1 && (
             <div className="flex flex-wrap items-center justify-between gap-4 pt-6">
               <p className="text-sm text-slate-600 dark:text-slate-400">
-                Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, tables.length)} of {tables.length} tables
+                {ui.showing((page - 1) * pageSize + 1, Math.min(page * pageSize, tables.length), tables.length)}
               </p>
               <div className="flex items-center gap-2">
                 <Button
@@ -295,10 +415,10 @@ export default function SupplierTablesPage() {
                   disabled={page <= 1}
                 >
                   <ChevronLeft className="h-4 w-4" />
-                  Previous
+                  {ui.previous}
                 </Button>
                 <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                  Page {page} of {totalPages}
+                  {ui.pageOf(page, totalPages)}
                 </span>
                 <Button
                   variant="outline"
@@ -306,7 +426,7 @@ export default function SupplierTablesPage() {
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                   disabled={page >= totalPages}
                 >
-                  Next
+                  {ui.next}
                   <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>

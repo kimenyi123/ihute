@@ -16,10 +16,131 @@ import {
   ImportResult
 } from '@/lib/supplierStockApi';
 import { useAuthStore } from '@/lib/auth-store';
+import { useLanguageStore, type Language } from '@/lib/language-store';
+
+const STOCK_UPLOAD_UI: Record<Language, {
+  alertExcelFile: string;
+  alertFileSize: string;
+  alertNoAccount: string;
+  pageTitle: string;
+  pageSubtitle: string;
+  bulkUploadTitle: string;
+  bulkUploadDesc: string;
+  fileFormatTitle: string;
+  supportedFormats: string;
+  generalFormat: string;
+  limits: string;
+  selectExcelFile: string;
+  selectedFile: string;
+  uploadImport: string;
+  importing: string;
+  parsingNote: string;
+  failedUpload: string;
+  viewStock: string;
+  backupCreated: string;
+  errors: string;
+  itemsAdded: string;
+  itemsUpdated: string;
+  rowsParsed: string;
+  rowsSkipped: string;
+  needTemplate: string;
+  downloadCsv: string;
+  csvNote: string;
+}> = {
+  en: {
+    alertExcelFile: "Please select an Excel file (.xlsx, .xls) or CSV file (.csv)",
+    alertFileSize: "File size must be less than 5MB",
+    alertNoAccount: "No account found. Please log in again.",
+    pageTitle: "Product Stock Management",
+    pageSubtitle: "Upload Excel inventory or manage individual items",
+    bulkUploadTitle: "Bulk Excel Upload",
+    bulkUploadDesc: "Upload multiple products at once using Excel or CSV files",
+    fileFormatTitle: "File Format Requirements",
+    supportedFormats: "Supported formats",
+    generalFormat: "General format",
+    limits: "Max 5MB file size, 10,000 rows",
+    selectExcelFile: "Select Excel File",
+    selectedFile: "Selected file:",
+    uploadImport: "Upload & Import",
+    importing: "Importing…",
+    parsingNote: "Parsing file and saving to your stock (database + search). Large menus (500+ items) may take 1–3 minutes — keep this tab open.",
+    failedUpload: "Failed to upload file",
+    viewStock: "View your stock on the dashboard →",
+    backupCreated: "Backup created",
+    errors: "Errors:",
+    itemsAdded: "Items added",
+    itemsUpdated: "Items updated",
+    rowsParsed: "Rows parsed",
+    rowsSkipped: "Rows skipped (invalid)",
+    needTemplate: "Need a template?",
+    downloadCsv: "Download general format (CSV)",
+    csvNote: "CSV — can be opened in Excel. Optional columns can be left empty.",
+  },
+  rw: {
+    alertExcelFile: "Hitamo dosiye ya Excel (.xlsx, .xls) cyangwa CSV (.csv)",
+    alertFileSize: "Ingano ya dosiye igomba kuba munsi ya 5MB",
+    alertNoAccount: "Nta konti yabonetse. Ongera winjire.",
+    pageTitle: "Gucunga Sitoki y'Ibicuruzwa",
+    pageSubtitle: "Ohereza sitoki ya Excel cyangwa ucunge ibicuruzwa ku giti cyabyo",
+    bulkUploadTitle: "Ohereza Excel Byinshi Icyarimwe",
+    bulkUploadDesc: "Ohereza ibicuruzwa byinshi icyarimwe ukoresheje Excel cyangwa CSV",
+    fileFormatTitle: "Ibisabwa ku Bwoko bwa Dosiye",
+    supportedFormats: "Ubwoko bwemewe",
+    generalFormat: "Imiterere rusange",
+    limits: "Ntarengwa: 5MB, imirongo 10,000",
+    selectExcelFile: "Hitamo Dosiye ya Excel",
+    selectedFile: "Dosiye yahiswemo:",
+    uploadImport: "Ohereza & Injiza",
+    importing: "Birinjizwa…",
+    parsingNote: "Dosiye irasomwa kandi ibikwa muri sitoki yawe. Menyu nini (500+) ishobora gufata iminota 1–3 — sigara kuri iyi paji.",
+    failedUpload: "Kohereza dosiye byanze",
+    viewStock: "Reba sitoki yawe kuri dashboard →",
+    backupCreated: "Kopi y'umutekano yakozwe",
+    errors: "Amakosa:",
+    itemsAdded: "Ibicuruzwa byongeywe",
+    itemsUpdated: "Ibicuruzwa byavuguruwe",
+    rowsParsed: "Imirongo yasomwe",
+    rowsSkipped: "Imirongo yasimbukiwe (itari nziza)",
+    needTemplate: "Ukeneye umugereka?",
+    downloadCsv: "Kuramo imiterere rusange (CSV)",
+    csvNote: "CSV — ishobora gufungurwa muri Excel. Koloni zidakenewe zishobora gusigara ubusa.",
+  },
+  fr: {
+    alertExcelFile: "Veuillez sélectionner un fichier Excel (.xlsx, .xls) ou CSV (.csv)",
+    alertFileSize: "La taille du fichier doit être inférieure à 5 Mo",
+    alertNoAccount: "Aucun compte trouvé. Veuillez vous reconnecter.",
+    pageTitle: "Gestion du stock produits",
+    pageSubtitle: "Importez un inventaire Excel ou gérez les articles individuellement",
+    bulkUploadTitle: "Import Excel en masse",
+    bulkUploadDesc: "Importez plusieurs produits à la fois via des fichiers Excel ou CSV",
+    fileFormatTitle: "Exigences de format de fichier",
+    supportedFormats: "Formats pris en charge",
+    generalFormat: "Format général",
+    limits: "Taille max 5 Mo, 10 000 lignes",
+    selectExcelFile: "Sélectionner un fichier Excel",
+    selectedFile: "Fichier sélectionné :",
+    uploadImport: "Importer",
+    importing: "Importation…",
+    parsingNote: "Analyse et enregistrement dans votre stock (base de données + recherche). Les menus volumineux (500+ articles) peuvent prendre 1 à 3 minutes — gardez cet onglet ouvert.",
+    failedUpload: "Échec du téléversement",
+    viewStock: "Voir votre stock sur le tableau de bord →",
+    backupCreated: "Sauvegarde créée",
+    errors: "Erreurs :",
+    itemsAdded: "Articles ajoutés",
+    itemsUpdated: "Articles mis à jour",
+    rowsParsed: "Lignes analysées",
+    rowsSkipped: "Lignes ignorées (invalides)",
+    needTemplate: "Besoin d'un modèle ?",
+    downloadCsv: "Télécharger le format général (CSV)",
+    csvNote: "CSV — peut être ouvert dans Excel. Les colonnes optionnelles peuvent être laissées vides.",
+  },
+};
 
 export default function SupplierStockUploadPage() {
   const router = useRouter();
   const { isAuthenticated, checkSession } = useAuthStore();
+  const language = useLanguageStore((s) => s.language);
+  const ui = STOCK_UPLOAD_UI[language] ?? STOCK_UPLOAD_UI.en;
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
@@ -65,11 +186,11 @@ export default function SupplierStockUploadPage() {
     if (selectedFile) {
       const fileName = selectedFile.name.toLowerCase();
       if (!fileName.endsWith('.xlsx') && !fileName.endsWith('.xls') && !fileName.endsWith('.csv')) {
-        alert('Please select an Excel file (.xlsx, .xls) or CSV file (.csv)');
+        alert(ui.alertExcelFile);
         return;
       }
       if (selectedFile.size > 5 * 1024 * 1024) {
-        alert('File size must be less than 5MB');
+        alert(ui.alertFileSize);
         return;
       }
       setFile(selectedFile);
@@ -82,7 +203,7 @@ export default function SupplierStockUploadPage() {
 
     const { user } = useAuthStore.getState();
     if (!user?.ishyigaAccount) {
-      alert('No account found. Please log in again.');
+      alert(ui.alertNoAccount);
       return;
     }
 
@@ -108,7 +229,7 @@ export default function SupplierStockUploadPage() {
       } else {
         setResult({
           ok: false,
-          message: 'Failed to upload file',
+          message: ui.failedUpload,
           error: error instanceof Error ? error.message : 'Unknown error',
         });
       }
@@ -122,9 +243,9 @@ export default function SupplierStockUploadPage() {
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">Product Stock Management</h1>
+          <h1 className="text-3xl font-bold text-gray-900">{ui.pageTitle}</h1>
           <p className="text-gray-600 mt-2">
-            Upload Excel inventory or manage individual items
+            {ui.pageSubtitle}
           </p>
         </div>
 
@@ -134,10 +255,10 @@ export default function SupplierStockUploadPage() {
             <div className="px-4 sm:px-6 py-4">
               <h2 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
                 <FileSpreadsheet className="w-6 h-6 text-blue-600" />
-                Bulk Excel Upload
+                {ui.bulkUploadTitle}
               </h2>
               <p className="text-gray-600 mt-1">
-                Upload multiple products at once using Excel or CSV files
+                {ui.bulkUploadDesc}
               </p>
             </div>
           </div>
@@ -149,14 +270,14 @@ export default function SupplierStockUploadPage() {
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-6">
               <h2 className="text-lg font-semibold text-blue-900 mb-3 flex items-center gap-2">
                 <AlertCircle className="w-5 h-5" />
-                File Format Requirements
+                {ui.fileFormatTitle}
               </h2>
               <ul className="space-y-2 text-sm text-blue-800">
-                <li>• <strong>Supported formats</strong>: Excel (.xlsx) or CSV (.csv)</li>
-                <li>• <strong>General format</strong>: CATEGORY, SUBCATEGORY, ITEM, QTE, PRICE (RWF), COST PRICE, FRENCH, KINYARWANDA, IMAGE LINK, KEYWORDS — required: ITEM, QTE, PRICE; others can be left empty</li>
+                <li>• <strong>{ui.supportedFormats}</strong>: Excel (.xlsx) or CSV (.csv)</li>
+                <li>• <strong>{ui.generalFormat}</strong>: CATEGORY, SUBCATEGORY, ITEM, QTE, PRICE (RWF), COST PRICE, FRENCH, KINYARWANDA, IMAGE LINK, KEYWORDS — required: ITEM, QTE, PRICE</li>
               </ul>
               <div className="mt-4 text-sm text-blue-700">
-                <strong>Limits:</strong> Max 5MB file size, 10,000 rows
+                <strong>Limits:</strong> {ui.limits}
               </div>
             </div>
 
@@ -178,12 +299,12 @@ export default function SupplierStockUploadPage() {
                   className="inline-block px-6 py-3 bg-blue-600 text-white rounded-lg cursor-pointer hover:bg-blue-700 transition"
                 >
                   <Upload className="w-5 h-5 inline mr-2" />
-                  Select Excel File
+                  {ui.selectExcelFile}
                 </label>
 
                 {file && (
                   <div className="mt-4">
-                    <p className="text-sm text-gray-600">Selected file:</p>
+                    <p className="text-sm text-gray-600">{ui.selectedFile}</p>
                     <p className="font-medium text-gray-900">{file.name}</p>
                     <p className="text-xs text-gray-500">
                       {(file.size / 1024).toFixed(2)} KB
@@ -202,18 +323,18 @@ export default function SupplierStockUploadPage() {
                     {uploading ? (
                       <>
                         <span className="inline-block animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2" aria-hidden />
-                        Importing…
+                        {ui.importing}
                       </>
                     ) : (
                       <>
                         <Upload className="w-5 h-5 inline mr-2" />
-                        Upload & Import
+                        {ui.uploadImport}
                       </>
                     )}
                   </button>
                 {uploading && (
                   <p className="mt-2 text-sm text-gray-500">
-                    Parsing file and saving to your stock (database + search). Large menus (500+ items) may take 1–3 minutes — keep this tab open.
+                    {ui.parsingNote}
                   </p>
                 )}
                 </div>
@@ -244,15 +365,15 @@ export default function SupplierStockUploadPage() {
                     {result.ok && (
                       <div className="mt-3 space-y-1 text-sm text-green-800">
                         {(result.itemsImported ?? 0) > 0 && (
-                          <p>✓ Items added: {result.itemsImported}</p>
+                          <p>✓ {ui.itemsAdded}: {result.itemsImported}</p>
                         )}
                         {(result.itemsUpdated ?? 0) > 0 && (
-                          <p>✓ Items updated: {result.itemsUpdated}</p>
+                          <p>✓ {ui.itemsUpdated}: {result.itemsUpdated}</p>
                         )}
-                        <p>✓ Rows parsed: {result.rowsParsed}</p>
+                        <p>✓ {ui.rowsParsed}: {result.rowsParsed}</p>
                         {(result.rowsSkipped ?? 0) > 0 && (
                           <>
-                            <p className="text-amber-700">⚠ Rows skipped (invalid): {result.rowsSkipped}</p>
+                            <p className="text-amber-700">⚠ {ui.rowsSkipped}: {result.rowsSkipped}</p>
                             {result.rowsSkippedNote && (
                               <p className="text-xs text-amber-600 mt-0.5">{result.rowsSkippedNote}</p>
                             )}
@@ -260,7 +381,7 @@ export default function SupplierStockUploadPage() {
                         )}
                         {result.backupKey && result.backupKey !== 'none' && (
                           <p className="text-xs text-green-700 mt-2">
-                            Backup created
+                            {ui.backupCreated}
                           </p>
                         )}
                         <p className="mt-3">
@@ -268,7 +389,7 @@ export default function SupplierStockUploadPage() {
                             href="/supplier/dashboard"
                             className="font-semibold text-green-900 underline underline-offset-2"
                           >
-                            View your stock on the dashboard →
+                            {ui.viewStock}
                           </a>
                         </p>
                       </div>
@@ -276,7 +397,7 @@ export default function SupplierStockUploadPage() {
 
                     {!result.ok && result.errors && result.errors.length > 0 && (
                       <div className="mt-3">
-                        <p className="text-sm font-medium text-red-800 mb-2">Errors:</p>
+                        <p className="text-sm font-medium text-red-800 mb-2">{ui.errors}</p>
                         <ul className="space-y-1 text-sm text-red-700">
                           {result.errors.map((error, idx) => (
                             <li key={idx}>• {error}</li>
@@ -296,13 +417,13 @@ export default function SupplierStockUploadPage() {
             {/* Download Template Link */}
             <div className="mt-8 text-center space-y-2">
               <p className="text-sm text-gray-600">
-                Need a template?{' '}
+                {ui.needTemplate}{' '}
                 <a href="/supplier/stock/template" className="text-blue-600 hover:underline font-medium" download>
-                  Download general format (CSV)
+                  {ui.downloadCsv}
                 </a>
               </p>
               <p className="text-xs text-gray-500">
-                CSV — can be opened in Excel. Optional columns can be left empty.
+                {ui.csvNote}
               </p>
             </div>
           </div>

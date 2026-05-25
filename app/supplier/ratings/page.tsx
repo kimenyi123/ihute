@@ -3,9 +3,92 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/auth-store";
+import { useLanguageStore, type Language } from "@/lib/language-store";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Star, TrendingUp, Users, Calendar, ArrowLeft } from "lucide-react";
+
+const RATINGS_UI: Record<Language, {
+  loadingRatings: string;
+  error: string;
+  goBack: string;
+  back: string;
+  yourRatings: string;
+  viewFeedback: string;
+  averageRating: string;
+  totalRatings: string;
+  customerReviews: string;
+  fiveStarRatings: string;
+  ofTotal: string;
+  ratingDistribution: string;
+  distributionDesc: string;
+  star: string;
+  recentRatings: string;
+  latestFeedback: string;
+  noRatingsYet: string;
+  ratingsWillAppear: string;
+}> = {
+  en: {
+    loadingRatings: "Loading ratings...",
+    error: "Error",
+    goBack: "Go Back",
+    back: "Back",
+    yourRatings: "Your Ratings",
+    viewFeedback: "View your customer feedback and ratings",
+    averageRating: "Average Rating",
+    totalRatings: "Total Ratings",
+    customerReviews: "Customer reviews",
+    fiveStarRatings: "5-Star Ratings",
+    ofTotal: "% of total",
+    ratingDistribution: "Rating Distribution",
+    distributionDesc: "Breakdown of your ratings by star level",
+    star: "Star",
+    recentRatings: "Recent Ratings",
+    latestFeedback: "Latest customer feedback and reviews",
+    noRatingsYet: "No ratings yet",
+    ratingsWillAppear: "Ratings will appear here once customers rate your service",
+  },
+  rw: {
+    loadingRatings: "Birimo gutangira amanota...",
+    error: "Ikosa",
+    goBack: "Subira inyuma",
+    back: "Subira inyuma",
+    yourRatings: "Amanota yawe",
+    viewFeedback: "Reba ibitekerezo n'amanota y'abakiriya bawe",
+    averageRating: "Umubare uri hagati w'amanota",
+    totalRatings: "Amanota yose",
+    customerReviews: "Ibitekerezo by'abakiriya",
+    fiveStarRatings: "Amanota y'inyenyeri 5",
+    ofTotal: "% by'igiteranyo",
+    ratingDistribution: "Ikwirakwizwa ry'amanota",
+    distributionDesc: "Incamake y'amanota yawe hakurikijwe inyenyeri",
+    star: "Inyenyeri",
+    recentRatings: "Amanota mashya",
+    latestFeedback: "Ibitekerezo bishya by'abakiriya",
+    noRatingsYet: "Nta manota ahari",
+    ratingsWillAppear: "Amanota azagaragara hano iyo abakiriya bamanose serivisi yawe",
+  },
+  fr: {
+    loadingRatings: "Chargement des évaluations...",
+    error: "Erreur",
+    goBack: "Retour",
+    back: "Retour",
+    yourRatings: "Vos évaluations",
+    viewFeedback: "Consultez les commentaires et évaluations de vos clients",
+    averageRating: "Note moyenne",
+    totalRatings: "Total des évaluations",
+    customerReviews: "Avis des clients",
+    fiveStarRatings: "Évaluations 5 étoiles",
+    ofTotal: "% du total",
+    ratingDistribution: "Distribution des évaluations",
+    distributionDesc: "Répartition de vos évaluations par niveau d'étoiles",
+    star: "Étoile",
+    recentRatings: "Évaluations récentes",
+    latestFeedback: "Derniers commentaires et avis des clients",
+    noRatingsYet: "Aucune évaluation pour le moment",
+    ratingsWillAppear: "Les évaluations apparaîtront ici une fois que les clients auront évalué votre service",
+  },
+};
 
 interface RatingStats {
   totalRatings: number;
@@ -44,6 +127,8 @@ const emojiMap: { [key: number]: string } = {
 export default function SupplierRatingsPage() {
   const router = useRouter();
   const { user, isAuthenticated, hasHydrated } = useAuthStore();
+  const language = useLanguageStore((s) => s.language);
+  const ui = RATINGS_UI[language] ?? RATINGS_UI.en;
   const [stats, setStats] = useState<RatingStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -141,7 +226,7 @@ export default function SupplierRatingsPage() {
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-slate-600">Loading ratings...</p>
+          <p className="text-slate-600">{ui.loadingRatings}</p>
         </div>
       </div>
     );
@@ -152,11 +237,11 @@ export default function SupplierRatingsPage() {
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-8">
         <Card className="max-w-md mx-auto">
           <CardHeader>
-            <CardTitle className="text-red-600">Error</CardTitle>
+            <CardTitle className="text-red-600">{ui.error}</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-slate-700 mb-4">{error}</p>
-            <Button onClick={() => router.back()}>Go Back</Button>
+            <Button onClick={() => router.back()}>{ui.goBack}</Button>
           </CardContent>
         </Card>
       </div>
@@ -176,12 +261,12 @@ export default function SupplierRatingsPage() {
               className="gap-2"
             >
               <ArrowLeft className="h-4 w-4" />
-              Back
+              {ui.back}
             </Button>
             <div>
-              <h1 className="text-2xl font-bold text-slate-900">Your Ratings</h1>
+              <h1 className="text-2xl font-bold text-slate-900">{ui.yourRatings}</h1>
               <p className="text-sm text-slate-600">
-                View your customer feedback and ratings
+                {ui.viewFeedback}
               </p>
             </div>
           </div>
@@ -194,7 +279,7 @@ export default function SupplierRatingsPage() {
           <Card className="bg-white shadow-md hover:shadow-lg transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-slate-600">
-                Average Rating
+                {ui.averageRating}
               </CardTitle>
               <Star className="h-5 w-5 text-yellow-500" />
             </CardHeader>
@@ -211,7 +296,7 @@ export default function SupplierRatingsPage() {
           <Card className="bg-white shadow-md hover:shadow-lg transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-slate-600">
-                Total Ratings
+                {ui.totalRatings}
               </CardTitle>
               <Users className="h-5 w-5 text-blue-500" />
             </CardHeader>
@@ -219,14 +304,14 @@ export default function SupplierRatingsPage() {
               <div className="text-3xl font-bold text-slate-900">
                 {stats?.totalRatings || 0}
               </div>
-              <p className="text-xs text-slate-500 mt-1">Customer reviews</p>
+              <p className="text-xs text-slate-500 mt-1">{ui.customerReviews}</p>
             </CardContent>
           </Card>
 
           <Card className="bg-white shadow-md hover:shadow-lg transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-slate-600">
-                5-Star Ratings
+                {ui.fiveStarRatings}
               </CardTitle>
               <TrendingUp className="h-5 w-5 text-green-500" />
             </CardHeader>
@@ -235,7 +320,7 @@ export default function SupplierRatingsPage() {
                 {stats?.distribution?.["5"] || 0}
               </div>
               <p className="text-xs text-slate-500 mt-1">
-                {stats?.percentages?.["5"]?.toFixed(1) || 0}% of total
+                {stats?.percentages?.["5"]?.toFixed(1) || 0}{ui.ofTotal}
               </p>
             </CardContent>
           </Card>
@@ -244,9 +329,9 @@ export default function SupplierRatingsPage() {
         {/* Rating Distribution */}
         <Card className="bg-white shadow-md mb-8">
           <CardHeader>
-            <CardTitle>Rating Distribution</CardTitle>
+            <CardTitle>{ui.ratingDistribution}</CardTitle>
             <CardDescription>
-              Breakdown of your ratings by star level
+              {ui.distributionDesc}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -256,7 +341,7 @@ export default function SupplierRatingsPage() {
                   <div className="flex items-center gap-2 w-24">
                     <span className="text-2xl">{emojiMap[star]}</span>
                     <span className="text-sm font-medium text-slate-700">
-                      {star} Star
+                      {star} {ui.star}
                     </span>
                   </div>
                   <div className="flex-1">
@@ -296,9 +381,9 @@ export default function SupplierRatingsPage() {
         {/* Recent Ratings */}
         <Card className="bg-white shadow-md">
           <CardHeader>
-            <CardTitle>Recent Ratings</CardTitle>
+            <CardTitle>{ui.recentRatings}</CardTitle>
             <CardDescription>
-              Latest customer feedback and reviews
+              {ui.latestFeedback}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -347,9 +432,9 @@ export default function SupplierRatingsPage() {
             ) : (
               <div className="text-center py-12">
                 <Star className="h-12 w-12 text-slate-300 mx-auto mb-4" />
-                <p className="text-slate-500 text-lg">No ratings yet</p>
+                <p className="text-slate-500 text-lg">{ui.noRatingsYet}</p>
                 <p className="text-slate-400 text-sm mt-2">
-                  Ratings will appear here once customers rate your service
+                  {ui.ratingsWillAppear}
                 </p>
               </div>
             )}
