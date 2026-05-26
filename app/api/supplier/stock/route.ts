@@ -1,9 +1,48 @@
 // app/api/supplier/stock/route.ts
 import { NextRequest, NextResponse } from "next/server"
 
-import { getBackendBase } from "@/lib/backend-config"
+import { getSupplierStockUrl } from "@/lib/backend-config"
+import { importStockExcelViaAddProduct } from "@/lib/supplier-stock-excel-import"
 
-const STOCK_SERVLET_URL = `${getBackendBase()}/SupplierStock`
+const STOCK_SERVLET_URL = getSupplierStockUrl()
+
+type ImportExcelBackendPayload = {
+  ok?: boolean
+  message?: string
+  itemsImported?: number
+  itemsUpdated?: number
+  rowsParsed?: number
+  rowsSkipped?: number
+  error?: string
+}
+
+/** Abort when client disconnects or route timeout fires. */
+function mergeAbortSignals(signals: AbortSignal[]): AbortSignal {
+  const anyFn = (AbortSignal as unknown as { any?: (s: AbortSignal[]) => AbortSignal }).any
+  if (typeof anyFn === "function") {
+    try {
+      return anyFn(signals)
+    } catch {
+      /* continue */
+    }
+  }
+  const c = new AbortController()
+  const on = () => {
+    try {
+      c.abort()
+    } catch {
+      /* ignore */
+    }
+  }
+  for (const s of signals) {
+    if (s.aborted) {
+      on()
+      break
+    }
+    s.addEventListener("abort", on)
+  }
+  return c.signal
+}
 
 export async function GET(req: NextRequest) {
   const controller = new AbortController()
@@ -109,40 +148,109 @@ export async function POST(req: NextRequest) {
     const headers: HeadersInit = {}
 
     // Handle multipart/form-data (Excel upload)
-    if (contentType.includes('multipart/form-data')) {
-      // For importExcel, stream body to backend to avoid buffering the whole file in Node
-      const account = searchParams.get("account")
-      if (effectiveAction === "importExcel" && account) {
-        const urlWithAccount = `${STOCK_SERVLET_URL}?action=importExcel&account=${encodeURIComponent(account)}`
-        headers["Content-Type"] = contentType
-        const streamResp = await fetch(urlWithAccount, {
-          method: "POST",
-          headers: { ...headers, Cookie: req.headers.get("cookie") || "" },
-          body: req.body as BodyInit,
-          signal: controller.signal,
-          cache: "no-store",
-          duplex: "half",
-        } as RequestInit)
-        const responseText = await streamResp.text()
-        let data: unknown
-        try {
-          data = JSON.parse(responseText)
-        } catch {
-          return NextResponse.json(
-            { ok: false, error: "Invalid response from backend" },
-            { status: 500 }
-          )
-        }
-        if (!streamResp.ok || (data as { ok?: boolean }).ok === false) {
-          return NextResponse.json(
-            { ok: false, error: (data as { error?: string }).error || "Import failed" },
-            { status: streamResp.status || 500 }
-          )
-        }
-        clearTimeout(timeout)
-        return NextResponse.json(data)
-      }
+    if (contentType.includes("multipart/form-data")) {
       const formData = await req.formData()
+      const account =
+        searchParams.get("account")?.trim() ||
+        String(formData.get("account") ?? "").trim()
+      if (!effectiveAction) {
+        effectiveAction = String(formData.get("action") ?? "").trim() || null
+      }
+
+      if (effectiveAction === "importExcel" && account) {
+        const cookie = req.headers.get("cookie") || ""
+        const fileEntry = formData.get("file")
+        const fileName =
+          fileEntry instanceof File
+            ? fileEntry.name
+            : String(formData.get("fileName") ?? "upload.xlsx")
+
+        const forwardFd = new FormData()
+        if (fileEntry instanceof Blob) {
+          forwardFd.append("file", fileEntry, fileName)
+        }
+        forwardFd.append("account", account)
+
+        const urlWithAccount = `${STOCK_SERVLET_URL}?action=importExcel&account=${encodeURIComponent(account)}`
+        let data: ImportExcelBackendPayload | null = null
+        let backendFailed = false
+
+        try {
+          const backendResp = await fetch(urlWithAccount, {
+            method: "POST",
+            headers: { Cookie: cookie },
+            body: forwardFd,
+            signal: controller.signal,
+            cache: "no-store",
+          })
+          const responseText = await backendResp.text()
+          try {
+            data = JSON.parse(responseText) as ImportExcelBackendPayload
+          } catch {
+            backendFailed = true
+          }
+          if (!backendResp.ok || data?.ok === false) {
+            backendFailed = true
+          }
+        } catch (e) {
+          backendFailed = true
+          if (e instanceof Error && e.name === "AbortError") {
+            clearTimeout(timeout)
+            return NextResponse.json(
+              {
+                ok: false,
+                error:
+                  "Import timed out. Try fewer rows or split the file, then upload again.",
+              },
+              { status: 504 },
+            )
+          }
+        }
+
+        const imported =
+          (data?.itemsImported ?? 0) + (data?.itemsUpdated ?? 0)
+        if (!backendFailed && data?.ok && imported > 0) {
+          clearTimeout(timeout)
+          return NextResponse.json({
+            ...data,
+            message:
+              data.message ||
+              `Imported ${imported} product(s) into your stock.`,
+          })
+        }
+
+        if (fileEntry instanceof Blob) {
+          const merged = mergeAbortSignals([controller.signal, req.signal])
+          const fallback = await importStockExcelViaAddProduct(
+            fileEntry,
+            fileName,
+            account,
+            cookie,
+            merged,
+          )
+          clearTimeout(timeout)
+          const note =
+            backendFailed && fallback.ok
+              ? " Saved via app (Java bulk import was unavailable)."
+              : ""
+          return NextResponse.json({
+            ...fallback,
+            message: `${fallback.message || "Import finished."}${note}`,
+          })
+        }
+
+        clearTimeout(timeout)
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              data?.error ||
+              "Import failed. Upload a valid Excel/CSV file with ITEM, QTE, and PRICE columns.",
+          },
+          { status: 500 },
+        )
+      }
+
       body = formData
     } 
     // Handle JSON body (regular API calls)

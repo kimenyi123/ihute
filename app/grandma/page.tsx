@@ -15,7 +15,15 @@ import { Slider } from "@/components/ui/slider"
 import { useLocationStoreEnhanced, type LocationData } from "@/lib/location-store-enhanced"
 import { getProductImageSrc, NO_IMAGE_URL } from "@/lib/image-utils"
 import { cn } from "@/lib/utils"
-import { LayoutDashboard, Loader2, SlidersHorizontal, Trash2 } from "lucide-react"
+import {
+  LayoutDashboard,
+  Loader2,
+  MessageSquare,
+  Phone,
+  SlidersHorizontal,
+  Smartphone,
+  Trash2,
+} from "lucide-react"
 import { grandmaApiService } from "@/lib/grandma-api-service"
 import { getUserPreferences, toggleUserPreference, saveUserPreferences, getCurrentUserId, loadUserPreferences } from "@/lib/user-preferences-api"
 import {
@@ -28,15 +36,28 @@ import {
   GRANDMA_REORDER_STORAGE_KEY,
   type GrandmaReorderPayload,
 } from "@/lib/grandma-reorder"
+import { notifyGrandmaOrderPlaced } from "@/lib/grandma-order-live"
+import { saveGrandmaPendingOrder } from "@/lib/grandma-pending-order"
+import {
+  buildGrandmaBillingReferenceTail,
+  buildGrandmaMtnUssd,
+  computeIhutePlatformFeeRwf,
+  stripShopMomoLabel,
+} from "@/lib/grandma-order-billing"
 import { GRANDMA_CATEGORY_TO_SECTOR_SLUG } from "@/lib/seller-category-sector"
 import { fetchSectorStatsFromApi, productCountFromSupplierRow } from "@/lib/fetch-suggestions-helpers"
 import { useAuthStore } from "@/lib/auth-store"
+import { useOrdersStore } from "@/lib/orders-store"
 import { grandmaUserCanUseSellerWorkspace } from "@/lib/auth-login-client"
+import { useLanguageStore } from "@/lib/language-store"
 import { GrandmaSellerDashboard } from "@/components/grandma-seller-dashboard"
 import { GrandmaSellerItemsPanel } from "@/components/grandma-seller-items-panel"
 import { digitsOnly, normalizePhoneDigitsForAuth, normalizeRwandaMobileE164 } from "@/lib/rwanda-phone"
+import { lineSellingPriceFromProductRow } from "@/lib/package-price"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+import { matchMoMoSmsToOrderTotal, type MoMoSmsMatchResult } from "@/lib/momo-payment-sms-match"
 import { Button } from "@/components/ui/button"
 
 export type Category =
@@ -67,6 +88,8 @@ type Product = {
   liveInStock?: boolean
   /** Menu / famille label from live API (filters) */
   liveCategory?: string
+  /** Sellable units on hand (inventory line quantity); omit when unknown. */
+  stockQty?: number
   qty: number
 }
 
@@ -162,6 +185,71 @@ type ShopEntry = {
   payoutAccount?: string
 }
 
+const GRANDMA_ORDERED_SHOPS_LS = "ihute:grandma:orderedShopIds" as const
+
+function readGrandmaOrderedShopIdsFromStorage(): string[] {
+  if (typeof window === "undefined") return []
+  try {
+    const raw = window.localStorage.getItem(GRANDMA_ORDERED_SHOPS_LS)
+    if (!raw) return []
+    const p = JSON.parse(raw) as unknown
+    if (!Array.isArray(p)) return []
+    return [...new Set(p.map((x) => String(x).trim()).filter(Boolean))]
+  } catch {
+    return []
+  }
+}
+
+function persistGrandmaOrderedShopIds(ids: string[]) {
+  try {
+    window.localStorage.setItem(GRANDMA_ORDERED_SHOPS_LS, JSON.stringify(ids.slice(0, 80)))
+  } catch {
+    /* ignore */
+  }
+}
+
+/** After a successful Grandma checkout — powers the “Reorder” shop filter. */
+function appendGrandmaOrderedShopId(shopId: string): string[] {
+  const id = String(shopId ?? "").trim()
+  if (!id) return readGrandmaOrderedShopIdsFromStorage()
+  const prev = readGrandmaOrderedShopIdsFromStorage()
+  const next = [id, ...prev.filter((x) => x !== id)].slice(0, 80)
+  persistGrandmaOrderedShopIds(next)
+  return next
+}
+
+function supplierRowSuggestsOnSale(supplier: Record<string, unknown>): boolean {
+  const pos = (v: unknown) => {
+    const x = Number(v)
+    return Number.isFinite(x) && x > 0
+  }
+  const truthy = (v: unknown) => v === true || v === "true" || v === "1" || v === 1
+  if (truthy(supplier.on_sale) || truthy(supplier.ON_SALE) || truthy(supplier.onSale)) return true
+  if (truthy(supplier.has_promo) || truthy(supplier.HAS_PROMO)) return true
+  if (pos(supplier.promo_count) || pos(supplier.PROMO_COUNT)) return true
+  if (pos(supplier.discount_items) || pos(supplier.DISCOUNT_ITEMS)) return true
+  return false
+}
+
+/** Live sector list has no “trending” flag — approximate with top stock-line counts per category. */
+function annotateShopTrendingByCategory(shops: ShopEntry[]): ShopEntry[] {
+  const groups = new Map<Category, ShopEntry[]>()
+  for (const s of shops) {
+    const g = groups.get(s.category) ?? []
+    g.push(s)
+    groups.set(s.category, g)
+  }
+  return shops.map((s) => {
+    const peers = groups.get(s.category) ?? [s]
+    const sorted = [...peers].sort((a, b) => (b.stockLineCount ?? 0) - (a.stockLineCount ?? 0))
+    const lim = Math.min(12, Math.max(4, Math.ceil(sorted.length * 0.22)))
+    const idx = Math.max(0, Math.min(lim, sorted.length) - 1)
+    const t = sorted[idx]?.stockLineCount ?? 0
+    const trending = t > 0 && (s.stockLineCount ?? 0) >= t
+    return { ...s, trending }
+  })
+}
+
 /** `supplier_ACCOUNT` or `supplier_ACCOUNT__Pharmacy` → Kaos seller account (no prefix / sector suffix). */
 function sellerAccountFromGrandmaShopId(shopId: string | null | undefined): string {
   const raw = String(shopId ?? "").replace(/^supplier_/, "").trim()
@@ -172,6 +260,100 @@ function sellerAccountFromGrandmaShopId(shopId: string | null | undefined): stri
 function sameGrandmaSeller(a: string | null | undefined, b: string | null | undefined): boolean {
   if (!a || !b) return false
   return sellerAccountFromGrandmaShopId(a) === sellerAccountFromGrandmaShopId(b)
+}
+
+/** Normalize seller account from API fields to compare with `sellerAccountFromGrandmaShopId(shop.id)`. */
+function normalizeSellerKeyFromSearch(raw: unknown): string {
+  const s = String(raw ?? "").trim()
+  if (!s) return ""
+  const synthetic = s.toLowerCase().startsWith("supplier_") ? s : `supplier_${s}__x`
+  return sellerAccountFromGrandmaShopId(synthetic).toUpperCase()
+}
+
+/** Collect seller accounts from global search JSON (products + suppliers). */
+function collectSellerAccountsFromGlobalSearchJson(json: Record<string, unknown>): Set<string> {
+  const out = new Set<string>()
+  const add = (raw: unknown) => {
+    const k = normalizeSellerKeyFromSearch(raw)
+    if (k) out.add(k)
+  }
+  const products = Array.isArray(json.products) ? json.products : []
+  for (const p of products) {
+    if (!p || typeof p !== "object") continue
+    const o = p as Record<string, unknown>
+    add(
+      o.supplier_account ??
+        o.SELLER_ISHYIGA_ACCOUNT ??
+        o.supplierAccount ??
+        o.ISHYIGA_ACCOUNT ??
+        o.seller_account ??
+        o.SELLER_ACCOUNT,
+    )
+  }
+  for (const arr of [json.suppliersByProduct, json.suppliersByName]) {
+    const rows = Array.isArray(arr) ? arr : []
+    for (const s of rows) {
+      if (!s || typeof s !== "object") continue
+      const o = s as Record<string, unknown>
+      add(
+        o.supplier_account ??
+          o.SELLER_ISHYIGA_ACCOUNT ??
+          o.supplierAccount ??
+          o.ISHYIGA_ACCOUNT ??
+          o.seller_account,
+      )
+    }
+  }
+  return out
+}
+
+function numPriceish(v: unknown): number {
+  if (typeof v === "number" && Number.isFinite(v)) return v
+  const s = String(v ?? "")
+    .replace(/,/g, "")
+    .replace(/[^\d.\-]/g, "")
+  const n = parseFloat(s)
+  return Number.isFinite(n) ? n : 0
+}
+
+/** Catalog row looks discounted (list vs selling) or explicit promo flags. */
+function productRowLooksDiscounted(o: Record<string, unknown>): boolean {
+  const sell = numPriceish(o.selling_price ?? o.SALE_PRICE_INCLUSIVE ?? o.UNITY_PRICE ?? o.price ?? o.PRICE)
+  const list = numPriceish(
+    o.list_price ??
+      o.LIST_PRICE ??
+      o.PV ??
+      o.MRP ??
+      o.rrp ??
+      o.RRP ??
+      o.prix_public ??
+      o.RECOMMENDED_RETAIL_PRICE ??
+      o.MSRP,
+  )
+  if (list > 0 && sell > 0 && sell < list * 0.995) return true
+  const d = String(o.on_sale ?? o.ON_SALE ?? o.promo ?? o.PROMO ?? o.has_discount ?? "").toLowerCase()
+  return d === "true" || d === "1" || d === "yes" || d === "y"
+}
+
+/** Seller keys (uppercase) that have at least one discounted line in a fetchSuggestions JSON body. */
+function collectDiscountedSellerAccountsFromSearchJson(json: Record<string, unknown>): Set<string> {
+  const out = new Set<string>()
+  const products = Array.isArray(json.products) ? json.products : []
+  for (const p of products) {
+    if (!p || typeof p !== "object") continue
+    const o = p as Record<string, unknown>
+    if (!productRowLooksDiscounted(o)) continue
+    const k = normalizeSellerKeyFromSearch(
+      o.supplier_account ??
+        o.SELLER_ISHYIGA_ACCOUNT ??
+        o.supplierAccount ??
+        o.ISHYIGA_ACCOUNT ??
+        o.seller_account ??
+        o.SELLER_ACCOUNT,
+    )
+    if (k) out.add(k)
+  }
+  return out
 }
 
 function isPreferredGrandmaShop(shopId: string, preferredIds: string[]): boolean {
@@ -314,6 +496,10 @@ const GRANDMA_LABELS: Record<
     amountLogistics: string
     totalPay: string
     sendOrder: string
+    stockOnHandLabel: string
+    stockExceededLine: string
+    stockExceededPayBlock: string
+    stockExceededSubmit: string
     deliveryPerson: string
     hobbies: string
     kmToShop: string
@@ -353,12 +539,63 @@ const GRANDMA_LABELS: Record<
     sellerDashBulletFulfillQueue: string
     sellerDashGrowthIdle: string
     sellerDashCtaStock: string
+    /** Opens Shop with Me (NIKI catalog) to add / source products */
+    sellerDashCtaNikiStock: string
     sellerDashCtaOrders: string
     sellerDashDeliveredTail: string
+    payStepPanelTitle: string
+    payStepDemoNote: string
+    payStepCommissionNote: string
+    payStepMtnTitle: string
+    payStepMtnPayer: string
+    payStepMtnDial: string
+    payStepAirtelTitle: string
+    payStepAirtelPayer: string
+    payStepAirtelDial: string
+    payStepAirtelHelp: string
+    payStepBkTitle: string
+    payStepBkHelp: string
+    payStepBkCardNumber: string
+    payStepBkExpiry: string
+    payStepBkCvc: string
+    payStepBkOtp: string
+    payStepBkOtpSms: string
+    payStepBkPin: string
+    payStepBkPinHint: string
+    payStepCashTitle: string
+    payStepCashConfirm: string
+    payStepCopy: string
+    payStepCopied: string
+    payStepErrPhone: string
+    payStepErrBkCard: string
+    payStepErrBkExpiry: string
+    payStepErrBkCvc: string
+    payStepErrBkOtp: string
+    payStepErrBkPin: string
+    payStepErrCash: string
+    payStepMtnNoUssd: string
+    payStepMomoPin: string
+    payStepAutoPayHintMtn: string
+    payStepAutoPayHintAirtel: string
+    payStepProcessing: string
+    payStepErrMtnPin: string
+    payStepErrAirtelPin: string
+    payStepCardsAccepted: string
+    payStepAfterCheckoutHint: string
+    payStepReadMoMoSmsTitle: string
+    payStepReadMoMoSmsHint: string
+    payStepVerifySms: string
+    payStepPaymentPaidMatched: string
+    payStepPaymentPaidMatchedWithTxn: string
+    payStepDialMomo: string
+    payStepPaymentMismatch: string
+    payStepPaymentNoAmountInSms: string
+    payStepSendOrderLocked: string
+    payStepErrMomoSms: string
   }
 > = {
   en: {
-    demoLocation: "Kacyiru, Gasabo — demo (set your address in settings)",
+    demoLocation: "Kacyiru, Gasabo - (set your address in settings)",
     titleHome: "Ishyiga Ihute",
     shopsPrefix: "Shops ·",
     titleSummary: "Order Summary",
@@ -381,12 +618,10 @@ const GRANDMA_LABELS: Record<
     yourLocation: "Your location",
     yourPhone: "Your phone (delivery)",
     yourPhoneHint: "The shop uses this to reach you. Leave blank to use your Ihute account phone when signed in.",
-    paymentGuestPhoneLabel: "Phone (for SMS about your order)",
-    paymentGuestPhonePlaceholder: "e.g. 0788 123 456",
-    paymentGuestPhoneNote:
-      "We use this number for SMS about your order (status, pickup, delivery). If you are signed in and your account already has a phone, you do not need to type it again.",
-    orderSubmitNeedPhone:
-      "Add your phone number — we send order updates and confirmations by SMS to this number.",
+    paymentGuestPhoneLabel: "Mobile Money & updates",
+    paymentGuestPhonePlaceholder: "07… · same wallet we notify",
+    paymentGuestPhoneNote: "Optional when signed in with a phone on your account.",
+    orderSubmitNeedPhone: "Add your mobile number to pay and receive order updates.",
     eta: "Estimated time of arrival",
     etaSub: "From ~{km} km · {mode} delivery",
     etaSubNoMode: "~{km} km from the shop. Choose a delivery option on Summary to see arrival time.",
@@ -405,7 +640,7 @@ const GRANDMA_LABELS: Record<
     footerDashboardShort: "Dashboard",
     sectionLogistics: "Shipment · Logistics",
     logisticsNote:
-      "Delivery fee uses distance to this shop ({km} km) and the option you pick (demo — replace with your pricing API).",
+      "Delivery fee uses distance to this shop ({km} km) and the option you pick (replace with your pricing API).",
     logisticsNotePickup:
       "Self pickup: you collect the order at this shop. No delivery fee — logistics is RWF 0.",
     fulfillmentSectionTitle: "How do you want to receive this order?",
@@ -430,6 +665,10 @@ const GRANDMA_LABELS: Record<
     amountLogistics: "Amount to logistics",
     totalPay: "Total amount to pay",
     sendOrder: "Send Order",
+    stockOnHandLabel: "In stock: {n}",
+    stockExceededLine: "You asked for {requested} — only {available} in stock.",
+    stockExceededPayBlock: "Match your quantities to stock before paying.",
+    stockExceededSubmit: "Reduce quantities to available stock before sending the order.",
     deliveryPerson: "Delivery person",
     hobbies: "Hobbies",
     kmToShop: "km to shop",
@@ -469,123 +708,232 @@ const GRANDMA_LABELS: Record<
     sellerDashBulletFulfillQueue: "{{n}} open orders — fulfilling updates these insights faster.",
     sellerDashGrowthIdle: "Deliver orders with line items to unlock best-seller and top-up tips here.",
     sellerDashCtaStock: "Stock & catalog",
+    sellerDashCtaNikiStock: "Add stock (NIKI)",
     sellerDashCtaOrders: "Open orders",
     sellerDashDeliveredTail: "{{n}} delivered",
+    payStepPanelTitle: "Complete this payment method",
+    payStepDemoNote: "",
+    payStepCommissionNote:
+      "The 1% Ihute line is written into your order reference for company commission (from the shop; not added to your total).",
+    payStepMtnTitle: "MTN MoMo",
+    payStepMtnPayer: "Wallet number (07…)",
+    payStepMtnDial: "USSD — copy & dial",
+    payStepAirtelTitle: "Airtel Money",
+    payStepAirtelPayer: "Wallet number (07…)",
+    payStepAirtelDial: "USSD — copy & dial",
+    payStepAirtelHelp: "Pay from the Airtel Money app or *500# to the merchant number shown above.",
+    payStepBkTitle: "Card (BK)",
+    payStepBkHelp: "Enter your card details as required by your bank.",
+    payStepBkCardNumber: "Card number",
+    payStepBkExpiry: "Expiry (MM/YY)",
+    payStepBkCvc: "CVC",
+    payStepBkOtp: "OTP from SMS",
+    payStepBkOtpSms: "Code to {mask} — enter the 6 digits from SMS.",
+    payStepBkPin: "Mobile banking PIN",
+    payStepBkPinHint: "Enter your 4-digit PIN.",
+    payStepCashTitle: "Cash on delivery",
+    payStepCashConfirm: "I will pay cash when I receive the order.",
+    payStepCopy: "Copy",
+    payStepCopied: "Copied",
+    payStepErrPhone: "Enter a valid Rwandan mobile number (07…).",
+    payStepErrBkCard: "Enter 13–16 digits for the card number.",
+    payStepErrBkExpiry: "Enter a valid expiry (MM/YY, not in the past).",
+    payStepErrBkCvc: "Enter 3 or 4 digits for CVC.",
+    payStepErrBkOtp: "Enter 6 digits for the OTP.",
+    payStepErrBkPin: "Enter 4 digits for the PIN.",
+    payStepErrCash: "Confirm cash on delivery to continue.",
+    payStepMtnNoUssd: "MoMo merchant code missing — use the number above or ask the shop.",
+    payStepMomoPin: "Wallet PIN",
+    payStepAutoPayHintMtn: "Payment runs automatically when your 5-digit MTN MoMo PIN is complete.",
+    payStepAutoPayHintAirtel: "Payment runs automatically when your 4-digit Airtel Money PIN is complete.",
+    payStepProcessing: "Processing…",
+    payStepErrMtnPin: "Enter your 5-digit MTN MoMo PIN.",
+    payStepErrAirtelPin: "Enter your 4-digit Airtel Money PIN.",
+    payStepCardsAccepted: "Cards accepted",
+    payStepAfterCheckoutHint: "You get an order ID and a track link — no sign-in required to buy.",
+    payStepReadMoMoSmsTitle: "Paste MoMo SMS (read confirmation)",
+    payStepReadMoMoSmsHint:
+      "After paying, copy the MTN message here. We match the RWF amount to your total ({total} RWF).",
+    payStepVerifySms: "Match to my total",
+    payStepPaymentPaidMatched: "Paid — SMS amount matches your order total.",
+    payStepPaymentPaidMatchedWithTxn:
+      "Paid — amount matches your order. MoMo TxId: {txnId}.",
+    payStepDialMomo: "Dial",
+    payStepPaymentMismatch: "Not matched — SMS shows {got} RWF but your total is {expected} RWF.",
+    payStepPaymentNoAmountInSms: "No RWF amount found — paste the full MoMo SMS.",
+    payStepSendOrderLocked: "Pay with MoMo, paste the confirmation SMS, then the Send button will appear.",
+    payStepErrMomoSms: "Confirm MoMo payment with the SMS before sending the order.",
   },
   rw: {
-    demoLocation: "Kacyiru, Gasabo (inyigo). Shyiraho aho uri mu buryo.",
+    demoLocation: "Kacyiru, Gasabo — hindura aho uri mu bigenga.",
     titleHome: "Ishyiga Ihute",
     shopsPrefix: "Amaduka ·",
-    titleSummary: "Incamake",
-    titlePayment: "Kwishyura",
-    settings: "Igenamiterere",
-    settingsSub: "Ururimi, aho uri, amaduka n'ishyura.",
+    titleSummary: "Incamake y'itumiza",
+    titlePayment: "Uburyo bwo kwishyura",
+    settings: "Ibigenga",
+    settingsSub: "Hindura ururimi, aho uri, amaduka n'uburyo bwo kwishyura.",
     language: "Ururimi",
     langEn: "English",
     langRw: "Ikinyarwanda",
     langFr: "Igifaransa",
     setLocation: "Shyiraho aho uri",
-    locationCurrent: "Ubu",
-    noLocationYet: "Ntabwo byanditse. Kanda uhitemo aho uri.",
+    locationCurrent: "Aho uri ubu",
+    noLocationYet: "Ntibyanditswe — kanda uhitemo aho uherereye.",
     preferredShops: "Amaduka ukunda",
-    preferredHint: "Aya ni yo abanza.",
+    preferredHint: "Aya maduka ni yo agaragara mbere mu rutonde rwawe.",
     paymentMode: "Uburyo bwo kwishyura",
-    payingTo: "Wishyura kuri",
-    bankName: "Banki",
+    payingTo: "Aho wishyurira",
+    bankName: "Izina ry'ibanki",
     account: "Konti",
     yourLocation: "Aho uri",
-    yourPhone: "Telefoni",
-    yourPhoneHint: "Iduka riguhamagare kuri iyi numero. Niba winjiye birahagije.",
-    paymentGuestPhoneLabel: "Telefoni (SMS z'amakuru y'komande)",
-    paymentGuestPhonePlaceholder: "Urugero: 0788 123 456",
-    paymentGuestPhoneNote:
-      "Dukoresha iyi numero kohereza SMS z'amakuru y'komande (imiterere, koherezwa, n'ibindi). Niba winjiye kandi telefoni yawe iri ku konti, ntacyo usaba.",
-    orderSubmitNeedPhone:
-      "Wibagiwe shyiramo telefoni — aho tuboherezaho SMS z'amakuru n'icyo komande.",
-    eta: "Igihe cyo kugera",
+    yourPhone: "Telefoni yawe",
+    yourPhoneHint: "Iduka rizaguhamagara kuri iyi nimero. Niba winjiye ku konti yawe, ntibikenewe.",
+    paymentGuestPhoneLabel: "Nimero ya MoMo n'amakuru y'itumiza",
+    paymentGuestPhonePlaceholder: "07… · nimero yo kwishyuriraho",
+    paymentGuestPhoneNote: "Ntibisabwa niba winjiye ku konti ifite nimero ya telefoni.",
+    orderSubmitNeedPhone: "Andika nimero ya telefoni yawe kugira ngo wishyure kandi ubone amakuru y'itumiza.",
+    eta: "Igihe ugereranyije cyo kugera",
     etaSub: "Km ~{km} · {mode}",
-    etaSubNoMode: "Hitamo uburyo bwo kohereza ku incamake.",
-    paymentModeSection: "Kwishyura",
-    sortDistance: " Ku ntambwe.",
-    shopsIntro: "Hitamo iduka muri {cat}. Ukunda ni uwa mbere.{sort}",
+    etaSubNoMode: "Hitamo uburyo bwo kubigeza iwawe ku ncamake kugira ngo urebe igihe cyo kugera.",
+    paymentModeSection: "Uburyo bwo kwishyura",
+    sortDistance: " Bitondetswe hakurikijwe intera.",
+    shopsIntro: "Hitamo iduka muri {cat}. Ayo uhitamo kenshi ni yo abanza.{sort}",
     sectorPanelShops: "amaduka",
-    sectorPanelItems: "ibintu",
+    sectorPanelItems: "ibicuruzwa",
     footerHome: "Ahabanza",
     footerShops: "Amaduka",
-    footerItems: "Ibintu",
+    footerItems: "Ibicuruzwa",
     footerSummary: "Incamake",
-    footerPay: "Kwishyura",
-    footerDashboard: "Konti y'iduka",
-    footerDashboardShort: "Konti",
-    sectionLogistics: "Kohereza",
-    logisticsNote: "Amafaranga bishingiye ku intera kugeza ku iduka ({km} km) n'uburyo watoranyije.",
-    logisticsNotePickup: "Wakira ku iduka. Nta mafaranga y'ihanyura.",
-    fulfillmentSectionTitle: "Wifuza ite?",
-    fulfillmentDeliveryTitle: "Koherezwa",
-    fulfillmentDeliverySub: "Binkugeza aho uri. Wishyura kugenda.",
+    footerPay: "Ishyura",
+    footerDashboard: "Ikibaho cy'iduka",
+    footerDashboardShort: "Ikibaho",
+    sectionLogistics: "Ubugendesheje",
+    logisticsNote: "Igiciro cy'ubugendesheje gishingiye ku ntera kugera ku iduka ({km} km) n'uburyo wahisemo.",
+    logisticsNotePickup: "Ujya kwakira ku iduka ubwawe. Nta giciro cy'ubugendesheje — ni RWF 0.",
+    fulfillmentSectionTitle: "Ushaka kubona ibi bitumize gute?",
+    fulfillmentDeliveryTitle: "Kubigezaho",
+    fulfillmentDeliverySub: "Binkugezaho aho ndi (igiciro cy'ubugendesheje kihari).",
     fulfillmentPickupTitle: "Kwakira ku iduka",
-    fulfillmentPickupSub: "Nzakira ku iduka. Nta mafaranga y'ihanyura.",
-    fulfillmentDeliveryModesHint: "Hitamo uburyo:",
+    fulfillmentPickupSub: "Nzajya kwakira ku iduka ubwanjye (nta giciro cy'ubugendesheje).",
+    fulfillmentDeliveryModesHint: "Hitamo uburyo bwo kubigeza iwawe:",
     etaAtShop: "Ku iduka",
-    etaPickupSub: "Wakira ku iduka. Vugana n'iduka nyuma.",
-    summaryLineItems: "Ibintu",
-    summaryLineItemsTotal: "Igiciro cy'ibintu",
-    summaryLineLogisticsRow: "Kohereza",
-    summaryLineGrandTotal: "Byose hamwe",
-    preferredBadge: "Ukunda",
+    etaPickupSub: "Urakira ku iduka — nta gihe cy'umugendesheje. Vugana n'iduka nyuma yo gutumiza.",
+    summaryLineItems: "Ibicuruzwa",
+    summaryLineItemsTotal: "Igiciro cy'ibicuruzwa",
+    summaryLineLogisticsRow: "Ubugendesheje",
+    summaryLineGrandTotal: "Igiciro cyose hamwe",
+    preferredBadge: "Uhitamo",
     logHuman: "Ku maguru",
-    logBike: "Ku igare",
-    logMoto: "Ku moto",
+    logBike: "Igare",
+    logMoto: "Moto",
     amountShop: "Amafaranga y'iduka",
-    ihuteFees: "Ihute 1% — ku iduka, ntibinjiye ku wishyura wawe",
+    ihuteFees: "Ihute 1% — iva ku iduka, ntiyongerwa ku wishyura wawe",
     taxes: "Imisoro",
-    amountLogistics: "Kohereza",
-    totalPay: "Byose",
-    sendOrder: "Ohereza",
-    deliveryPerson: "Uwatwara",
-    hobbies: "Akunda",
-    kmToShop: "Km kugeza ku iduka",
-    reviewers: "bareba",
-    tapCouriers: "Kanda urebe abatwara",
-    closestToShop: "Bari hafi",
-    top5Available: "Ba 5",
-    myOrders: "Komande zanjye",
-    viewMyOrders: "Reba komande",
-    signInForOrders: "Injira urebe komande",
+    amountLogistics: "Amafaranga y'ubugendesheje",
+    totalPay: "Igiciro cyose",
+    sendOrder: "Ohereza itumiza",
+    stockOnHandLabel: "Iboneka: {n}",
+    stockExceededLine: "Wasabye {requested} — ariko muri sitoki hari {available} gusa.",
+    stockExceededPayBlock: "Gabanya ingano uhujeje n'ibiri muri sitoki mbere yo kwishyura.",
+    stockExceededSubmit: "Gabanya ingano uhujeje n'ibiri muri sitoki mbere yo kohereza.",
+    deliveryPerson: "Umugendesheje",
+    hobbies: "Ibyishimo",
+    kmToShop: "Km kugera ku iduka",
+    reviewers: "abasubirije",
+    tapCouriers: "Kanda urebe abagendesheje 5 bari hafi y'iduka",
+    closestToShop: "Bari hafi y'iduka",
+    top5Available: "5 bahari",
+    myOrders: "Ibyo natumije",
+    viewMyOrders: "Reba ibyo natumije",
+    signInForOrders: "Injira urebe ibyo watumije",
     signIn: "Injira",
     logOut: "Sohoka",
-    reorderSplashTitle: "Biri mu iduka…",
-    reorderSplashSub: "Turimo kubona ibintu.",
+    reorderSplashTitle: "Turimo gutegura…",
+    reorderSplashSub: "Turimo gukusanyiriza ibicuruzwa by'iri duka.",
     versionLabel: "Verisiyo",
-    settingsModeHint: "Hitamo Buyer cyangwa Seller ngo urebe form ijyanye. Kanda Funga nimara.",
-    settingsFormBuyerTitle: "Amahitamo y'umuguzi",
-    settingsFormSellerTitle: "Iduka / seller",
-    settingsSellerIntro: "Hitamo kimwe mu bikurikira, hanyuma kanda Funga ngo ufunge ibi buryo.",
+    settingsModeHint: "Hitamo Umuguzi cyangwa Umucuruzi kugira ngo urebe ibijyanye. Umaze, kanda Funga.",
+    settingsFormBuyerTitle: "Ibyo umuguzi ahitamo",
+    settingsFormSellerTitle: "Iduka / Umucuruzi",
+    settingsSellerIntro: "Hitamo aho ushaka kujya hepfo, umaze kanda Funga.",
     settingsApplyClose: "Funga",
-    settingsOpenSellerHome: "Ahabanza",
-    settingsOpenSellerOrders: "Komande",
-    settingsOpenSellerItems: "Ibintu",
-    settingsSellerNeedLogin: "Injira ukoresheje konti y'iduka ngo ukore uburyo bwa Seller.",
-    settingsSellerTapDenied: "Injira ukoresheje konti y'iduka ngo uhindure uburyo bwa Seller.",
-    sellerDashBestSelling: "Gicuruzwa cy'agurishwa cyane",
-    sellerDashBestSellingSubtitle: "Bivuye muri komande zoherejwe",
+    settingsOpenSellerHome: "Ikibaho",
+    settingsOpenSellerOrders: "Amatumiza",
+    settingsOpenSellerItems: "Ibicuruzwa na sitoki",
+    settingsSellerNeedLogin: "Injira na konti y'iduka kugira ngo ukoreshe uburyo bw'umucuruzi.",
+    settingsSellerTapDenied: "Injira na konti y'iduka kugira ngo ujye ku buryo bw'umucuruzi.",
+    sellerDashBestSelling: "Igicuruzwa kigurishwa cyane",
+    sellerDashBestSellingSubtitle: "Amakuru avuye ku bitumijwe byageze",
     sellerDashBestSellingEmpty:
-      "Imenyeshe komande ko zageze ngo ubone izina ry'icyagurishwa cyane, ingano, n'ubwita ku stock.",
-    sellerDashUnitsSold: "ibiceri byagurishwe",
-    sellerDashLineRevenue: "Amafaranga ku murongo",
-    sellerDashShareRevenue: "{{pct}}% y'amafaranga ku murongo · {{rwf}}",
-    sellerDashTopUpTitle: "Top-up sale",
-    sellerDashTopUpSubtitle: "Ibikorwa bigufasha kuguma ufite stock neza n'urubanza rw'ibicuruzwa.",
-    sellerDashBulletRestock: "Ongeraho stock: {{name}} — ingano {{units}} ku komande zageze.",
-    sellerDashBulletPopular: "Nacyo gikunzwe: {{name}} ({{units}}).",
-    sellerDashBulletFulfillQueue: "Ufite komande {{n}} zitarahera — zishyira mubereho kugira ngo umenye byihuse.",
-    sellerDashGrowthIdle: "Kugeza komande zifite ibicuruzwa kandi zigeze wabona hano amakuru y'ubucuruzi.",
-    sellerDashCtaStock: "Stock n'ibirimo",
-    sellerDashCtaOrders: "Komande",
-    sellerDashDeliveredTail: "{{n}} zegezwemo",
+      "Emeza ko ibitumijwe byageze kugira ngo urebe igicuruzwa kigurishwa cyane, ingano n'ibyo gusubiza muri sitoki.",
+    sellerDashUnitsSold: "byagurishijwe",
+    sellerDashLineRevenue: "Amafaranga yinjiye",
+    sellerDashShareRevenue: "{{pct}}% y'amafaranga · {{rwf}}",
+    sellerDashTopUpTitle: "Gusubiza muri sitoki",
+    sellerDashTopUpSubtitle: "Ibikorwa bigufi bigufasha kuguma ufite ibicuruzwa bihagije mu iduka.",
+    sellerDashBulletRestock: "Ongeraho muri sitoki: {{name}} — ingano {{units}} ku matumiza yageze.",
+    sellerDashBulletPopular: "Nacyo kikunzwe: {{name}} ({{units}}).",
+    sellerDashBulletFulfillQueue: "Ufite ibitumijwe {{n}} bitararangira — bikore byihuse kugira ngo ubone amakuru mashya.",
+    sellerDashGrowthIdle: "Rangiza ibitumijwe bifite ibicuruzwa kugira ngo ubone amakuru y'ubucuruzi hano.",
+    sellerDashCtaStock: "Sitoki n'ibicuruzwa",
+    sellerDashCtaNikiStock: "Ongeraho sitoki (NIKI)",
+    sellerDashCtaOrders: "Ibitumijwe",
+    sellerDashDeliveredTail: "{{n}} yageze",
+    payStepPanelTitle: "Rangiza kwishyura",
+    payStepDemoNote: "",
+    payStepCommissionNote:
+      "1% ya Ihute yandikwa ku makuru y'itumiza (komisio y'ikompanyi, ku iduka; ntiyongerwa ku wishyura wawe).",
+    payStepMtnTitle: "MTN MoMo",
+    payStepMtnPayer: "Nimero ya MoMo (07…)",
+    payStepMtnDial: "USSD — koporora ukore",
+    payStepAirtelTitle: "Airtel Money",
+    payStepAirtelPayer: "Nimero ya Airtel (07…)",
+    payStepAirtelDial: "USSD — koporora ukore",
+    payStepAirtelHelp: "Ishyura kuri *500# cyangwa muri app ya Airtel kuri nimero y'umucuruzi iri hejuru.",
+    payStepBkTitle: "Ikarita (BK)",
+    payStepBkHelp: "Andika amakuru y'ikarita yawe uko ibanki ibisaba.",
+    payStepBkCardNumber: "Nimero y'ikarita",
+    payStepBkExpiry: "Igihe irangirira (MM/YY)",
+    payStepBkCvc: "CVC",
+    payStepBkOtp: "OTP yoherejwe kuri SMS",
+    payStepBkOtpSms: "Imibare 6 yoherejwe kuri telefoni yawe.",
+    payStepBkPin: "PIN y'ibanki kuri telefoni",
+    payStepBkPinHint: "Andika PIN y'ibanki yawe (imibare 4).",
+    payStepCashTitle: "Kwishyura mu ntoki",
+    payStepCashConfirm: "Nzishyura mu ntoki igihe nazakira ibyo natumije.",
+    payStepCopy: "Koporora",
+    payStepCopied: "Byakopoye",
+    payStepErrPhone: "Andika nimero ya telefoni y'u Rwanda iboneye (07…).",
+    payStepErrBkCard: "Andika imibare 13–16 ya nimero y'ikarita.",
+    payStepErrBkExpiry: "Andika neza igihe irangirira (MM/YY, itararenza).",
+    payStepErrBkCvc: "Andika imibare 3 cyangwa 4 ya CVC.",
+    payStepErrBkOtp: "Andika imibare 6 ya OTP.",
+    payStepErrBkPin: "Andika imibare 4 ya PIN.",
+    payStepErrCash: "Emeza ko uzishyura mu ntoki kugira ngo ukomeze.",
+    payStepMtnNoUssd: "Nimero ya MoMo y'umucuruzi ntiboneka — koresha nimero iri hejuru cyangwa ubaze iduka.",
+    payStepMomoPin: "PIN",
+    payStepAutoPayHintMtn: "Kwishyura gutangira uko gusa PIN ya MTN irangiye (imibare 5).",
+    payStepAutoPayHintAirtel: "Kwishyura gutangira uko gusa PIN ya Airtel irangiye (imibare 4).",
+    payStepProcessing: "Birimo gutunganywa…",
+    payStepErrMtnPin: "Andika PIN ya MTN MoMo (imibare 5).",
+    payStepErrAirtelPin: "Andika PIN ya Airtel Money (imibare 4).",
+    payStepCardsAccepted: "Amakarita yemewe",
+    payStepAfterCheckoutHint: "Uhabwa nimero y'itumiza na link yo gukurikirana — ntusabwe kwinjira mbere.",
+    payStepReadMoMoSmsTitle: "Shyiraho SMS ya MoMo (kwemeza kwishyura)",
+    payStepReadMoMoSmsHint:
+      "Nyuma yo kwishyura, koporora ubutumwa bwa MTN ubushyire hano. Tugereranya amafaranga n'igiciro ({total} RWF).",
+    payStepVerifySms: "Gereranya n'igiciro",
+    payStepPaymentPaidMatched: "Byishyuwe — amafaranga muri SMS ahuye n'igiciro.",
+    payStepPaymentPaidMatchedWithTxn:
+      "Byishyuwe — amafaranga ahuye n'igiciro. Nimero y'ubwishyu: {txnId}.",
+    payStepDialMomo: "Hamagara",
+    payStepPaymentMismatch: "Ntibihuye — SMS irerekana {got} RWF ariko igiciro cyawe ni {expected} RWF.",
+    payStepPaymentNoAmountInSms: "Nta mafaranga yabonetse — shyiraho SMS yose ya MoMo.",
+    payStepSendOrderLocked:
+      "Ishyura ukoresheje MoMo, shyiraho SMS y'ikimenyetso, noneho buto ya Ohereza izagaragara.",
+    payStepErrMomoSms: "Emeza kwishyura ukoresheje SMS ya MoMo mbere yo kohereza itumiza.",
   },
   fr: {
-    demoLocation: "Kacyiru, Gasabo — démo (définissez l'adresse dans les réglages)",
+    demoLocation: "Kacyiru, Gasabo — définition dans les réglages",
     titleHome: "Ishyiga Ihute",
     shopsPrefix: "Magasins ·",
     titleSummary: "Récapitulatif",
@@ -608,12 +956,10 @@ const GRANDMA_LABELS: Record<
     yourLocation: "Votre position",
     yourPhone: "Votre téléphone (livraison)",
     yourPhoneHint: "Le magasin vous joint sur ce numéro. Laissez vide pour utiliser le téléphone de votre compte Ihute si vous êtes connecté.",
-    paymentGuestPhoneLabel: "Téléphone (SMS sur la commande)",
-    paymentGuestPhonePlaceholder: "ex. 0788 123 456",
-    paymentGuestPhoneNote:
-      "Nous utilisons ce numéro pour les SMS sur votre commande (statut, livraison, etc.). Si vous êtes connecté et que votre compte a déjà un téléphone, vous pouvez laisser vide.",
-    orderSubmitNeedPhone:
-      "Indiquez votre numéro de téléphone — nous y envoyons les mises à jour et confirmations de commande par SMS.",
+    paymentGuestPhoneLabel: "Mobile Money & suivi",
+    paymentGuestPhonePlaceholder: "07… · même numéro pour payer",
+    paymentGuestPhoneNote: "Facultatif si vous êtes connecté avec un téléphone sur le compte.",
+    orderSubmitNeedPhone: "Ajoutez votre mobile pour payer et recevoir les mises à jour.",
     eta: "Heure d'arrivée estimée",
     etaSub: "Depuis ~{km} km · livraison {mode}",
     etaSubNoMode: "À ~{km} km du magasin. Choisissez une livraison sur le récapitulatif pour voir l’heure d’arrivée.",
@@ -631,7 +977,7 @@ const GRANDMA_LABELS: Record<
     footerDashboardShort: "Tableau",
     sectionLogistics: "Livraison · Logistique",
     logisticsNote:
-      "Les frais utilisent la distance jusqu’à ce magasin ({km} km) et le mode choisi (démo — branchez votre API tarifs).",
+      "Les frais utilisent la distance jusqu'à ce magasin ({km} km) et le mode choisi.",
     logisticsNotePickup:
       "Retrait au magasin : vous récupérez la commande sur place. Pas de frais de livraison (0 RWF).",
     fulfillmentSectionTitle: "Comment souhaitez-vous recevoir cette commande ?",
@@ -656,6 +1002,10 @@ const GRANDMA_LABELS: Record<
     amountLogistics: "Montant logistique",
     totalPay: "Total à payer",
     sendOrder: "Envoyer la commande",
+    stockOnHandLabel: "En stock : {n}",
+    stockExceededLine: "Vous demandez {requested} — seulement {available} en stock.",
+    stockExceededPayBlock: "Ajustez les quantités au stock avant de payer.",
+    stockExceededSubmit: "Réduisez les quantités au stock disponible avant d’envoyer.",
     deliveryPerson: "Livreur",
     hobbies: "Loisirs",
     kmToShop: "km jusqu'au magasin",
@@ -696,10 +1046,66 @@ const GRANDMA_LABELS: Record<
     sellerDashBulletFulfillQueue: "{{n}} commandes ouvertes — les traiter actualise ces indicateurs.",
     sellerDashGrowthIdle: "Livrez des commandes avec lignes produit pour activer ce panneau.",
     sellerDashCtaStock: "Stock & catalogue",
+    sellerDashCtaNikiStock: "Ajouter stock (NIKI)",
     sellerDashCtaOrders: "Commandes ouvertes",
     sellerDashDeliveredTail: "{{n}} livrée(s)",
+    payStepPanelTitle: "Compléter ce mode de paiement",
+    payStepDemoNote: "",
+    payStepCommissionNote:
+      "La ligne 1 % Ihute est inscrite dans la référence de commande (commission société, côté boutique — pas sur votre total).",
+    payStepMtnTitle: "MTN Mobile Money",
+    payStepMtnPayer: "Compte portefeuille (07…)",
+    payStepMtnDial: "USSD — copier & composer",
+    payStepAirtelTitle: "Airtel Money",
+    payStepAirtelPayer: "Compte portefeuille (07…)",
+    payStepAirtelDial: "USSD — copier & composer",
+    payStepAirtelHelp: "Payer via *500# ou l’app vers le numéro marchand ci-dessus.",
+    payStepBkTitle: "Carte bancaire",
+    payStepBkHelp: "Saisissez vos informations conformément aux instructions de votre banque.",
+    payStepBkCardNumber: "Numéro de carte",
+    payStepBkExpiry: "Expiration (MM/AA)",
+    payStepBkCvc: "CVC",
+    payStepBkOtp: "OTP reçu par SMS",
+    payStepBkOtpSms: "Code au {mask} — 6 chiffres.",
+    payStepBkPin: "PIN banque mobile",
+    payStepBkPinHint: "PIN à 4 chiffres.",
+    payStepCashTitle: "Paiement à la livraison",
+    payStepCashConfirm: "Je paierai en espèces à la réception.",
+    payStepCopy: "Copier",
+    payStepCopied: "Copié",
+    payStepErrPhone: "Indiquez un mobile rwandais valide (07…).",
+    payStepErrBkCard: "Saisissez 13 à 16 chiffres pour la carte.",
+    payStepErrBkExpiry: "Indiquez une date d’expiration valide (MM/AA, non expirée).",
+    payStepErrBkCvc: "Indiquez 3 ou 4 chiffres pour le CVC.",
+    payStepErrBkOtp: "Indiquez 6 chiffres pour l'OTP.",
+    payStepErrBkPin: "Indiquez 4 chiffres pour le PIN.",
+    payStepErrCash: "Cochez la confirmation paiement à la livraison.",
+    payStepMtnNoUssd: "Code marchand MoMo manquant — utilisez le numéro ci-dessus ou contactez le magasin.",
+    payStepMomoPin: "PIN portefeuille",
+    payStepAutoPayHintMtn: "Le paiement démarre tout seul quand le PIN MTN MoMo à 5 chiffres est complet.",
+    payStepAutoPayHintAirtel: "Le paiement démarre tout seul quand le PIN Airtel Money à 4 chiffres est complet.",
+    payStepProcessing: "Traitement…",
+    payStepErrMtnPin: "Saisissez le PIN MTN MoMo à 5 chiffres.",
+    payStepErrAirtelPin: "Saisissez le PIN Airtel Money à 4 chiffres.",
+    payStepCardsAccepted: "Cartes acceptées",
+    payStepAfterCheckoutHint: "Vous recevez un n° de commande et un lien de suivi — achat sans compte possible.",
+    payStepReadMoMoSmsTitle: "Collez le SMS MoMo (confirmation)",
+    payStepReadMoMoSmsHint:
+      "Après paiement, collez le SMS MTN. Nous comparons au total ({total} RWF).",
+    payStepVerifySms: "Comparer au total",
+    payStepPaymentPaidMatched: "Payé — le SMS correspond au total.",
+    payStepPaymentPaidMatchedWithTxn:
+      "Payé — montant conforme. TxId MoMo : {txnId}.",
+    payStepDialMomo: "Composer",
+    payStepPaymentMismatch: "Écart — SMS {got} RWF, total {expected} RWF.",
+    payStepPaymentNoAmountInSms: "Aucun montant RWF — collez le SMS complet.",
+    payStepSendOrderLocked:
+      "Payez par MoMo, collez le SMS, puis le bouton Envoyer apparaîtra.",
+    payStepErrMomoSms: "Confirmez le paiement MoMo avec le SMS avant d'envoyer.",
   },
 }
+
+type GrandmaSmsPayCheck = "paid" | "mismatch" | "no_amount" | null
 
 function humanizeGrandmaOrderBackendError(raw: string, lang: GrandmaLang): string {
   if (!raw?.trim()) return raw
@@ -753,12 +1159,12 @@ switch (paymentMode) {
 case "momo":
 return {
 bankName: "MTN MoMo",
-account: shop.momo?.replace("MTN MoMo: ", "") ?? "—"
+account: stripShopMomoLabel(shop.momo ?? "") || "—",
 }
 case "airtel":
 return {
 bankName: "Airtel Money",
-account: shop.momo?.replace("MTN MoMo: ", "") ?? "—" // Assuming same field for now
+account: stripShopMomoLabel(shop.momo ?? "") || "—",
 }
 case "bk":
 return {
@@ -773,6 +1179,11 @@ account: "—"
 default:
 return shopPayReceivingAccount(shop)
 }
+}
+
+function isGrandmaRwMobileDigits(raw: string): boolean {
+  const n = normalizePhoneDigitsForAuth(raw.trim())
+  return n.length === 12 && n.startsWith("2507")
 }
 
 const SHOP_LOGO_PATHS = [
@@ -1124,14 +1535,13 @@ const LOGISTICS: LogisticsOption[] = [
 ]
 
 const PAYMENTS: PaymentMode[] = [
-  { id: "momo", label: "MTN MoMo (Mokash loan @7%)", iconSrc: "/img/momo.png" },
+  { id: "momo", label: "MTN MoMo", iconSrc: "/img/momo.png" },
   { id: "airtel", label: "Airtel Money", iconSrc: "/img/airtel.png" },
-  { id: "bk", label: "BK (QuickLoan @3%)", iconSrc: "/img/bk.png" },
-  { id: "cash", label: "Cash on Delivery", iconSrc: "/img/cash.png" },
+  { id: "bk", label: "Card (BK)", iconSrc: "/img/bk.png" },
+  { id: "cash", label: "Cash on delivery", iconSrc: "/img/cash.png" },
 ]
 
-/** 1% platform fee on items subtotal — shown for transparency; buyer total excludes it (seller settlement). */
-const IHUTE_FEE_RATE = 0.01
+/** Buyer grand total excludes this; fee is computed via {@link computeIhutePlatformFeeRwf} and stored on order REFERENCE. */
 const TAXES_PLACEHOLDER = 0
 
 function formatRwf(v: number): string {
@@ -1234,13 +1644,6 @@ function liveCatalogThumbUrl(
   const resolved = getProductImageSrc(p as Record<string, unknown>)
   if (resolved !== NO_IMAGE_URL) return resolved
   return livePlaceholderImageUrl(category, `${nickname}\u241e${dedupeKey}\u241e${displayName}`)
-}
-
-function stableSample<T>(list: T[], take: number, seedKey: (x: T) => string): T[] {
-  if (list.length <= take) return list
-  const scored = list.map((x) => ({ x, s: Math.abs(shopIdHash(seedKey(x))) }))
-  scored.sort((a, b) => a.s - b.s)
-  return scored.slice(0, take).map((r) => r.x)
 }
 
 function offerId(shopId: string, productId: number): string {
@@ -1366,6 +1769,69 @@ function shopProductPriceRwf(shop: ShopEntry, product: Product): number {
 }
 
 const OFFERS_PER_PRODUCT = 3
+
+/** Full supplier catalog for page 3 — must match product-grid / Kaos (not the old 50-row cap). */
+const GRANDMA_SUPPLIER_CATALOG_LIMIT = 10_000
+
+type GrandmaInventoryLine = {
+  id: number
+  itemName: string
+  nikiCode: string
+  quantity: number
+  salePrice: number
+  costPrice: number
+}
+
+function parseStockQtyValue(raw: unknown): number | null {
+  if (raw === undefined || raw === null || raw === "") return null
+  if (typeof raw === "boolean") return raw ? null : 0
+  const n = Math.floor(Number(String(raw).replace(/,/g, "").trim()))
+  if (!Number.isFinite(n) || n < 0) return null
+  return n
+}
+
+function stockQtyFromCatalogRow(row: Record<string, unknown>): number | null {
+  for (const key of [
+    "QUANTITY",
+    "quantity",
+    "QTY",
+    "qty",
+    "stock",
+    "STOCK",
+    "STOCK_QTY",
+    "item_qty",
+    "ITEM_QTY",
+    "available_qty",
+    "AVAILABLE_QTY",
+  ]) {
+    const v = parseStockQtyValue(row[key])
+    if (v != null) return v
+  }
+  return null
+}
+
+/** Known stock cap for cart clamping; null = unknown (do not cap). */
+function productStockOnHand(p: Product): number | null {
+  if (typeof p.stockQty === "number" && Number.isFinite(p.stockQty)) {
+    return Math.max(0, Math.floor(p.stockQty))
+  }
+  if (p.liveInStock === false) return 0
+  return null
+}
+
+function clampQtyForProduct(p: Product, qty: number): number {
+  const cap = productStockOnHand(p)
+  const safe = Math.max(0, Math.floor(Number(qty) || 0))
+  if (cap == null) return safe
+  return Math.min(safe, cap)
+}
+
+/** Stable React/cart id per DB stock line (not per SKU — multiple lots stay separate). */
+function grandmaProductIdFromStockLine(baseSupplierId: string, line: GrandmaInventoryLine): number {
+  if (Number.isFinite(line.id) && line.id > 0) return 1_000_000 + Math.floor(line.id)
+  const seed = `${baseSupplierId}:${line.nikiCode}:${line.itemName}:${line.salePrice}`
+  return 1_000_000 + (Math.abs(shopIdHash(seed)) % 899_000)
+}
 
 /** Stable demo rating per shop until API provides `rating` */
 function shopDisplayRating(s: ShopEntry): number {
@@ -1739,6 +2205,15 @@ export default function GrandmaPage() {
   const [category, setCategory] = useState<Category>("Boutique")
   const [search, setSearch] = useState("")
   const [shopSearch, setShopSearch] = useState("")
+  /** Seller accounts (uppercase) returned by global product search — shops are included if they sell matching items. */
+  const [shopProductSearchAccounts, setShopProductSearchAccounts] = useState<string[]>([])
+  const [shopProductSearchLoading, setShopProductSearchLoading] = useState(false)
+  /** Shop ids the buyer has successfully ordered from on this device (localStorage). */
+  const [grandmaOrderedShopIds, setGrandmaOrderedShopIds] = useState<string[]>([])
+  /** SELLER_ISHYIGA_ACCOUNT keys (uppercase) from buyer order history — powers Reorder when LS is empty. */
+  const [reorderHistorySellerKeys, setReorderHistorySellerKeys] = useState<string[]>([])
+  /** Sellers that had discounted catalog hits in sector-wide search probes — powers On sale. */
+  const [onsaleSellerAccounts, setOnsaleSellerAccounts] = useState<string[]>([])
   const [shopTab, setShopTab] = useState<ShopFilterTab | null>(null)
   const [useLocationSort, setUseLocationSort] = useState(false)
   const [selectedShopId, setSelectedShopId] = useState<string | null>(null)
@@ -1753,16 +2228,26 @@ export default function GrandmaPage() {
   const [fulfillmentMode, setFulfillmentMode] = useState<FulfillmentMode>("delivery")
   const [appMode, setAppMode] = useState<AppMode>("buyer")
   const [sellerView, setSellerView] = useState<SellerView>("home")
-  const [language, setLanguage] = useState<GrandmaLang>("rw")
+  const language = useLanguageStore((s) => s.language) as GrandmaLang
+  const setLanguage = useLanguageStore((s) => s.setLanguage)
   const [preferredShopIds, setPreferredShopIds] = useState<string[]>([])
   const [selectedPayment, setSelectedPayment] = useState<PaymentId>("momo")
+  const [grandmaCashConfirm, setGrandmaCashConfirm] = useState(false)
+  const [stockQtyAttempts, setStockQtyAttempts] = useState<Record<number, number>>({})
+  const [grandmaMomoSmsPaste, setGrandmaMomoSmsPaste] = useState("")
+  const [grandmaSmsPayCheck, setGrandmaSmsPayCheck] = useState<GrandmaSmsPayCheck>(null)
+  const [grandmaSmsMatchResult, setGrandmaSmsMatchResult] = useState<MoMoSmsMatchResult | null>(
+    null
+  )
+  const [grandmaUssdCopied, setGrandmaUssdCopied] = useState(false)
   const [prefsHydrated, setPrefsHydrated] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  /** Mode highlighted in settings sheet (can be Seller before login succeeds). */
+  const [settingsModePick, setSettingsModePick] = useState<AppMode>("buyer")
   const [settingsSellerGuardMsg, setSettingsSellerGuardMsg] = useState<string | null>(null)
   const [filterSheetOpen, setFilterSheetOpen] = useState(false)
   const [itemsSort, setItemsSort] = useState<ItemsSortId>("default")
   const [liveInStockOnly, setLiveInStockOnly] = useState(false)
-  const [liveShowAll, setLiveShowAll] = useState(false)
   const [itemsMenuCategoryKey, setItemsMenuCategoryKey] = useState<string | null>(null)
   const [priceRangeRwf, setPriceRangeRwf] = useState<[number, number] | null>(null)
   const [locationDialogOpen, setLocationDialogOpen] = useState(false)
@@ -1770,6 +2255,7 @@ export default function GrandmaPage() {
   const [grandmaBuyerPhoneInput, setGrandmaBuyerPhoneInput] = useState("")
   const [grandmaOrderSubmitting, setGrandmaOrderSubmitting] = useState(false)
   const [grandmaOrderSubmitError, setGrandmaOrderSubmitError] = useState<string | null>(null)
+  const grandmaOrderSubmitGuardRef = useRef(false)
   const [pendingReorder, setPendingReorder] = useState<GrandmaReorderPayload | null>(null)
   const [reorderSplashOpen, setReorderSplashOpen] = useState(false)
   /** True while fetchProducts() has started (sync) — apply-reorder effect must wait (React state may lag one frame). */
@@ -1828,18 +2314,118 @@ export default function GrandmaPage() {
     }
   }, [])
 
-  // Combine API products with existing products, preserving quantities - FIXED FOR API INTEGRATION
+  /** Debounced global product search so shop list can include stores that sell the query (e.g. “milk”), not only name/tagline matches. */
+  useEffect(() => {
+    let cancelled = false
+    const q = shopSearch.trim()
+    if (q.length < 2) {
+      setShopProductSearchAccounts([])
+      setShopProductSearchLoading(false)
+      return
+    }
+    const ac = new AbortController()
+    const tid = setTimeout(() => {
+      if (cancelled) return
+      void (async () => {
+        setShopProductSearchLoading(true)
+        try {
+          const sector = GRANDMA_CATEGORY_TO_SECTOR_SLUG[category]?.trim()
+          const params = new URLSearchParams({
+            globalSearch: q,
+            limit: "200",
+            Currency: "RWF",
+          })
+          if (sector) params.set("sector", sector)
+          const res = await fetch(`/api/fetchSuggestions?${params.toString()}`, {
+            signal: ac.signal,
+            cache: "no-store",
+          })
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          const json = (await res.json()) as Record<string, unknown>
+          const acc = collectSellerAccountsFromGlobalSearchJson(json)
+          if (!cancelled) setShopProductSearchAccounts([...acc])
+        } catch {
+          if (!cancelled && !ac.signal.aborted) setShopProductSearchAccounts([])
+        } finally {
+          if (!cancelled && !ac.signal.aborted) setShopProductSearchLoading(false)
+        }
+      })()
+    }, 380)
+    return () => {
+      cancelled = true
+      clearTimeout(tid)
+      ac.abort()
+    }
+  }, [shopSearch, category])
+
+  useEffect(() => {
+    setGrandmaOrderedShopIds(readGrandmaOrderedShopIdsFromStorage())
+  }, [])
+
+  const liveMenuNickname = useMemo(() => {
+    if (selectedShopId === "rs_burrows") return "burrows"
+    if (selectedShopId === "ph_rite") return "rite"
+    return null
+  }, [selectedShopId])
+  const isLiveMenuSelected = useMemo(() => Boolean(liveMenuNickname), [liveMenuNickname])
+
+  // Full supplier catalog (apiProducts) + optional live-menu rows (Burrows/Rite) — no sampling.
   const combinedProducts = useMemo(() => {
-    if (apiProducts.length === 0) return []
-    if (selectedShopId) return apiProducts
-    // Sector / home navigation can clear selection before a new shop is chosen — still count cart lines.
-    if (apiProducts.some((p) => p.qty > 0)) return apiProducts
-    return []
-  }, [apiProducts, selectedShopId])
+    if (!selectedShopId) {
+      if (apiProducts.some((p) => p.qty > 0)) return apiProducts
+      return []
+    }
+    const catalog = apiProducts
+    const liveRows = isLiveMenuSelected ? products.filter((p) => p.id >= 100000) : []
+    if (liveRows.length === 0) return catalog
+    if (catalog.length === 0) return liveRows
+    const qtyById = new Map<number, number>()
+    for (const p of [...catalog, ...liveRows, ...products]) qtyById.set(p.id, p.qty)
+    const seen = new Set<string>()
+    const merged: Product[] = []
+    const push = (p: Product) => {
+      const key = (p.stockLineCode || p.liveKey || `${p.id}:${p.name}`).trim().toLowerCase()
+      if (!key || seen.has(key)) return
+      seen.add(key)
+      merged.push({ ...p, qty: qtyById.get(p.id) ?? p.qty })
+    }
+    for (const p of catalog) push(p)
+    for (const p of liveRows) push(p)
+    return merged
+  }, [apiProducts, selectedShopId, products, isLiveMenuSelected])
 
   const selectedProducts = useMemo(() => combinedProducts.filter((p) => p.qty > 0), [combinedProducts])
   const itemsCount = useMemo(() => selectedProducts.reduce((a, p) => a + p.qty, 0), [selectedProducts])
   const itemsTotal = useMemo(() => selectedProducts.reduce((a, p) => a + p.qty * p.price, 0), [selectedProducts])
+
+  const grandmaStockLineIssues = useMemo(() => {
+    const issues: {
+      id: number
+      name: string
+      requested: number
+      available: number
+      qty: number
+    }[] = []
+    for (const p of combinedProducts) {
+      if (p.qty < 1) continue
+      const cap = productStockOnHand(p)
+      if (cap == null) continue
+      const attempt = stockQtyAttempts[p.id]
+      const overAttempt = attempt != null && attempt > cap
+      const overQty = p.qty > cap
+      if (!overAttempt && !overQty) continue
+      issues.push({
+        id: p.id,
+        name: p.name,
+        requested: overAttempt ? attempt : p.qty,
+        available: cap,
+        qty: Math.min(p.qty, cap),
+      })
+    }
+    return issues
+  }, [combinedProducts, stockQtyAttempts])
+
+  const hasGrandmaStockBlock = grandmaStockLineIssues.length > 0
 
   /** Home grid counts: shops from browse rows, items from full `sectorStats` totals. */
   const grandmaHomeSectorCounts = useMemo(() => {
@@ -1886,13 +2472,6 @@ export default function GrandmaPage() {
     },
     [selectedShopId, allAvailableShops, apiShops, category]
   )
-
-  const liveMenuNickname = useMemo(() => {
-    if (selectedShopId === "rs_burrows") return "burrows"
-    if (selectedShopId === "ph_rite") return "rite"
-    return null
-  }, [selectedShopId])
-  const isLiveMenuSelected = useMemo(() => Boolean(liveMenuNickname), [liveMenuNickname])
 
   const deliveryKm = selectedShop?.distanceKm ?? 0
 
@@ -1966,12 +2545,13 @@ export default function GrandmaPage() {
 
   useEffect(() => {
     if (typeof window === "undefined" || !prefsHydrated) return
-    localStorage.setItem("grandma:lang", language)
-  }, [language, prefsHydrated])
-  useEffect(() => {
-    if (typeof window === "undefined" || !prefsHydrated) return
     localStorage.setItem("grandma:payment", selectedPayment)
   }, [selectedPayment, prefsHydrated])
+  useEffect(() => {
+    setGrandmaUssdCopied(false)
+    if (selectedPayment !== "cash") setGrandmaCashConfirm(false)
+  }, [selectedPayment])
+
   useEffect(() => {
     if (typeof window === "undefined" || !prefsHydrated) return
     localStorage.setItem("grandma:preferredShops", JSON.stringify(preferredShopIds))
@@ -2066,10 +2646,13 @@ export default function GrandmaPage() {
               stockLineCode: stockLineCode || undefined,
               liveInStock: p.in_stock === true,
               liveCategory: menuCat,
+              stockQty:
+                parseStockQtyValue(p.stock) ??
+                (p.in_stock === false ? 0 : undefined),
               qty: 0,
             } satisfies Product
           })
-          .filter((p) => p.name && p.price > 0)
+          .filter((p) => Boolean(p.name))
         if (cancelled) return
         setBurrowsLiveCount(mapped.length)
         setProducts((prev) => {
@@ -2211,7 +2794,7 @@ export default function GrandmaPage() {
             favorite: false,
             orderedBefore: false,
             trending: false,
-            onSale: false,
+            onSale: supplierRowSuggestsOnSale(supplier as Record<string, unknown>),
             distanceKm: Math.random() * 5 + 0.5, // Mock distance
             momo: `MTN MoMo: ${supplier.seller_momo || 'N/A'}`,
             rating: 4.0,
@@ -2237,7 +2820,7 @@ export default function GrandmaPage() {
           // keep default logos if override fetch fails
         }
 
-        setAllAvailableShops(shopsWithImages)
+        setAllAvailableShops(annotateShopTrendingByCategory(shopsWithImages))
         console.log('setAllAvailableShops called with:', transformedShops.length, 'shops')
         console.log('Shop IDs in allAvailableShops:', transformedShops.map(s => s.id))
         console.log('Current preferredShopIds:', preferredShopIds)
@@ -2318,49 +2901,40 @@ export default function GrandmaPage() {
         // Extract supplier account for Redis pattern (ignore optional __Sector suffix)
         const baseSupplierId = sellerAccountFromGrandmaShopId(selectedShopId)
 
-        // Same-origin `/api/fetchSuggestions` so phones on LAN (e.g. 192.168.x.x:3000) work — never call
-        // getBackendBase() from the browser (127.0.0.1 would be the phone, not your dev PC).
-        const qs = new URLSearchParams({
+        const invQs = new URLSearchParams({ sellerAccount: baseSupplierId })
+        const sugQs = new URLSearchParams({
           supplierProducts: baseSupplierId,
-          limit: "50",
+          limit: String(GRANDMA_SUPPLIER_CATALOG_LIMIT),
           Currency: "RWF",
         })
-        const url = `/api/fetchSuggestions?${qs.toString()}`
-        console.log("Fetching products from URL:", url)
-        const res = await fetch(url, { cache: "no-store" })
-        
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const data = (await res.json()) as any
-        
-        console.log('Products API Response data:', data)
-        console.log('Data type:', Array.isArray(data) ? 'array' : typeof data)
-        console.log('Response keys:', Object.keys(data || {}))
-        console.log('Products array length:', Array.isArray(data) ? data.length : (data.products ? data.products.length : 0))
-        
+        const [invRes, sugRes] = await Promise.all([
+          fetch(`/api/grandma/sellers/inventory?${invQs.toString()}`, { cache: "no-store" }),
+          fetch(`/api/fetchSuggestions?${sugQs.toString()}`, { cache: "no-store" }),
+        ])
+
         if (cancelled) return
-        
-        // Extract products from response - supplierProducts returns products directly
-        let products = []
-        if (data && data.products && Array.isArray(data.products)) {
-          products = data.products
-        } else if (Array.isArray(data)) {
-          products = data
+
+        let suggestionRows: Record<string, unknown>[] = []
+        if (sugRes.ok) {
+          const data = (await sugRes.json()) as { products?: unknown[] } | unknown[]
+          const raw = Array.isArray(data)
+            ? data
+            : data && typeof data === "object" && Array.isArray((data as { products?: unknown[] }).products)
+              ? (data as { products: unknown[] }).products
+              : []
+          suggestionRows = raw.filter((p): p is Record<string, unknown> => Boolean(p) && typeof p === "object")
         }
-        
-        console.log('Products found:', products.length)
-        console.log('Product sources:', products.map((p: any) => p.source || 'unknown'))
-        console.log('Sample product fields:', products[0])
-        console.log('All product keys:', Object.keys(products[0] || {}))
-        console.log('Image-related fields:', Object.keys(products[0] || {}).filter(key => key.toLowerCase().includes('image')))
-        console.log('Image URL values:', {
-          image_url: products[0]?.image_url,
-          item_image_url: products[0]?.item_image_url,
-          IMAGE_URL: products[0]?.IMAGE_URL,
-          image: products[0]?.image,
-          img: products[0]?.img,
-          imageUrl: products[0]?.imageUrl
-        })
-        
+
+        const enrichByCode = new Map<string, Record<string, unknown>>()
+        for (const row of suggestionRows) {
+          const code = String(
+            row.ITEM_CODE ?? row.item_code ?? row.item_key_words ?? row.NIKI_CODE ?? row.niki_code ?? ""
+          )
+            .trim()
+            .toUpperCase()
+          if (code) enrichByCode.set(code, row)
+        }
+
         let productImageMap: Record<string, string> = {}
         try {
           const mapRes = await fetch(
@@ -2375,11 +2949,12 @@ export default function GrandmaPage() {
           // keep backend product images when override fetch fails
         }
 
-        // Transform products to Product format - fix field mapping based on actual Redis data
-        const transformedProducts = products.map((product: any, index: number) => {
-          // Extract numeric price from '9000 RWF' format
-          const priceString = product.selling_price || product.SALE_PRICE_INCLUSIVE || product.price || '0'
-          const numericPrice = Number(String(priceString).replace(/[^\d.]/g, '')) || 0
+        const mapSuggestionRow = (product: Record<string, unknown>, lineId?: number): Product | null => {
+          const name = String(
+            product.item_commercial_name || product.ITEM_NAME || product.item_name || product.name || ""
+          ).trim()
+          if (!name) return null
+          const numericPrice = Math.max(0, Math.round(lineSellingPriceFromProductRow(product)))
           const itemCode = String(
             product.ITEM_CODE ||
               product.item_code ||
@@ -2388,30 +2963,105 @@ export default function GrandmaPage() {
               product.niki_code ||
               ""
           ).trim()
-
+          const id =
+            lineId != null && lineId > 0
+              ? 1_000_000 + lineId
+              : grandmaProductIdFromStockLine(baseSupplierId, {
+                  id: lineId ?? 0,
+                  itemName: name,
+                  nikiCode: itemCode,
+                  quantity: 0,
+                  salePrice: numericPrice,
+                  costPrice: 0,
+                })
           const overrideImage = itemCode ? productImageMap[itemCode.toUpperCase()] : ""
+          const liveKey =
+            lineId != null && lineId > 0
+              ? `${itemCode || name}:${lineId}`
+              : itemCode || name
           return {
-            id: 2000 + index,
+            id,
             category: selectedShop.category,
-            name: String(product.item_commercial_name || product.ITEM_NAME || product.item_name || product.name || "Product"),
+            name,
             price: numericPrice,
-            emoji: "ð¦",
+            emoji: emojiForRestaurantItem(name),
             imageUrl:
               overrideImage ||
-              product.image_url ||
-              product.item_image_url ||
-              product.IMAGE_URL ||
-              product.image ||
-              product.img ||
-              product.imageUrl ||
+              String(product.image_url || product.item_image_url || product.IMAGE_URL || product.image || product.img || product.imageUrl || "") ||
               "/img/shops/default.png",
             qty: 0,
             stockLineCode: itemCode || undefined,
-            liveKey: itemCode || undefined,
+            liveKey,
+            stockQty: stockQtyFromCatalogRow(product) ?? undefined,
           }
-        })
-        
-        console.log('Transformed products:', transformedProducts)
+        }
+
+        let transformedProducts: Product[] = []
+
+        if (invRes.ok) {
+          const invJson = (await invRes.json()) as { ok?: boolean; lines?: GrandmaInventoryLine[] }
+          const invLines = Array.isArray(invJson?.lines) ? invJson.lines : []
+          if (invJson?.ok && invLines.length > 0) {
+            const fromInventory: Product[] = []
+            for (const line of invLines) {
+              const itemName = String(line.itemName ?? "").trim()
+              if (!itemName) continue
+              const nikiCode = String(line.nikiCode ?? "").trim()
+              const enrich = nikiCode ? enrichByCode.get(nikiCode.toUpperCase()) : undefined
+              const row = enrich ?? {}
+              const name = String(
+                row.item_commercial_name || row.ITEM_NAME || row.item_name || itemName
+              ).trim()
+              const saleFromInv = Number(line.salePrice)
+              const numericPrice =
+                Number.isFinite(saleFromInv) && saleFromInv > 0
+                  ? Math.max(0, Math.round(saleFromInv))
+                  : Math.max(0, Math.round(lineSellingPriceFromProductRow(row)))
+              const id = grandmaProductIdFromStockLine(baseSupplierId, line)
+              const overrideImage = nikiCode ? productImageMap[nikiCode.toUpperCase()] : ""
+              fromInventory.push({
+                id,
+                category: selectedShop.category,
+                name,
+                price: numericPrice,
+                emoji: emojiForRestaurantItem(name),
+                imageUrl:
+                  overrideImage ||
+                  String(
+                    row.image_url ||
+                      row.item_image_url ||
+                      row.IMAGE_URL ||
+                      row.image ||
+                      row.img ||
+                      row.imageUrl ||
+                      ""
+                  ) ||
+                  "/img/shops/default.png",
+                qty: 0,
+                stockLineCode: nikiCode || undefined,
+                liveKey: `${nikiCode || name}:${line.id}`,
+                stockQty: Math.max(0, Math.floor(Number(line.quantity) || 0)),
+              })
+            }
+            transformedProducts = fromInventory
+            console.log(
+              "[grandma] Catalog from inventory:",
+              transformedProducts.length,
+              "lines (card stockLineCount:",
+              selectedShop.stockLineCount ?? "?",
+              ")"
+            )
+          }
+        }
+
+        if (transformedProducts.length === 0) {
+          if (!sugRes.ok) throw new Error(`Catalog HTTP ${sugRes.status}`)
+          transformedProducts = suggestionRows
+            .map((row) => mapSuggestionRow(row))
+            .filter((p): p is Product => p != null)
+          console.log("[grandma] Catalog fallback fetchSuggestions:", transformedProducts.length, "rows")
+        }
+
         setApiProducts(transformedProducts)
       } catch (error: any) {
         if (!cancelled) {
@@ -2452,11 +3102,31 @@ export default function GrandmaPage() {
 
   const settingsUi = GRANDMA_LABELS[language]
 
-  const ihuteFees = useMemo(() => Math.round(itemsTotal * IHUTE_FEE_RATE), [itemsTotal])
+  const ihuteFees = useMemo(() => computeIhutePlatformFeeRwf(itemsTotal), [itemsTotal])
   const grandTotal = useMemo(
     () => itemsTotal + logisticsTotal + TAXES_PLACEHOLDER,
     [itemsTotal, logisticsTotal]
   )
+
+  const grandmaMtnUssd = useMemo(() => {
+    if (!selectedShop || selectedPayment !== "momo") return ""
+    return buildGrandmaMtnUssd(selectedShop.momo ?? "", Math.round(grandTotal))
+  }, [selectedShop, selectedPayment, grandTotal])
+
+  const grandmaMtnUssdTelHref = useMemo(() => {
+    if (!grandmaMtnUssd) return ""
+    return `tel:${grandmaMtnUssd.replace(/#/g, "%23")}`
+  }, [grandmaMtnUssd])
+
+  const grandmaAirtelUssd = useMemo(() => {
+    if (!selectedShop || selectedPayment !== "airtel") return ""
+    return buildGrandmaMtnUssd(selectedShop.momo ?? "", Math.round(grandTotal))
+  }, [selectedShop, selectedPayment, grandTotal])
+
+  const grandmaAirtelUssdTelHref = useMemo(() => {
+    if (!grandmaAirtelUssd) return ""
+    return `tel:${grandmaAirtelUssd.replace(/#/g, "%23")}`
+  }, [grandmaAirtelUssd])
 
   const selectLogisticsMode = (id: LogisticsId) => {
     setSelectedLogistics(id)
@@ -2486,6 +3156,75 @@ export default function GrandmaPage() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
   /** Must be true before treating `user` as final — avoids seller mode snapping back to buyer on load. */
   const authHasHydrated = useAuthStore((s) => s.hasHydrated)
+
+  const grandmaPayerPhoneOk = useMemo(() => {
+    const payerRaw = grandmaBuyerSession?.phone || grandmaBuyerPhoneInput.trim()
+    return isGrandmaRwMobileDigits(payerRaw)
+  }, [grandmaBuyerSession?.phone, grandmaBuyerPhoneInput])
+
+  const verifyGrandmaMoMoSms = useCallback(() => {
+    setGrandmaSmsPayCheck(null)
+    setGrandmaSmsMatchResult(null)
+    if (selectedPayment !== "momo" || grandTotal < 1) return
+    const text = grandmaMomoSmsPaste.trim()
+    if (!text) return
+    const r = matchMoMoSmsToOrderTotal(text, Math.round(grandTotal))
+    setGrandmaSmsMatchResult(r)
+    if (!r.candidates.length) setGrandmaSmsPayCheck("no_amount")
+    else if (r.matched) setGrandmaSmsPayCheck("paid")
+    else setGrandmaSmsPayCheck("mismatch")
+  }, [selectedPayment, grandTotal, grandmaMomoSmsPaste])
+
+  useEffect(() => {
+    setGrandmaSmsPayCheck(null)
+    setGrandmaSmsMatchResult(null)
+    if (selectedPayment !== "momo") setGrandmaMomoSmsPaste("")
+  }, [selectedPayment, grandTotal])
+
+  useEffect(() => {
+    if (selectedPayment !== "momo") return
+    const text = grandmaMomoSmsPaste.trim()
+    if (text.length < 8) {
+      if (!text) {
+        setGrandmaSmsPayCheck(null)
+        setGrandmaSmsMatchResult(null)
+      }
+      return
+    }
+    const timer = window.setTimeout(() => {
+      const r = matchMoMoSmsToOrderTotal(text, Math.round(grandTotal))
+      setGrandmaSmsMatchResult(r)
+      if (!r.candidates.length) setGrandmaSmsPayCheck("no_amount")
+      else if (r.matched) setGrandmaSmsPayCheck("paid")
+      else setGrandmaSmsPayCheck("mismatch")
+    }, 450)
+    return () => window.clearTimeout(timer)
+  }, [grandmaMomoSmsPaste, grandTotal, selectedPayment])
+
+  const grandmaCanSendOrder = useMemo(() => {
+    if (!selectedShop || selectedProducts.length === 0) return false
+    if (hasGrandmaStockBlock) return false
+    if (selectedPayment === "momo") {
+      return grandmaSmsPayCheck === "paid" && grandmaPayerPhoneOk
+    }
+    if (selectedPayment === "airtel") {
+      return grandmaSmsPayCheck === "paid" && grandmaPayerPhoneOk
+    }
+    if (selectedPayment === "cash") return grandmaCashConfirm
+    return false
+  }, [
+    selectedShop,
+    selectedProducts.length,
+    hasGrandmaStockBlock,
+    selectedPayment,
+    grandmaSmsPayCheck,
+    grandmaPayerPhoneOk,
+    grandmaCashConfirm,
+  ])
+
+  useEffect(() => {
+    setStockQtyAttempts({})
+  }, [selectedShopId])
 
   const sellerShopLabel = useAuthStore((s) => {
     const u = s.user
@@ -2763,11 +3502,124 @@ export default function GrandmaPage() {
     return []
   }, [category, allAvailableShops, allShopsLoading])
 
-  const visibleShops = useMemo(() => {
-    const q = shopSearch.trim().toLowerCase()
-    let list = shopsInCategory.filter(
-      (s) => !q || s.name.toLowerCase().includes(q) || s.tagline.toLowerCase().includes(q)
-    )
+  const reorderSellerKeySet = useMemo(() => {
+    const set = new Set<string>()
+    for (const id of grandmaOrderedShopIds) {
+      const k = sellerAccountFromGrandmaShopId(id).toUpperCase()
+      if (k) set.add(k)
+    }
+    for (const k of reorderHistorySellerKeys) {
+      if (k) set.add(k.toUpperCase())
+    }
+    return set
+  }, [grandmaOrderedShopIds, reorderHistorySellerKeys])
+
+  const onsaleSellerKeysSet = useMemo(
+    () => new Set(onsaleSellerAccounts.map((x) => String(x).trim().toUpperCase()).filter(Boolean)),
+    [onsaleSellerAccounts],
+  )
+
+  useEffect(() => {
+    if (!isAuthenticated || !grandmaBuyerSession?.ishyigaAccount) {
+      setReorderHistorySellerKeys([])
+      return
+    }
+    let cancel = false
+    const ac = new AbortController()
+    void (async () => {
+      try {
+        const res = await fetch("/api/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            buyerAccount: grandmaBuyerSession.ishyigaAccount,
+            page: 1,
+            pageSize: 50,
+          }),
+          cache: "no-store",
+          signal: ac.signal,
+        })
+        if (!res.ok) return
+        const json = (await res.json()) as { transactions?: unknown[]; orders?: unknown[] }
+        const rawList = (Array.isArray(json.transactions)
+          ? json.transactions
+          : Array.isArray(json.orders)
+            ? json.orders
+            : []) as Record<string, unknown>[]
+        const keys = new Set<string>()
+        for (const raw of rawList) {
+          const acc = String(raw.SELLER_ISHYIGA_ACCOUNT ?? raw.seller_account ?? "").trim()
+          if (!acc) continue
+          const base = acc.replace(/^supplier_/i, "").split("__")[0].trim()
+          if (base) keys.add(base.toUpperCase())
+        }
+        if (!cancel) setReorderHistorySellerKeys([...keys])
+      } catch {
+        if (!cancel) setReorderHistorySellerKeys([])
+      }
+    })()
+    return () => {
+      cancel = true
+      ac.abort()
+    }
+  }, [isAuthenticated, grandmaBuyerSession?.ishyigaAccount])
+
+  useEffect(() => {
+    const sector = GRANDMA_CATEGORY_TO_SECTOR_SLUG[category]?.trim()
+    if (!sector || allAvailableShops.length === 0) {
+      setOnsaleSellerAccounts([])
+      return
+    }
+    let cancel = false
+    const ac = new AbortController()
+    const probes = ["a", "e", "i", "1"]
+    const tid = setTimeout(() => {
+      void (async () => {
+        const merged = new Set<string>()
+        for (const g of probes) {
+          if (cancel || ac.signal.aborted) break
+          try {
+            const params = new URLSearchParams({
+              globalSearch: g,
+              limit: "120",
+              Currency: "RWF",
+              sector,
+            })
+            const res = await fetch(`/api/fetchSuggestions?${params.toString()}`, {
+              signal: ac.signal,
+              cache: "no-store",
+            })
+            if (!res.ok) continue
+            const json = (await res.json()) as Record<string, unknown>
+            collectDiscountedSellerAccountsFromSearchJson(json).forEach((x) => merged.add(x))
+          } catch {
+            /* ignore */
+          }
+        }
+        if (!cancel) setOnsaleSellerAccounts([...merged])
+      })()
+    }, 600)
+    return () => {
+      cancel = true
+      clearTimeout(tid)
+      ac.abort()
+    }
+  }, [category, allAvailableShops.length])
+
+  const shopListFilterResult = useMemo(() => {
+    const qRaw = shopSearch.trim().toLowerCase()
+    const tokens = qRaw.split(/\s+/).filter(Boolean)
+    const productAccountSet = new Set(shopProductSearchAccounts)
+
+    const shopMatchesQuery = (s: ShopEntry): boolean => {
+      if (!tokens.length) return true
+      const sellerKey = sellerAccountFromGrandmaShopId(s.id).toUpperCase()
+      const productHit = productAccountSet.has(sellerKey)
+      const hay = `${s.name} ${s.tagline} ${s.momo ?? ""} ${s.id}`.toLowerCase()
+      const textHit = tokens.every((t) => hay.includes(t))
+      return textHit || productHit
+    }
+
     const prefBoost = (a: ShopEntry, b: ShopEntry) => {
       const pref =
         Number(isPreferredGrandmaShop(b.id, preferredShopIds)) -
@@ -2775,32 +3627,96 @@ export default function GrandmaPage() {
       if (pref !== 0) return pref
       return 0
     }
-    if (shopTab === "favorites") list = list.filter((s) => s.favorite)
-    else if (shopTab === "reorder") list = list.filter((s) => s.orderedBefore)
-    else if (shopTab === "trending") list = list.filter((s) => s.trending)
-    else if (shopTab === "onsale") list = list.filter((s) => s.onSale)
-    else {
-      list = [...list].sort((a, b) => {
-        // Preferred shops (Settings) first — e.g. Burrows + Rite when you mark them
+
+    const shopOrderedRecently = (s: ShopEntry) => {
+      const k = sellerAccountFromGrandmaShopId(s.id).toUpperCase()
+      return reorderSellerKeySet.has(k) || s.orderedBefore
+    }
+
+    const sortList = (list: ShopEntry[]) =>
+      [...list].sort((a, b) => {
+        if (tokens.length && productAccountSet.size > 0) {
+          const ak = sellerAccountFromGrandmaShopId(a.id).toUpperCase()
+          const bk = sellerAccountFromGrandmaShopId(b.id).toUpperCase()
+          const ap = productAccountSet.has(ak) ? 1 : 0
+          const bp = productAccountSet.has(bk) ? 1 : 0
+          if (ap !== bp) return bp - ap
+        }
         const p = prefBoost(a, b)
         if (p !== 0) return p
         if (a.favorite !== b.favorite) return a.favorite ? -1 : 1
-        if (a.orderedBefore !== b.orderedBefore) return a.orderedBefore ? -1 : 1
+        if (shopOrderedRecently(a) !== shopOrderedRecently(b)) return shopOrderedRecently(b) ? -1 : 1
         if (useLocationSort) return a.distanceKm - b.distanceKm
         return a.name.localeCompare(b.name)
       })
+
+    const applyTab = (list: ShopEntry[]): ShopEntry[] => {
+      if (shopTab === "favorites") {
+        if (preferredShopIds.includes(PREFERRED_ALL_ID)) return list
+        const prefs = preferredShopIds.filter((x) => x !== PREFERRED_ALL_ID)
+        return list.filter(
+          (s) => s.favorite || (prefs.length > 0 && prefs.some((pid) => sameGrandmaSeller(pid, s.id))),
+        )
+      }
+      if (shopTab === "reorder") {
+        if (reorderSellerKeySet.size === 0) return []
+        return list.filter((s) => reorderSellerKeySet.has(sellerAccountFromGrandmaShopId(s.id).toUpperCase()))
+      }
+      if (shopTab === "trending") return list.filter((s) => s.trending)
+      if (shopTab === "onsale") {
+        return list.filter((s) => {
+          if (s.onSale) return true
+          return onsaleSellerKeysSet.has(sellerAccountFromGrandmaShopId(s.id).toUpperCase())
+        })
+      }
       return list
     }
-    list = [...list].sort((a, b) => {
-      const p = prefBoost(a, b)
-      if (p !== 0) return p
-      if (a.favorite !== b.favorite) return a.favorite ? -1 : 1
-      if (a.orderedBefore !== b.orderedBefore) return a.orderedBefore ? -1 : 1
-      if (useLocationSort) return a.distanceKm - b.distanceKm
-      return a.name.localeCompare(b.name)
-    })
-    return list
-  }, [shopsInCategory, shopSearch, shopTab, useLocationSort, preferredShopIds])
+
+    const base = shopsInCategory
+    let relaxedNote: string | null = null
+
+    if (!tokens.length) {
+      const list = shopTab ? applyTab(base) : base
+      return { shops: sortList(list), relaxedNote: null }
+    }
+
+    const searchHits = base.filter(shopMatchesQuery)
+    if (!shopTab) {
+      return { shops: sortList(searchHits), relaxedNote: null }
+    }
+
+    const tabbed = applyTab(base)
+    const tabAndSearch = tabbed.filter(shopMatchesQuery)
+    if (tabAndSearch.length > 0) {
+      return { shops: sortList(tabAndSearch), relaxedNote: null }
+    }
+
+    if (searchHits.length > 0) {
+      relaxedNote =
+        language === "rw"
+          ? "Nta duka riri muri uyu muhuza (Reorder, …) rihuye n'uko wanditse — reba amaduka yose ahuye n'uko wanditse."
+          : language === "fr"
+            ? "Aucun commerce ne correspond à ce filtre + recherche — affichage de tous les commerces correspondant à votre recherche."
+            : "No shop matches this filter plus your search — showing all shops that match your search."
+      return { shops: sortList(searchHits), relaxedNote }
+    }
+
+    return { shops: sortList([]), relaxedNote: null }
+  }, [
+    shopsInCategory,
+    shopSearch,
+    shopTab,
+    useLocationSort,
+    preferredShopIds,
+    language,
+    shopProductSearchAccounts,
+    grandmaOrderedShopIds,
+    reorderSellerKeySet,
+    onsaleSellerKeysSet,
+  ])
+
+  const visibleShops = shopListFilterResult.shops
+  const shopSearchRelaxedNote = shopListFilterResult.relaxedNote
 
   const isAllPreferred = useMemo(() => preferredShopIds.includes(PREFERRED_ALL_ID), [preferredShopIds])
   const multiShopMode = useMemo(() => isAllPreferred && !selectedShopId, [isAllPreferred, selectedShopId])
@@ -2817,15 +3733,14 @@ export default function GrandmaPage() {
     return inCat
   }, [category, preferredShopIds, apiShops, shopsLoading])
 
-  /** Full item pool for price histogram / category chips (ignores live “sample 20”). */
+  /** Full item pool for price histogram / category chips (full catalog, no sampling). */
   const itemsFilterStatsSource = useMemo(() => {
     if (multiShopMode) return [] as Product[]
     let list = combinedProducts.filter((p) => p.category === category)
     const q = search.trim().toLowerCase()
     if (q) list = list.filter((p) => p.name.toLowerCase().includes(q))
-    if (isLiveMenuSelected) {
-      list = list.filter((p) => p.id >= 100000)
-      if (liveInStockOnly) list = list.filter((p) => p.liveInStock === true)
+    if (isLiveMenuSelected && liveInStockOnly) {
+      list = list.filter((p) => p.liveInStock === true || p.qty > 0)
     }
     return list
   }, [multiShopMode, combinedProducts, category, search, isLiveMenuSelected, liveInStockOnly])
@@ -2916,19 +3831,8 @@ export default function GrandmaPage() {
       const catOk = p.category === effectiveCategory || p.qty > 0
       return catOk && qok
     })
-    if (isLiveMenuSelected) {
-      // Burrows live rows use id ≥ 100000; supplier Redis catalog uses 2000+ — keep cart lines visible either way.
-      list = list.filter((p) => p.id >= 100000 || p.qty > 0)
-      if (liveInStockOnly) list = list.filter((p) => p.liveInStock === true || p.qty > 0)
-      const showAll = liveShowAll || Boolean(q)
-      if (!showAll) {
-        const inCart = list.filter((p) => p.qty > 0)
-        const rest = list.filter((p) => p.qty <= 0)
-        const budget = Math.max(0, 20 - inCart.length)
-        const sampled =
-          budget > 0 ? stableSample(rest, budget, (p) => `${p.liveKey ?? p.id}-${p.name}`) : []
-        list = [...inCart, ...sampled]
-      }
+    if (isLiveMenuSelected && liveInStockOnly) {
+      list = list.filter((p) => p.liveInStock === true || p.qty > 0)
     }
     if (priceRangeRwf) {
       const [lo, hi] = priceRangeRwf
@@ -2950,7 +3854,6 @@ export default function GrandmaPage() {
     search,
     isLiveMenuSelected,
     liveInStockOnly,
-    liveShowAll,
     itemsSort,
     priceRangeRwf,
     itemsMenuCategoryKey,
@@ -2981,7 +3884,6 @@ export default function GrandmaPage() {
     setUseLocationSort(false)
     setItemsSort("default")
     setLiveInStockOnly(false)
-    setLiveShowAll(false)
     setItemsMenuCategoryKey(null)
     const { min, max } = filterPriceExtent
     if (Number.isFinite(min) && Number.isFinite(max) && max >= min) setPriceRangeRwf([min, max])
@@ -2994,25 +3896,42 @@ export default function GrandmaPage() {
     return Math.max(1, Math.round((max - min) / 80))
   }, [filterPriceExtent])
 
+  const findGrandmaProductById = useCallback(
+    (id: number) => products.find((p) => p.id === id) ?? apiProducts.find((p) => p.id === id),
+    [products, apiProducts],
+  )
+
+  const applyGrandmaProductQty = useCallback((id: number, requestedQty: number) => {
+    const safe = Math.max(0, Math.floor(Number(requestedQty) || 0))
+    let cap: number | null = null
+    const patch = (prev: Product[]) => {
+      const target = prev.find((p) => p.id === id)
+      if (!target) return prev
+      cap = productStockOnHand(target)
+      const capped = clampQtyForProduct(target, safe)
+      return prev.map((p) => (p.id === id ? { ...p, qty: capped } : p))
+    }
+    setProducts(patch)
+    setApiProducts(patch)
+    if (cap != null && safe > cap) {
+      setStockQtyAttempts((a) => ({ ...a, [id]: safe }))
+    } else {
+      setStockQtyAttempts((a) => {
+        const next = { ...a }
+        delete next[id]
+        return next
+      })
+    }
+  }, [])
+
   const changeQty = (id: number, diff: number) => {
-    console.log('changeQty called with id:', id, 'diff:', diff)
-    // Update both products and apiProducts to ensure quantity changes persist
-    setProducts((prev) => {
-      const updated = prev.map((p) => (p.id === id ? { ...p, qty: Math.max(0, p.qty + diff) } : p))
-      console.log('Updated products state:', updated.filter(p => p.id === id))
-      return updated
-    })
-    setApiProducts((prev) => {
-      const updated = prev.map((p) => (p.id === id ? { ...p, qty: Math.max(0, p.qty + diff) } : p))
-      console.log('Updated apiProducts state:', updated.filter(p => p.id === id))
-      return updated
-    })
+    const target = findGrandmaProductById(id)
+    if (!target) return
+    applyGrandmaProductQty(id, target.qty + diff)
   }
 
   const setQtyDirect = (id: number, nextQty: number) => {
-    const safeQty = Math.max(0, Math.floor(Number(nextQty) || 0))
-    setProducts((prev) => prev.map((p) => (p.id === id ? { ...p, qty: safeQty } : p)))
-    setApiProducts((prev) => prev.map((p) => (p.id === id ? { ...p, qty: safeQty } : p)))
+    applyGrandmaProductQty(id, nextQty)
   }
 
   /** Cart qty field: blank when 0 (no leading “0”), digits only in onChange. */
@@ -3041,13 +3960,13 @@ export default function GrandmaPage() {
       if (p?.v !== 1 || !p.shopId || !Array.isArray(p.lines) || p.lines.length === 0) return
       sessionStorage.removeItem(GRANDMA_REORDER_STORAGE_KEY)
       setPendingReorder(p)
+      setGrandmaOrderedShopIds(appendGrandmaOrderedShopId(p.shopId))
       setReorderSplashOpen(true)
       setSelectedShopId(p.shopId)
       setAppMode("buyer")
       setPage(3)
       setItemsMenuCategoryKey(null)
       setSearch("")
-      setLiveShowAll(true)
       const gc = p.grandmaCategory
       if (gc) {
         const cats: Category[] = [
@@ -3105,26 +4024,17 @@ export default function GrandmaPage() {
       return
     }
 
-    setApiProducts((prev) =>
-      prev.map((x) => {
-        const add = addQtyById.get(x.id)
-        if (!add) return x
-        return { ...x, qty: x.qty + add }
-      }),
-    )
-    setProducts((prev) =>
-      prev.map((x) => {
-        const add = addQtyById.get(x.id)
-        if (!add) return x
-        return { ...x, qty: x.qty + add }
-      }),
-    )
+    for (const [id, add] of addQtyById) {
+      const target = apiProducts.find((x) => x.id === id) ?? products.find((x) => x.id === id)
+      if (!target) continue
+      applyGrandmaProductQty(id, target.qty + add)
+    }
 
     setPendingReorder(null)
     setReorderSplashOpen(false)
     // Items tab (shop catalog + cart bar) — not home (1) or summary (4)
     setPage(3)
-  }, [pendingReorder, productsLoading, selectedShopId, selectedShop, apiProducts])
+  }, [pendingReorder, productsLoading, selectedShopId, selectedShop, apiProducts, products, applyGrandmaProductQty])
 
   const goToPage = (p: PageId) => setPage(p)
 
@@ -3252,6 +4162,8 @@ export default function GrandmaPage() {
       window.alert(msg)
       return
     }
+    if (grandmaOrderSubmitGuardRef.current) return
+    grandmaOrderSubmitGuardRef.current = true
     setGrandmaOrderSubmitting(true)
     setGrandmaOrderSubmitError(null)
     try {
@@ -3274,6 +4186,69 @@ export default function GrandmaPage() {
         setGrandmaOrderSubmitError(trSubmit.orderSubmitNeedPhone)
         return
       }
+
+      if (selectedPayment === "momo" || selectedPayment === "airtel") {
+        const payerRaw = phoneFromAccount || grandmaBuyerPhoneInput.trim()
+        if (!isGrandmaRwMobileDigits(payerRaw)) {
+          setGrandmaOrderSubmitError(trSubmit.payStepErrPhone)
+          return
+        }
+      }
+      if (selectedPayment === "cash" && !grandmaCashConfirm) {
+        setGrandmaOrderSubmitError(trSubmit.payStepErrCash)
+        return
+      }
+      if (selectedPayment === "momo" && grandmaSmsPayCheck !== "paid") {
+        setGrandmaOrderSubmitError(trSubmit.payStepErrMomoSms)
+        return
+      }
+      if (hasGrandmaStockBlock) {
+        setGrandmaOrderSubmitError(trSubmit.stockExceededSubmit)
+        return
+      }
+
+      const piRes = await fetch("/api/grandma/payment-intent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          channel: selectedPayment,
+          grandTotalRwf: Math.round(grandTotal),
+          platformFeeRwf: ihuteFees,
+          itemsSubtotalRwf: Math.round(itemsTotal),
+          logisticsRwf: Math.round(logisticsTotal),
+          sellerAccount,
+        }),
+      })
+      const piJson = (await piRes.json().catch(() => ({}))) as {
+        ok?: boolean
+        intentId?: string
+        error?: string
+      }
+      if (!piRes.ok || piJson.ok !== true || !piJson.intentId) {
+        setGrandmaOrderSubmitError(
+          piJson.error ||
+            (language === "rw"
+              ? "Kwemeza kwishyura byanze."
+              : language === "fr"
+                ? "Étape de paiement échouée."
+                : "Payment confirmation failed."),
+        )
+        return
+      }
+
+      const payerDigits =
+        selectedPayment === "momo" || selectedPayment === "airtel"
+          ? normalizePhoneDigitsForAuth(buyerPhone)
+          : undefined
+      const billingTail = buildGrandmaBillingReferenceTail({
+        intentId: String(piJson.intentId),
+        ihuteFeeRwf: ihuteFees,
+        itemsSubtotalRwf: Math.round(itemsTotal),
+        logisticsRwf: Math.round(logisticsTotal),
+        buyerGrandTotalRwf: Math.round(grandTotal),
+        paymentChannel: selectedPayment,
+        payerDigits,
+      })
 
       const locParts = [
         locationData?.province,
@@ -3307,7 +4282,8 @@ export default function GrandmaPage() {
         fulfillmentMode === "pickup"
           ? ["SELF-PICKUP", orderNotes.trim()].filter(Boolean)
           : [`DELIVERY-${selectedLogistics}`, orderNotes.trim()].filter(Boolean)
-      const reference = referenceParts.length ? referenceParts.join(" | ").slice(0, 500) : undefined
+      const baseRef = referenceParts.length ? referenceParts.join(" | ") : ""
+      const reference = (baseRef + billingTail).slice(0, 500)
 
       const res = await fetch("/api/grandma/order", {
         method: "POST",
@@ -3324,6 +4300,7 @@ export default function GrandmaPage() {
           currency: "RWF",
           items,
           reference,
+          subtotal: Math.round(itemsTotal),
         }),
       })
       const data = (await res.json().catch(() => ({}))) as {
@@ -3348,9 +4325,42 @@ export default function GrandmaPage() {
 
       try {
         localStorage.setItem("grandma:lastOrderId", String(oid))
+        setGrandmaOrderedShopIds(appendGrandmaOrderedShopId(selectedShop.id))
       } catch {
         /* ignore */
       }
+
+      const payLabel = grandmaPaymentToOrdersPaymentName(selectedPayment)
+      const placedOrder = {
+        id: String(oid),
+        buyerName,
+        buyerAccount: authUser?.ishyigaAccount?.trim() || "",
+        sellerAccount,
+        sellerId: sellerAccount,
+        sellerName: selectedShop.name,
+        seller: selectedShop.name,
+        amount: Math.round(grandTotal),
+        subtotal: Math.round(itemsTotal),
+        orderStatus: "OPEN",
+        status: "open" as const,
+        paymentStatus: (payLabel.toLowerCase().includes("paid") ? "paid" : "pending") as
+          | "paid"
+          | "pending",
+        paymentStatusRaw: payLabel,
+        createdAt: new Date().toISOString(),
+        items: items.map((it, idx) => ({
+          id: String(it.itemCode || it.ITEM_CODE || idx),
+          name: String(it.name),
+          price: Number(it.unitPrice) || 0,
+          qty: Number(it.qty) || 1,
+        })),
+        itemsCount: items.length,
+        ...(data.trackToken ? { publicToken: String(data.trackToken) } : {}),
+      }
+      useOrdersStore.getState().upsertOrder(placedOrder)
+      saveGrandmaPendingOrder(placedOrder)
+
+      notifyGrandmaOrderPlaced(String(oid))
 
       setProducts((prev) => prev.map((x) => ({ ...x, qty: 0 })))
       setOrderNotes("")
@@ -3360,29 +4370,23 @@ export default function GrandmaPage() {
       })
       setPage(1)
 
-      const sellerPhoneParam =
-        momoDigits.length >= 9
-          ? momoDigits.startsWith("250")
-            ? `0${momoDigits.slice(3)}`
-            : momoDigits.startsWith("0")
-              ? momoDigits.slice(0, 10)
-              : `0${momoDigits.slice(-9)}`
-          : ""
-
       const q = new URLSearchParams({
         orderId: String(oid),
         sellerName: selectedShop.name,
         buyerPhone,
         total: String(Math.round(grandTotal)),
         from: "grandma",
+        autoWhatsApp: "1",
       })
       if (data.trackToken) q.set("trackToken", String(data.trackToken))
-      if (sellerPhoneParam) q.set("sellerPhone", sellerPhoneParam)
+      if (payLabel) q.set("payment", payLabel)
+      if (grandmaSmsMatchResult?.txId) q.set("momoTxId", grandmaSmsMatchResult.txId)
       router.push(`/order-success?${q.toString()}`)
     } catch (e: unknown) {
       const raw = e instanceof Error ? e.message : "Order request failed"
       setGrandmaOrderSubmitError(humanizeGrandmaOrderBackendError(raw, language))
     } finally {
+      grandmaOrderSubmitGuardRef.current = false
       setGrandmaOrderSubmitting(false)
     }
   }, [
@@ -3398,6 +4402,13 @@ export default function GrandmaPage() {
     displayUserLocationEn,
     grandTotal,
     grandmaBuyerPhoneInput,
+    grandmaCashConfirm,
+    grandmaSmsPayCheck,
+    grandmaSmsMatchResult,
+    hasGrandmaStockBlock,
+    ihuteFees,
+    itemsTotal,
+    logisticsTotal,
   ])
 
   const featuredCourierSafe = useMemo(() => {
@@ -3419,20 +4430,27 @@ export default function GrandmaPage() {
         :root{
           --blue:#1897e0;--blue-dark:#127fc0;--bg:#eef4fb;--card:#ffffff;--text:#17324d;
           --muted:#6f8399;--line:#dbe7f3;--green:#22c55e;
+          --pay:#1897e0;--pay2:#127fc0;--pay-soft:#f0f8ff;--pay-ring:rgba(24,151,224,.24);
         }
+        #page5-pay.page.active .primary-btn{background:linear-gradient(90deg,var(--pay),var(--pay2));box-shadow:0 10px 22px rgba(18,127,192,.22);}
+        #page5-pay .pay-item{transition:border-color .2s ease,background .2s ease,box-shadow .2s ease;}
+        #page5-pay .pay-item.active{border-color:#a8d7f4;background:var(--pay-soft);box-shadow:0 0 0 1px #d6ecfb;}
+        #page5-pay .pay-item.active .radio{border-color:var(--pay);}
+        #page5-pay .pay-item.active .radio::after{background:var(--pay);}
+        #page5-pay .pay-input-tap:focus-visible{outline:none;box-shadow:0 0 0 3px var(--pay-ring);border-color:#2e9ad9!important;}
         *{box-sizing:border-box}
         body{margin:0;font-family:Arial, Helvetica, sans-serif;background:var(--bg);color:var(--text);}
         .app{max-width:430px;margin:0 auto;min-height:100vh;background:linear-gradient(180deg,#f7fbff 0%,#eef4fb 100%);padding-bottom:calc(120px + env(safe-area-inset-bottom));}
         .topbar{background:linear-gradient(90deg,var(--blue),#30acef,var(--blue-dark));color:#fff;padding:14px 16px;position:sticky;top:0;z-index:10;box-shadow:0 8px 20px rgba(0,0,0,.10);}
         .topbar-row{display:flex;align-items:center;gap:10px;}
-        .back-btn,.more-btn,.orders-btn{border:none;background:rgba(255,255,255,.14);color:#fff;border-radius:10px;width:36px;height:36px;font-size:18px;cursor:pointer;flex-shrink:0;line-height:1;}
+        .back-btn,.more-btn,.orders-btn{border:none;background:rgba(255,255,255,.14);color:#fff;border-radius:10px;width:36px;height:36px;font-size:18px;cursor:pointer;flex-shrink:0;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;}
         .buyer-header-name{display:block;margin-top:2px;font-size:11px;font-weight:700;opacity:.92;max-width:min(72vw,260px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
         .filter-trigger-btn{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:10px;background:rgba(255,255,255,.95);color:#17324d;border:1px solid rgba(255,255,255,.55);font-size:12px;font-weight:800;cursor:pointer;flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,.08);}
         .filter-trigger-btn svg{flex-shrink:0;opacity:.9;}
         .brand{display:flex;align-items:center;gap:10px;flex:1;min-width:0;}
-        .logo{width:34px;height:34px;border-radius:10px;background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;border:1px solid rgba(255,255,255,.35);flex-shrink:0;}
-        button.logo{cursor:pointer;padding:0;font:inherit;border:none;background:transparent;}
-        .logo img{width:100%;height:100%;object-fit:contain;display:block;}
+        .logo{width:34px;height:34px;border-radius:50%;background:#fff;display:block;overflow:hidden;border:2px solid rgba(255,255,255,.5);flex-shrink:0;box-shadow:0 1px 3px rgba(0,0,0,.12);padding:0;}
+        button.logo{cursor:pointer;padding:0!important;padding-inline:0!important;margin:0;font:inherit;width:34px!important;height:34px!important;min-height:34px!important;border-radius:50%;background:#fff;border:2px solid rgba(255,255,255,.5);display:block;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.12);}
+        .logo img{width:100%;height:100%;object-fit:cover;display:block;}
         .topbar-order-actions{display:flex;align-items:center;gap:6px;flex-shrink:0;}
         .shop-box .logo{width:48px;height:48px;border-radius:12px;border:1px solid var(--line);}
         .title{font-size:22px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -3461,12 +4479,12 @@ export default function GrandmaPage() {
         .shop-filter-pill{flex-shrink:0;padding:10px 14px;border-radius:999px;border:1px solid var(--line);background:#fff;font-weight:700;font-size:13px;cursor:pointer;color:var(--text);}
         .shop-filter-pill.active{background:var(--blue);color:#fff;border-color:var(--blue);}
         .shop-list{display:flex;flex-direction:column;gap:10px;}
-        .shop-row{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;gap:12px;align-items:center;cursor:pointer;box-shadow:0 8px 18px rgba(24,151,224,.06);}
+        .shop-row{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;gap:12px;align-items:center;cursor:pointer;box-shadow:0 8px 18px rgba(24,151,224,.06);text-align:left;}
         .shop-row:active{transform:scale(.995);}
         .shop-avatar{width:48px;height:48px;border-radius:12px;background:linear-gradient(135deg,#e0f2fe,#bae6fd);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;overflow:hidden;border:1px solid var(--line);}
         .shop-avatar img{width:100%;height:100%;object-fit:contain;display:block;background:#fff;}
-        .shop-row-meta{flex:1;min-width:0;}
-        .shop-row-name{font-size:16px;font-weight:700;}
+        .shop-row-meta{flex:1;min-width:0;text-align:left;}
+        .shop-row-name{font-size:16px;font-weight:700;text-align:left;}
         .shop-row-tag{color:var(--muted);font-size:13px;margin-top:4px;line-height:1.3;}
         .shop-row-items{color:var(--muted);font-size:12px;margin-top:4px;font-weight:700;}
         .shop-row-badges{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
@@ -3480,10 +4498,10 @@ export default function GrandmaPage() {
         .shop-dist-pill{font-size:15px;font-weight:800;color:var(--blue-dark);background:#f1f8ff;border:1px solid var(--line);border-radius:12px;padding:10px 14px;white-space:nowrap;flex-shrink:0;align-self:center;}
         .shop-inline-rating{font-size:13px;color:var(--muted);margin-top:6px;font-weight:600;}
         .product-list{display:flex;flex-direction:column;gap:10px;}
-        .product-row{background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px;display:grid;grid-template-columns:42px 1fr auto;gap:10px;align-items:center;box-shadow:0 8px 18px rgba(24,151,224,.06);}
+        .product-row{background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px;display:grid;grid-template-columns:42px 1fr auto;gap:10px;align-items:center;box-shadow:0 8px 18px rgba(24,151,224,.06);text-align:left;}
         .emoji{font-size:28px;text-align:center;}
-        .p-name{font-size:16px;font-weight:700;}
-        .p-price{margin-top:4px;color:var(--muted);font-size:14px;}
+        .p-name{font-size:16px;font-weight:700;text-align:left;}
+        .p-price{margin-top:4px;color:var(--muted);font-size:14px;text-align:left;}
         .qty{display:flex;align-items:center;gap:10px;background:#f1f8ff;border-radius:14px;padding:8px 10px;}
         .qty input{width:min(32vw,112px);min-width:88px;height:48px;border:2px solid var(--line);border-radius:12px;background:#fff;color:var(--text);font-weight:800;font-size:20px;text-align:center;padding:0 8px;outline:none;}
         .qty input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(24,151,224,.18);}
@@ -3665,7 +4683,7 @@ export default function GrandmaPage() {
               aria-label="Grandma home"
               title="Grandma home"
             >
-              <img src="/img/logo.png" alt="" />
+              <img src="/img/logo.png" alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}} />
             </button>
             <div
               className={`title ${
@@ -3777,6 +4795,7 @@ export default function GrandmaPage() {
             topUpTitle: GRANDMA_LABELS[language].sellerDashTopUpTitle,
             topUpSubtitle: GRANDMA_LABELS[language].sellerDashTopUpSubtitle,
             ctaStock: GRANDMA_LABELS[language].sellerDashCtaStock,
+            ctaNikiStock: GRANDMA_LABELS[language].sellerDashCtaNikiStock,
             ctaOrders: GRANDMA_LABELS[language].sellerDashCtaOrders,
             deliveredTail: GRANDMA_LABELS[language].sellerDashDeliveredTail,
           }}
@@ -3784,6 +4803,9 @@ export default function GrandmaPage() {
           onOrders={() => setSellerView("orders")}
           onClients={() => window.alert("Clients — coming soon")}
           onItems={() => setSellerView("items")}
+          onNikiStock={() => {
+            router.push("/register/seller?step=2")
+          }}
           onSales={() => setSellerView("orders")}
         />
       ) : null}
@@ -4157,7 +5179,12 @@ export default function GrandmaPage() {
           <button
             type="button"
             className="shop-trio-btn"
-            onClick={() => alert("List your shop on Ihute — seller onboarding (coming from your admin / API).")}
+            onClick={() => {
+              writeGrandmaSignupRole("seller")
+              router.push(
+                `${GRANDMA_OUTBOUND.registerSeller}?redirect=${encodeURIComponent(GRANDMA_PATHS.appRoot)}`,
+              )
+            }}
           >
             List your shop
           </button>
@@ -4175,8 +5202,8 @@ export default function GrandmaPage() {
           <input
             value={shopSearch}
             onChange={(e) => setShopSearch(e.target.value)}
-            placeholder="Search shops"
-            aria-label="Search shops"
+            placeholder="Search shops or products (e.g. milk, bread)"
+            aria-label="Search shops or products"
           />
         </div>
 
@@ -4194,6 +5221,11 @@ export default function GrandmaPage() {
             </button>
           ))}
         </div>
+        {shopSearchRelaxedNote ? (
+          <p className="card note" style={{ marginTop: 8, marginBottom: 0, fontSize: 12, color: "#92400e", background: "#fffbeb", borderColor: "#fcd34d" }}>
+            {shopSearchRelaxedNote}
+          </p>
+        ) : null}
 
         <div className="shop-list" id="shopList">
           {allShopsLoading ? (
@@ -4214,7 +5246,38 @@ export default function GrandmaPage() {
               {!GRANDMA_SHOW_DEMO_SHOPS && allAvailableShops.length === 0 ? (
                 <p style={{ marginBottom: 10, color: "#5a6b7a", fontSize: "0.92rem" }}>{GRANDMA_NO_LIVE_SHOPS_HINT}</p>
               ) : null}
-              No shops match. Try another filter or search.
+              {shopSearch.trim() ? (
+                shopProductSearchLoading ? (
+                  <p style={{ margin: 0 }}>
+                    {language === "rw"
+                      ? "Turimo gushakisha ibicuruzya kugira ngo tubone amaduka abibamo…"
+                      : language === "fr"
+                        ? "Recherche des produits pour afficher les boutiques concernées…"
+                        : "Searching the product catalog for shops that carry matching items…"}
+                  </p>
+                ) : language === "rw" ? (
+                  <p style={{ margin: 0 }}>
+                    Nta duka ryahuye na <strong>&quot;{shopSearch.trim()}&quot;</strong> ku izina cyangwa ibicuruzya.
+                    {shopTab ? " Gerageza gukura filtere." : ""} Gerageza andi magambo cyangwa siba uko wanditse.
+                  </p>
+                ) : language === "fr" ? (
+                  <p style={{ margin: 0 }}>
+                    Aucun commerce ne correspond à <strong>&quot;{shopSearch.trim()}&quot;</strong> (nom ou produits du
+                    catalogue).
+                    {shopTab ? " Essayez de désactiver le filtre actif." : ""} Essayez d&apos;autres mots ou effacez la
+                    recherche.
+                  </p>
+                ) : (
+                  <p style={{ margin: 0 }}>
+                    No shops match <strong>&quot;{shopSearch.trim()}&quot;</strong> by shop name, MoMo, or catalog
+                    products
+                    {shopTab ? " with the current filter." : "."} Try different words, clear the search box, or tap the
+                    active filter again to turn it off.
+                  </p>
+                )
+              ) : (
+                <p style={{ margin: 0 }}>No shops match. Try another filter or search.</p>
+              )}
             </div>
           ) : null}
           {!allShopsLoading && !shopsLoading && !shopsError && visibleShops.length > 0 ? (
@@ -4258,10 +5321,20 @@ export default function GrandmaPage() {
                     {isPreferredGrandmaShop(s.id, preferredShopIds) ? (
                       <span className="shop-badge">★ Preferred</span>
                     ) : null}
-                    {s.favorite ? <span className="shop-badge">★ Favorite</span> : null}
-                    {s.orderedBefore ? <span className="shop-badge">Reorder</span> : null}
+                    {preferredShopIds.includes(PREFERRED_ALL_ID) ||
+                    s.favorite ||
+                    preferredShopIds
+                      .filter((x) => x !== PREFERRED_ALL_ID)
+                      .some((pid) => sameGrandmaSeller(pid, s.id)) ? (
+                      <span className="shop-badge">★ Favorite</span>
+                    ) : null}
+                    {reorderSellerKeySet.has(sellerAccountFromGrandmaShopId(s.id).toUpperCase()) || s.orderedBefore ? (
+                      <span className="shop-badge">Reorder</span>
+                    ) : null}
                     {s.trending ? <span className="shop-badge">Trending</span> : null}
-                    {s.onSale ? <span className="shop-badge sale">On sale</span> : null}
+                    {s.onSale || onsaleSellerKeysSet.has(sellerAccountFromGrandmaShopId(s.id).toUpperCase()) ? (
+                      <span className="shop-badge sale">On sale</span>
+                    ) : null}
                   </div>
                 </div>
                 <div className="shop-row-dist">{s.distanceKm.toFixed(1)} km</div>
@@ -4285,6 +5358,17 @@ export default function GrandmaPage() {
               <div style={{ marginTop: 6, color: "#b42318", fontSize: 12, fontWeight: 700 }}>
                 Live menu error: {burrowsLiveError}
               </div>
+            ) : null}
+            {!isLiveMenuSelected && !productsLoading && !productsError ? (
+              <span style={{ marginLeft: 8, color: "var(--muted)", fontWeight: 700 }}>
+                · {visibleProducts.length.toLocaleString()} stock line
+                {visibleProducts.length === 1 ? "" : "s"}
+                {selectedShop.stockLineCount != null &&
+                selectedShop.stockLineCount > 0 &&
+                visibleProducts.length < selectedShop.stockLineCount
+                  ? ` (${selectedShop.stockLineCount.toLocaleString()} in shop — loading more…)`
+                  : ""}
+              </span>
             ) : null}
           </div>
         ) : multiShopMode ? (
@@ -4377,9 +5461,37 @@ export default function GrandmaPage() {
                       p.emoji
                     )}
                   </div>
-                  <div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
                     <div className="p-name">{p.name}</div>
                     <div className="p-price">{formatRwf(p.price)}</div>
+                    {productStockOnHand(p) != null ? (
+                      <div className="text-[11px] text-[#6f8399]" style={{ marginTop: 2 }}>
+                        {tPay.stockOnHandLabel.replace("{n}", String(productStockOnHand(p)))}
+                      </div>
+                    ) : null}
+                    {grandmaStockLineIssues.find((i) => i.id === p.id) ? (
+                      <div
+                        className="text-[11px] font-semibold text-amber-900"
+                        style={{ marginTop: 4, lineHeight: 1.35 }}
+                        role="alert"
+                      >
+                        {tPay.stockExceededLine
+                          .replace(
+                            "{requested}",
+                            String(
+                              grandmaStockLineIssues.find((i) => i.id === p.id)?.requested ?? p.qty,
+                            ),
+                          )
+                          .replace(
+                            "{available}",
+                            String(
+                              grandmaStockLineIssues.find((i) => i.id === p.id)?.available ??
+                                productStockOnHand(p) ??
+                                0,
+                            ),
+                          )}
+                      </div>
+                    ) : null}
                   </div>
                   <div className="qty">
                     <input
@@ -4458,6 +5570,25 @@ export default function GrandmaPage() {
           </div>
           <div id="bottomTotal">Total: {formatRwf(itemsTotal)}</div>
         </div>
+        {hasGrandmaStockBlock ? (
+          <div
+            className="card note"
+            style={{ marginTop: 10, color: "#92400e", borderColor: "#fcd34d", background: "#fffbeb" }}
+            role="alert"
+          >
+            {tPay.stockExceededPayBlock}
+            <ul style={{ margin: "8px 0 0", paddingLeft: 18, fontSize: 12, lineHeight: 1.45 }}>
+              {grandmaStockLineIssues.map((issue) => (
+                <li key={issue.id}>
+                  {issue.name}:{" "}
+                  {tPay.stockExceededLine
+                    .replace("{requested}", String(issue.requested))
+                    .replace("{available}", String(issue.available))}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </section>
 
       {/* Page 3 — order lines (sits under .app, directly before #page3) */}
@@ -4476,6 +5607,34 @@ export default function GrandmaPage() {
                       {p.name} x{p.qty}
                     </div>
                     <div className="summary-sub">{formatRwf(p.price)} each</div>
+                    {productStockOnHand(p) != null ? (
+                      <div className="summary-sub" style={{ color: "#6f8399" }}>
+                        {tPay.stockOnHandLabel.replace("{n}", String(productStockOnHand(p)))}
+                      </div>
+                    ) : null}
+                    {grandmaStockLineIssues.find((i) => i.id === p.id) ? (
+                      <div
+                        className="summary-sub"
+                        style={{ color: "#92400e", fontWeight: 600 }}
+                        role="alert"
+                      >
+                        {tPay.stockExceededLine
+                          .replace(
+                            "{requested}",
+                            String(
+                              grandmaStockLineIssues.find((i) => i.id === p.id)?.requested ?? p.qty,
+                            ),
+                          )
+                          .replace(
+                            "{available}",
+                            String(
+                              grandmaStockLineIssues.find((i) => i.id === p.id)?.available ??
+                                productStockOnHand(p) ??
+                                0,
+                            ),
+                          )}
+                      </div>
+                    ) : null}
                   </div>
                   <div className="summary-item-end">
                     <button
@@ -4673,7 +5832,24 @@ export default function GrandmaPage() {
         </div>
 
         <div className="card summary-pay-card">
-          <button type="button" className="primary-btn summary-pay-btn" onClick={() => goToPage(5)}>
+          {hasGrandmaStockBlock ? (
+            <p
+              className="card note"
+              style={{ marginBottom: 10, color: "#92400e", borderColor: "#fcd34d", background: "#fffbeb" }}
+              role="alert"
+            >
+              {tPay.stockExceededPayBlock}
+            </p>
+          ) : null}
+          <button
+            type="button"
+            className="primary-btn summary-pay-btn"
+            disabled={hasGrandmaStockBlock}
+            onClick={() => {
+              if (hasGrandmaStockBlock) return
+              goToPage(5)
+            }}
+          >
             <span className="summary-pay-icon" aria-hidden>
               💳
             </span>
@@ -4745,6 +5921,346 @@ export default function GrandmaPage() {
             </div>
           ))}
         </div>
+
+        {selectedShop && selectedPayment !== "bk" ? (
+          <div
+            className="card pay-method-form"
+            style={{ textAlign: "left", marginTop: 12, marginBottom: 12, padding: "14px 16px" }}
+          >
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontWeight: 800, fontSize: 15, color: "var(--text)" }}>{tPay.payStepPanelTitle}</div>
+              {tPay.payStepDemoNote.trim() ? (
+                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4, lineHeight: 1.35 }}>
+                  {tPay.payStepDemoNote}
+                </div>
+              ) : null}
+            </div>
+
+            {!grandmaBuyerSession?.phone?.trim() ? (
+              <div className="mb-4 space-y-2">
+                <div className="flex items-start gap-2">
+                  <Smartphone className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700" aria-hidden />
+                  <Label htmlFor="grandma-guest-phone" className="text-sm font-bold leading-snug text-emerald-950">
+                    {tPay.paymentGuestPhoneLabel}
+                  </Label>
+                </div>
+                <Input
+                  id="grandma-guest-phone"
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  placeholder={tPay.paymentGuestPhonePlaceholder}
+                  value={grandmaBuyerPhoneInput}
+                  onChange={(e) => setGrandmaBuyerPhoneInput(e.target.value)}
+                  className="pay-input-tap min-h-[48px] border-emerald-200 bg-white text-base focus-visible:ring-emerald-500/30"
+                />
+                <p className="text-xs leading-snug text-emerald-900/80">
+                  {tPay.paymentGuestPhoneNote}{" "}
+                  <a
+                    href={`${GRANDMA_PATHS.login}?redirect=${encodeURIComponent(GRANDMA_PATHS.appRoot)}`}
+                    className="font-semibold text-emerald-800 underline underline-offset-2"
+                  >
+                    {tPay.signIn}
+                  </a>
+                </p>
+              </div>
+            ) : null}
+
+            {selectedPayment === "momo" ? (
+              <div className="space-y-3">
+                <div style={{ fontWeight: 700, fontSize: 13 }}>{tPay.payStepMtnTitle}</div>
+                {grandmaMtnUssd ? (
+                  <div>
+                    <span className="text-xs font-bold text-[#166534]">{tPay.payStepMtnDial}</span>
+                    <div style={{ display: "flex", gap: 8, marginTop: 6, alignItems: "stretch" }}>
+                      <code
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          wordBreak: "break-all",
+                          fontSize: 12,
+                          padding: "10px 10px",
+                          background: "var(--pay-soft)",
+                          borderRadius: 10,
+                          border: "1px solid #bbf7d0",
+                          lineHeight: 1.35,
+                        }}
+                      >
+                        {grandmaMtnUssd}
+                      </code>
+                      <div className="flex shrink-0 gap-2 self-center">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="border-blue-200 text-xs font-bold text-blue-900 hover:bg-blue-50"
+                          onClick={() => {
+                            void (async () => {
+                              try {
+                                await navigator.clipboard.writeText(grandmaMtnUssd)
+                                setGrandmaUssdCopied(true)
+                                window.setTimeout(() => setGrandmaUssdCopied(false), 2000)
+                              } catch {
+                                window.alert(grandmaMtnUssd)
+                              }
+                            })()
+                          }}
+                        >
+                          {grandmaUssdCopied ? tPay.payStepCopied : tPay.payStepCopy}
+                        </Button>
+                        {grandmaMtnUssdTelHref ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="border-blue-200 text-xs font-bold text-blue-900 hover:bg-blue-50"
+                            asChild
+                          >
+                            <a href={grandmaMtnUssdTelHref}>
+                              <Phone className="mr-1 h-3.5 w-3.5" aria-hidden />
+                              {tPay.payStepDialMomo}
+                            </a>
+                          </Button>
+                        ) : (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="border-blue-200 text-xs font-bold text-blue-900"
+                            disabled
+                          >
+                            <Phone className="mr-1 h-3.5 w-3.5" aria-hidden />
+                            {tPay.payStepDialMomo}
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <p style={{ fontSize: 12, color: "#b45309", margin: 0 }}>{tPay.payStepMtnNoUssd}</p>
+                )}
+                <div
+                  className="min-w-0 space-y-2 rounded-xl border border-[#dbe7f3] bg-white px-3 py-3"
+                  style={{ marginTop: 4 }}
+                >
+                  <div className="flex items-center gap-2">
+                    <MessageSquare className="h-4 w-4 shrink-0 text-[#127fc0]" aria-hidden />
+                    <span className="text-sm font-semibold text-[#17324d]">{tPay.payStepReadMoMoSmsTitle}</span>
+                  </div>
+                  <p className="text-xs text-[#6f8399]">
+                    {tPay.payStepReadMoMoSmsHint.replace(
+                      "{total}",
+                      Math.round(grandTotal).toLocaleString(),
+                    )}
+                  </p>
+                  <Textarea
+                    value={grandmaMomoSmsPaste}
+                    onChange={(e) => {
+                      setGrandmaMomoSmsPaste(e.target.value)
+                      setGrandmaSmsPayCheck(null)
+                      setGrandmaSmsMatchResult(null)
+                    }}
+                    className="min-h-[88px] resize-y border-[#dbe7f3] text-sm"
+                    placeholder="MTN MoMo…"
+                    aria-label={tPay.payStepReadMoMoSmsTitle}
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="w-full border-[#dbe7f3] bg-[#f7fbff] text-[#17324d] hover:bg-[#eef6ff]"
+                    onClick={() => verifyGrandmaMoMoSms()}
+                    disabled={grandTotal < 1 || !grandmaMomoSmsPaste.trim()}
+                  >
+                    {tPay.payStepVerifySms}
+                  </Button>
+                  {grandmaSmsPayCheck === "paid" ? (
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-2 text-xs font-medium text-emerald-900">
+                      {grandmaSmsMatchResult?.txId
+                        ? tPay.payStepPaymentPaidMatchedWithTxn.replace(
+                            "{txnId}",
+                            grandmaSmsMatchResult.txId,
+                          )
+                        : tPay.payStepPaymentPaidMatched}
+                    </div>
+                  ) : null}
+                  {grandmaSmsPayCheck === "no_amount" ? (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-2 text-xs text-amber-950">
+                      {tPay.payStepPaymentNoAmountInSms}
+                    </div>
+                  ) : null}
+                  {grandmaSmsPayCheck === "mismatch" && grandmaSmsMatchResult ? (
+                    <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-2 text-xs text-red-900">
+                      {tPay.payStepPaymentMismatch
+                        .replace("{got}", String(grandmaSmsMatchResult.amount ?? "—"))
+                        .replace("{expected}", Math.round(grandTotal).toLocaleString())}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : selectedPayment === "airtel" ? (
+              <div className="space-y-3">
+                <div style={{ fontWeight: 700, fontSize: 13 }}>{tPay.payStepAirtelTitle}</div>
+                {grandmaAirtelUssd ? (
+                  <div>
+                    <span className="text-xs font-bold text-[#166534]">{tPay.payStepAirtelDial}</span>
+                    <div style={{ display: "flex", gap: 8, marginTop: 6, alignItems: "stretch" }}>
+                      <code
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          wordBreak: "break-all",
+                          fontSize: 12,
+                          padding: "10px 10px",
+                          background: "var(--pay-soft)",
+                          borderRadius: 10,
+                          border: "1px solid #bbf7d0",
+                          lineHeight: 1.35,
+                        }}
+                      >
+                        {grandmaAirtelUssd}
+                      </code>
+                      <div className="flex shrink-0 gap-2 self-center">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="border-blue-200 text-xs font-bold text-blue-900 hover:bg-blue-50"
+                          onClick={() => {
+                            void (async () => {
+                              try {
+                                await navigator.clipboard.writeText(grandmaAirtelUssd)
+                                setGrandmaUssdCopied(true)
+                                window.setTimeout(() => setGrandmaUssdCopied(false), 2000)
+                              } catch {
+                                window.alert(grandmaAirtelUssd)
+                              }
+                            })()
+                          }}
+                        >
+                          {grandmaUssdCopied ? tPay.payStepCopied : tPay.payStepCopy}
+                        </Button>
+                        {grandmaAirtelUssdTelHref ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="border-blue-200 text-xs font-bold text-blue-900 hover:bg-blue-50"
+                            asChild
+                          >
+                            <a href={grandmaAirtelUssdTelHref}>
+                              <Phone className="mr-1 h-3.5 w-3.5" aria-hidden />
+                              {tPay.payStepDialMomo}
+                            </a>
+                          </Button>
+                        ) : (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="border-blue-200 text-xs font-bold text-blue-900"
+                            disabled
+                          >
+                            <Phone className="mr-1 h-3.5 w-3.5" aria-hidden />
+                            {tPay.payStepDialMomo}
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+                <p style={{ fontSize: 11, color: "var(--muted)", margin: 0, lineHeight: 1.45 }}>{tPay.payStepAirtelHelp}</p>
+                <div
+                  className="min-w-0 space-y-2 rounded-xl border border-[#dbe7f3] bg-white px-3 py-3"
+                  style={{ marginTop: 4 }}
+                >
+                  <div className="flex items-center gap-2">
+                    <MessageSquare className="h-4 w-4 shrink-0 text-[#127fc0]" aria-hidden />
+                    <span className="text-sm font-semibold text-[#17324d]">{tPay.payStepReadMoMoSmsTitle}</span>
+                  </div>
+                  <p className="text-xs text-[#6f8399]">
+                    {tPay.payStepReadMoMoSmsHint.replace(
+                      "{total}",
+                      Math.round(grandTotal).toLocaleString(),
+                    )}
+                  </p>
+                  <Textarea
+                    value={grandmaMomoSmsPaste}
+                    onChange={(e) => {
+                      setGrandmaMomoSmsPaste(e.target.value)
+                      setGrandmaSmsPayCheck(null)
+                      setGrandmaSmsMatchResult(null)
+                    }}
+                    className="min-h-[88px] resize-y border-[#dbe7f3] text-sm"
+                    placeholder="Airtel Money…"
+                    aria-label={tPay.payStepReadMoMoSmsTitle}
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="w-full border-[#dbe7f3] bg-[#f7fbff] text-[#17324d] hover:bg-[#eef6ff]"
+                    onClick={() => verifyGrandmaMoMoSms()}
+                    disabled={grandTotal < 1 || !grandmaMomoSmsPaste.trim()}
+                  >
+                    {tPay.payStepVerifySms}
+                  </Button>
+                  {grandmaSmsPayCheck === "paid" ? (
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-2 text-xs font-medium text-emerald-900">
+                      {grandmaSmsMatchResult?.txId
+                        ? tPay.payStepPaymentPaidMatchedWithTxn.replace(
+                            "{txnId}",
+                            grandmaSmsMatchResult.txId,
+                          )
+                        : tPay.payStepPaymentPaidMatched}
+                    </div>
+                  ) : null}
+                  {grandmaSmsPayCheck === "no_amount" ? (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-2 text-xs text-amber-950">
+                      {tPay.payStepPaymentNoAmountInSms}
+                    </div>
+                  ) : null}
+                  {grandmaSmsPayCheck === "mismatch" && grandmaSmsMatchResult ? (
+                    <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-2 text-xs text-red-900">
+                      {tPay.payStepPaymentMismatch
+                        .replace("{got}", String(grandmaSmsMatchResult.amount ?? "—"))
+                        .replace("{expected}", Math.round(grandTotal).toLocaleString())}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div style={{ fontWeight: 700, fontSize: 13 }}>{tPay.payStepCashTitle}</div>
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 10,
+                    cursor: "pointer",
+                    fontSize: 13,
+                    lineHeight: 1.45,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={grandmaCashConfirm}
+                    onChange={(e) => setGrandmaCashConfirm(e.target.checked)}
+                    style={{ marginTop: 3, width: 16, height: 16, flexShrink: 0 }}
+                  />
+                  <span>{tPay.payStepCashConfirm}</span>
+                </label>
+              </div>
+            )}
+
+            <p
+              style={{
+                fontSize: 11,
+                color: "var(--muted)",
+                margin: "14px 0 0",
+                lineHeight: 1.45,
+                borderTop: "1px solid var(--line)",
+                paddingTop: 10,
+              }}
+            >
+              {tPay.payStepCommissionNote}
+            </p>
+          </div>
+        ) : null}
 
         <div className="card breakdown">
           <div className="summary-row">
@@ -4886,43 +6402,37 @@ export default function GrandmaPage() {
             {grandmaOrderSubmitError}
           </div>
         ) : null}
-        {!grandmaBuyerSession?.phone?.trim() ? (
-          <div className="card" style={{ marginBottom: 14, textAlign: "left" }}>
-            <Label htmlFor="grandma-guest-phone" className="text-sm font-bold text-[#17324d]">
-              {tPay.paymentGuestPhoneLabel}
-            </Label>
-            <Input
-              id="grandma-guest-phone"
-              type="tel"
-              inputMode="tel"
-              autoComplete="tel"
-              placeholder={tPay.paymentGuestPhonePlaceholder}
-              value={grandmaBuyerPhoneInput}
-              onChange={(e) => setGrandmaBuyerPhoneInput(e.target.value)}
-              className="mt-2 border-[#dbe7f3]"
-            />
-            <p className="card note" style={{ marginTop: 10, fontSize: 11, lineHeight: 1.45, color: "var(--muted)" }}>
-              {tPay.paymentGuestPhoneNote}{" "}
-              <a
-                href={`${GRANDMA_PATHS.login}?redirect=${encodeURIComponent(GRANDMA_PATHS.appRoot)}`}
-                className="font-semibold text-[#1897e0] underline"
-              >
-                {tPay.signIn}
-              </a>
-              .
-            </p>
-          </div>
-        ) : null}
-        <button
-          type="button"
-          className="primary-btn"
-          disabled={grandmaOrderSubmitting}
-          onClick={() => void submitGrandmaOrder()}
-        >
-          {grandmaOrderSubmitting ? "…" : tPay.sendOrder}
-        </button>
+        {grandmaCanSendOrder ? (
+          <button
+            type="button"
+            className="primary-btn inline-flex min-h-[52px] w-full items-center justify-center gap-2 transition-transform duration-150 active:scale-[0.99]"
+            disabled={grandmaOrderSubmitting}
+            onClick={() => void submitGrandmaOrder()}
+          >
+            {grandmaOrderSubmitting ? (
+              <>
+                <Loader2 className="h-5 w-5 shrink-0 animate-spin" aria-hidden />
+                <span>{tPay.payStepProcessing}</span>
+              </>
+            ) : (
+              tPay.sendOrder
+            )}
+          </button>
+        ) : (
+          <p className="card note" style={{ marginBottom: 12, fontSize: 13, lineHeight: 1.45 }}>
+            {hasGrandmaStockBlock
+              ? tPay.stockExceededPayBlock
+              : selectedPayment === "momo"
+                ? tPay.payStepSendOrderLocked
+                : selectedPayment === "cash"
+                  ? tPay.payStepErrCash
+                  : selectedPayment === "airtel"
+                    ? tPay.payStepErrPhone
+                    : tPay.payStepSendOrderLocked}
+          </p>
+        )}
         <p className="card note" style={{ marginTop: 12, fontSize: 12, color: "var(--muted)" }}>
-          After checkout you get an <strong>order id</strong> and a <strong>track link</strong>. No sign-in required to buy — use the link to follow status, or sign in / add phone above to link the sale to you.
+          {tPay.payStepAfterCheckoutHint}
         </p>
       </section>
 
@@ -5143,20 +6653,6 @@ export default function GrandmaPage() {
                         <span className="mt-0.5 block text-xs text-muted-foreground">Hide lines the supplier marked out of stock.</span>
                       </span>
                     </label>
-                    <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-background p-3 hover:bg-muted/40">
-                      <input
-                        type="checkbox"
-                        checked={liveShowAll}
-                        onChange={(e) => setLiveShowAll(e.target.checked)}
-                        className="mt-0.5 h-4 w-4 shrink-0 accent-blue-600"
-                      />
-                      <span>
-                        <span className="block text-sm font-bold">Show full catalog</span>
-                        <span className="mt-0.5 block text-xs text-muted-foreground">
-                          When off, only a sample shows until you search.
-                        </span>
-                      </span>
-                    </label>
                   </div>
                 ) : null}
               </div>
@@ -5188,7 +6684,12 @@ export default function GrandmaPage() {
         open={settingsOpen}
         onOpenChange={(open) => {
           setSettingsOpen(open)
-          if (!open) setSettingsSellerGuardMsg(null)
+          if (open) {
+            setSettingsModePick(appMode)
+            setSettingsSellerGuardMsg(null)
+          } else {
+            setSettingsSellerGuardMsg(null)
+          }
         }}
       >
         <SheetContent
@@ -5213,6 +6714,7 @@ export default function GrandmaPage() {
                       key={mode}
                       type="button"
                       onClick={() => {
+                        setSettingsModePick(mode)
                         if (mode === "buyer") {
                           setSettingsSellerGuardMsg(null)
                           writeGrandmaSignupRole("buyer")
@@ -5245,10 +6747,11 @@ export default function GrandmaPage() {
                       }}
                       className={cn(
                         "rounded-xl border px-3 py-2.5 text-sm font-bold transition-colors",
-                        appMode === mode
-                          ? "border-blue-600 bg-blue-50 text-blue-900"
+                        settingsModePick === mode
+                          ? "border-blue-600 bg-blue-50 text-blue-900 ring-2 ring-blue-600/30"
                           : "border-border bg-background text-foreground hover:bg-muted/60",
                       )}
+                      aria-pressed={settingsModePick === mode}
                     >
                       {mode === "buyer" ? "Buyer" : "Seller"}
                     </button>
@@ -5256,7 +6759,9 @@ export default function GrandmaPage() {
                 </div>
                 <p className="mt-2 text-xs text-muted-foreground">{settingsUi.settingsModeHint}</p>
                 {settingsSellerGuardMsg ? (
-                  <p className="mt-2 text-sm font-medium text-red-800">{settingsSellerGuardMsg}</p>
+                  <p className="mt-2 rounded-lg bg-green-50 px-2.5 py-2 text-sm font-medium text-green-800">
+                    {settingsSellerGuardMsg}
+                  </p>
                 ) : null}
               </div>
 
@@ -5416,6 +6921,32 @@ export default function GrandmaPage() {
                     <>
                       <p className="text-sm text-muted-foreground">{settingsUi.settingsSellerIntro}</p>
                       <div className="text-base font-bold text-foreground">{sellerShopLabel || "—"}</div>
+                      <div>
+                        <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                          {settingsUi.language}
+                        </div>
+                        <div className="mt-2 flex gap-2">
+                          {(["en", "rw", "fr"] as const).map((lang) => (
+                            <button
+                              key={lang}
+                              type="button"
+                              onClick={() => setLanguage(lang)}
+                              className={cn(
+                                "min-w-0 flex-1 rounded-xl border px-2 py-2.5 text-xs font-bold transition-colors",
+                                language === lang
+                                  ? "border-blue-600 bg-blue-50 text-blue-900"
+                                  : "border-border bg-background text-foreground hover:bg-muted/60",
+                              )}
+                            >
+                              {lang === "en"
+                                ? settingsUi.langEn
+                                : lang === "rw"
+                                  ? settingsUi.langRw
+                                  : settingsUi.langFr}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                       <div className="grid gap-2">
                         <button
                           type="button"

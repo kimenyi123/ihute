@@ -14,6 +14,81 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { useLanguageStore, type Language } from "@/lib/language-store";
+
+const SCAN_MENU_UI: Record<Language, {
+  pageTitle: string;
+  pageSubtitle: string;
+  step1Title: string;
+  step1Desc: string;
+  step2Title: string;
+  processAll: string;
+  processingPage: (current: number, total: number) => string;
+  resizeNote: string;
+  step3Title: string;
+  noItems: string;
+  tryClearer: string;
+  startOver: string;
+  rawOcrTitle: string;
+  rawOcrEmpty: string;
+  maxImages: (n: number) => string;
+  totalSizeLimit: (mb: number) => string;
+}> = {
+  en: {
+    pageTitle: "Scan Menu",
+    pageSubtitle: "Upload menu photos → extract items with OCR → download Excel",
+    step1Title: "1. Upload menu images",
+    step1Desc: "Add multiple photos (e.g. each page of the menu). Items, prices, and descriptions are read from the images.",
+    step2Title: "2. Preview & process",
+    processAll: "Process all images",
+    processingPage: (c, t) => `Processing page ${c} of ${t}…`,
+    resizeNote: "Images are resized before upload for faster processing. Please wait.",
+    step3Title: "3. Review & export",
+    noItems: "No menu items were extracted from the images.",
+    tryClearer: "Try clearer photos, better lighting, or ensure the menu text is visible.",
+    startOver: "Start over",
+    rawOcrTitle: "What we read from the images (raw OCR text)",
+    rawOcrEmpty: "(empty — OCR may have failed or image was unreadable)",
+    maxImages: (n) => `Maximum ${n} images per session.`,
+    totalSizeLimit: (mb) => `Total size must be under ${mb}MB.`,
+  },
+  rw: {
+    pageTitle: "Soma Menyu",
+    pageSubtitle: "Ohereza amafoto ya menyu → soma ibikubiyemo na OCR → kuramo Excel",
+    step1Title: "1. Ohereza amashusho ya menyu",
+    step1Desc: "Ongeraho amafoto menshi (urugero: buri paji ya menyu). Ibicuruzwa, ibiciro, n'ibisobanuro bisomwa mu mashusho.",
+    step2Title: "2. Reba mbere & ukore",
+    processAll: "Kora amashusho yose",
+    processingPage: (c, t) => `Gusoma paji ${c} kuri ${t}…`,
+    resizeNote: "Amashusho agabanyijemo ingano mbere yo koherezwa. Tegereza.",
+    step3Title: "3. Suzuma & ohereze",
+    noItems: "Nta bicuruzwa bya menyu byavuwe mu mashusho.",
+    tryClearer: "Gerageza amafoto asobanutse, urumuri rwiza, cyangwa wizere ko inyandiko za menyu zigaragara.",
+    startOver: "Ongera utangire",
+    rawOcrTitle: "Ibyo twasomye mu mashusho (inyandiko z'OCR)",
+    rawOcrEmpty: "(ubusa — OCR ishobora kuba yarananiranye cyangwa ishusho ntiyasomeka)",
+    maxImages: (n) => `Ntarengwa: amashusho ${n} ku mwitozo umwe.`,
+    totalSizeLimit: (mb) => `Ingano yose igomba kuba munsi ya ${mb}MB.`,
+  },
+  fr: {
+    pageTitle: "Scanner le menu",
+    pageSubtitle: "Téléversez des photos de menu → extraction OCR → téléchargement Excel",
+    step1Title: "1. Téléverser les images du menu",
+    step1Desc: "Ajoutez plusieurs photos (par ex. chaque page du menu). Les articles, prix et descriptions sont extraits des images.",
+    step2Title: "2. Aperçu et traitement",
+    processAll: "Traiter toutes les images",
+    processingPage: (c, t) => `Traitement de la page ${c} sur ${t}…`,
+    resizeNote: "Les images sont redimensionnées avant l'envoi pour un traitement plus rapide. Veuillez patienter.",
+    step3Title: "3. Vérifier et exporter",
+    noItems: "Aucun article de menu n'a été extrait des images.",
+    tryClearer: "Essayez des photos plus nettes, un meilleur éclairage ou assurez-vous que le texte du menu est visible.",
+    startOver: "Recommencer",
+    rawOcrTitle: "Ce que nous avons lu des images (texte OCR brut)",
+    rawOcrEmpty: "(vide — l'OCR a peut-être échoué ou l'image était illisible)",
+    maxImages: (n) => `Maximum ${n} images par session.`,
+    totalSizeLimit: (mb) => `La taille totale doit être inférieure à ${mb} Mo.`,
+  },
+};
 
 const MAX_IMAGES = 20;
 const MAX_TOTAL_MB = 50;
@@ -161,6 +236,8 @@ async function processWithRetry(
 }
 
 export default function ScanMenuPage() {
+  const language = useLanguageStore((s) => s.language);
+  const ui = SCAN_MENU_UI[language] ?? SCAN_MENU_UI.en;
   const [images, setImages] = useState<ImageFile[]>([]);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [processing, setProcessing] = useState(false);
@@ -182,12 +259,12 @@ export default function ScanMenuPage() {
   const handleFiles = useCallback((files: ImageFile[]) => {
     setError(null);
     if (files.length > MAX_IMAGES) {
-      setError(`Maximum ${MAX_IMAGES} images per session.`);
+      setError(ui.maxImages(MAX_IMAGES));
       return;
     }
     const total = files.reduce((acc, f) => acc + f.file.size, 0);
     if (total > MAX_TOTAL_BYTES) {
-      setError(`Total size must be under ${MAX_TOTAL_MB}MB.`);
+      setError(ui.totalSizeLimit(MAX_TOTAL_MB));
       return;
     }
     setImages(files);
@@ -261,17 +338,17 @@ export default function ScanMenuPage() {
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900">Scan Menu</h1>
+        <h1 className="text-2xl font-bold text-slate-900">{ui.pageTitle}</h1>
         <p className="text-slate-600 mt-1">
-          Upload menu photos → extract items with OCR → download Excel
+          {ui.pageSubtitle}
         </p>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>1. Upload menu images</CardTitle>
+          <CardTitle>{ui.step1Title}</CardTitle>
           <CardDescription>
-            Add multiple photos (e.g. each page of the menu). Items, prices, and descriptions are read from the images.
+            {ui.step1Desc}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -291,7 +368,7 @@ export default function ScanMenuPage() {
       {images.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>2. Preview & process</CardTitle>
+            <CardTitle>{ui.step2Title}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <ImagePreviewList
@@ -306,8 +383,8 @@ export default function ScanMenuPage() {
                   disabled={!canProcess || processing}
                 >
                   {processing
-                    ? `Processing page ${progress.current} of ${progress.total}…`
-                    : "Process all images"}
+                    ? ui.processingPage(progress.current, progress.total)
+                    : ui.processAll}
                 </Button>
                 {processing && (
                   <div className="flex-1 max-w-xs h-2 bg-slate-200 rounded-full overflow-hidden">
@@ -326,7 +403,7 @@ export default function ScanMenuPage() {
               </div>
               {processing && (
                 <p className="text-sm text-muted-foreground">
-                  Images are resized before upload for faster processing. Please wait.
+                  {ui.resizeNote}
                 </p>
               )}
             </div>
@@ -338,7 +415,7 @@ export default function ScanMenuPage() {
         <div ref={resultsRef}>
         <Card>
           <CardHeader>
-            <CardTitle>3. Review & export</CardTitle>
+            <CardTitle>{ui.step3Title}</CardTitle>
           </CardHeader>
           <CardContent>
             {menuItems.length > 0 ? (
@@ -351,23 +428,22 @@ export default function ScanMenuPage() {
               <div className="py-8 space-y-4">
                 <div className="text-center space-y-2">
                   <p className="text-muted-foreground">
-                    No menu items were extracted from the images.
+                    {ui.noItems}
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    Try clearer photos, better lighting, or ensure the menu text is visible.
+                    {ui.tryClearer}
                   </p>
                   <Button variant="outline" onClick={startOver}>
-                    Start over
+                    {ui.startOver}
                   </Button>
                 </div>
                 {lastRawText && (
                   <details className="mt-6 text-left">
                     <summary className="cursor-pointer text-sm font-medium text-slate-700 hover:text-slate-900">
-                      What we read from the images (raw OCR text)
+                      {ui.rawOcrTitle}
                     </summary>
                     <pre className="mt-2 p-4 bg-muted rounded-lg text-xs text-foreground whitespace-pre-wrap break-words max-h-64 overflow-y-auto border">
-                      {lastRawText ||
-                        "(empty — OCR may have failed or image was unreadable)"}
+                      {lastRawText || ui.rawOcrEmpty}
                     </pre>
                   </details>
                 )}

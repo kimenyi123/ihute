@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import mysql from "mysql2/promise"
 import { isValidRwandaMobileE164, normalizeRwandaMobileE164 } from "@/lib/rwanda-phone"
 import { sendSms } from "@/lib/sms/send-sms"
-import { buildUmuriroSellerSmsBody } from "@/lib/umuriro-seller-sms"
+import { buildUmuriroSellerSmsBodyFromLines } from "@/lib/umuriro-seller-sms"
 
 /**
  * Umuriro: minimal “shop contact + purchase line + MoMo USSD” payload.
@@ -53,9 +53,21 @@ export type UmuriroPayload = {
     quantity: number
     totalRwf: number
   }
+  /** Multi-item cart (Quick + Advanced). When set, `line` mirrors first row for older readers. */
+  lines?: Array<{
+    itemName: string
+    itemCode?: string
+    unitPriceRwf: number
+    quantity: number
+    lineTotalRwf: number
+  }>
   ussd: string
   submittedAt: string
   rid?: string
+  payment?: {
+    channel: "momo" | "cash"
+    momoSmsMatched: boolean | null
+  }
 }
 
 export async function POST(req: Request) {
@@ -86,9 +98,24 @@ export async function POST(req: Request) {
 
     const shop = record.shop as Record<string, unknown> | undefined
     const line = record.line as Record<string, unknown> | undefined
+    const linesRaw = record.lines
+    const lineNames: string[] = []
+    if (Array.isArray(linesRaw)) {
+      for (const row of linesRaw) {
+        if (row && typeof row === "object" && typeof (row as { itemName?: unknown }).itemName === "string") {
+          const n = (row as { itemName: string }).itemName.trim()
+          if (n) lineNames.push(n)
+        }
+      }
+    }
     const rawPhone =
       typeof shop?.shopPhoneOptional === "string" ? shop.shopPhoneOptional.trim() : ""
-    const itemName = typeof line?.itemName === "string" ? line.itemName : ""
+    const itemName =
+      lineNames.length > 0
+        ? lineNames.join(", ")
+        : typeof line?.itemName === "string"
+          ? line.itemName
+          : ""
 
     let sms: {
       attempted: boolean
@@ -104,7 +131,10 @@ export async function POST(req: Request) {
       if (e164 && isValidRwandaMobileE164(e164)) {
         sms.attempted = true
         sms.to = e164
-        const text = buildUmuriroSellerSmsBody(itemName, rid)
+        const text = buildUmuriroSellerSmsBodyFromLines(
+          lineNames.length > 0 ? lineNames : itemName ? [itemName] : [],
+          rid,
+        )
         smsPreview = text
         const out = await sendSms(e164, text)
         sms.sent = out.ok

@@ -3,6 +3,7 @@
  * Proxies to `POST /api/auth/login` (Java auth).
  */
 import type { User, UserRole } from "@/lib/auth-store"
+import { normalizePhoneDigitsForAuth } from "@/lib/rwanda-phone"
 
 export type ApiLoginOK = {
   ok: true
@@ -15,11 +16,12 @@ export type ApiLoginOK = {
   user: { email: string; firstName: string; lastName: string; tel: string; location: string; owner: string }
 }
 
-function toUserRoleFromAuth(auth: Pick<ApiLoginOK, "role" | "dualPharmacyRetail">): UserRole {
-  const dbRole = auth.role?.toUpperCase()
-  if (dbRole === "ADMIN") return "admin"
+function toUserRoleFromAuth(auth: Pick<ApiLoginOK, "role" | "dbRole" | "dualPharmacyRetail">): UserRole {
+  const roleField = String(auth.role ?? "").toUpperCase()
+  const typeField = String(auth.dbRole ?? "").toUpperCase()
+  if (roleField === "ADMIN" || typeField === "ADMIN") return "admin"
   if (auth.dualPharmacyRetail) return "supplier"
-  if (dbRole === "SELLER") return "supplier"
+  if (roleField === "SELLER" || typeField === "SELLER") return "supplier"
   return "customer"
 }
 
@@ -80,7 +82,9 @@ export function normalizeJavaLoginToUser(payload: ApiLoginOK): User {
       email ||
       ishyiga,
     role: toUserRoleFromAuth(payload),
-    dbRole: payload.dbRole,
+    dbRole:
+      payload.dbRole ??
+      (payload.role ? String(payload.role).toUpperCase() : undefined),
     dualPharmacyRetail: !!payload.dualPharmacyRetail,
     pharmacySector: !!payload.pharmacySector,
     phone,
@@ -91,21 +95,50 @@ export function normalizeJavaLoginToUser(payload: ApiLoginOK): User {
   }
 }
 
+/** Map Java `user-auth` errors to clearer copy (login still fails — DB/Java must match). */
+export function humanizeAuthLoginError(json: Record<string, unknown> | null | undefined): string {
+  const err = String(json?.error ?? "").trim()
+  const code = String(json?.code ?? "").trim().toUpperCase()
+  if (!err && !code) return "Invalid credentials"
+  if (code === "AUTH_LOGIN_FAIL" && /account not found/i.test(err)) {
+    return (
+      "Account not found for this phone or email. Admin accounts often use a real email in the database — " +
+      "try signing in with that email (not only 07…). If you use phone, TEL in account_signup must match."
+    )
+  }
+  if (code === "AUTH_LOGIN_FAIL" && /password|credential|invalid/i.test(err)) {
+    return err || "Wrong password for this account."
+  }
+  if (err) return err
+  if (code) return `Login failed (${code})`
+  return "Invalid credentials"
+}
+
 export async function loginWithCredentialsResult(
   phoneOrEmail: string,
   password: string,
 ): Promise<LoginWithCredentialsResult> {
   const trimmed = phoneOrEmail.trim()
-  const res = await fetch("/api/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: trimmed, password }),
-    credentials: "include",
-  })
-  const json = (await res.json().catch(() => null)) as Record<string, unknown> | null
+  /** Phone field is sent as `email` to Java; canonicalize 07…/8… so it matches `tel` in DB (`250…`). */
+  const emailForJava = trimmed.includes("@")
+    ? trimmed
+    : (normalizePhoneDigitsForAuth(trimmed) || trimmed)
+  const doLogin = (email: string) =>
+    fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+      credentials: "include",
+    })
+
+  let res = await doLogin(emailForJava)
+  let json = (await res.json().catch(() => null)) as Record<string, unknown> | null
+  if ((!res.ok || !json || !(json as { ok?: boolean }).ok) && emailForJava !== trimmed && !trimmed.includes("@")) {
+    res = await doLogin(trimmed)
+    json = (await res.json().catch(() => null)) as Record<string, unknown> | null
+  }
   if (!res.ok || !json || !(json as { ok?: boolean }).ok) {
-    const msg = String((json as { error?: string } | null)?.error || "Invalid credentials")
-    throw new Error(msg)
+    throw new Error(humanizeAuthLoginError(json))
   }
   if (parseMustChangePassword(json)) {
     return { outcome: "must_change", payload: json as unknown as ApiLoginOK }
@@ -119,6 +152,13 @@ export async function loginWithCredentials(phoneOrEmail: string, password: strin
     throw new Error("Password change required. Use the full sign-in page to set a new password.")
   }
   return r.user
+}
+
+/** Platform admin (Java TYPE/role ADMIN). */
+export function isAdminUser(user: User | null): boolean {
+  if (!user) return false
+  if (user.role === "admin") return true
+  return String(user.dbRole ?? "").toUpperCase() === "ADMIN"
 }
 
 /** Seller / supplier access for Grandma gate (SELLER role or dual pharmacy retail). */

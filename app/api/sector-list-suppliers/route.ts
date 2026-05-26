@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server"
-import { getProxyTimeoutMs, getSectorListSuppliersUrl } from "@/lib/backend-config"
+import { getProxyTimeoutMs, getSectorListSuppliersUrl, warmJavaBackendBase } from "@/lib/backend-config"
 
 const DEFAULT_TIMEOUT_MS = Math.max(30000, getProxyTimeoutMs())
 
@@ -8,6 +8,7 @@ const DEFAULT_TIMEOUT_MS = Math.max(30000, getProxyTimeoutMs())
  * {@code fetchSuggestions?listSuppliersWithProducts=}, with Tomcat timing headers forwarded.
  */
 export async function GET(req: NextRequest) {
+  await warmJavaBackendBase()
   const incoming = new URL(req.url)
   const target = new URL(getSectorListSuppliersUrl())
   incoming.searchParams.forEach((v, k) => target.searchParams.set(k, v))
@@ -25,6 +26,17 @@ export async function GET(req: NextRequest) {
     })
     const text = await resp.text()
     const proxyRtMs = Math.round(performance.now() - t0)
+
+    if (resp.status === 404) {
+      const body = JSON.stringify([])
+      const headers = new Headers()
+      headers.set("content-type", "application/json; charset=utf-8")
+      headers.set("Access-Control-Allow-Origin", "*")
+      headers.set("Access-Control-Allow-Methods", "GET, OPTIONS")
+      headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+      headers.set("X-Proxy-Rt-Ms", String(proxyRtMs))
+      return new Response(body, { status: 200, headers })
+    }
 
     const headers = new Headers()
     headers.set("content-type", resp.headers.get("content-type") || "application/json; charset=utf-8")

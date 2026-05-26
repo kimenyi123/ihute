@@ -18,6 +18,7 @@ import {
 import { UrubutoTransactionReport } from "@/components/urubuto/transaction-report"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { cn } from "@/lib/utils"
+import { useLanguageStore, type Language } from "@/lib/language-store"
 import { ArrowLeft, Bell, ChevronDown, FileText, Loader2, Upload } from "lucide-react"
 
 type UrubutoNotification = {
@@ -34,8 +35,190 @@ const DOC_TYPES = [
   "SIGNED_MERCHANT_FORM",
 ] as const
 
+const URUBUTO_UI: Record<Language, {
+  signInPrompt: string
+  backToDashboard: string
+  activeSubtitle: string
+  inactiveSubtitle: string
+  paymentSettings: string
+  testEnvironment: string
+  markRead: string
+  updatesTitle: (count: number) => string
+  updatesFallback: string
+  newUpdates: string
+  loading: string
+  startTitle: string
+  startDescription: (account: string) => string
+  startApplication: string
+  applicationStarted: string
+  registrationFailed: string
+  submitFailed: string
+  submittedForReview: string
+  documentUploaded: string
+  uploadFailed: string
+  status: string
+  documentsTitle: string
+  missingDoc: string
+  verified: string
+  uploadedUnderReview: string
+  rejected: string
+  upload: string
+  replace: string
+  uploading: string
+  submitTitle: string
+  submitDescription: string
+  submitForReview: string
+  compliance: string
+  missing: string
+  uploaded: string
+  wizard: Record<string, { title: string; description: string }>
+  missingReadState: string
+  couldNotMarkRead: string
+}> = {
+  en: {
+    signInPrompt: "Sign in as a supplier to manage UrubutoPay.",
+    backToDashboard: "Back to dashboard",
+    activeSubtitle: "MoMo and card payments are active at checkout.",
+    inactiveSubtitle: "Accept MoMo and card from customers — fast, secure payments powered by UrubutoPay on IHUTE.",
+    paymentSettings: "Payment settings",
+    testEnvironment: "Test environment",
+    markRead: "Mark read",
+    updatesTitle: (count) => `${count} Urubuto update${count === 1 ? "" : "s"}`,
+    updatesFallback: "Document review or activation update",
+    newUpdates: "New updates",
+    loading: "Loading...",
+    startTitle: "Start your application",
+    startDescription: (account) => `Register once using your seller payer code ${account}.`,
+    startApplication: "Start application",
+    applicationStarted: "Application started.",
+    registrationFailed: "Registration failed",
+    submitFailed: "Submit failed",
+    submittedForReview: "Submitted for review. We will notify you when UrubutoPay is live.",
+    documentUploaded: "Document uploaded.",
+    uploadFailed: "Upload failed",
+    status: "Status",
+    documentsTitle: "Documents (3 required)",
+    missingDoc: "Missing — pdf, jpg, or png",
+    verified: "Verified",
+    uploadedUnderReview: "Uploaded — under review",
+    rejected: "Rejected",
+    upload: "Upload",
+    replace: "Replace",
+    uploading: "Uploading...",
+    submitTitle: "Submit for review",
+    submitDescription: "Send your file to IHUTE ops for Urubuto activation.",
+    submitForReview: "Submit for review",
+    compliance: "Application & compliance",
+    missing: "Missing",
+    uploaded: "Uploaded",
+    wizard: {
+      register: { title: "Apply", description: "Register for UrubutoPay" },
+      documents: { title: "Documents", description: "Upload KYC (3 files)" },
+      review: { title: "Review", description: "IHUTE & Urubuto activation" },
+      live: { title: "Go live", description: "Accept MoMo & card" },
+    },
+    missingReadState:
+      "Read state did not save on the server. Run kaos/docs/migration_notification_urubuto_read.sql (add is_read), redeploy Kaos, then try again.",
+    couldNotMarkRead: "Could not mark notifications as read",
+  },
+  rw: {
+    signInPrompt: "Injira nka supplier kugira ngo ucunge UrubutoPay.",
+    backToDashboard: "Subira kuri dashboard",
+    activeSubtitle: "Kwishyura na MoMo na card birakora muri checkout.",
+    inactiveSubtitle: "Emera MoMo na card z'abakiriya — ubwishyu bwihuse kandi butekanye bwa UrubutoPay kuri IHUTE.",
+    paymentSettings: "Igenamiterere ry'ubwishyu",
+    testEnvironment: "Aho kugeragereza",
+    markRead: "Shyira ko byasomwe",
+    updatesTitle: (count) => `Amakuru ${count} ya Urubuto`,
+    updatesFallback: "Amakuru ku isuzuma ry'inyandiko cyangwa gufungura serivisi",
+    newUpdates: "Amakuru mashya",
+    loading: "Birimo gutangira...",
+    startTitle: "Tangira ubusabe bwawe",
+    startDescription: (account) => `Iyandikishe rimwe ukoresheje kode ya supplier ${account}.`,
+    startApplication: "Tangira ubusabe",
+    applicationStarted: "Ubusabe bwatangiye.",
+    registrationFailed: "Kwiyandikisha byanze",
+    submitFailed: "Kohereza byanze",
+    submittedForReview: "Byoherejwe gusuzumwa. Tuzakumenyesha UrubutoPay nitangira gukora.",
+    documentUploaded: "Inyandiko yoherejwe.",
+    uploadFailed: "Kohereza byanze",
+    status: "Imiterere",
+    documentsTitle: "Inyandiko (3 zisabwa)",
+    missingDoc: "Irabura — pdf, jpg, cyangwa png",
+    verified: "Yemejwe",
+    uploadedUnderReview: "Yoherejwe — irimo gusuzumwa",
+    rejected: "Yanzwe",
+    upload: "Ohereza",
+    replace: "Hindura",
+    uploading: "Birimo kohereza...",
+    submitTitle: "Ohereza gusuzumwa",
+    submitDescription: "Ohereza dosiye yawe kuri IHUTE ops kugira ngo Urubuto ikorwe.",
+    submitForReview: "Ohereza gusuzumwa",
+    compliance: "Ubusabe n'ibisabwa",
+    missing: "Irabura",
+    uploaded: "Yoherejwe",
+    wizard: {
+      register: { title: "Saba", description: "Iyandikishe kuri UrubutoPay" },
+      documents: { title: "Inyandiko", description: "Ohereza KYC (dosiye 3)" },
+      review: { title: "Isuzuma", description: "Gufungura na IHUTE & Urubuto" },
+      live: { title: "Tangira", description: "Emera MoMo na card" },
+    },
+    missingReadState:
+      "Kubika ko byasomwe ntibyagenze neza kuri server. Koresha kaos/docs/migration_notification_urubuto_read.sql (ongeramo is_read), wongere ushyireho Kaos, hanyuma wongere ugerageze.",
+    couldNotMarkRead: "Gushyiraho ko byasomwe byanze",
+  },
+  fr: {
+    signInPrompt: "Connectez-vous comme fournisseur pour gérer UrubutoPay.",
+    backToDashboard: "Retour au tableau de bord",
+    activeSubtitle: "Les paiements MoMo et carte sont actifs au paiement.",
+    inactiveSubtitle: "Acceptez MoMo et les cartes des clients — paiements rapides et sécurisés avec UrubutoPay sur IHUTE.",
+    paymentSettings: "Paramètres de paiement",
+    testEnvironment: "Environnement de test",
+    markRead: "Marquer comme lu",
+    updatesTitle: (count) => `${count} mise${count === 1 ? "" : "s"} à jour Urubuto`,
+    updatesFallback: "Mise à jour de l'examen des documents ou de l'activation",
+    newUpdates: "Nouvelles mises à jour",
+    loading: "Chargement...",
+    startTitle: "Démarrer votre demande",
+    startDescription: (account) => `Inscrivez-vous une seule fois avec votre code fournisseur ${account}.`,
+    startApplication: "Démarrer la demande",
+    applicationStarted: "Demande démarrée.",
+    registrationFailed: "Échec de l'inscription",
+    submitFailed: "Échec de l'envoi",
+    submittedForReview: "Envoyé pour examen. Nous vous informerons lorsque UrubutoPay sera actif.",
+    documentUploaded: "Document envoyé.",
+    uploadFailed: "Échec du téléversement",
+    status: "Statut",
+    documentsTitle: "Documents (3 requis)",
+    missingDoc: "Manquant — pdf, jpg ou png",
+    verified: "Vérifié",
+    uploadedUnderReview: "Envoyé — en cours d'examen",
+    rejected: "Rejeté",
+    upload: "Téléverser",
+    replace: "Remplacer",
+    uploading: "Téléversement...",
+    submitTitle: "Envoyer pour examen",
+    submitDescription: "Envoyez votre dossier aux opérations IHUTE pour l'activation Urubuto.",
+    submitForReview: "Envoyer pour examen",
+    compliance: "Demande et conformité",
+    missing: "Manquant",
+    uploaded: "Envoyé",
+    wizard: {
+      register: { title: "Demande", description: "Inscription à UrubutoPay" },
+      documents: { title: "Documents", description: "Téléverser KYC (3 fichiers)" },
+      review: { title: "Examen", description: "Activation IHUTE & Urubuto" },
+      live: { title: "Activer", description: "Accepter MoMo et carte" },
+    },
+    missingReadState:
+      "L'état de lecture n'a pas été enregistré sur le serveur. Exécutez kaos/docs/migration_notification_urubuto_read.sql (ajouter is_read), redéployez Kaos, puis réessayez.",
+    couldNotMarkRead: "Impossible de marquer les notifications comme lues",
+  },
+}
+
 export default function SupplierUrubutoPage() {
   const { user, isAuthenticated, hasHydrated } = useAuthStore()
+  const language = useLanguageStore((s) => s.language)
+  const ui = URUBUTO_UI[language] ?? URUBUTO_UI.en
   const account = user?.ishyigaAccount?.trim() ?? ""
 
   const [loading, setLoading] = useState(true)
@@ -102,13 +285,13 @@ export default function SupplierUrubutoPage() {
       })
       const data = await res.json()
       if (!data.ok && !data.merchant) {
-        setNotice(data.message || data.error || "Registration failed")
+        setNotice(data.message || data.error || ui.registrationFailed)
         return
       }
-      setNotice("Application started.")
+      setNotice(ui.applicationStarted)
       await refresh()
     } catch {
-      setNotice("Registration failed")
+      setNotice(ui.registrationFailed)
     } finally {
       setRegistering(false)
     }
@@ -125,13 +308,13 @@ export default function SupplierUrubutoPage() {
       })
       const data = await res.json()
       if (!data.ok) {
-        setNotice(data.message || data.error || "Submit failed")
+        setNotice(data.message || data.error || ui.submitFailed)
         return
       }
-      setNotice("Submitted for review. We will notify you when UrubutoPay is live.")
+      setNotice(ui.submittedForReview)
       await refresh()
     } catch {
-      setNotice("Submit failed")
+      setNotice(ui.submitFailed)
     } finally {
       setSubmitting(false)
     }
@@ -147,15 +330,13 @@ export default function SupplierUrubutoPage() {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok || data.ok === false) {
-        setNotice(data.message || data.error || "Could not mark notifications as read")
+        setNotice(data.message || data.error || ui.couldNotMarkRead)
         return
       }
       const rowsUpdated = Number(data.rowsUpdated ?? 0)
       const stillUnread = await refresh()
       if (stillUnread > 0 && rowsUpdated === 0 && idsToMark.length > 0) {
-        setNotice(
-          "Read state did not save on the server. Run kaos/docs/migration_notification_urubuto_read.sql (add is_read), redeploy Kaos, then try again.",
-        )
+        setNotice(ui.missingReadState)
         return
       }
       setNotice(null)
@@ -163,7 +344,7 @@ export default function SupplierUrubutoPage() {
         window.dispatchEvent(new Event("ihute-urubuto-notifications-read"))
       }
     } catch {
-      setNotice("Could not mark notifications as read")
+      setNotice(ui.couldNotMarkRead)
     }
   }
 
@@ -181,13 +362,13 @@ export default function SupplierUrubutoPage() {
       const res = await fetch("/api/supplier/urubuto/onboarding-documents", { method: "POST", body: fd })
       const data = await res.json()
       if (data.status !== 200 && !data.ok) {
-        setNotice(data.message || "Upload failed")
+        setNotice(data.message || ui.uploadFailed)
         return
       }
-      setNotice("Document uploaded.")
+      setNotice(ui.documentUploaded)
       await refresh()
     } catch {
-      setNotice("Upload failed")
+      setNotice(ui.uploadFailed)
     } finally {
       setUploadingType(null)
     }
@@ -197,7 +378,7 @@ export default function SupplierUrubutoPage() {
   if (!isAuthenticated || !account) {
     return (
       <div className="p-6">
-        <p className="text-gray-600">Sign in as a supplier to manage UrubutoPay.</p>
+        <p className="text-gray-600">{ui.signInPrompt}</p>
       </div>
     )
   }
@@ -211,7 +392,7 @@ export default function SupplierUrubutoPage() {
       <div className={cn("mx-auto space-y-4", eligible ? "max-w-6xl" : "max-w-6xl")}>
         <Link href="/supplier/dashboard" className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900">
           <ArrowLeft className="h-4 w-4" />
-          Back to dashboard
+          {ui.backToDashboard}
         </Link>
 
         <div className="rounded-xl border border-violet-200 bg-white p-4 shadow-sm md:p-5">
@@ -227,19 +408,19 @@ export default function SupplierUrubutoPage() {
               </div>
               <p className="mt-1 max-w-3xl text-sm text-gray-600">
                 {eligible
-                  ? "MoMo and card payments are active at checkout."
-                  : "Accept MoMo and card from customers — fast, secure payments powered by UrubutoPay on IHUTE."}
+                  ? ui.activeSubtitle
+                  : ui.inactiveSubtitle}
               </p>
             </div>
             {eligible && (
               <Link href="/supplier/settings/location" className="text-sm text-violet-700 underline sm:mt-1">
-                Payment settings
+                {ui.paymentSettings}
               </Link>
             )}
           </div>
           {process.env.NEXT_PUBLIC_TRADING_BETA === "true" && (
             <p className="mt-2 text-xs font-medium text-amber-800 bg-amber-50 inline-block px-2 py-1 rounded">
-              Test environment
+              {ui.testEnvironment}
             </p>
           )}
         </div>
@@ -253,8 +434,8 @@ export default function SupplierUrubutoPage() {
                 i <= step ? "border-violet-400 bg-violet-50 text-violet-900" : "border-gray-200 bg-white text-gray-500"
               }`}
             >
-              <div className="font-semibold leading-tight">{s.title}</div>
-              <div className="mt-0.5 hidden leading-tight md:block">{s.description}</div>
+              <div className="font-semibold leading-tight">{ui.wizard[s.id]?.title ?? s.title}</div>
+              <div className="mt-0.5 hidden leading-tight md:block">{ui.wizard[s.id]?.description ?? s.description}</div>
             </li>
           ))}
         </ol>
@@ -270,15 +451,15 @@ export default function SupplierUrubutoPage() {
               <Bell className="h-4 w-4 mt-0.5 shrink-0" />
               <div>
                 <p className="font-medium">
-                  {bannerUnread} Urubuto update{bannerUnread === 1 ? "" : "s"}
+                  {ui.updatesTitle(bannerUnread)}
                 </p>
                 <p className="text-xs text-violet-800 mt-0.5">
-                  {unreadNotifications[0]?.message || "Document review or activation update"}
+                  {unreadNotifications[0]?.message || ui.updatesFallback}
                 </p>
               </div>
             </div>
             <Button type="button" variant="outline" size="sm" onClick={() => void markNotificationsRead()}>
-              Mark read
+              {ui.markRead}
             </Button>
           </div>
         )}
@@ -288,7 +469,7 @@ export default function SupplierUrubutoPage() {
             <CardHeader className="pb-2">
               <CardTitle className="text-base flex items-center gap-2">
                 <Bell className="h-4 w-4" />
-                New updates
+                {ui.newUpdates}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
@@ -318,13 +499,13 @@ export default function SupplierUrubutoPage() {
             {!merchant && (
               <Card>
                 <CardHeader>
-                  <CardTitle>Start your application</CardTitle>
-                  <CardDescription>Register once using your seller payer code {account}.</CardDescription>
+                  <CardTitle>{ui.startTitle}</CardTitle>
+                  <CardDescription>{ui.startDescription(account)}</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <Button onClick={() => void register()} disabled={registering}>
                     {registering ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                    Start application
+                    {ui.startApplication}
                   </Button>
                 </CardContent>
               </Card>
@@ -337,7 +518,7 @@ export default function SupplierUrubutoPage() {
                     <div className="space-y-4">
                       <Card>
                         <CardHeader className="px-4 py-3">
-                          <CardTitle className="text-base">Status</CardTitle>
+                          <CardTitle className="text-base">{ui.status}</CardTitle>
                         </CardHeader>
                         <CardContent className="space-y-3 px-4 pb-4">
                           <p className="text-sm text-gray-800">{breakdown?.sellerMessage}</p>
@@ -348,13 +529,13 @@ export default function SupplierUrubutoPage() {
                       {(breakdown?.uploadedDocCount ?? 0) >= 3 && (
                         <Card>
                           <CardHeader className="px-4 py-3">
-                            <CardTitle className="text-base">Submit for review</CardTitle>
-                            <CardDescription>Send your file to IHUTE ops for Urubuto activation.</CardDescription>
+                            <CardTitle className="text-base">{ui.submitTitle}</CardTitle>
+                            <CardDescription>{ui.submitDescription}</CardDescription>
                           </CardHeader>
                           <CardContent className="px-4 pb-4">
                             <Button onClick={() => void submitForReview()} disabled={submitting} className="w-full sm:w-auto">
                               {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                              Submit for review
+                              {ui.submitForReview}
                             </Button>
                           </CardContent>
                         </Card>
@@ -365,35 +546,36 @@ export default function SupplierUrubutoPage() {
                       <CardHeader className="px-4 py-3">
                         <CardTitle className="text-base flex items-center gap-2">
                           <FileText className="h-4 w-4" />
-                          Documents (3 required)
+                          {ui.documentsTitle}
                         </CardTitle>
                       </CardHeader>
                       <CardContent className="space-y-3 px-4 pb-4">
                         {DOC_TYPES.map((dt) => {
                           const existing = docs.find((d) => d.doc_type === dt)
                           const labels = DOC_TYPE_LABELS[dt]
+                          const label = labels?.[language] || labels?.en || dt
                           return (
                             <div
                               key={dt}
                               className="rounded-lg border border-gray-200 p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
                             >
                               <div className="min-w-0">
-                                <p className="font-medium text-gray-900">{labels?.en ?? dt}</p>
-                                <p className="text-xs text-gray-500">{labels?.rw}</p>
+                                <p className="font-medium text-gray-900">{label}</p>
+                                {labels?.rw && language !== "rw" ? <p className="text-xs text-gray-500">{labels.rw}</p> : null}
                                 {existing ? (
                                   <p className="text-xs mt-1 text-gray-600">
-                                    {existing.verified ? "✓ Verified" : "Uploaded — under review"}
+                                    {existing.verified ? `✓ ${ui.verified}` : ui.uploadedUnderReview}
                                     {existing.rejection_reason && (
-                                      <span className="block text-red-700">Rejected: {existing.rejection_reason}</span>
+                                      <span className="block text-red-700">{ui.rejected}: {existing.rejection_reason}</span>
                                     )}
                                   </p>
                                 ) : (
-                                  <p className="text-xs mt-1 text-amber-700">Missing — pdf, jpg, or png</p>
+                                  <p className="text-xs mt-1 text-amber-700">{ui.missingDoc}</p>
                                 )}
                               </div>
                               <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md bg-violet-600 px-3 py-2 text-sm text-white hover:bg-violet-700 sm:w-28">
                                 <Upload className="h-4 w-4" />
-                                {uploadingType === dt ? "Uploading…" : existing ? "Replace" : "Upload"}
+                                {uploadingType === dt ? ui.uploading : existing ? ui.replace : ui.upload}
                                 <input
                                   type="file"
                                   accept=".pdf,.jpg,.jpeg,.png"
@@ -424,7 +606,7 @@ export default function SupplierUrubutoPage() {
                           type="button"
                           className="flex w-full items-center justify-between gap-2 px-6 py-4 text-left hover:bg-gray-50/80"
                         >
-                          <span className="text-sm font-medium text-gray-700">Application &amp; compliance</span>
+                          <span className="text-sm font-medium text-gray-700">{ui.compliance}</span>
                           <ChevronDown
                             className={cn(
                               "h-4 w-4 text-gray-500 transition-transform",
@@ -440,20 +622,21 @@ export default function SupplierUrubutoPage() {
                             {DOC_TYPES.map((dt) => {
                               const existing = docs.find((d) => d.doc_type === dt)
                               const labels = DOC_TYPE_LABELS[dt]
+                              const label = labels?.[language] || labels?.en || dt
                               return (
                                 <div
                                   key={dt}
                                   className="rounded-lg border border-gray-200 p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm"
                                 >
                                   <div>
-                                    <p className="font-medium">{labels?.en ?? dt}</p>
+                                    <p className="font-medium">{label}</p>
                                     <p className="text-xs text-gray-500">
-                                      {existing?.verified ? "Verified" : existing ? "Uploaded" : "Missing"}
+                                      {existing?.verified ? ui.verified : existing ? ui.uploaded : ui.missing}
                                     </p>
                                   </div>
                                   <label className="inline-flex cursor-pointer items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-gray-50">
                                     <Upload className="h-3 w-3" />
-                                    Replace
+                                    {ui.replace}
                                     <input
                                       type="file"
                                       accept=".pdf,.jpg,.jpeg,.png"

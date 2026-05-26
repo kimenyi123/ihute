@@ -18,14 +18,251 @@ import {
   type UrubutoPaymentSummary,
 } from "@/lib/urubuto-transactions"
 import { cn } from "@/lib/utils"
+import { useLanguageStore, type Language } from "@/lib/language-store"
 import { ChevronDown, ChevronLeft, ChevronRight, Copy, CreditCard, Loader2, RefreshCw, Search, Smartphone, Wallet } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 
 type MethodFilter = "all" | "WALLET" | "CARD"
 type StatusFilter = "all" | "PENDING" | "COMPLETED" | "FAILED"
 
-function MethodBadge({ method }: { method?: string }) {
+const REPORT_UI: Record<Language, {
+  transactionReport: string
+  description: string
+  refresh: string
+  totalPayments: string
+  momoWallet: string
+  walletChannel: string
+  card: string
+  cardChannel: string
+  completedRwf: string
+  completedSummary: (paid: number, pending: number) => string
+  allMethods: string
+  momoOnly: string
+  cardOnly: string
+  allStatus: string
+  pending: string
+  completed: string
+  failed: string
+  cancelled: string
+  paid: string
+  from: string
+  to: string
+  searchRef: string
+  searchPlaceholder: string
+  noMatchingPayments: string
+  showing: (from: number, to: number, total: number) => string
+  clearFilters: string
+  noTransactions: string
+  when: string
+  customer: string
+  amount: string
+  method: string
+  status: string
+  paymentIds: string
+  paidAt: string
+  recorded: string
+  initiated: string
+  attempted: string
+  started: string
+  guest: string
+  customerFallback: string
+  orderNumber: (id: number) => string
+  moreReferences: string
+  perPage: string
+  previous: string
+  next: string
+  pageOf: (page: number, total: number) => string
+  copied: string
+  couldNotLoad: string
+}> = {
+  en: {
+    transactionReport: "Transaction report",
+    description: "All UrubutoPay payments at your shop — MoMo wallet and card (IHUTE checkout & POS).",
+    refresh: "Refresh",
+    totalPayments: "Total payments",
+    momoWallet: "MoMo wallet",
+    walletChannel: "WALLET channel",
+    card: "Card",
+    cardChannel: "CARD channel",
+    completedRwf: "Completed (RWF)",
+    completedSummary: (paid, pending) => `${paid} paid · ${pending} pending`,
+    allMethods: "All methods",
+    momoOnly: "MoMo only",
+    cardOnly: "Card only",
+    allStatus: "All status",
+    pending: "Pending",
+    completed: "Completed",
+    failed: "Failed",
+    cancelled: "Cancelled",
+    paid: "Paid",
+    from: "From",
+    to: "To",
+    searchRef: "Search ref",
+    searchPlaceholder: "IHUTE ref, MoMo FT, cart, payer...",
+    noMatchingPayments: "No matching payments",
+    showing: (from, to, total) => `Showing ${from}-${to} of ${total}`,
+    clearFilters: "Clear filters",
+    noTransactions: "No transactions match these filters yet. When customers pay with UrubutoPay (MoMo or card) at checkout, they appear here.",
+    when: "When",
+    customer: "Customer",
+    amount: "Amount",
+    method: "Method",
+    status: "Status",
+    paymentIds: "Payment IDs",
+    paidAt: "Paid at",
+    recorded: "Recorded",
+    initiated: "Initiated",
+    attempted: "Attempted",
+    started: "Started",
+    guest: "Guest",
+    customerFallback: "Customer",
+    orderNumber: (id) => `Order #${id}`,
+    moreReferences: "More references",
+    perPage: "Per page",
+    previous: "Previous",
+    next: "Next",
+    pageOf: (page, total) => `Page ${page} of ${total}`,
+    copied: "Copied",
+    couldNotLoad: "Could not load transactions",
+  },
+  rw: {
+    transactionReport: "Raporo y'ubwishyu",
+    description: "Ubwishyu bwose bwa UrubutoPay ku iduka ryawe — MoMo wallet na card (IHUTE checkout & POS).",
+    refresh: "Vugurura",
+    totalPayments: "Ubwishyu bwose",
+    momoWallet: "MoMo wallet",
+    walletChannel: "Uburyo bwa WALLET",
+    card: "Card",
+    cardChannel: "Uburyo bwa CARD",
+    completedRwf: "Ubwishyu bwuzuye (RWF)",
+    completedSummary: (paid, pending) => `${paid} byishyuwe · ${pending} bitegereje`,
+    allMethods: "Uburyo bwose",
+    momoOnly: "MoMo gusa",
+    cardOnly: "Card gusa",
+    allStatus: "Imiterere yose",
+    pending: "Bitegereje",
+    completed: "Byuzuye",
+    failed: "Byanze",
+    cancelled: "Byahagaritswe",
+    paid: "Byishyuwe",
+    from: "Kuva",
+    to: "Kugeza",
+    searchRef: "Shaka ref",
+    searchPlaceholder: "IHUTE ref, MoMo FT, cart, uwishyuye...",
+    noMatchingPayments: "Nta bwishyu buhuye",
+    showing: (from, to, total) => `Birerekana ${from}-${to} kuri ${total}`,
+    clearFilters: "Kuraho amayungurura",
+    noTransactions: "Nta bwishyu buhuye n'aya mayungurura. Abakiriya nibishyura na UrubutoPay (MoMo cyangwa card), bizagaragara hano.",
+    when: "Igihe",
+    customer: "Umukiriya",
+    amount: "Amafaranga",
+    method: "Uburyo",
+    status: "Imiterere",
+    paymentIds: "ID z'ubwishyu",
+    paidAt: "Yishyuwe",
+    recorded: "Yanditswe",
+    initiated: "Yatangiye",
+    attempted: "Yageragejwe",
+    started: "Yatangiye",
+    guest: "Umushyitsi",
+    customerFallback: "Umukiriya",
+    orderNumber: (id) => `Komande #${id}`,
+    moreReferences: "Izindi references",
+    perPage: "Kuri page",
+    previous: "Ibibanza",
+    next: "Ibikurikira",
+    pageOf: (page, total) => `Page ${page} kuri ${total}`,
+    copied: "Byakoporowe",
+    couldNotLoad: "Ntibyashobotse gufungura transactions",
+  },
+  fr: {
+    transactionReport: "Rapport des transactions",
+    description: "Tous les paiements UrubutoPay de votre boutique — portefeuille MoMo et carte (IHUTE checkout & POS).",
+    refresh: "Actualiser",
+    totalPayments: "Total des paiements",
+    momoWallet: "Portefeuille MoMo",
+    walletChannel: "Canal WALLET",
+    card: "Carte",
+    cardChannel: "Canal CARD",
+    completedRwf: "Terminés (RWF)",
+    completedSummary: (paid, pending) => `${paid} payé(s) · ${pending} en attente`,
+    allMethods: "Tous les moyens",
+    momoOnly: "MoMo seulement",
+    cardOnly: "Carte seulement",
+    allStatus: "Tous les statuts",
+    pending: "En attente",
+    completed: "Terminé",
+    failed: "Échoué",
+    cancelled: "Annulé",
+    paid: "Payé",
+    from: "Du",
+    to: "Au",
+    searchRef: "Rechercher ref",
+    searchPlaceholder: "Réf. IHUTE, MoMo FT, panier, payeur...",
+    noMatchingPayments: "Aucun paiement correspondant",
+    showing: (from, to, total) => `Affichage ${from}-${to} sur ${total}`,
+    clearFilters: "Effacer les filtres",
+    noTransactions: "Aucune transaction ne correspond à ces filtres. Quand les clients paient avec UrubutoPay (MoMo ou carte), elles apparaissent ici.",
+    when: "Date",
+    customer: "Client",
+    amount: "Montant",
+    method: "Moyen",
+    status: "Statut",
+    paymentIds: "ID de paiement",
+    paidAt: "Payé le",
+    recorded: "Enregistré",
+    initiated: "Initié",
+    attempted: "Tentative",
+    started: "Démarré",
+    guest: "Invité",
+    customerFallback: "Client",
+    orderNumber: (id) => `Commande #${id}`,
+    moreReferences: "Plus de références",
+    perPage: "Par page",
+    previous: "Précédent",
+    next: "Suivant",
+    pageOf: (page, total) => `Page ${page} sur ${total}`,
+    copied: "Copié",
+    couldNotLoad: "Impossible de charger les transactions",
+  },
+}
+
+function methodLabel(method: string | undefined, ui: typeof REPORT_UI.en) {
   const { label, tone } = formatUrubutoPaymentMethod(method)
+  if (tone === "momo") return { label: ui.momoWallet, tone }
+  if (tone === "card") return { label: ui.card, tone }
+  return { label, tone }
+}
+
+function statusLabel(status: string | undefined, ui: typeof REPORT_UI.en) {
+  const { label, tone } = formatUrubutoPaymentStatus(status)
+  const s = (status ?? "").toUpperCase()
+  if (s === "COMPLETED") return { label: ui.paid, tone }
+  if (s === "PENDING" || s === "INITIATED") return { label: ui.pending, tone }
+  if (s === "FAILED") return { label: ui.failed, tone }
+  if (s === "CANCELLED") return { label: ui.cancelled, tone }
+  return { label, tone }
+}
+
+function timeLabel(label: string, ui: typeof REPORT_UI.en) {
+  switch (label) {
+    case "Paid at":
+      return ui.paidAt
+    case "Recorded":
+      return ui.recorded
+    case "Initiated":
+      return ui.initiated
+    case "Attempted":
+      return ui.attempted
+    case "Started":
+      return ui.started
+    default:
+      return label
+  }
+}
+
+function MethodBadge({ method, ui }: { method?: string; ui: typeof REPORT_UI.en }) {
+  const { label, tone } = methodLabel(method, ui)
   return (
     <Badge
       variant="outline"
@@ -93,10 +330,12 @@ function PaymentReferences({
   p,
   displayStatus,
   onCopy,
+  ui,
 }: {
   p: UrubutoPaymentRow
   displayStatus: string
   onCopy: (v: string) => void
+  ui: typeof REPORT_UI.en
 }) {
   const refs = buildUrubutoReferenceDisplay(p)
   if (!refs.ihuteRef) {
@@ -115,7 +354,7 @@ function PaymentReferences({
     >
       {!compact ? (
         <div className="px-2.5 py-2 border-b border-violet-50 bg-violet-50/40">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-800">Payment IDs</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-800">{ui.paymentIds}</p>
         </div>
       ) : null}
       <div className={cn("px-2.5", compact ? "py-1.5" : "py-1")}>
@@ -133,7 +372,7 @@ function PaymentReferences({
             )}
           >
             <ChevronDown className="h-3 w-3 transition-transform group-open:rotate-180" />
-            More references
+            {ui.moreReferences}
           </summary>
           <div className={cn("px-2.5 pt-0", compact ? "pb-1.5" : "pb-2")}>
             {refs.urubutoInternal ? (
@@ -147,7 +386,7 @@ function PaymentReferences({
   )
 }
 
-function PaymentWhenCell({ p, displayStatus }: { p: UrubutoPaymentRow; displayStatus: string }) {
+function PaymentWhenCell({ p, displayStatus, ui }: { p: UrubutoPaymentRow; displayStatus: string; ui: typeof REPORT_UI.en }) {
   const ts = buildUrubutoPaymentTimestamps(p, displayStatus)
   const primaryIsPaid = ts.primaryLabel === "Paid at"
 
@@ -159,14 +398,14 @@ function PaymentWhenCell({ p, displayStatus }: { p: UrubutoPaymentRow; displaySt
           primaryIsPaid ? "text-emerald-700" : "text-gray-500",
         )}
       >
-        {ts.primaryLabel}
+        {timeLabel(ts.primaryLabel, ui)}
       </p>
       <p className={cn("text-sm leading-snug", primaryIsPaid && "text-emerald-900 font-medium")}>
         {ts.primaryAt ? ts.primaryAt.toLocaleString() : "—"}
       </p>
       {ts.secondaryLabel && ts.secondaryAt ? (
         <div className="mt-2">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">{ts.secondaryLabel}</p>
+          <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">{timeLabel(ts.secondaryLabel, ui)}</p>
           <p className="text-xs leading-snug text-gray-600">{ts.secondaryAt.toLocaleString()}</p>
         </div>
       ) : null}
@@ -174,8 +413,8 @@ function PaymentWhenCell({ p, displayStatus }: { p: UrubutoPaymentRow; displaySt
   )
 }
 
-function StatusBadge({ status }: { status?: string }) {
-  const { label, tone } = formatUrubutoPaymentStatus(status)
+function StatusBadge({ status, ui }: { status?: string; ui: typeof REPORT_UI.en }) {
+  const { label, tone } = statusLabel(status, ui)
   return (
     <Badge
       variant="outline"
@@ -243,6 +482,8 @@ export function UrubutoTransactionReport({
   autoRefreshMs?: number
 }) {
   const { toast } = useToast()
+  const language = useLanguageStore((s) => s.language)
+  const ui = REPORT_UI[language] ?? REPORT_UI.en
   const [loading, setLoading] = useState(true)
   const [payments, setPayments] = useState<UrubutoPaymentRow[]>([])
   const [summary, setSummary] = useState<UrubutoPaymentSummary | null>(null)
@@ -280,7 +521,7 @@ export function UrubutoTransactionReport({
         search: searchQuery || undefined,
       })
       if (!res.ok) {
-        toast({ title: "Could not load transactions", description: res.error, variant: "destructive" })
+        toast({ title: ui.couldNotLoad, description: res.error, variant: "destructive" })
         return
       }
       setPayments(res.payments)
@@ -289,7 +530,7 @@ export function UrubutoTransactionReport({
     } finally {
       setLoading(false)
     }
-  }, [account, page, pageSize, methodFilter, statusFilter, dateFrom, dateTo, searchQuery, toast])
+  }, [account, page, pageSize, methodFilter, statusFilter, dateFrom, dateTo, searchQuery, toast, ui.couldNotLoad])
 
   const resetFilters = () => {
     setMethodFilter("all")
@@ -323,7 +564,7 @@ export function UrubutoTransactionReport({
 
   const copyRef = (text: string) => {
     void navigator.clipboard.writeText(text)
-    toast({ title: "Copied", description: text.slice(0, 40) + (text.length > 40 ? "…" : "") })
+    toast({ title: ui.copied, description: text.slice(0, 40) + (text.length > 40 ? "..." : "") })
   }
 
   return (
@@ -333,15 +574,15 @@ export function UrubutoTransactionReport({
           <div>
             <CardTitle className="text-lg flex items-center gap-2">
               <Wallet className="h-5 w-5 text-violet-700" />
-              Transaction report
+              {ui.transactionReport}
             </CardTitle>
             <CardDescription>
-              All UrubutoPay payments at your shop — MoMo wallet and card (IHUTE checkout & POS).
+              {ui.description}
             </CardDescription>
           </div>
           <Button type="button" variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            <span className="ml-2">Refresh</span>
+            <span className="ml-2">{ui.refresh}</span>
           </Button>
         </div>
       </CardHeader>
@@ -349,7 +590,7 @@ export function UrubutoTransactionReport({
         {summary && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
             <SummaryTile
-              label="Total payments"
+              label={ui.totalPayments}
               value={String(summary.totalCount)}
               active={methodFilter === "all" && statusFilter === "all"}
               onClick={() => {
@@ -358,23 +599,23 @@ export function UrubutoTransactionReport({
               }}
             />
             <SummaryTile
-              label="MoMo wallet"
+              label={ui.momoWallet}
               value={String(summary.walletCount)}
-              sub="WALLET channel"
+              sub={ui.walletChannel}
               active={methodFilter === "WALLET"}
               onClick={() => setMethodFilter((f) => (f === "WALLET" ? "all" : "WALLET"))}
             />
             <SummaryTile
-              label="Card"
+              label={ui.card}
               value={String(summary.cardCount)}
-              sub="CARD channel"
+              sub={ui.cardChannel}
               active={methodFilter === "CARD"}
               onClick={() => setMethodFilter((f) => (f === "CARD" ? "all" : "CARD"))}
             />
             <SummaryTile
-              label="Completed (RWF)"
+              label={ui.completedRwf}
               value={summary.completedAmountRwf.toLocaleString()}
-              sub={`${summary.completedCount} paid · ${summary.pendingCount} pending`}
+              sub={ui.completedSummary(summary.completedCount, summary.pendingCount)}
               active={statusFilter === "COMPLETED"}
               onClick={() => setStatusFilter((f) => (f === "COMPLETED" ? "all" : "COMPLETED"))}
             />
@@ -392,7 +633,7 @@ export function UrubutoTransactionReport({
                 className={methodFilter === m ? "bg-violet-700 hover:bg-violet-800" : "bg-white"}
                 onClick={() => setMethodFilter(m)}
               >
-                {m === "all" ? "All methods" : m === "WALLET" ? "MoMo only" : "Card only"}
+                {m === "all" ? ui.allMethods : m === "WALLET" ? ui.momoOnly : ui.cardOnly}
               </Button>
             ))}
             <span className="w-px h-8 bg-gray-200 hidden sm:block mx-1" />
@@ -405,13 +646,13 @@ export function UrubutoTransactionReport({
                 className={statusFilter !== s ? "bg-white" : ""}
                 onClick={() => setStatusFilter(s)}
               >
-                {s === "all" ? "All status" : s.charAt(0) + s.slice(1).toLowerCase()}
+                {s === "all" ? ui.allStatus : s === "PENDING" ? ui.pending : s === "COMPLETED" ? ui.completed : ui.failed}
               </Button>
             ))}
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
             <div>
-              <label className="text-[10px] font-medium uppercase tracking-wide text-gray-500">From</label>
+              <label className="text-[10px] font-medium uppercase tracking-wide text-gray-500">{ui.from}</label>
               <Input
                 type="date"
                 value={dateFrom}
@@ -420,7 +661,7 @@ export function UrubutoTransactionReport({
               />
             </div>
             <div>
-              <label className="text-[10px] font-medium uppercase tracking-wide text-gray-500">To</label>
+              <label className="text-[10px] font-medium uppercase tracking-wide text-gray-500">{ui.to}</label>
               <Input
                 type="date"
                 value={dateTo}
@@ -429,11 +670,11 @@ export function UrubutoTransactionReport({
               />
             </div>
             <div className="sm:col-span-2">
-              <label className="text-[10px] font-medium uppercase tracking-wide text-gray-500">Search ref</label>
+              <label className="text-[10px] font-medium uppercase tracking-wide text-gray-500">{ui.searchRef}</label>
               <div className="relative mt-0.5">
                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
                 <Input
-                  placeholder="IHUTE ref, MoMo FT, cart, payer…"
+                  placeholder={ui.searchPlaceholder}
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
                   className="h-9 pl-8 bg-white"
@@ -444,11 +685,11 @@ export function UrubutoTransactionReport({
           <div className="flex flex-wrap items-center gap-2 justify-between">
             <p className="text-xs text-gray-600">
               {filteredTotal === 0
-                ? "No matching payments"
-                : `Showing ${page * pageSize + 1}–${Math.min(filteredTotal, page * pageSize + payments.length)} of ${filteredTotal}`}
+                ? ui.noMatchingPayments
+                : ui.showing(page * pageSize + 1, Math.min(filteredTotal, page * pageSize + payments.length), filteredTotal)}
             </p>
             <Button type="button" size="sm" variant="ghost" className="h-8 text-xs" onClick={resetFilters}>
-              Clear filters
+              {ui.clearFilters}
             </Button>
           </div>
         </div>
@@ -459,19 +700,19 @@ export function UrubutoTransactionReport({
           </div>
         ) : payments.length === 0 ? (
           <p className="text-sm text-gray-600 py-6 text-center rounded-lg border border-dashed bg-gray-50/80">
-            No transactions match these filters yet. When customers pay with UrubutoPay (MoMo or card) at checkout, they appear here.
+            {ui.noTransactions}
           </p>
         ) : (
           <div className="rounded-lg border overflow-x-auto lg:overflow-x-visible [scrollbar-width:none] hover:[scrollbar-width:thin] [-ms-overflow-style:none] [&::-webkit-scrollbar]:h-0 hover:[&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300">
             <table className="w-full text-sm min-w-[920px] lg:min-w-0 table-fixed lg:table-auto">
               <thead>
                 <tr className="border-b bg-gray-50/90 text-left text-gray-600">
-                  <th className="py-2.5 px-3 font-medium w-[148px]">When</th>
-                  <th className="py-2.5 px-3 font-medium min-w-[120px]">Customer</th>
-                  <th className="py-2.5 px-3 font-medium w-[100px]">Amount</th>
-                  <th className="py-2.5 px-3 font-medium w-[110px]">Method</th>
-                  <th className="py-2.5 px-3 font-medium w-[88px]">Status</th>
-                  <th className="py-2.5 px-3 font-medium min-w-[260px] lg:min-w-[300px] lg:w-[32%]">Payment IDs</th>
+                  <th className="py-2.5 px-3 font-medium w-[148px]">{ui.when}</th>
+                  <th className="py-2.5 px-3 font-medium min-w-[120px]">{ui.customer}</th>
+                  <th className="py-2.5 px-3 font-medium w-[100px]">{ui.amount}</th>
+                  <th className="py-2.5 px-3 font-medium w-[110px]">{ui.method}</th>
+                  <th className="py-2.5 px-3 font-medium w-[88px]">{ui.status}</th>
+                  <th className="py-2.5 px-3 font-medium min-w-[260px] lg:min-w-[300px] lg:w-[32%]">{ui.paymentIds}</th>
                 </tr>
               </thead>
               <tbody>
@@ -481,7 +722,7 @@ export function UrubutoTransactionReport({
                   const customerLabel =
                     p.orderBuyerName?.trim() ||
                     (!guestPayer && p.payerNames?.trim()) ||
-                    (guestPayer ? "Guest" : "Customer")
+                    (guestPayer ? ui.guest : ui.customerFallback)
                   const compactRow = isCompactUrubutoReferencePanel(p, displayStatus)
                   return (
                     <tr
@@ -492,7 +733,7 @@ export function UrubutoTransactionReport({
                       )}
                     >
                       <td className={cn("px-3 text-gray-700 align-top", compactRow ? "py-2" : "py-2.5 lg:py-3")}>
-                        <PaymentWhenCell p={p} displayStatus={displayStatus} />
+                        <PaymentWhenCell p={p} displayStatus={displayStatus} ui={ui} />
                       </td>
                       <td className={cn("px-3", compactRow ? "py-2" : "py-2.5 lg:py-3")}>
                         <p className="font-medium text-gray-900">{customerLabel}</p>
@@ -502,7 +743,7 @@ export function UrubutoTransactionReport({
                             href={`/supplier/orders/${p.orderId}`}
                             className="text-xs text-violet-700 hover:underline mt-1 inline-block font-medium"
                           >
-                            Order #{p.orderId}
+                            {ui.orderNumber(p.orderId)}
                           </Link>
                         ) : null}
                       </td>
@@ -515,13 +756,13 @@ export function UrubutoTransactionReport({
                         {(p.amount ?? 0).toLocaleString()} {p.currency || "RWF"}
                       </td>
                       <td className={cn("px-3", compactRow ? "py-2" : "py-2.5 lg:py-3")}>
-                        <MethodBadge method={p.paymentMethod} />
+                        <MethodBadge method={p.paymentMethod} ui={ui} />
                       </td>
                       <td className={cn("px-3", compactRow ? "py-2" : "py-2.5 lg:py-3")}>
-                        <StatusBadge status={displayStatus} />
+                        <StatusBadge status={displayStatus} ui={ui} />
                       </td>
                       <td className={cn("px-3", compactRow ? "py-2" : "py-2.5 lg:py-3")}>
-                        <PaymentReferences p={p} displayStatus={displayStatus} onCopy={copyRef} />
+                        <PaymentReferences p={p} displayStatus={displayStatus} onCopy={copyRef} ui={ui} />
                       </td>
                     </tr>
                   )
@@ -534,7 +775,7 @@ export function UrubutoTransactionReport({
         {filteredTotal > 0 && (
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-2 border-t border-gray-100">
             <div className="flex items-center gap-2">
-              <span className="text-xs text-gray-500">Per page</span>
+              <span className="text-xs text-gray-500">{ui.perPage}</span>
               {([10, 20, 50] as const).map((n) => (
                 <Button
                   key={n}
@@ -557,10 +798,10 @@ export function UrubutoTransactionReport({
                 onClick={() => setPage((p) => Math.max(0, p - 1))}
               >
                 <ChevronLeft className="h-4 w-4" />
-                Previous
+                {ui.previous}
               </Button>
               <span className="text-xs text-gray-600 min-w-[88px] text-center">
-                Page {page + 1} of {totalPages}
+                {ui.pageOf(page + 1, totalPages)}
               </span>
               <Button
                 type="button"
@@ -569,7 +810,7 @@ export function UrubutoTransactionReport({
                 disabled={loading || page + 1 >= totalPages}
                 onClick={() => setPage((p) => p + 1)}
               >
-                Next
+                {ui.next}
                 <ChevronRight className="h-4 w-4" />
               </Button>
             </div>
