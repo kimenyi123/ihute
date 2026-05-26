@@ -19,8 +19,8 @@ export function UrubutoKpiStrip() {
 
   const items = [
     { label: "Pending", value: kpis.pendingApplications },
-    { label: "Active merchants", value: kpis.activeMerchants },
-    { label: "With Urubuto code", value: kpis.withUrubutoCode },
+    { label: "Live merchants", value: kpis.activeMerchants },
+    { label: "With Urubuto codes", value: kpis.withUrubutoCode },
     { label: "Payments (7d)", value: kpis.paymentsLast7Days },
   ]
 

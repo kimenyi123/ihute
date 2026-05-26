@@ -20,6 +20,7 @@ const CHECKLIST_UI: Record<Language, {
     labels: {
       "Merchant status ACTIVE": "Imiterere ya merchant: irakora",
       "Urubuto merchant code assigned": "Kode ya merchant ya UrubutoPay yatanzwe",
+      "Urubuto service code assigned": "Kode ya service ya UrubutoPay yatanzwe",
       "IHUTE onboarding approved": "Kwemezwa kwa IHUTE onboarding byakozwe",
       "Company registration uploaded": "Icyemezo cy'ubucuruzi cyoherejwe",
       "Company registration verified": "Icyemezo cy'ubucuruzi cyemejwe",
@@ -35,6 +36,7 @@ const CHECKLIST_UI: Record<Language, {
     labels: {
       "Merchant status ACTIVE": "Statut marchand : actif",
       "Urubuto merchant code assigned": "Code marchand UrubutoPay attribué",
+      "Urubuto service code assigned": "Code service UrubutoPay attribué",
       "IHUTE onboarding approved": "Intégration IHUTE approuvée",
       "Company registration uploaded": "Certificat d'incorporation téléversé",
       "Company registration verified": "Certificat d'incorporation vérifié",

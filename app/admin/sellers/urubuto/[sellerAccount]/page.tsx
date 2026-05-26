@@ -17,6 +17,7 @@ interface UrubutoMerchantJson {
   displayName: string
   sellerPayerCode: string
   urubutoMerchantCode: string
+  urubutoServiceCode: string
   status: string
   applicationChannel?: string
 }
@@ -58,6 +59,7 @@ export default function UrubutoMerchantApplicationPage() {
   const [downloadingId, setDownloadingId] = useState<number | null>(null)
 
   const [codeInput, setCodeInput] = useState("")
+  const [serviceCodeInput, setServiceCodeInput] = useState("")
   const [statusInput, setStatusInput] = useState("PENDING")
   const [onboardingApproved, setOnboardingApproved] = useState(false)
   const [internalNote, setInternalNote] = useState("")
@@ -91,6 +93,7 @@ export default function UrubutoMerchantApplicationPage() {
           checklist: (b?.checklist as UrubutoChecklistItem[]) || [],
         })
         setCodeInput(m.urubutoMerchantCode || "")
+        setServiceCodeInput(m.urubutoServiceCode || "")
         setStatusInput(m.status || "PENDING")
         setOnboardingApproved(!!(data.onboarding as UrubutoOnboardingJson)?.onboardingApproved)
         setInternalNote((data.onboarding as UrubutoOnboardingJson)?.internalNote || "")
@@ -146,6 +149,7 @@ export default function UrubutoMerchantApplicationPage() {
     void adminAction("updateUrubutoMerchant", {
       status: statusInput,
       urubutoMerchantCode: codeInput.trim(),
+      urubutoServiceCode: serviceCodeInput.trim(),
       onboardingApproved: onboardingApproved ? "true" : "false",
     }, "Merchant saved")
 
@@ -247,6 +251,17 @@ export default function UrubutoMerchantApplicationPage() {
                       )}
                     </div>
                   </div>
+                  <div>
+                    <span className="text-gray-500">Urubuto service code</span>
+                    <div className="flex items-center gap-2 font-mono break-all">
+                      {merchant.urubutoServiceCode || "—"}
+                      {merchant.urubutoServiceCode && (
+                        <button type="button" onClick={() => copy(merchant.urubutoServiceCode)} aria-label="Copy">
+                          <Copy className="h-4 w-4 text-gray-400" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
 
@@ -284,6 +299,15 @@ export default function UrubutoMerchantApplicationPage() {
                         className="mt-1 w-full rounded border px-2 py-1.5 font-mono"
                         value={codeInput}
                         onChange={(e) => setCodeInput(e.target.value)}
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-gray-600">Urubuto service code</span>
+                      <input
+                        className="mt-1 w-full rounded border px-2 py-1.5 font-mono"
+                        value={serviceCodeInput}
+                        onChange={(e) => setServiceCodeInput(e.target.value)}
+                        placeholder="e.g. SERVICE123"
                       />
                     </label>
                     <label className="block">
