@@ -3123,6 +3123,11 @@ export default function GrandmaPage() {
     return buildGrandmaMtnUssd(selectedShop.momo ?? "", Math.round(grandTotal))
   }, [selectedShop, selectedPayment, grandTotal])
 
+  const grandmaAirtelUssdTelHref = useMemo(() => {
+    if (!grandmaAirtelUssd) return ""
+    return `tel:${grandmaAirtelUssd.replace(/#/g, "%23")}`
+  }, [grandmaAirtelUssd])
+
   const selectLogisticsMode = (id: LogisticsId) => {
     setSelectedLogistics(id)
   }
@@ -3202,7 +3207,9 @@ export default function GrandmaPage() {
     if (selectedPayment === "momo") {
       return grandmaSmsPayCheck === "paid" && grandmaPayerPhoneOk
     }
-    if (selectedPayment === "airtel") return grandmaPayerPhoneOk
+    if (selectedPayment === "airtel") {
+      return grandmaSmsPayCheck === "paid" && grandmaPayerPhoneOk
+    }
     if (selectedPayment === "cash") return grandmaCashConfirm
     return false
   }, [
@@ -6110,28 +6117,111 @@ export default function GrandmaPage() {
                       >
                         {grandmaAirtelUssd}
                       </code>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="shrink-0 self-center border-blue-200 text-xs font-bold text-blue-900 hover:bg-blue-50"
-                        onClick={() => {
-                          void (async () => {
-                            try {
-                              await navigator.clipboard.writeText(grandmaAirtelUssd)
-                              setGrandmaUssdCopied(true)
-                              window.setTimeout(() => setGrandmaUssdCopied(false), 2000)
-                            } catch {
-                              window.alert(grandmaAirtelUssd)
-                            }
-                          })()
-                        }}
-                      >
-                        {grandmaUssdCopied ? tPay.payStepCopied : tPay.payStepCopy}
-                      </Button>
+                      <div className="flex shrink-0 gap-2 self-center">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="border-blue-200 text-xs font-bold text-blue-900 hover:bg-blue-50"
+                          onClick={() => {
+                            void (async () => {
+                              try {
+                                await navigator.clipboard.writeText(grandmaAirtelUssd)
+                                setGrandmaUssdCopied(true)
+                                window.setTimeout(() => setGrandmaUssdCopied(false), 2000)
+                              } catch {
+                                window.alert(grandmaAirtelUssd)
+                              }
+                            })()
+                          }}
+                        >
+                          {grandmaUssdCopied ? tPay.payStepCopied : tPay.payStepCopy}
+                        </Button>
+                        {grandmaAirtelUssdTelHref ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="border-blue-200 text-xs font-bold text-blue-900 hover:bg-blue-50"
+                            asChild
+                          >
+                            <a href={grandmaAirtelUssdTelHref}>
+                              <Phone className="mr-1 h-3.5 w-3.5" aria-hidden />
+                              {tPay.payStepDialMomo}
+                            </a>
+                          </Button>
+                        ) : (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="border-blue-200 text-xs font-bold text-blue-900"
+                            disabled
+                          >
+                            <Phone className="mr-1 h-3.5 w-3.5" aria-hidden />
+                            {tPay.payStepDialMomo}
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ) : null}
                 <p style={{ fontSize: 11, color: "var(--muted)", margin: 0, lineHeight: 1.45 }}>{tPay.payStepAirtelHelp}</p>
+                <div
+                  className="min-w-0 space-y-2 rounded-xl border border-[#dbe7f3] bg-white px-3 py-3"
+                  style={{ marginTop: 4 }}
+                >
+                  <div className="flex items-center gap-2">
+                    <MessageSquare className="h-4 w-4 shrink-0 text-[#127fc0]" aria-hidden />
+                    <span className="text-sm font-semibold text-[#17324d]">{tPay.payStepReadMoMoSmsTitle}</span>
+                  </div>
+                  <p className="text-xs text-[#6f8399]">
+                    {tPay.payStepReadMoMoSmsHint.replace(
+                      "{total}",
+                      Math.round(grandTotal).toLocaleString(),
+                    )}
+                  </p>
+                  <Textarea
+                    value={grandmaMomoSmsPaste}
+                    onChange={(e) => {
+                      setGrandmaMomoSmsPaste(e.target.value)
+                      setGrandmaSmsPayCheck(null)
+                      setGrandmaSmsMatchResult(null)
+                    }}
+                    className="min-h-[88px] resize-y border-[#dbe7f3] text-sm"
+                    placeholder="Airtel Money…"
+                    aria-label={tPay.payStepReadMoMoSmsTitle}
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="w-full border-[#dbe7f3] bg-[#f7fbff] text-[#17324d] hover:bg-[#eef6ff]"
+                    onClick={() => verifyGrandmaMoMoSms()}
+                    disabled={grandTotal < 1 || !grandmaMomoSmsPaste.trim()}
+                  >
+                    {tPay.payStepVerifySms}
+                  </Button>
+                  {grandmaSmsPayCheck === "paid" ? (
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-2 text-xs font-medium text-emerald-900">
+                      {grandmaSmsMatchResult?.txId
+                        ? tPay.payStepPaymentPaidMatchedWithTxn.replace(
+                            "{txnId}",
+                            grandmaSmsMatchResult.txId,
+                          )
+                        : tPay.payStepPaymentPaidMatched}
+                    </div>
+                  ) : null}
+                  {grandmaSmsPayCheck === "no_amount" ? (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-2 text-xs text-amber-950">
+                      {tPay.payStepPaymentNoAmountInSms}
+                    </div>
+                  ) : null}
+                  {grandmaSmsPayCheck === "mismatch" && grandmaSmsMatchResult ? (
+                    <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-2 text-xs text-red-900">
+                      {tPay.payStepPaymentMismatch
+                        .replace("{got}", String(grandmaSmsMatchResult.amount ?? "—"))
+                        .replace("{expected}", Math.round(grandTotal).toLocaleString())}
+                    </div>
+                  ) : null}
+                </div>
               </div>
             ) : (
               <div className="space-y-3">
