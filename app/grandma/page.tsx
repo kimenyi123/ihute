@@ -5596,25 +5596,21 @@ export default function GrandmaPage() {
 
 
       
-
-     {/* Page 3 — order lines (sits under .app, directly before #page3) */}
+{/* Page 3 — order lines (sits under .app, directly before #page3) */}
 <div
   className={`page ${page === 4 ? "active" : ""}`}
   id="page4-order-head"
   aria-hidden={page !== 4}
 >
-  <div className="bg-white rounded-[28px] p-5 shadow-sm border border-slate-200">
+  <div className="card summary-card">
     
     {/* HEADER */}
-    <div className="flex items-center justify-between mb-4">
-      <div className="text-[20px] font-bold text-slate-900">
+    <div className="summary-row">
+      <div className="summary-left">
         Order Summary
       </div>
 
-      <div
-        id="summaryCount"
-        className="text-[18px] font-semibold text-slate-700"
-      >
+      <div id="summaryCount">
         {itemsCount} items
       </div>
     </div>
@@ -5624,24 +5620,28 @@ export default function GrandmaPage() {
       {selectedProducts.length ? (
         selectedProducts.map((p) => (
           <div
+            className="summary-row summary-item-row"
             key={p.id}
-            className="flex items-start justify-between gap-4 border-t border-slate-200 py-5"
           >
             {/* LEFT SIDE */}
-            <div className="flex-1">
-              {/* NAME */}
-              <div className="text-[18px] font-bold text-[#082552]">
+            <div className="summary-item-main">
+              
+              {/* PRODUCT NAME */}
+              <div className="summary-left">
                 {p.name} x{p.qty}
               </div>
 
-              {/* PRICE */}
-              <div className="mt-2 text-[16px] text-slate-500">
+              {/* PRODUCT PRICE */}
+              <div className="summary-sub">
                 {formatRwf(p.price)} each
               </div>
 
               {/* STOCK */}
               {productStockOnHand(p) != null ? (
-                <div className="mt-2 text-[15px] text-[#6f8399]">
+                <div
+                  className="summary-sub"
+                  style={{ color: "#6f8399" }}
+                >
                   {tPay.stockOnHandLabel.replace(
                     "{n}",
                     String(productStockOnHand(p)),
@@ -5650,9 +5650,15 @@ export default function GrandmaPage() {
               ) : null}
 
               {/* STOCK WARNING */}
-              {grandmaStockLineIssues.find((i) => i.id === p.id) ? (
+              {grandmaStockLineIssues.find(
+                (i) => i.id === p.id,
+              ) ? (
                 <div
-                  className="mt-2 text-[15px] font-semibold text-amber-700"
+                  className="summary-sub"
+                  style={{
+                    color: "#92400e",
+                    fontWeight: 600,
+                  }}
                   role="alert"
                 >
                   {tPay.stockExceededLine
@@ -5680,7 +5686,7 @@ export default function GrandmaPage() {
 
             {/* RIGHT SIDE */}
             <div className="flex flex-col items-end gap-3">
-              
+
               {/* REMOVE BUTTON */}
               <button
                 type="button"
@@ -5692,44 +5698,34 @@ export default function GrandmaPage() {
                 Remove
               </button>
 
-              {/* QUANTITY CONTROLS */}
+              {/* EDIT QUANTITY */}
               <div className="flex items-center gap-3">
-                
-                {/* MINUS */}
+
+                {/* EDIT BUTTON */}
                 <button
                   type="button"
-                  aria-label={`Decrease quantity of ${p.name}`}
-                  onClick={() =>
-                    setQtyDirect(
-                      p.id,
-                      Math.max(1, p.qty - 1),
-                    )
-                  }
-                  disabled={p.qty <= 1}
-                  className="w-9 h-9 rounded-xl bg-sky-500 hover:bg-sky-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-[22px] font-bold flex items-center justify-center transition"
+                  className="border border-slate-200 rounded-2xl px-4 py-3 bg-white hover:bg-slate-50 transition text-slate-700 font-semibold"
                 >
-                  -
+                  Edit Qty
                 </button>
 
-                {/* QTY */}
-                <span className="min-w-[24px] text-center text-[18px] font-bold text-slate-900">
-                  {p.qty}
-                </span>
+                {/* INPUT */}
+                <input
+                  type="number"
+                  min={1}
+                  value={p.qty}
+                  onChange={(e) => {
+                    const value = Number(e.target.value)
 
-                {/* PLUS */}
-                <button
-                  type="button"
-                  aria-label={`Increase quantity of ${p.name}`}
-                  onClick={() =>
-                    setQtyDirect(
-                      p.id,
-                      p.qty + 1,
-                    )
-                  }
-                  className="w-9 h-9 rounded-xl bg-sky-500 hover:bg-sky-600 text-white text-[22px] font-bold flex items-center justify-center transition"
-                >
-                  +
-                </button>
+                    if (
+                      !Number.isNaN(value) &&
+                      value > 0
+                    ) {
+                      setQtyDirect(p.id, value)
+                    }
+                  }}
+                  className="w-[90px] border border-slate-200 rounded-2xl px-4 py-3 text-center font-bold text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                />
               </div>
 
               {/* TOTAL */}
@@ -5740,13 +5736,14 @@ export default function GrandmaPage() {
           </div>
         ))
       ) : (
-        <div className="py-5 text-slate-500">
+        <div className="note">
           No items selected yet.
         </div>
       )}
     </div>
   </div>
 </div>
+
 
 
 
