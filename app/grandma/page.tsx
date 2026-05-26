@@ -5591,71 +5591,175 @@ export default function GrandmaPage() {
         ) : null}
       </section>
 
-      {/* Page 3 — order lines (sits under .app, directly before #page3) */}
-      <div className={`page ${page === 4 ? "active" : ""}`} id="page4-order-head" aria-hidden={page !== 4}>
-        <div className="card summary-card">
-          <div className="summary-row">
-            <div className="summary-left">Order Summary</div>
-            <div id="summaryCount">{itemsCount} items</div>
-          </div>
-          <div id="summaryItems">
-            {selectedProducts.length ? (
-              selectedProducts.map((p) => (
-                <div className="summary-row summary-item-row" key={p.id}>
-                  <div className="summary-item-main">
-                    <div className="summary-left">
-                      {p.name} x{p.qty}
-                    </div>
-                    <div className="summary-sub">{formatRwf(p.price)} each</div>
-                    {productStockOnHand(p) != null ? (
-                      <div className="summary-sub" style={{ color: "#6f8399" }}>
-                        {tPay.stockOnHandLabel.replace("{n}", String(productStockOnHand(p)))}
-                      </div>
-                    ) : null}
-                    {grandmaStockLineIssues.find((i) => i.id === p.id) ? (
-                      <div
-                        className="summary-sub"
-                        style={{ color: "#92400e", fontWeight: 600 }}
-                        role="alert"
-                      >
-                        {tPay.stockExceededLine
-                          .replace(
-                            "{requested}",
-                            String(
-                              grandmaStockLineIssues.find((i) => i.id === p.id)?.requested ?? p.qty,
-                            ),
-                          )
-                          .replace(
-                            "{available}",
-                            String(
-                              grandmaStockLineIssues.find((i) => i.id === p.id)?.available ??
-                                productStockOnHand(p) ??
-                                0,
-                            ),
-                          )}
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="summary-item-end">
-                    <button
-                      type="button"
-                      className="summary-remove-btn"
-                      aria-label={`Remove ${p.name} from cart`}
-                      onClick={() => setQtyDirect(p.id, 0)}
-                    >
-                      <Trash2 aria-hidden />
-                      Remove
-                    </button>
-                    <strong>{formatRwf(p.qty * p.price)}</strong>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="note">No items selected yet.</div>
-            )}
-          </div>
-        </div>
+
+
+
+
+      
+
+     {/* Page 3 — order lines (sits under .app, directly before #page3) */}
+<div
+  className={`page ${page === 4 ? "active" : ""}`}
+  id="page4-order-head"
+  aria-hidden={page !== 4}
+>
+  <div className="bg-white rounded-[28px] p-5 shadow-sm border border-slate-200">
+    
+    {/* HEADER */}
+    <div className="flex items-center justify-between mb-4">
+      <div className="text-[20px] font-bold text-slate-900">
+        Order Summary
       </div>
+
+      <div
+        id="summaryCount"
+        className="text-[18px] font-semibold text-slate-700"
+      >
+        {itemsCount} items
+      </div>
+    </div>
+
+    {/* ITEMS */}
+    <div id="summaryItems">
+      {selectedProducts.length ? (
+        selectedProducts.map((p) => (
+          <div
+            key={p.id}
+            className="flex items-start justify-between gap-4 border-t border-slate-200 py-5"
+          >
+            {/* LEFT SIDE */}
+            <div className="flex-1">
+              {/* NAME */}
+              <div className="text-[18px] font-bold text-[#082552]">
+                {p.name} x{p.qty}
+              </div>
+
+              {/* PRICE */}
+              <div className="mt-2 text-[16px] text-slate-500">
+                {formatRwf(p.price)} each
+              </div>
+
+              {/* STOCK */}
+              {productStockOnHand(p) != null ? (
+                <div className="mt-2 text-[15px] text-[#6f8399]">
+                  {tPay.stockOnHandLabel.replace(
+                    "{n}",
+                    String(productStockOnHand(p)),
+                  )}
+                </div>
+              ) : null}
+
+              {/* STOCK WARNING */}
+              {grandmaStockLineIssues.find((i) => i.id === p.id) ? (
+                <div
+                  className="mt-2 text-[15px] font-semibold text-amber-700"
+                  role="alert"
+                >
+                  {tPay.stockExceededLine
+                    .replace(
+                      "{requested}",
+                      String(
+                        grandmaStockLineIssues.find(
+                          (i) => i.id === p.id,
+                        )?.requested ?? p.qty,
+                      ),
+                    )
+                    .replace(
+                      "{available}",
+                      String(
+                        grandmaStockLineIssues.find(
+                          (i) => i.id === p.id,
+                        )?.available ??
+                          productStockOnHand(p) ??
+                          0,
+                      ),
+                    )}
+                </div>
+              ) : null}
+            </div>
+
+            {/* RIGHT SIDE */}
+            <div className="flex flex-col items-end gap-3">
+              
+              {/* REMOVE BUTTON */}
+              <button
+                type="button"
+                aria-label={`Remove ${p.name} from cart`}
+                onClick={() => setQtyDirect(p.id, 0)}
+                className="flex items-center gap-2 border border-slate-200 rounded-2xl px-4 py-3 text-rose-600 font-semibold bg-white hover:bg-rose-50 transition"
+              >
+                <Trash2 size={18} />
+                Remove
+              </button>
+
+              {/* QUANTITY CONTROLS */}
+              <div className="flex items-center gap-3">
+                
+                {/* MINUS */}
+                <button
+                  type="button"
+                  aria-label={`Decrease quantity of ${p.name}`}
+                  onClick={() =>
+                    setQtyDirect(
+                      p.id,
+                      Math.max(1, p.qty - 1),
+                    )
+                  }
+                  disabled={p.qty <= 1}
+                  className="w-9 h-9 rounded-xl bg-sky-500 hover:bg-sky-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-[22px] font-bold flex items-center justify-center transition"
+                >
+                  -
+                </button>
+
+                {/* QTY */}
+                <span className="min-w-[24px] text-center text-[18px] font-bold text-slate-900">
+                  {p.qty}
+                </span>
+
+                {/* PLUS */}
+                <button
+                  type="button"
+                  aria-label={`Increase quantity of ${p.name}`}
+                  onClick={() =>
+                    setQtyDirect(
+                      p.id,
+                      p.qty + 1,
+                    )
+                  }
+                  className="w-9 h-9 rounded-xl bg-sky-500 hover:bg-sky-600 text-white text-[22px] font-bold flex items-center justify-center transition"
+                >
+                  +
+                </button>
+              </div>
+
+              {/* TOTAL */}
+              <strong className="text-[20px] font-extrabold text-[#082552]">
+                {formatRwf(p.qty * p.price)}
+              </strong>
+            </div>
+          </div>
+        ))
+      ) : (
+        <div className="py-5 text-slate-500">
+          No items selected yet.
+        </div>
+      )}
+    </div>
+  </div>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+
 
       {/* Page 4 — shipment, shop, totals, notes, pay */}
       <section className={`page ${page === 4 ? "active" : ""}`} id="page4-summary">
@@ -5693,6 +5797,14 @@ export default function GrandmaPage() {
                 setFulfillmentMode("pickup")
               }
             }}
+
+
+
+
+
+
+
+
           >
             <span className="log-icon" aria-hidden>
               🏪
