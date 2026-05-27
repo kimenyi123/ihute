@@ -82,8 +82,8 @@ export async function subscribeToPushNotifications(): Promise<PushSubscription |
     registration = await navigator.serviceWorker.ready;
     console.log('[Notifications] Service worker is ready');
   } catch (error) {
-    console.error('[Notifications] Service worker error:', error);
-    throw new Error('Failed to register service worker. Please refresh the page and try again.');
+    console.warn('[Notifications] Service worker unavailable:', error);
+    return null;
   }
 
   // Check if already subscribed
@@ -136,21 +136,10 @@ export async function subscribeToPushNotifications(): Promise<PushSubscription |
 
     console.log('[Notifications] Successfully subscribed to push notifications');
     return subscription;
-  } catch (error: any) {
-    console.error('[Notifications] Error subscribing:', error);
-
-    // Provide user-friendly error messages
-    if (error.name === 'InvalidAccessError' || error.message?.includes('applicationServerKey')) {
-      console.warn('[Notifications] Invalid VAPID key. Push notifications disabled.');
-      return null;
-    } else if (error.message) {
-      // Log but don't throw - allow graceful degradation
-      console.warn('[Notifications] Failed to subscribe:', error.message);
-      return null;
-    } else {
-      console.warn('[Notifications] Failed to subscribe to notifications.');
-      return null;
-    }
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.warn('[Notifications] Subscription skipped:', msg);
+    return null;
   }
 }
 
@@ -243,15 +232,13 @@ async function sendSubscriptionToBackend(subscription: PushSubscription): Promis
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[Notifications] Subscribe API error:', errorText);
-      throw new Error(`Subscription failed: ${response.status}`);
+      console.warn('[Notifications] Subscribe API returned', response.status, '— subscription saved locally only');
+      return;
     }
 
     console.log('[Notifications] Subscription registered with backend');
-  } catch (error) {
-    console.error('[Notifications] Error sending subscription:', error);
-    throw error;
+  } catch {
+    console.warn('[Notifications] Backend unreachable — subscription saved locally only');
   }
 }
 

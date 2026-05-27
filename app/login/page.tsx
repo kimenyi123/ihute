@@ -18,7 +18,11 @@ import {
 import { useAuthStore } from "@/lib/auth-store"
 import type { User } from "@/lib/auth-store"
 import type { ApiLoginOK } from "@/lib/auth-login-client"
-import { grandmaUserCanUseSellerWorkspace, normalizeJavaLoginToUser } from "@/lib/auth-login-client"
+import {
+  grandmaUserCanUseSellerWorkspace,
+  isAdminUser,
+  normalizeJavaLoginToUser,
+} from "@/lib/auth-login-client"
 import { IshyigaLoginCard } from "@/components/ishyiga-login-card"
 import { APP_VERSION_DISPLAY } from "@/lib/app-version"
 import { GRANDMA_PATHS, writeGrandmaSignupRole } from "@/lib/grandma-urls"
@@ -64,6 +68,15 @@ function LoginPageInner() {
   })()
   const backHomeLabel = backHomeHref === GRANDMA_PATHS.appRoot ? "Back to Grandma" : "Back to Home"
 
+  const adminLoginIntent = (() => {
+    if (!redirectTo) return false
+    try {
+      return decodeURIComponent(redirectTo).startsWith("/admin")
+    } catch {
+      return redirectTo.startsWith("/admin")
+    }
+  })()
+
   useEffect(() => {
     if (!redirectTo) return
     let decoded = ""
@@ -92,12 +105,8 @@ function LoginPageInner() {
     }
   }
 
-  const isAdminUser = (user: User): boolean =>
-    user.role === "admin" || String(user.dbRole ?? "").toUpperCase() === "ADMIN"
-
   const redirectAfterLogin = (user: User, decoded: string, safeRedirect: boolean) => {
-    const redirectIsGrandma = decoded.startsWith("/grandma")
-    if (isAdminUser(user) && redirectIsGrandma) {
+    if (isAdminUser(user)) {
       router.push("/admin/dashboard")
       return
     }
@@ -105,9 +114,7 @@ function LoginPageInner() {
       router.push(decoded)
       return
     }
-    if (isAdminUser(user)) {
-      router.push("/admin/dashboard")
-    } else if (user.role === "supplier") {
+    if (user.role === "supplier") {
       router.push("/supplier/dashboard")
     } else {
       router.push("/")
@@ -205,7 +212,11 @@ function LoginPageInner() {
 
         <IshyigaLoginCard
           title="Welcome back"
-          description="Sign in with your phone number"
+          description={
+            adminLoginIntent
+              ? "Admin sign-in: use the email stored in account_signup (TYPE = ADMIN). Phone works only if TEL matches that row."
+              : "Sign in with your phone number or email"
+          }
           onSuccess={handleSuccess}
           onMustChangePassword={handleMustChangePassword}
           defaultPhone={phonePrefill}

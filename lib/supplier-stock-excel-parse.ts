@@ -1,4 +1,6 @@
-import * as XLSX from "xlsx"
+// xlsx@0.18 ships broken .d.ts — cast to `any` for build.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-require-imports
+const XLSX: any = require("xlsx")
 import { roundRwfPrice } from "@/lib/parse-rwf-price"
 
 export type ParsedStockRow = {
@@ -253,8 +255,7 @@ export function parseStockExcelBuffer(buffer: ArrayBuffer, fileName: string): Pa
   for (const sheetName of wb.SheetNames) {
     const sheet = wb.Sheets[sheetName]
     if (!sheet) continue
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const matrix = (XLSX as any).utils.sheet_to_json(sheet, {
+    const matrix = XLSX.utils.sheet_to_json(sheet, {
       header: 1,
       defval: "",
       raw: false,

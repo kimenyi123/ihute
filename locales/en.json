@@ -1,0 +1,237 @@
+{
+  "header": {
+    "searchPlaceholder": "Search products, brands, or scan barcode…",
+    "login": "Login",
+    "logout": "Logout",
+    "allLocations": "All Locations"
+  },
+  "hero": {
+    "title": "Shop from Local Businesses",
+    "subtitle": "Connect with trusted suppliers across Rwanda. Find quality products delivered to your doorstep.",
+    "shopNow": "Shop Now",
+    "becomeSupplier": "Become a Supplier"
+  },
+  "stats": {
+    "suppliers": "Suppliers",
+    "customers": "Customers",
+    "paymentMethods": "Payment Methods",
+    "fastDelivery": "Fast Delivery"
+  },
+  "categories": {
+    "shopByCategory": "Shop by Category",
+    "findWhatYouNeed": "Find exactly what you're looking for",
+    "viewMore": "View More Categories",
+    "viewLess": "View Less",
+    "pharmacy": "Pharmacy",
+    "liquorStore": "Liquor Store",
+    "boutique": "Boutique",
+    "barResto": "Bar & Restaurant",
+    "supermarket": "Supermarket",
+    "coffeeShop": "Coffee Shop",
+    "beauty": "Beauty & Cosmetics",
+    "generalStore": "General Store",
+    "pharmacyDesc": "Health & wellness products",
+    "liquorStoreDesc": "Wines, spirits & beverages",
+    "boutiqueDesc": "Fashion & accessories",
+    "barRestoDesc": "Food & dining",
+    "supermarketDesc": "Groceries & household items",
+    "coffeeShopDesc": "Coffee & pastries",
+    "beautyDesc": "Skincare & makeup",
+    "generalStoreDesc": "Everything else"
+  },
+  "shops": {
+    "nickname": "Nickname",
+    "noNickname": "No nickname",
+    "linkDisabledHint": "Add a NICKNAME for this supplier to enable Shop With Me.",
+    "shops": "shops",
+    "items": "items",
+    "browseByPrefix": "Shop in",
+    "browseBySuffix": "by:",
+    "chooseShop": "Choose a shop",
+    "chooseItem": "Choose an item",
+    "shopsHint": "Pick a shop to see its catalog.",
+    "pickShopForProducts": "Pick a shop above to see products.",
+    "family": "Family",
+    "familyAny": "Any",
+    "trendingSort": "Trending",
+    "trendingHint": "Top 20 preview — full trending scores coming soon.",
+    "allItemsInSector": "All items in this sector",
+    "useHeaderSearchProducts": "Use the main search bar (top of the page) to find products or brands. Here you can sort and filter by family for this sector only.",
+    "shopGridHint": "Find a shop with the main search (top), then open it below. Optional: narrow by area — matches your location filter when set in the header.",
+    "locationFilter": "Area",
+    "locationAll": "All areas",
+    "locationMatchesHeader": "Header location applied"
+  },
+  "filters": {
+    "sortProducts": "Sort products",
+    "sortHint": "For \"Choose an item\" on a category page, this controls how products are ordered.",
+    "featured": "Featured",
+    "priceLow": "Price: Low to High",
+    "priceHigh": "Price: High to Low",
+    "newest": "Newest first",
+    "rating": "Highest rated",
+    "done": "Done"
+  },
+  "howItWorks": {
+    "title": "How It Works",
+    "step1Title": "Browse Products",
+    "step1Desc": "Explore products from local suppliers in your area",
+    "step2Title": "Add to Cart",
+    "step2Desc": "Select items and quantities that suit your needs",
+    "step3Title": "Fast Delivery",
+    "step3Desc": "Get your order delivered quickly to your location"
+  },
+  "payment": {
+    "title": "We Accept",
+    "mobileMoney": "Mobile Money",
+    "creditCard": "Credit Card",
+    "debitCard": "Debit Card",
+    "bankTransfer": "Bank Transfer",
+    "cashOnDelivery": "Cash on Delivery"
+  },
+  "partners": {
+    "title": "Our Trusted Partners"
+  },
+  "cta": {
+    "readyToStart": "Ready to Start Selling?",
+    "joinSuppliers": "Join hundreds of suppliers already selling on ihute.rw",
+    "becomeCustomer": "Become a Customer"
+  },
+  "footer": {
+    "aboutUs": "About Us",
+    "aboutDesc": "ihute.rw connects businesses with customers across Rwanda, making it easy to buy and sell products online.",
+    "quickLinks": "Quick Links",
+    "home": "Home",
+    "categories": "Categories",
+    "suppliers": "Suppliers",
+    "howItWorks": "How It Works",
+    "customerService": "Customer Service",
+    "help": "Help Center",
+    "shipping": "Shipping Info",
+    "returns": "Returns",
+    "contactUs": "Contact Us",
+    "contact": "Contact",
+    "email": "Email",
+    "phone": "Phone",
+    "address": "Address",
+    "kigaliRwanda": "Kigali, Rwanda",
+    "allRightsReserved": "All rights reserved."
+  },
+  "product": {
+    "addToCart": "Add to Cart",
+    "quantity": "Quantity",
+    "unit": "Unit",
+    "price": "Price",
+    "inStock": "In Stock",
+    "outOfStock": "Out of Stock",
+    "supplier": "Supplier"
+  },
+  "cart": {
+    "title": "Shopping Cart",
+    "empty": "Your cart is empty",
+    "continueShopping": "Continue Shopping",
+    "checkout": "Checkout",
+    "subtotal": "Subtotal",
+    "delivery": "Delivery",
+    "total": "Total"
+  },
+  "favorites": {
+    "title": "My Favorites",
+    "empty": "No favorites yet",
+    "add": "Add to favorites",
+    "remove": "Remove from favorites"
+  },
+  "units": {
+    "piece": "Piece",
+    "box": "Box",
+    "carton": "Carton",
+    "crate": "Crate",
+    "pack": "Pack"
+  },
+  "auth": {
+    "signIn": "Sign In",
+    "signUp": "Sign Up",
+    "name": "Name",
+    "emailAddress": "Email Address",
+    "password": "Password",
+    "location": "Location",
+    "role": "I am a",
+    "customer": "Customer",
+    "businessName": "Business Name",
+    "businessCategory": "Business Category",
+    "register": "Register",
+    "alreadyHaveAccount": "Already have an account?",
+    "dontHaveAccount": "Don't have an account?"
+  },
+  "tutorial": {
+    "howToUse": "How to Use ihute.rw",
+    "watchVideoGuide": "Watch our simple video guide to get started",
+    "watchTutorial": "Watch Tutorial",
+    "step1": "Browse products from local suppliers",
+    "step2": "Add items to your cart with quantities",
+    "step3": "Complete checkout and get delivery"
+  },
+  "validation": {
+    "required": "This field is required",
+    "invalidEmail": "Please enter a valid email address",
+    "invalidPhone": "Please enter a valid phone number",
+    "passwordMin": "Password must be at least 6 characters",
+    "passwordMismatch": "Passwords do not match",
+    "selectOption": "Please select an option"
+  },
+  "common": {
+    "loading": "Loading…",
+    "save": "Save",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "delete": "Delete",
+    "edit": "Edit",
+    "close": "Close",
+    "back": "Back",
+    "next": "Next",
+    "previous": "Previous",
+    "search": "Search",
+    "noResults": "No results found",
+    "retry": "Retry",
+    "yes": "Yes",
+    "no": "No",
+    "ok": "OK",
+    "error": "Something went wrong",
+    "success": "Success",
+    "warning": "Warning"
+  },
+  "orders": {
+    "title": "My Orders",
+    "orderNumber": "Order #",
+    "date": "Date",
+    "status": "Status",
+    "total": "Total",
+    "details": "View Details",
+    "empty": "You have no orders yet",
+    "pending": "Pending",
+    "confirmed": "Confirmed",
+    "inTransit": "In Transit",
+    "delivered": "Delivered",
+    "cancelled": "Cancelled",
+    "trackOrder": "Track Order"
+  },
+  "seller": {
+    "dashboard": "Seller Dashboard",
+    "myShop": "My Shop",
+    "addProduct": "Add Product",
+    "inventory": "Inventory",
+    "sales": "Sales",
+    "earnings": "Earnings",
+    "customers": "Customers",
+    "reviews": "Reviews",
+    "settings": "Settings"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "empty": "No notifications",
+    "markAllRead": "Mark all as read",
+    "newOrder": "New order received",
+    "orderUpdate": "Order status updated",
+    "paymentReceived": "Payment received"
+  }
+}

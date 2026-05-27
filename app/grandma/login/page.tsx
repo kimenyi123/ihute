@@ -9,7 +9,41 @@ import { useAuthStore } from "@/lib/auth-store"
 import type { User } from "@/lib/auth-store"
 import { IshyigaLoginCard } from "@/components/ishyiga-login-card"
 import { GRANDMA_PATHS, readGrandmaSignupRole, writeGrandmaSignupRole } from "@/lib/grandma-urls"
-import { grandmaUserCanUseSellerWorkspace } from "@/lib/auth-login-client"
+import { grandmaUserCanUseSellerWorkspace, isAdminUser } from "@/lib/auth-login-client"
+import { useTranslation } from "@/hooks/use-translation"
+
+const LOGIN_UI = {
+  en: {
+    headerTitle: "Sign in",
+    backToHome: "Back to Home",
+    welcome: "Welcome back",
+    description: "Sign in with your phone number or email",
+    submitLabel: "Sign in",
+    registerSeller: "Register as seller",
+    registerBuyer: "Register as buyer",
+    loading: "Loading\u2026",
+  },
+  rw: {
+    headerTitle: "Injira",
+    backToHome: "Subira ahabanza",
+    welcome: "Murakaza neza",
+    description: "Injira ukoresheje nimero ya telefoni cyangwa imeyili",
+    submitLabel: "Injira",
+    registerSeller: "Iyandikishe nk\u2019umucuruzi",
+    registerBuyer: "Iyandikishe nk\u2019umuguzi",
+    loading: "Turimo gutunganya\u2026",
+  },
+  fr: {
+    headerTitle: "Connexion",
+    backToHome: "Retour \u00e0 l\u2019accueil",
+    welcome: "Bienvenue",
+    description: "Connectez-vous avec votre t\u00e9l\u00e9phone ou e-mail",
+    submitLabel: "Se connecter",
+    registerSeller: "S\u2019inscrire comme vendeur",
+    registerBuyer: "S\u2019inscrire comme acheteur",
+    loading: "Chargement\u2026",
+  },
+} as const
 
 const shell =
   "min-h-screen bg-[#eef4fb] text-[#17324d] flex flex-col bg-gradient-to-b from-[#e8f5ff] to-[#dff0ff]"
@@ -18,8 +52,13 @@ function GrandmaLoginInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const loginStore = useAuthStore((s) => s.login)
+  const user = useAuthStore((s) => s.user)
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+  const hasHydrated = useAuthStore((s) => s.hasHydrated)
   const redirectTo = searchParams?.get("redirect")
   const phonePrefill = searchParams?.get("phone") ?? ""
+  const { language } = useTranslation()
+  const ui = LOGIN_UI[language] ?? LOGIN_UI.en
 
   const [registerHref, setRegisterHref] = useState("/register/buyer")
 
@@ -27,8 +66,12 @@ function GrandmaLoginInner() {
     setRegisterHref(readGrandmaSignupRole() === "seller" ? "/register/seller" : "/register/buyer")
   }, [])
 
-  const isAdminUser = (user: User): boolean =>
-    user.role === "admin" || String(user.dbRole ?? "").toUpperCase() === "ADMIN"
+  useLayoutEffect(() => {
+    if (!hasHydrated || !isAuthenticated || !user) return
+    if (isAdminUser(user)) {
+      router.replace("/admin/dashboard")
+    }
+  }, [hasHydrated, isAuthenticated, user, router])
 
   const handleSuccess = async (user: User) => {
     loginStore(user)
@@ -41,7 +84,6 @@ function GrandmaLoginInner() {
       /* ignore */
     }
     const decoded = redirectTo ? decodeURIComponent(redirectTo) : ""
-    // Admin should always land on admin workspace, even if arriving from grandma redirects.
     if (isAdminUser(user)) {
       router.push("/admin/dashboard")
       return
@@ -60,7 +102,7 @@ function GrandmaLoginInner() {
           <Link
             href={GRANDMA_PATHS.appRoot}
             className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-white/15 text-lg text-white hover:bg-white/25"
-            aria-label="Back to Grandma"
+            aria-label={ui.backToHome}
           >
             ←
           </Link>
@@ -69,7 +111,7 @@ function GrandmaLoginInner() {
               <Image src="/images/ishyiga-logo.png" alt="" width={34} height={34} className="object-contain" />
             </div>
             <div className="min-w-0">
-              <div className="truncate text-lg font-bold leading-tight">Sign in</div>
+              <div className="truncate text-lg font-bold leading-tight">{ui.headerTitle}</div>
               <div className="truncate text-xs text-white/90">Ishyiga Ihute</div>
             </div>
           </div>
@@ -82,17 +124,17 @@ function GrandmaLoginInner() {
           className="mb-4 inline-flex items-center gap-2 text-sm font-medium text-[#1897e0] hover:underline"
         >
           <ArrowLeft className="h-4 w-4" />
-          Back to Home
+          {ui.backToHome}
         </Link>
 
         <IshyigaLoginCard
-          title="Welcome back"
-          description="Sign in with your phone number or email"
-          submitLabel="Sign in"
+          title={ui.welcome}
+          description={ui.description}
+          submitLabel={ui.submitLabel}
           defaultPhone={phonePrefill}
           registerHref={registerHref}
           registerLinkText={
-            registerHref === "/register/seller" ? "Register as seller" : "Register as buyer"
+            registerHref === "/register/seller" ? ui.registerSeller : ui.registerBuyer
           }
           forgotHref="/forgot-password"
           loginMode="phoneOrEmail"
@@ -105,11 +147,13 @@ function GrandmaLoginInner() {
 }
 
 export default function GrandmaLoginPage() {
+  const { language } = useTranslation()
+  const ui = LOGIN_UI[language] ?? LOGIN_UI.en
   return (
     <Suspense
       fallback={
         <div className="flex min-h-screen items-center justify-center bg-[#eef4fb] text-[#6f8399] text-sm">
-          Loading…
+          {ui.loading}
         </div>
       }
     >
