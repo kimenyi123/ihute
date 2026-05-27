@@ -237,7 +237,8 @@ function parseOneSheet(
 export function parseStockExcelBuffer(buffer: ArrayBuffer, fileName: string): ParseStockExcelResult {
   const errors: string[] = []
   const lower = fileName.toLowerCase()
-  const wb = XLSX.read(buffer, {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const wb = (XLSX as any).read(buffer, {
     type: "array",
     raw: false,
     ...(lower.endsWith(".csv") ? { FS: ",", RS: "\n" } : {}),
@@ -252,7 +253,8 @@ export function parseStockExcelBuffer(buffer: ArrayBuffer, fileName: string): Pa
   for (const sheetName of wb.SheetNames) {
     const sheet = wb.Sheets[sheetName]
     if (!sheet) continue
-    const matrix = XLSX.utils.sheet_to_json<(string | number | null)[]>(sheet, {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const matrix = (XLSX as any).utils.sheet_to_json(sheet, {
       header: 1,
       defval: "",
       raw: false,
