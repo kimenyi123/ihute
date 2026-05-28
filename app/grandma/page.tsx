@@ -2722,6 +2722,30 @@ export default function GrandmaPage() {
               console.warn(`Sector list failed for ${cat}: HTTP ${res.status}`)
             }
 
+            // Production Grandma browse is the canonical seller endpoint; use it when the older sector servlet is empty.
+            if (suppliers.length === 0) {
+              const browseQs = new URLSearchParams({
+                sector,
+                sellerLimit: "500",
+                productsPerSeller: "6",
+                Currency: "RWF",
+              })
+              const browseUrl = `/api/grandma/suppliers/browse?${browseQs.toString()}`
+              const browseRes = await fetch(browseUrl, { cache: "no-store" })
+              if (browseRes.ok) {
+                const browseData = await browseRes.json()
+                if (Array.isArray(browseData) && browseData.length > 0) {
+                  suppliers = browseData
+                  console.log(`${cat} suppliers (grandma browse fallback):`, suppliers.length)
+                } else if (browseData && typeof browseData === "object" && (browseData as { ok?: boolean }).ok === false) {
+                  browseFailures++
+                }
+              } else {
+                browseFailures++
+                console.warn(`Grandma browse failed for ${cat}: HTTP ${browseRes.status}`)
+              }
+            }
+
             // Same SQL family as browse, different servlet path — helps if Grandma browse404/503 or returns [].
             if (suppliers.length === 0) {
               const legacyUrl = `/api/fetchSuggestions?listSuppliersBySector=${encodeURIComponent(sector)}&Currency=RWF`
