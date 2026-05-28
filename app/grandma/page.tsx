@@ -2722,6 +2722,30 @@ export default function GrandmaPage() {
               console.warn(`Sector list failed for ${cat}: HTTP ${res.status}`)
             }
 
+            // Production Grandma browse is the canonical seller endpoint; use it when the older sector servlet is empty.
+            if (suppliers.length === 0) {
+              const browseQs = new URLSearchParams({
+                sector,
+                sellerLimit: "500",
+                productsPerSeller: "6",
+                Currency: "RWF",
+              })
+              const browseUrl = `/api/grandma/suppliers/browse?${browseQs.toString()}`
+              const browseRes = await fetch(browseUrl, { cache: "no-store" })
+              if (browseRes.ok) {
+                const browseData = await browseRes.json()
+                if (Array.isArray(browseData) && browseData.length > 0) {
+                  suppliers = browseData
+                  console.log(`${cat} suppliers (grandma browse fallback):`, suppliers.length)
+                } else if (browseData && typeof browseData === "object" && (browseData as { ok?: boolean }).ok === false) {
+                  browseFailures++
+                }
+              } else {
+                browseFailures++
+                console.warn(`Grandma browse failed for ${cat}: HTTP ${browseRes.status}`)
+              }
+            }
+
             // Same SQL family as browse, different servlet path — helps if Grandma browse404/503 or returns [].
             if (suppliers.length === 0) {
               const legacyUrl = `/api/fetchSuggestions?listSuppliersBySector=${encodeURIComponent(sector)}&Currency=RWF`
@@ -4721,39 +4745,34 @@ export default function GrandmaPage() {
               </button>
             ) : null}
           </div>
-          {appMode === "buyer" ? (
-            <div className="topbar-order-actions">
-              <button
-                type="button"
-                className="orders-btn"
-                aria-label="Quick Shop"
-                title="Quick Shop"
-                onClick={() =>
-                  router.push(
-                    `${GRANDMA_OUTBOUND.umuriro}?redirect=${encodeURIComponent(GRANDMA_PATHS.appRoot)}`,
-                  )
-                }
-              >
-                ⚡
-              </button>
-              <button
-                type="button"
-                className="orders-btn"
-                aria-label={settingsUi.myOrders}
-                title={settingsUi.myOrders}
-                onClick={() => {
-                  const target = GRANDMA_PATHS.buyerOrders
-                  if (isAuthenticated) router.push(target)
-                  else
-                    router.push(
-                      `${GRANDMA_PATHS.login}?redirect=${encodeURIComponent(target)}`,
-                    )
-                }}
-              >
-                📦
-              </button>
-            </div>
-          ) : null}
+        {appMode === "buyer" ? (
+  <div className="topbar-order-actions">
+    <button
+      type="button"
+      className="orders-btn"
+      aria-label="Quick Shop"
+      title="Quick Shop"
+      onClick={() => {
+        router.push(GRANDMA_OUTBOUND.umuriro)
+      }}
+    >
+      ⚡
+    </button>
+
+    <button
+      type="button"
+      className="orders-btn"
+      aria-label={settingsUi.myOrders}
+      title={settingsUi.myOrders}
+      onClick={() => {
+        router.push(GRANDMA_PATHS.buyerOrders)
+      }}
+    >
+      📦
+    </button>
+  </div>
+) : null}
+          
           <button
             className="more-btn"
             onClick={() => setSettingsOpen(true)}
@@ -5591,71 +5610,172 @@ export default function GrandmaPage() {
         ) : null}
       </section>
 
-      {/* Page 3 — order lines (sits under .app, directly before #page3) */}
-      <div className={`page ${page === 4 ? "active" : ""}`} id="page4-order-head" aria-hidden={page !== 4}>
-        <div className="card summary-card">
-          <div className="summary-row">
-            <div className="summary-left">Order Summary</div>
-            <div id="summaryCount">{itemsCount} items</div>
-          </div>
-          <div id="summaryItems">
-            {selectedProducts.length ? (
-              selectedProducts.map((p) => (
-                <div className="summary-row summary-item-row" key={p.id}>
-                  <div className="summary-item-main">
-                    <div className="summary-left">
-                      {p.name} x{p.qty}
-                    </div>
-                    <div className="summary-sub">{formatRwf(p.price)} each</div>
-                    {productStockOnHand(p) != null ? (
-                      <div className="summary-sub" style={{ color: "#6f8399" }}>
-                        {tPay.stockOnHandLabel.replace("{n}", String(productStockOnHand(p)))}
-                      </div>
-                    ) : null}
-                    {grandmaStockLineIssues.find((i) => i.id === p.id) ? (
-                      <div
-                        className="summary-sub"
-                        style={{ color: "#92400e", fontWeight: 600 }}
-                        role="alert"
-                      >
-                        {tPay.stockExceededLine
-                          .replace(
-                            "{requested}",
-                            String(
-                              grandmaStockLineIssues.find((i) => i.id === p.id)?.requested ?? p.qty,
-                            ),
-                          )
-                          .replace(
-                            "{available}",
-                            String(
-                              grandmaStockLineIssues.find((i) => i.id === p.id)?.available ??
-                                productStockOnHand(p) ??
-                                0,
-                            ),
-                          )}
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="summary-item-end">
-                    <button
-                      type="button"
-                      className="summary-remove-btn"
-                      aria-label={`Remove ${p.name} from cart`}
-                      onClick={() => setQtyDirect(p.id, 0)}
-                    >
-                      <Trash2 aria-hidden />
-                      Remove
-                    </button>
-                    <strong>{formatRwf(p.qty * p.price)}</strong>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="note">No items selected yet.</div>
-            )}
-          </div>
-        </div>
+
+
+
+
+      
+{/* Page 3 — order lines (sits under .app, directly before #page3) */}
+<div
+  className={`page ${page === 4 ? "active" : ""}`}
+  id="page4-order-head"
+  aria-hidden={page !== 4}
+>
+  <div className="card summary-card">
+    
+    {/* HEADER */}
+    <div className="summary-row">
+      <div className="summary-left">
+        Order Summary
       </div>
+
+      <div id="summaryCount">
+        {itemsCount} items
+      </div>
+    </div>
+
+    {/* ITEMS */}
+    <div id="summaryItems">
+      {selectedProducts.length ? (
+        selectedProducts.map((p) => (
+          <div
+            className="summary-row summary-item-row"
+            key={p.id}
+          >
+            {/* LEFT SIDE */}
+            <div className="summary-item-main">
+              
+              {/* PRODUCT NAME */}
+              <div className="summary-left">
+                {p.name} x{p.qty}
+              </div>
+
+              {/* PRODUCT PRICE */}
+              <div className="summary-sub">
+                {formatRwf(p.price)} each
+              </div>
+
+              {/* STOCK */}
+              {productStockOnHand(p) != null ? (
+                <div
+                  className="summary-sub"
+                  style={{ color: "#6f8399" }}
+                >
+                  {tPay.stockOnHandLabel.replace(
+                    "{n}",
+                    String(productStockOnHand(p)),
+                  )}
+                </div>
+              ) : null}
+
+              {/* STOCK WARNING */}
+              {grandmaStockLineIssues.find(
+                (i) => i.id === p.id,
+              ) ? (
+                <div
+                  className="summary-sub"
+                  style={{
+                    color: "#92400e",
+                    fontWeight: 600,
+                  }}
+                  role="alert"
+                >
+                  {tPay.stockExceededLine
+                    .replace(
+                      "{requested}",
+                      String(
+                        grandmaStockLineIssues.find(
+                          (i) => i.id === p.id,
+                        )?.requested ?? p.qty,
+                      ),
+                    )
+                    .replace(
+                      "{available}",
+                      String(
+                        grandmaStockLineIssues.find(
+                          (i) => i.id === p.id,
+                        )?.available ??
+                          productStockOnHand(p) ??
+                          0,
+                      ),
+                    )}
+                </div>
+              ) : null}
+            </div>
+
+            {/* RIGHT SIDE */}
+            <div className="flex flex-col items-end gap-3">
+
+              {/* REMOVE BUTTON */}
+              <button
+                type="button"
+                aria-label={`Remove ${p.name} from cart`}
+                onClick={() => setQtyDirect(p.id, 0)}
+                className="flex items-center gap-2 border border-slate-200 rounded-2xl px-4 py-3 text-rose-600 font-semibold bg-white hover:bg-rose-50 transition"
+              >
+                <Trash2 size={18} />
+                Remove
+              </button>
+
+              {/* EDIT QUANTITY */}
+              <div className="flex items-center gap-3">
+
+                {/* EDIT BUTTON */}
+                <button
+                  type="button"
+                  className="border border-slate-200 rounded-2xl px-4 py-3 bg-white hover:bg-slate-50 transition text-slate-700 font-semibold"
+                >
+                  Edit Qty
+                </button>
+
+                {/* INPUT */}
+                <input
+                  type="number"
+                  min={1}
+                  value={p.qty}
+                  onChange={(e) => {
+                    const value = Number(e.target.value)
+
+                    if (
+                      !Number.isNaN(value) &&
+                      value > 0
+                    ) {
+                      setQtyDirect(p.id, value)
+                    }
+                  }}
+                  className="w-[90px] border border-slate-200 rounded-2xl px-4 py-3 text-center font-bold text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                />
+              </div>
+
+              {/* TOTAL */}
+              <strong className="text-[20px] font-extrabold text-[#082552]">
+                {formatRwf(p.qty * p.price)}
+              </strong>
+            </div>
+          </div>
+        ))
+      ) : (
+        <div className="note">
+          No items selected yet.
+        </div>
+      )}
+    </div>
+  </div>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
       {/* Page 4 — shipment, shop, totals, notes, pay */}
       <section className={`page ${page === 4 ? "active" : ""}`} id="page4-summary">
@@ -5693,6 +5813,14 @@ export default function GrandmaPage() {
                 setFulfillmentMode("pickup")
               }
             }}
+
+
+
+
+
+
+
+
           >
             <span className="log-icon" aria-hidden>
               🏪
@@ -5954,14 +6082,9 @@ export default function GrandmaPage() {
                   onChange={(e) => setGrandmaBuyerPhoneInput(e.target.value)}
                   className="pay-input-tap min-h-[48px] border-emerald-200 bg-white text-base focus-visible:ring-emerald-500/30"
                 />
-                <p className="text-xs leading-snug text-emerald-900/80">
-                  {tPay.paymentGuestPhoneNote}{" "}
-                  <a
-                    href={`${GRANDMA_PATHS.login}?redirect=${encodeURIComponent(GRANDMA_PATHS.appRoot)}`}
-                    className="font-semibold text-emerald-800 underline underline-offset-2"
-                  >
-                    {tPay.signIn}
-                  </a>
+                  <p className="text-xs leading-snug text-emerald-900/80">
+                  {tPay.paymentGuestPhoneNote} {" "}
+                  <span className="font-semibold text-emerald-800">{tPay.signIn}</span>
                 </p>
               </div>
             ) : null}
@@ -6780,11 +6903,7 @@ export default function GrandmaPage() {
                       onClick={() => {
                         setSettingsOpen(false)
                         const target = GRANDMA_PATHS.buyerOrders
-                        if (isAuthenticated) router.push(target)
-                        else
-                          router.push(
-                            `${GRANDMA_PATHS.login}?redirect=${encodeURIComponent(target)}`,
-                          )
+                        router.push(target)
                       }}
                       className="mt-2 w-full rounded-xl border border-border bg-background px-3 py-2.5 text-left text-sm font-bold hover:bg-muted/60"
                     >

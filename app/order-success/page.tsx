@@ -401,47 +401,46 @@ function OrderSuccessPageInner() {
           </CardContent>
         </Card>
 
-          {/* WhatsApp Notification */}
-          {whatsappHref ? (
-            <Card className="border-0 shadow-xl rounded-2xl border-2 border-green-100 bg-white text-slate-900">
-              <CardHeader>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <MessageCircle className="h-5 w-5 text-[#25D366]" />
-                  Contact Seller on WhatsApp
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                  <p className="text-sm text-green-900 mb-3">
-                    <strong>Important:</strong> Click below to send your order details to the seller via WhatsApp.
-                    This helps ensure faster processing and delivery.
-                  </p>
-                  {loadingDetails ? (
-                    <Button
-                      className="w-full bg-[#25D366] hover:bg-[#20b05a] text-white"
-                      disabled
-                    >
-                      <MessageCircle className="h-4 w-4 mr-2" />
-                      Loading order details...
-                    </Button>
-                  ) : (
-                    <Button
-                      className="w-full bg-[#25D366] hover:bg-[#20b05a] text-white"
-                      asChild
-                    >
-                      <a href={whatsappHref} target="_blank" rel="noopener noreferrer">
-                        <MessageCircle className="h-4 w-4 mr-2" />
-                        Contact Seller on WhatsApp
-                      </a>
-                    </Button>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  The seller will receive your order details and contact you on {buyerPhone} for delivery confirmation.
+        {whatsappHref ? (
+          <Card className="border-0 shadow-xl rounded-2xl border-2 border-green-100 bg-white text-slate-900">
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <MessageCircle className="h-5 w-5 text-[#25D366]" />
+                Contact Seller on WhatsApp
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                <p className="text-sm text-green-900 mb-3">
+                  <strong>Important:</strong> Click below to send your order details to the seller via WhatsApp.
+                  This helps ensure faster processing and delivery.
                 </p>
-              </CardContent>
-            </Card>
-          )}
+                {loadingDetails ? (
+                  <Button
+                    className="w-full bg-[#25D366] hover:bg-[#20b05a] text-white"
+                    disabled
+                  >
+                    <MessageCircle className="h-4 w-4 mr-2" />
+                    Loading order details...
+                  </Button>
+                ) : (
+                  <Button
+                    className="w-full bg-[#25D366] hover:bg-[#20b05a] text-white"
+                    asChild
+                  >
+                    <a href={whatsappHref} target="_blank" rel="noopener noreferrer">
+                      <MessageCircle className="h-4 w-4 mr-2" />
+                      Contact Seller on WhatsApp
+                    </a>
+                  </Button>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                The seller will receive your order details and contact you on {buyerPhone} for delivery confirmation.
+              </p>
+            </CardContent>
+          </Card>
+        ) : null}
 
           {/* Action Buttons */}
           <div className="flex flex-col gap-3 pt-2">
