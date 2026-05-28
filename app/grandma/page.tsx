@@ -4745,39 +4745,34 @@ export default function GrandmaPage() {
               </button>
             ) : null}
           </div>
-          {appMode === "buyer" ? (
-            <div className="topbar-order-actions">
-              <button
-                type="button"
-                className="orders-btn"
-                aria-label="Quick Shop"
-                title="Quick Shop"
-                onClick={() =>
-                  router.push(
-                    `${GRANDMA_OUTBOUND.umuriro}?redirect=${encodeURIComponent(GRANDMA_PATHS.appRoot)}`,
-                  )
-                }
-              >
-                ⚡
-              </button>
-              <button
-                type="button"
-                className="orders-btn"
-                aria-label={settingsUi.myOrders}
-                title={settingsUi.myOrders}
-                onClick={() => {
-                  const target = GRANDMA_PATHS.buyerOrders
-                  if (isAuthenticated) router.push(target)
-                  else
-                    router.push(
-                      `${GRANDMA_PATHS.login}?redirect=${encodeURIComponent(target)}`,
-                    )
-                }}
-              >
-                📦
-              </button>
-            </div>
-          ) : null}
+        {appMode === "buyer" ? (
+  <div className="topbar-order-actions">
+    <button
+      type="button"
+      className="orders-btn"
+      aria-label="Quick Shop"
+      title="Quick Shop"
+      onClick={() => {
+        router.push(GRANDMA_OUTBOUND.umuriro)
+      }}
+    >
+      ⚡
+    </button>
+
+    <button
+      type="button"
+      className="orders-btn"
+      aria-label={settingsUi.myOrders}
+      title={settingsUi.myOrders}
+      onClick={() => {
+        router.push(GRANDMA_PATHS.buyerOrders)
+      }}
+    >
+      📦
+    </button>
+  </div>
+) : null}
+          
           <button
             className="more-btn"
             onClick={() => setSettingsOpen(true)}
@@ -6087,14 +6082,9 @@ export default function GrandmaPage() {
                   onChange={(e) => setGrandmaBuyerPhoneInput(e.target.value)}
                   className="pay-input-tap min-h-[48px] border-emerald-200 bg-white text-base focus-visible:ring-emerald-500/30"
                 />
-                <p className="text-xs leading-snug text-emerald-900/80">
-                  {tPay.paymentGuestPhoneNote}{" "}
-                  <a
-                    href={`${GRANDMA_PATHS.login}?redirect=${encodeURIComponent(GRANDMA_PATHS.appRoot)}`}
-                    className="font-semibold text-emerald-800 underline underline-offset-2"
-                  >
-                    {tPay.signIn}
-                  </a>
+                  <p className="text-xs leading-snug text-emerald-900/80">
+                  {tPay.paymentGuestPhoneNote} {" "}
+                  <span className="font-semibold text-emerald-800">{tPay.signIn}</span>
                 </p>
               </div>
             ) : null}
@@ -6913,11 +6903,7 @@ export default function GrandmaPage() {
                       onClick={() => {
                         setSettingsOpen(false)
                         const target = GRANDMA_PATHS.buyerOrders
-                        if (isAuthenticated) router.push(target)
-                        else
-                          router.push(
-                            `${GRANDMA_PATHS.login}?redirect=${encodeURIComponent(target)}`,
-                          )
+                        router.push(target)
                       }}
                       className="mt-2 w-full rounded-xl border border-border bg-background px-3 py-2.5 text-left text-sm font-bold hover:bg-muted/60"
                     >
