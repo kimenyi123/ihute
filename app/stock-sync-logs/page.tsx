@@ -19,6 +19,25 @@ type LogItem = {
   skippedItems?: Array<{ index?: number; item_commercial_name?: string; reason?: string }>
 }
 
+const logTimeKigaliFormatter = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Africa/Kigali",
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+})
+
+function formatLogTimeKigali(iso?: string): string {
+  if (!iso?.trim()) return "—"
+  const raw = iso.trim()
+  const d = new Date(raw)
+  if (Number.isNaN(d.getTime())) return raw
+  return logTimeKigaliFormatter.format(d)
+}
+
 export default function StockSyncLogsPage() {
   const [items, setItems] = useState<LogItem[]>([])
   const [loading, setLoading] = useState(false)
@@ -307,7 +326,12 @@ export default function StockSyncLogsPage() {
           <tbody>
             {items.map((it, idx) => (
               <tr key={idx} className="border-t align-top">
-                <td className="px-3 py-2 whitespace-nowrap">{it.createdAt || "—"}</td>
+                <td
+                  className="px-3 py-2 whitespace-nowrap"
+                  title={it.createdAt ? `UTC: ${it.createdAt}` : undefined}
+                >
+                  {formatLogTimeKigali(it.createdAt)}
+                </td>
                 <td className="px-3 py-2 font-mono">{it.ishyigaAccount || "—"}</td>
                 <td className="px-3 py-2">{it.sellerOwner || "—"}</td>
                 <td className="px-3 py-2">{stageLabel(it.stage)}</td>
