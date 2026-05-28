@@ -603,10 +603,7 @@ export function UmuriroBoarding() {
     setDoneMsg(null)
     setTrackDialogOpen(false)
     if (!hasHydrated) return
-    if (!isAuthenticated || !user) {
-      setErr(pickLang(UMURIRO_UI.loginRequired, lang))
-      return
-    }
+    // Allow guest submissions: fall back to guest info when user is not signed in
     if (!validate(mode)) return
     if (payChannel === "momo" && smsPayCheck !== "paid") {
       setErr(pickLang(UMURIRO_UI.saveOrderErrMomoSms, lang))
@@ -623,21 +620,25 @@ export function UmuriroBoarding() {
         lineTotalRwf: Math.round(line.unitPriceRwf * line.quantity),
       }))
       const first = orderLines[0]!
+      const savedByInfo = user
+        ? {
+            email: user.email,
+            name: user.name,
+            phone: user.phone || "",
+          }
+        : {
+            email: "",
+            name: shopName.trim() || "Guest",
+            phone: shopPhoneOptional.trim() || "",
+          }
+
       const payload = {
         kind: "umuriro" as const,
         umuriroMode: mode,
         incompleteSeller: true as const,
-        savedBy: {
-          email: user.email,
-          name: user.name,
-          phone: user.phone || "",
-        },
+        savedBy: savedByInfo,
         policy: {
-          createdBy: {
-            email: user.email,
-            name: user.name,
-            phone: user.phone || "",
-          },
+          createdBy: savedByInfo,
           adjustmentRwf: 100,
         },
         shop: {
@@ -711,7 +712,7 @@ export function UmuriroBoarding() {
     }
   }
 
-  const canSave = hasHydrated && isAuthenticated && !!user
+  const canSave = hasHydrated
   const isAdvanced = mode === "advanced"
 
   return (
@@ -784,14 +785,7 @@ export function UmuriroBoarding() {
             </DialogContent>
           </Dialog>
 
-          {hasHydrated && !canSave && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50/95 px-3 py-2 text-sm text-amber-950">
-              {pickLang(UMURIRO_UI.loginRequired, lang)}{" "}
-              <Link href="/login" className="font-semibold text-[#127fc0] underline">
-                {pickLang(UMURIRO_UI.signIn, lang)}
-              </Link>
-            </div>
-          )}
+          {/* login prompt removed to allow Quick Shop for guest users */}
 
           {err && (
             <div className="rounded-xl border border-red-200 bg-red-50/95 px-3 py-2 text-sm text-red-800 shadow-sm">
