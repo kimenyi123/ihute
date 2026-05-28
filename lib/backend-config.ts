@@ -12,11 +12,6 @@ function noTrailingSlash(s: string): string {
 
 const LOCAL_JAVA_BACKEND_DEFAULT = "http://localhost:8082/Trading"
 
-/** Tomcat context segment after host (path starts with one of these). */
-function pathnameHasJavaContext(pathname: string): boolean {
-  return /\/(trading|ihute|trading_ai)(\/|$)/i.test(pathname || "")
-}
-
 /** NEXT_PUBLIC_API_URL is often set to frontend origin; only use it for Java proxying when it clearly targets Trading. */
 function looksLikeJavaTradingBase(raw: string): boolean {
   const t = noTrailingSlash(raw.trim())
@@ -33,6 +28,13 @@ function looksLikeJavaTradingBase(raw: string): boolean {
   }
 }
 
+function getExplicitBackendBase(): string {
+  const backendUrl = process.env.BACKEND_URL?.trim() || ""
+  const javaBackendBase = process.env.JAVA_BACKEND_BASE?.trim() || ""
+  const publicApiUrl = process.env.NEXT_PUBLIC_API_URL?.trim() || ""
+  return backendUrl || javaBackendBase || (looksLikeJavaTradingBase(publicApiUrl) ? publicApiUrl : "")
+}
+
 /**
  * Same URL resolution as {@link getBackendBase}; used by server API routes that proxy to Java.
  * Prefer {@link getBackendBase} in new code; kept for imports from merged branches.
@@ -46,13 +48,7 @@ export function getServerProxyBackendBase(): string {
  * Priority: `BACKEND_URL` → `JAVA_BACKEND_BASE` → `NEXT_PUBLIC_API_URL`, then local / production defaults.
  */
 export function getBackendBase(): string {
-  const backendUrl = process.env.BACKEND_URL?.trim() || ""
-  const javaBackendBase = process.env.JAVA_BACKEND_BASE?.trim() || ""
-  const publicApiUrl = process.env.NEXT_PUBLIC_API_URL?.trim() || ""
-  const explicit =
-    backendUrl ||
-    javaBackendBase ||
-    (looksLikeJavaTradingBase(publicApiUrl) ? publicApiUrl : "")
+  const explicit = getExplicitBackendBase()
 
   let raw: string
   if (explicit) {
@@ -64,23 +60,14 @@ export function getBackendBase(): string {
   }
 
   try {
-    let u = new URL(raw)
-    let path = u.pathname.replace(/\/+$/, "") || ""
+    const u = new URL(raw)
+    const path = u.pathname.replace(/\/+$/, "") || ""
     if (path === "" || path === "/") {
       u.pathname = process.env.NODE_ENV === "development" ? "/trading_ai" : "/Trading"
       return noTrailingSlash(u.toString())
     }
-    // Do not append /Trading when the URL already uses another context (e.g. /Ihute from Tomcat WAR name).
-    if (!pathnameHasJavaContext(path)) {
-      raw = noTrailingSlash(`${raw}/Trading`)
-      u = new URL(raw)
-      path = u.pathname.replace(/\/+$/, "") || ""
-    }
     return noTrailingSlash(u.toString())
   } catch {
-    if (!pathnameHasJavaContext(raw)) {
-      raw = noTrailingSlash(`${raw}/Trading`)
-    }
     return raw
   }
 }
@@ -93,6 +80,9 @@ let warmJavaBackendInFlight: Promise<void> | null = null
  * Base URL for server-side Java proxies after {@link warmJavaBackendBase} (falls back to {@link getBackendBase}).
  */
 export function getBackendBaseForProxy(): string {
+  if (getExplicitBackendBase()) {
+    return getBackendBase()
+  }
   return resolvedJavaBackendBase ?? getBackendBase()
 }
 
@@ -114,6 +104,10 @@ function buildJavaBackendBaseCandidates(): string[] {
     .filter(Boolean)
   for (const e of extra) add(e)
 
+  if (getExplicitBackendBase()) {
+    return out
+  }
+
   try {
     const u = new URL(getBackendBase())
     const local = u.hostname === "localhost" || u.hostname === "127.0.0.1"
@@ -133,7 +127,7 @@ function buildJavaBackendBaseCandidates(): string[] {
       .filter((n) => !Number.isNaN(n) && n > 0)
     for (const n of envPorts) ports.add(n)
 
-    const contexts = ["Trading", "Ihute", "trading_ai"]
+    const contexts = ["Trading", "Ihute", "trading_ai", "Trading_beta", "trading_beta"]
     for (const h of hosts) {
       for (const port of ports) {
         for (const ctx of contexts) {

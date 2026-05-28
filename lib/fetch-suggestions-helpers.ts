@@ -54,12 +54,15 @@ export async function fetchSectorStatsFromApi(sectorId: string): Promise<{ shops
   if (!j || typeof j !== "object") {
     return { shops: 0, items: 0 }
   }
+  if (j.ok === false || typeof j.error === "string") {
+    return { shops: 0, items: 0 }
+  }
   const shops = Number(j.shops)
   const items = Number(j.items)
   const s = Number.isFinite(shops) ? Math.max(0, Math.floor(shops)) : 0
   const it = Number.isFinite(items) ? Math.max(0, Math.floor(items)) : 0
   if (!r.ok) {
-    return { shops: s, items: it }
+    return { shops: 0, items: 0 }
   }
   return { shops: s, items: it }
 }

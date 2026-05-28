@@ -136,13 +136,19 @@ async function forward(req: NextRequest) {
     })
 
     if (!resp.ok) {
-      await resp.text()
-      console.warn("[fetchSuggestions] Backend returned", resp.status, ", returning empty results")
+      const errText = await resp.text()
+      console.warn("[fetchSuggestions] Backend returned", resp.status, ", not masking as empty sector data")
       if (sectorStatsParam) {
         return new Response(
-          sectorStatsErrorBody(sectorStatsParam, "Sector stats unavailable (backend HTTP " + resp.status + ")"),
+          JSON.stringify({
+            ok: false,
+            sector: sectorStatsParam.trim(),
+            shops: 0,
+            items: 0,
+            error: "Sector stats unavailable (backend HTTP " + resp.status + ")",
+          }),
           {
-            status: 200,
+            status: resp.status >= 400 ? resp.status : 503,
             headers: {
               "content-type": "application/json",
               "Access-Control-Allow-Origin": "*",
