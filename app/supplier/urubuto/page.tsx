@@ -19,7 +19,7 @@ import { UrubutoTransactionReport } from "@/components/urubuto/transaction-repor
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { cn } from "@/lib/utils"
 import { useLanguageStore, type Language } from "@/lib/language-store"
-import { ArrowLeft, Bell, ChevronDown, FileText, Loader2, Upload } from "lucide-react"
+import { ArrowLeft, Bell, ChevronDown, FileText, Loader2, RefreshCw, Upload } from "lucide-react"
 
 type UrubutoNotification = {
   id: number
@@ -41,6 +41,7 @@ const URUBUTO_UI: Record<Language, {
   activeSubtitle: string
   inactiveSubtitle: string
   paymentSettings: string
+  refreshStatus: string
   testEnvironment: string
   markRead: string
   updatesTitle: (count: number) => string
@@ -81,6 +82,7 @@ const URUBUTO_UI: Record<Language, {
     activeSubtitle: "MoMo and card payments are active at checkout.",
     inactiveSubtitle: "Accept MoMo and card from customers — fast, secure payments powered by UrubutoPay on IHUTE.",
     paymentSettings: "Payment settings",
+    refreshStatus: "Refresh status",
     testEnvironment: "Test environment",
     markRead: "Mark read",
     updatesTitle: (count) => `${count} Urubuto update${count === 1 ? "" : "s"}`,
@@ -127,6 +129,7 @@ const URUBUTO_UI: Record<Language, {
     activeSubtitle: "Kwishyura na MoMo na card birakora muri checkout.",
     inactiveSubtitle: "Emera MoMo na card z'abakiriya — ubwishyu bwihuse kandi butekanye bwa UrubutoPay kuri IHUTE.",
     paymentSettings: "Igenamiterere ry'ubwishyu",
+    refreshStatus: "Vugurura imiterere",
     testEnvironment: "Aho kugeragereza",
     markRead: "Shyira ko byasomwe",
     updatesTitle: (count) => `Amakuru ${count} ya Urubuto`,
@@ -173,6 +176,7 @@ const URUBUTO_UI: Record<Language, {
     activeSubtitle: "Les paiements MoMo et carte sont actifs au paiement.",
     inactiveSubtitle: "Acceptez MoMo et les cartes des clients — paiements rapides et sécurisés avec UrubutoPay sur IHUTE.",
     paymentSettings: "Paramètres de paiement",
+    refreshStatus: "Actualiser le statut",
     testEnvironment: "Environnement de test",
     markRead: "Marquer comme lu",
     updatesTitle: (count) => `${count} mise${count === 1 ? "" : "s"} à jour Urubuto`,
@@ -412,11 +416,28 @@ export default function SupplierUrubutoPage() {
                   : ui.inactiveSubtitle}
               </p>
             </div>
-            {eligible && (
-              <Link href="/supplier/settings/location" className="text-sm text-violet-700 underline sm:mt-1">
-                {ui.paymentSettings}
-              </Link>
-            )}
+            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void refresh()}
+                disabled={loading}
+                className="border-violet-200 text-violet-700 hover:bg-violet-50 hover:text-violet-900"
+              >
+                {loading ? (
+                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="mr-1.5 h-4 w-4" />
+                )}
+                {ui.refreshStatus}
+              </Button>
+              {eligible && (
+                <Link href="/supplier/settings/location" className="text-sm text-violet-700 underline">
+                  {ui.paymentSettings}
+                </Link>
+              )}
+            </div>
           </div>
           {process.env.NEXT_PUBLIC_TRADING_BETA === "true" && (
             <p className="mt-2 text-xs font-medium text-amber-800 bg-amber-50 inline-block px-2 py-1 rounded">
