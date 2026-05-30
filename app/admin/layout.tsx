@@ -108,7 +108,10 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                 <ul className="space-y-2">
                   {menuItems.map((item) => {
                     const Icon = item.icon
-                    const isActive = pathname === item.href
+                    const isActive =
+                      item.href === '/admin/payment'
+                        ? pathname === '/admin/payment' || pathname.startsWith('/admin/payment/')
+                        : pathname === item.href || pathname.startsWith(`${item.href}/`)
                     return (
                       <li key={item.href}>
                         <Link

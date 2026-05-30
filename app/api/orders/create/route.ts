@@ -158,6 +158,7 @@ export async function POST(req: Request) {
       "PAID_MTN_MOMO",
       "PAID_AIRTEL_MOMO",
       "PAID_CARD",
+      "PAID_URUBUTO",
       "MTN_MOMO",
       "AIRTEL_MOMO",
       "MOMO",
