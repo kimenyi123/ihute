@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { getAuthUrl } from "@/lib/backend-config"
+import { getAuthUrl, getJavaAuthUrlCandidates } from "@/lib/backend-config"
 import { resetPasswordViaMysql } from "@/lib/forgot-password-mysql"
 import { coerceTelRawForPasswordReset, rwJavaResetTelVariants } from "@/lib/rwanda-phone"
 
@@ -32,10 +32,6 @@ export async function POST(req: Request) {
   const rid = crypto.randomUUID()
   const t0 = Date.now()
 
-  if (!JAVA_AUTH_URL) {
-    return NextResponse.json({ ok: false, error: "Auth backend not configured", rid }, { status: 500 })
-  }
-
   try {
     const body = await req.json().catch(() => ({}))
     const emailTrimmed = String(body?.email ?? "").trim()
@@ -63,8 +59,19 @@ export async function POST(req: Request) {
         console.warn(`[api/auth/forgot-password][${rid}] mysql (continuing to Java): ${fbPre.error}`)
       }
 
-      const javaUrl = new URL(JAVA_AUTH_URL)
-      javaUrl.searchParams.set("action", "resetPassword")
+      if (!JAVA_AUTH_URL) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: fbPre.error || "Auth backend not configured for password reset",
+            rid,
+          },
+          { status: 503 }
+        )
+      }
+
+      const candidates = getJavaAuthUrlCandidates()
+      const actionVariants = ["reset_password", "resetPassword", "reset-password"]
       const javaFetchMs = javaResetFetchTimeoutMs()
 
       let lastJson: AuthJson = {}
@@ -72,62 +79,69 @@ export async function POST(req: Request) {
       let lastFetchErr: string | null = null
 
       type JavaAttempt =
-        | { tel: string; kind: "ok"; res: Response; json: AuthJson }
-        | { tel: string; kind: "fetch_err"; err: string }
-        | { tel: string; kind: "bad_json"; raw: string }
+        | { tel: string; candidate: string; action: string; kind: "ok"; res: Response; json: AuthJson }
+        | { tel: string; candidate: string; action: string; kind: "fetch_err"; err: string }
+        | { tel: string; candidate: string; action: string; kind: "bad_json"; raw: string }
 
-      const javaAttempts = await Promise.all(
-        telVariants.map(async (tel): Promise<JavaAttempt> => {
-          const form = new URLSearchParams()
-          form.set("action", "resetPassword")
-          if (emailTrimmed) form.set("email", emailTrimmed)
-          form.set("tel", tel)
-          form.set("streetNumber", streetNumber)
-          form.set("newPassword", newPassword)
-          try {
-            const res = await fetch(javaUrl.toString(), {
-              method: "POST",
-              headers: { "Content-Type": "application/x-www-form-urlencoded" },
-              body: form.toString(),
-              cache: "no-store",
-              signal: AbortSignal.timeout(javaFetchMs),
-            })
-            const text = await res.text()
-            let json: AuthJson
-            try {
-              json = text ? JSON.parse(text) : {}
-            } catch {
-              return { tel, kind: "bad_json" as const, raw: text.slice(0, 400) }
-            }
-            return { tel, kind: "ok" as const, res, json }
-          } catch (e: unknown) {
-            const err = e instanceof Error ? e.message : String(e)
-            return { tel, kind: "fetch_err" as const, err }
+      const attemptPromises: Promise<JavaAttempt>[] = []
+      for (const candidate of candidates) {
+        for (const tel of telVariants) {
+          for (const actionName of actionVariants) {
+            attemptPromises.push(
+              (async (): Promise<JavaAttempt> => {
+                const form = new URLSearchParams()
+                form.set("action", actionName)
+                if (emailTrimmed) form.set("email", emailTrimmed)
+                form.set("tel", tel)
+                form.set("streetNumber", streetNumber)
+                form.set("newPassword", newPassword)
+                try {
+                  const res = await fetch(candidate.toString(), {
+                    method: "POST",
+                    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                    body: form.toString(),
+                    cache: "no-store",
+                    signal: AbortSignal.timeout(javaFetchMs),
+                  })
+                  const text = await res.text()
+                  let json: AuthJson
+                  try {
+                    json = text ? JSON.parse(text) : {}
+                  } catch {
+                    return { tel, candidate, action: actionName, kind: "bad_json" as const, raw: text.slice(0, 400) }
+                  }
+                  return { tel, candidate, action: actionName, kind: "ok" as const, res, json }
+                } catch (e: unknown) {
+                  const err = e instanceof Error ? e.message : String(e)
+                  return { tel, candidate, action: actionName, kind: "fetch_err" as const, err }
+                }
+              })()
+            )
           }
-        })
-      )
-
-      for (const a of javaAttempts) {
-        if (a.kind === "bad_json") {
-          return NextResponse.json(
-            { ok: false, error: "Bad response from auth server", raw: a.raw, rid },
-            { status: 502 }
-          )
         }
       }
 
+      const javaAttempts = await Promise.all(attemptPromises)
+      const badJsonAttempts: Array<{ tel: string; candidate: string; action: string; raw: string }> = []
+
       for (const a of javaAttempts) {
-        if (a.kind === "fetch_err") {
-          lastFetchErr = a.err
-          console.warn(`[api/auth/forgot-password][${rid}] Java fetch failed tel=${a.tel}: ${a.err}`)
+        if (a.kind === "bad_json") {
+          console.warn(
+            `[api/auth/forgot-password][${rid}] bad_json from java candidate=${a.candidate} action=${a.action} tel=${a.tel}`
+          )
+          badJsonAttempts.push({ tel: a.tel, candidate: a.candidate, action: a.action, raw: a.raw })
           continue
         }
-        if (a.kind !== "ok") continue
+        if (a.kind === "fetch_err") {
+          lastFetchErr = a.err
+          console.warn(`[api/auth/forgot-password][${rid}] Java fetch failed candidate=${a.candidate} action=${a.action} tel=${a.tel}: ${a.err}`)
+          continue
+        }
         const { tel, res, json } = a
         lastRes = res
         lastJson = json
         console.log(
-          `[api/auth/forgot-password][${rid}] try tel=${tel} http=${res.status} ok=${json?.ok} code=${json?.code ?? ""} error=${json?.error ?? ""}`
+          `[api/auth/forgot-password][${rid}] try candidate=${a.candidate} action=${a.action} tel=${tel} http=${res.status} ok=${json?.ok} code=${json?.code ?? ""} error=${json?.error ?? ""}`
         )
         if (json?.ok === true) {
           console.log(`[api/auth/forgot-password][${rid}] Java ok in ${Date.now() - t0}ms (tel=${tel})`)
@@ -135,20 +149,40 @@ export async function POST(req: Request) {
         }
       }
 
-      if (isUnknownAction(lastJson)) {
-        const hint =
-          fbPre.error !== "no_db" && fbPre.error
-            ? ` MySQL fallback: ${fbPre.error}`
-            : ""
+      if (badJsonAttempts.length > 0 && (!lastJson || Object.keys(lastJson).length === 0)) {
+        const firstBad = badJsonAttempts[0]
         return NextResponse.json(
           {
             ok: false,
-            error:
-              "Password reset is not available on this server yet. Deploy the latest trading_ai WAR (UserAuthServlet with resetPassword), or set FORGOT_PASSWORD_MYSQL_* / ONBOARDING_MYSQL_* in .env.local for a database fallback." +
-              hint,
-            code: lastJson?.code ?? "AUTH_UNKNOWN_ACTION",
+            error: "Bad response from auth server",
+            raw: firstBad.raw,
             rid,
           },
+          { status: 502 }
+        )
+      }
+
+      if (isUnknownAction(lastJson)) {
+        const hint = fbPre.error !== "no_db" && fbPre.error ? ` MySQL fallback: ${fbPre.error}` : ""
+        const baseErr =
+          "Password reset is not available on this server yet. Deploy the latest trading_ai WAR (UserAuthServlet with reset_password), or set FORGOT_PASSWORD_MYSQL_* / ONBOARDING_MYSQL_* in .env.local for a database fallback." +
+          hint
+
+        // In development include the upstream JSON for debugging to make it easier
+        // to identify which actions the Java servlet supports. Avoid leaking
+        // upstream details in production.
+        const debugDetails = process.env.NODE_ENV !== "production" ? { upstream: lastJson } : undefined
+
+        return NextResponse.json(
+          Object.assign(
+            {
+              ok: false,
+              error: baseErr,
+              code: lastJson?.code ?? "AUTH_UNKNOWN_ACTION",
+              rid,
+            },
+            debugDetails || {}
+          ),
           { status: 503 }
         )
       }

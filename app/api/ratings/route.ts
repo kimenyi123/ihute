@@ -28,16 +28,26 @@ export async function GET(req: NextRequest) {
 
         const resp = await fetch(url, {
             method: "GET",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Accept": "application/json" },
             cache: "no-store",
         });
 
         console.log(`[RATING-API] Response status: ${resp.status}`);
 
-        const data = await resp.json();
-        console.log(`[RATING-API] Response data:`, data);
+        const contentType = resp.headers.get("content-type") || ""
 
-        return NextResponse.json(data, { status: resp.ok ? 200 : 500 });
+        if (contentType.includes("application/json")) {
+            const data = await resp.json();
+            console.log(`[RATING-API] Response data:`, data);
+            return NextResponse.json(data, { status: resp.ok ? 200 : 500 });
+        } else {
+            const text = await resp.text()
+            console.warn(`[RATING-API] Expected JSON but got ${contentType}. Returning error.`)
+            return NextResponse.json(
+                { ok: false, error: `Upstream returned non-JSON response`, upstreamStatus: resp.status, upstreamBodySnippet: text.slice(0, 100) },
+                { status: 502 }
+            )
+        }
 
     } catch (error: any) {
         console.error("[RATING-API] GET Error:", error);
@@ -61,17 +71,27 @@ export async function POST(req: NextRequest) {
 
         const resp = await fetch(RATING_SERVLET_URL, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Accept": "application/json", "Content-Type": "application/json" },
             body: JSON.stringify(body),
             cache: "no-store",
         });
 
         console.log(`[RATING-API] Response status: ${resp.status}`);
 
-        const data = await resp.json();
-        console.log(`[RATING-API] Response data:`, data);
+        const contentType = resp.headers.get("content-type") || ""
 
-        return NextResponse.json(data, { status: resp.ok ? 200 : 500 });
+        if (contentType.includes("application/json")) {
+            const data = await resp.json();
+            console.log(`[RATING-API] Response data:`, data);
+            return NextResponse.json(data, { status: resp.ok ? 200 : 500 });
+        } else {
+            const text = await resp.text()
+            console.warn(`[RATING-API] Expected JSON but got ${contentType}. Returning error.`)
+            return NextResponse.json(
+                { ok: false, error: `Upstream returned non-JSON response`, upstreamStatus: resp.status, upstreamBodySnippet: text.slice(0, 100) },
+                { status: 502 }
+            )
+        }
 
     } catch (error: any) {
         console.error("[RATING-API] POST Error:", error);
