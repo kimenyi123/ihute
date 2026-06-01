@@ -38,6 +38,14 @@ import { CartSuggestionsPopup } from "@/components/cart-suggestions-popup"
 import { orderErrorMessageWithProductNames } from "@/lib/order-error-display"
 import { flushCartToServer } from "@/lib/flush-cart-server"
 import {
+  fetchSellerUrubutoEligibility,
+  fetchCheckoutUrubutoStatus,
+  initiateCheckoutUrubutoPay,
+  URUBUTO_CHECKOUT_CARD_TYPE,
+} from "@/lib/checkout-urubuto"
+import { isValidUrubutoMtnOrAirtel, normalizeUrubutoPhone, urubutoPhoneHint } from "@/lib/urubuto-phone"
+import { isUrubutoCheckoutPreviewForSeller } from "@/lib/urubuto-checkout-preview"
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -236,12 +244,31 @@ function CartSummaryBody() {
   // Payment method selection dialog
   const [paymentMethodOpen, setPaymentMethodOpen] = useState(false)
   const [selectedSeller, setSelectedSeller] = useState<string | null>(null)
-  const [paymentMethod, setPaymentMethod] = useState<"momo" | "airtel" | "cod">("momo")
+  const [paymentMethod, setPaymentMethod] = useState<"momo" | "airtel" | "cod" | "urubuto">("momo")
+  const [urubutoEligibleBySeller, setUrubutoEligibleBySeller] = useState<Record<string, boolean>>({})
+  const [urubutoOpen, setUrubutoOpen] = useState(false)
+  const [urubutoForSeller, setUrubutoForSeller] = useState<string | null>(null)
+  const [urubutoPhone, setUrubutoPhone] = useState("")
+  const [urubutoChannel, setUrubutoChannel] = useState<"wallet" | "card">("wallet")
+  const [urubutoCardUrl, setUrubutoCardUrl] = useState<string | null>(null)
 
   // Anonymous checkout mode
   const [checkoutMode, setCheckoutMode] = useState<"login" | "anonymous">(isAuthenticated ? "login" : "anonymous")
   const [anonymousPhone, setAnonymousPhone] = useState("")
   const [anonymousName, setAnonymousName] = useState("")
+
+  const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  const waitForUrubutoCompletion = async (transactionId: string) => {
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      await wait(attempt === 0 ? 2500 : 3000)
+      const status = await fetchCheckoutUrubutoStatus(transactionId)
+      const normalized = (status.paymentStatus ?? "").toUpperCase()
+      if (normalized === "COMPLETED") return true
+      if (normalized === "FAILED" || normalized === "CANCELLED" || normalized === "CANCELED") return false
+    }
+    return false
+  }
 
   // Table command mode
   const { isInTableCommand, activeSession, leaveTableCommand, lockTableCommand, canCloseTable, closeTableCommand, createTableCommand, updateTableShareData } = useTableCommandStore()
@@ -408,6 +435,16 @@ function CartSummaryBody() {
     void ensureGuestPoolBuyerAccount()
   }, [paymentMethodOpen, checkoutMode])
 
+  // UrubutoPay: show only when seller is live (ALG payer code → Urubuto merchant code assigned)
+  useEffect(() => {
+    if (!paymentMethodOpen || !selectedSeller) return
+    const seller = selectedSeller.trim()
+    if (!seller || urubutoEligibleBySeller[seller] !== undefined) return
+    void fetchSellerUrubutoEligibility(seller).then((r) => {
+      setUrubutoEligibleBySeller((prev) => ({ ...prev, [seller]: r.eligible }))
+    })
+  }, [paymentMethodOpen, selectedSeller])
+
   const discountPercent = appliedPromo?.percent ?? 0
   const discountAmount = Math.round((grandTotal * discountPercent) / 100)
   const totalAfterDiscount = grandTotal - discountAmount
@@ -562,8 +599,19 @@ function CartSummaryBody() {
     // Otherwise proceed with regular checkout
     const hasUssdTarget = Boolean(getMomoForGroup(g))
     setSelectedSeller(supplierId)
-    // Default to momo if available, otherwise cod
-    setPaymentMethod(hasUssdTarget ? "momo" : "cod")
+    setUrubutoPhone(
+      checkoutMode === "anonymous"
+        ? isInTableCommand()
+          ? anonymousPhone
+          : ""
+        : user?.phone || "",
+    )
+    void fetchSellerUrubutoEligibility(supplierId).then((r) => {
+      const preview = isUrubutoCheckoutPreviewForSeller(supplierId)
+      const show = r.eligible || preview
+      setUrubutoEligibleBySeller((prev) => ({ ...prev, [supplierId]: r.eligible }))
+      setPaymentMethod(show ? "urubuto" : hasUssdTarget ? "momo" : "cod")
+    })
     setPaymentMethodOpen(true)
   }
 
@@ -589,6 +637,11 @@ function CartSummaryBody() {
       setContactPhone(checkoutMode === "anonymous" ? anonymousPhone : user?.phone || "")
       setCodOpen(true)
       setSelectedSeller(null)
+    } else if (paymentMethod === "urubuto") {
+      setPaymentMethodOpen(false)
+      setUrubutoForSeller(selectedSeller)
+      setUrubutoOpen(true)
+      setSelectedSeller(null)
     } else {
       setPaymentMethodOpen(false)
       setMomoForSeller(selectedSeller)
@@ -604,11 +657,12 @@ function CartSummaryBody() {
   const placeOrder = async (
     g: ReturnType<typeof getGroupsBySeller>[number],
     opts: {
-      paymentName: "PAID_MTN_MOMO" | "PAID_AIRTEL_MOMO" | "PAY_ON_DELIVERY";
+      paymentName: "PAID_MTN_MOMO" | "PAID_AIRTEL_MOMO" | "PAID_URUBUTO" | "PAY_ON_DELIVERY";
       buyerPhone?: string;
       buyerLocation?: string;
       reference?: string;
       paymentId?: string;
+      paymentStatus?: "pending" | "paid";
     }
   ) => {
     if (!requireLogin()) return
@@ -684,6 +738,7 @@ function CartSummaryBody() {
           paymentName: opts.paymentName,
           paymentId: paymentId,
           reference: opts.reference || "",
+          ...(opts.paymentStatus ? { paymentStatus: opts.paymentStatus } : {}),
           currency: "RWF",
           items,
           // Table command information
@@ -703,6 +758,9 @@ function CartSummaryBody() {
 
         if (orderId) setOrderIds(m => ({ ...m, [g.supplierId]: orderId }))
         if (sellerTel) setOrderPhones(m => ({ ...m, [g.supplierId]: sellerTel }))
+        if (opts.paymentStatus === "paid") {
+          setPaymentStatus(g.supplierId, "paid")
+        }
 
         // Track successful purchase for all items in this seller group (best-effort)
         try {
@@ -753,7 +811,12 @@ function CartSummaryBody() {
           return
         }
 
-        if ((opts.paymentName === "PAID_MTN_MOMO" || opts.paymentName === "PAID_AIRTEL_MOMO") && orderId) {
+        if (
+          (opts.paymentName === "PAID_MTN_MOMO" ||
+            opts.paymentName === "PAID_AIRTEL_MOMO" ||
+            opts.paymentName === "PAID_URUBUTO") &&
+          orderId
+        ) {
           pollPayment(orderId, g.supplierId)
         }
 
@@ -900,6 +963,108 @@ function CartSummaryBody() {
     setMomoForSeller(null)
     setMomoAwaitingProof(false)
     setMomoProofDraft("")
+  }
+
+  const resetUrubutoDialog = () => {
+    setUrubutoForSeller(null)
+    setUrubutoChannel("wallet")
+    setUrubutoCardUrl(null)
+  }
+
+  const confirmUrubutoPayment = async () => {
+    if (!urubutoForSeller) return
+    const g = groups.find((x) => x.supplierId === urubutoForSeller)
+    if (!g) {
+      setUrubutoOpen(false)
+      resetUrubutoDialog()
+      return
+    }
+    const previewOnly =
+      isUrubutoCheckoutPreviewForSeller(g.supplierId) && !urubutoEligibleBySeller[g.supplierId]
+    if (previewOnly) {
+      alert(
+        "UI preview only: this seller is not live on UrubutoPay yet. In admin, set status ACTIVE, Urubuto merchant code, and verify KYC — or remove NEXT_PUBLIC_URUBUTO_CHECKOUT_PREVIEW.",
+      )
+      return
+    }
+
+    const isCard = urubutoChannel === "card"
+    const phone = normalizeUrubutoPhone(urubutoPhone.trim())
+    if (!isCard && !phone) {
+      alert("Enter your MoMo number (MTN or Airtel).")
+      return
+    }
+    if (!isCard && !isValidUrubutoMtnOrAirtel(phone)) {
+      alert(urubutoPhoneHint())
+      return
+    }
+
+    const payerNames =
+      checkoutMode === "anonymous"
+        ? anonymousName.trim() || "Guest"
+        : user?.name || "Customer"
+    const payerEmail = checkoutMode === "anonymous" ? GUEST_POOL_EMAIL : user?.email || ""
+    const payerCode =
+      checkoutMode === "anonymous" ? undefined : user?.ishyigaAccount?.trim() || undefined
+    const cartId = `IHUTE-CART-${g.supplierId}-${Date.now()}`
+
+    setBusy(g.supplierId)
+    try {
+      const pay = await initiateCheckoutUrubutoPay({
+        sellerAccount: g.supplierId,
+        amount: g.subtotal,
+        paymentMethod: isCard ? "CARD" : "WALLET",
+        phone_number: isCard ? undefined : phone,
+        card_type_to_be_used: isCard ? URUBUTO_CHECKOUT_CARD_TYPE : undefined,
+        payer_names: payerNames,
+        payer_email: payerEmail,
+        payerCode,
+        cartId,
+        clientReference: cartId,
+      })
+      const txnId = pay.transactionId?.trim()
+      const cardUrl = pay.cardProcessingUrl?.trim()
+      if (!pay.ok || (!txnId && !cardUrl)) {
+        alert(pay.error || "Could not start UrubutoPay. Try another method or contact the seller.")
+        return
+      }
+
+      if (isCard && cardUrl) {
+        window.open(cardUrl, "_blank", "noopener,noreferrer")
+        setUrubutoCardUrl(cardUrl)
+      }
+
+      const reference = txnId || `URUBUTO-CARD-${Date.now()}`
+      let paymentCompleted = false
+      if (!isCard && txnId) {
+        toast({
+          title: "Payment request sent",
+          description: "Approve the MoMo prompt on your phone. We are checking the payment now.",
+          duration: 3500,
+        })
+        paymentCompleted = await waitForUrubutoCompletion(txnId)
+      }
+      await placeOrder(g, {
+        paymentName: "PAID_URUBUTO",
+        reference,
+        paymentId: reference,
+        buyerPhone: phone || undefined,
+        paymentStatus: paymentCompleted ? "paid" : "pending",
+      })
+      setUrubutoOpen(false)
+      resetUrubutoDialog()
+      toast({
+        title: paymentCompleted ? "Payment successful" : isCard ? "Card payment started" : "Order placed, payment pending",
+        description: paymentCompleted
+          ? "Your UrubutoPay payment was received successfully."
+          : isCard
+            ? "Complete the payment in the secure Urubuto tab."
+            : "If you already approved the MoMo prompt, the seller dashboard will refresh shortly.",
+        duration: 6000,
+      })
+    } finally {
+      setBusy(null)
+    }
   }
 
   const renderContent = () => (
@@ -1265,14 +1430,43 @@ function CartSummaryBody() {
           )}
 
           {/* Payment method selection */}
-          <RadioGroup value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as "momo" | "airtel" | "cod")}>
+          <RadioGroup value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as "momo" | "airtel" | "cod" | "urubuto")}>
             <div className="space-y-3">
               {selectedSeller && (() => {
                 const g = groups.find(x => x.supplierId === selectedSeller)
                 const hasUssdTarget = g ? Boolean(getMomoForGroup(g)) : false
+                const urubutoPreview = isUrubutoCheckoutPreviewForSeller(selectedSeller)
+                const urubutoLive = urubutoEligibleBySeller[selectedSeller] === true || urubutoPreview
 
                 return (
                   <>
+                    {urubutoLive && (
+                      <div
+                        className="flex items-center space-x-3 border rounded-lg p-4 cursor-pointer hover:bg-accent border-violet-300 bg-violet-50/50"
+                        onClick={() => setPaymentMethod("urubuto")}
+                      >
+                        <RadioGroupItem value="urubuto" id="urubuto" />
+                        <Label htmlFor="urubuto" className="flex items-center gap-2 cursor-pointer flex-1">
+                          <CreditCard className="h-5 w-5 text-violet-700" />
+                          <div>
+                            <div className="font-medium flex items-center gap-2 flex-wrap">
+                              UrubutoPay
+                              {/*
+                              {urubutoPreview && !urubutoEligibleBySeller[selectedSeller] && (
+                                <Badge variant="outline" className="text-[10px] border-amber-400 text-amber-800">
+                                  UI preview
+                                </Badge>
+                              )}
+                              */}
+                            </div>
+                            <div className="text-sm text-muted-foreground">
+                              MoMo wallet or card via Urubuto — payment goes to this shop
+                            </div>
+                          </div>
+                        </Label>
+                      </div>
+                    )}
+
                     <div
                       className={`flex items-center space-x-3 border rounded-lg p-4 cursor-pointer hover:bg-accent ${!hasUssdTarget ? 'opacity-50' : ''}`}
                       onClick={() => hasUssdTarget && setPaymentMethod("momo")}
@@ -1568,6 +1762,133 @@ function CartSummaryBody() {
             >
               <Truck className="h-4 w-4 mr-2" />
               Place order
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* UrubutoPay checkout dialog */}
+      <Dialog
+        open={urubutoOpen}
+        onOpenChange={(open) => {
+          setUrubutoOpen(open)
+          if (!open) resetUrubutoDialog()
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Pay with UrubutoPay</DialogTitle>
+            <DialogDescription>
+              {urubutoChannel === "card"
+                ? "You will open a secure card page to complete payment for this shop."
+                : "Approve the MoMo prompt on your phone. Payment is collected for the seller via their Urubuto merchant account."}
+            </DialogDescription>
+          </DialogHeader>
+          {urubutoForSeller && (() => {
+            const g = groups.find((x) => x.supplierId === urubutoForSeller)
+            if (!g) return null
+            const normalizedPhone = normalizeUrubutoPhone(urubutoPhone)
+            return (
+              <div className="space-y-4">
+                <div className="rounded-lg border border-violet-200 bg-violet-50/80 p-3 text-sm">
+                  <p className="font-medium text-violet-950">{g.supplierName}</p>
+                  <p className="text-muted-foreground mt-1">
+                    Amount: <strong>{g.subtotal.toLocaleString()} RWF</strong>
+                  </p>
+                </div>
+                <RadioGroup
+                  value={urubutoChannel}
+                  onValueChange={(v) => {
+                    setUrubutoChannel(v as "wallet" | "card")
+                    setUrubutoCardUrl(null)
+                  }}
+                  className="grid grid-cols-2 gap-2"
+                >
+                  <div
+                    className={`flex items-center gap-2 rounded-lg border p-3 cursor-pointer ${urubutoChannel === "wallet" ? "border-violet-500 bg-violet-50" : "border-border"}`}
+                    onClick={() => setUrubutoChannel("wallet")}
+                  >
+                    <RadioGroupItem value="wallet" id="urubuto-wallet" />
+                    <Label htmlFor="urubuto-wallet" className="cursor-pointer flex items-center gap-1.5 text-sm font-medium">
+                      <Wallet className="h-4 w-4 text-yellow-600" />
+                      MoMo wallet
+                    </Label>
+                  </div>
+                  <div
+                    className={`flex items-center gap-2 rounded-lg border p-3 cursor-pointer ${urubutoChannel === "card" ? "border-violet-500 bg-violet-50" : "border-border"}`}
+                    onClick={() => setUrubutoChannel("card")}
+                  >
+                    <RadioGroupItem value="card" id="urubuto-card-channel" />
+                    <Label htmlFor="urubuto-card-channel" className="cursor-pointer flex items-center gap-1.5 text-sm font-medium">
+                      <CreditCard className="h-4 w-4 text-blue-600" />
+                      Card
+                    </Label>
+                  </div>
+                </RadioGroup>
+                {urubutoChannel === "wallet" ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="urubuto-phone">Your MoMo number</Label>
+                    <Input
+                      id="urubuto-phone"
+                      value={urubutoPhone}
+                      onChange={(e) => setUrubutoPhone(e.target.value)}
+                      onBlur={() => {
+                        const normalized = normalizeUrubutoPhone(urubutoPhone)
+                        if (normalized) setUrubutoPhone(normalized)
+                      }}
+                      placeholder="0788123456 or +250788123456"
+                      inputMode="tel"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      {urubutoPhoneHint()}. We will format it as 2507… for UrubutoPay.
+                      {normalizedPhone && normalizedPhone !== urubutoPhone.replace(/\s/g, "") ? (
+                        <span className="block text-violet-700">Will send to: {normalizedPhone}</span>
+                      ) : null}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="rounded-lg border border-blue-200 bg-blue-50/80 p-3 text-sm text-blue-900 space-y-2">
+                      <p className="font-medium flex items-center gap-2">
+                        <CreditCard className="h-4 w-4" />
+                        Secure card payment
+                      </p>
+                      <p className="text-blue-800/90 text-xs leading-relaxed">
+                        After you continue, a new tab opens for Urubuto&apos;s card checkout. Complete payment there, then return here — your order is placed automatically.
+                      </p>
+                      <div className="rounded-md border border-blue-200 bg-white px-3 py-2 text-xs text-slate-600">
+                        Card type: BK Arena prepaid card (Urubuto secure checkout)
+                      </div>
+                    </div>
+                    {urubutoCardUrl && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full border-blue-300 text-blue-800"
+                        onClick={() => window.open(urubutoCardUrl, "_blank", "noopener,noreferrer")}
+                      >
+                        Open card payment page again
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => { setUrubutoOpen(false); resetUrubutoDialog() }}>
+              Cancel
+            </Button>
+            <Button
+              className="bg-violet-700 hover:bg-violet-800"
+              onClick={() => void confirmUrubutoPayment()}
+              disabled={busy === urubutoForSeller}
+            >
+              {busy === urubutoForSeller
+                ? "Processing…"
+                : urubutoChannel === "card"
+                  ? "Continue to card payment"
+                  : "Send payment request"}
             </Button>
           </DialogFooter>
         </DialogContent>

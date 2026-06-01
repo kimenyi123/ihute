@@ -143,6 +143,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
       );
     }
     items.push(
+      { name: "UrubutoPay", href: "/supplier/urubuto" },
       { name: ui.ratings, href: "/supplier/ratings" },
       { name: ui.b2b, href: "/supplier/b2b" },
       { name: ui.expenses, href: "/supplier/expenses" },

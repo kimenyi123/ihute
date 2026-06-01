@@ -11,49 +11,11 @@ import { Button } from "@/components/ui/button"
 import { ArrowLeft, Phone, User2, RotateCw, CreditCard } from "lucide-react"
 import { useAuthStore } from "@/lib/auth-store"
 import dynamic from "next/dynamic"
+import { formatSupplierOrderPaymentDisplay, getPaymentMethodIcon } from "@/lib/payment-utils"
 
 type Detail = { order?: any; items?: any[]; seller?: any; buyer?: any }
 
 const QRCode = dynamic(() => import("react-qr-code"), { ssr: false })
-
-// Improved payment status detection
-function getPaymentStatus(order: any): { status: string; displayName: string; isPaid: boolean } {
-  const paymentName = (order?.PAYMENT_NAME || "").toLowerCase()
-  const paymentStatus = (order?.PAYMENT_STATUS || "").toLowerCase()
-  
-  // Check if payment is marked as PAID in database
-  if (paymentStatus === 'paid') {
-    return { 
-      status: 'paid', 
-      displayName: 'Paid via MoMo', 
-      isPaid: true 
-    }
-  }
-  
-  // Check payment method
-  if (paymentName.includes('momo') || paymentName.includes('mtn') || paymentName.includes('mobile money')) {
-    return { 
-      status: 'processing', 
-      displayName: 'MoMo Payment', 
-      isPaid: false 
-    }
-  }
-  
-  if (paymentName.includes('pay on delivery') || paymentName.includes('cod')) {
-    return { 
-      status: 'pending', 
-      displayName: 'Pay on Delivery', 
-      isPaid: false 
-    }
-  }
-  
-  // Default fallback
-  return {
-    status: paymentStatus || 'pending',
-    displayName: order?.PAYMENT_NAME || 'Pending',
-    isPaid: paymentStatus === 'paid'
-  }
-}
 
 function pickAnyNum(row: Record<string, unknown>, ...keys: string[]): number | null {
   for (const k of keys) {
@@ -153,6 +115,34 @@ export default function SupplierOrderDetailsPage() {
     return () => abortRef.current?.abort()
   }, [load])
 
+  // Poll Urubuto settlement while order payment is still pending (webhooks may not reach localhost).
+  useEffect(() => {
+    const payName = (detail?.order?.PAYMENT_NAME ?? "").toString().toUpperCase()
+    const paySt = (detail?.order?.PAYMENT_STATUS ?? "").toString().toUpperCase()
+    if (!orderId || !payName.includes("URUBUTO") || paySt === "PAID" || paySt === "FAILED") {
+      return
+    }
+    const tick = async () => {
+      try {
+        const r = await fetch("/api/orders/payment-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ orderId }),
+          cache: "no-store",
+        })
+        const j = await r.json()
+        if (j?.ok && (j.status === "paid" || j.status === "failed")) {
+          await load()
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    void tick()
+    const id = setInterval(() => void tick(), 4000)
+    return () => clearInterval(id)
+  }, [orderId, detail?.order?.PAYMENT_NAME, detail?.order?.PAYMENT_STATUS, load])
+
   // --- helpers ---
   const qtyOf = (it: any) => Number(it.QUANTITY ?? it.qty ?? it.quantity ?? 0)
   const requestedPriceOf = (it: any) =>
@@ -204,7 +194,7 @@ export default function SupplierOrderDetailsPage() {
     const orderNote = pickAnyStr(order ?? {}, "CONDITIONS", "ORDER_NOTE", "orderNote", "NOTE")
 
     // Get payment status
-    const paymentInfo = getPaymentStatus(order)
+    const paymentInfo = formatSupplierOrderPaymentDisplay(order?.PAYMENT_NAME, order?.PAYMENT_STATUS)
 
     // Prefer explicit buyer identity fields; only show "Guest Buyer" when no usable identity exists.
     const buyerEmail = String(order?.BUYER_EMAIL || buyer?.EMAIL || "").trim()
@@ -236,7 +226,8 @@ export default function SupplierOrderDetailsPage() {
   }, [detail])
 
   const sellerMomo = (detail?.seller?.momo ?? "").toString().trim()
-  const showMomoQR = !!sellerMomo
+  const isUrubutoOrder = (order?.PAYMENT_NAME ?? "").toString().toUpperCase().includes("URUBUTO")
+  const showMomoQR = !!sellerMomo && !isUrubutoOrder
   const momoAmount = Number(order?.AMOUNT || grandTotal || 0)
   const momoPayload = showMomoQR ? `*182*8*1*${sellerMomo}*${momoAmount}#` : ""
 
@@ -297,7 +288,7 @@ export default function SupplierOrderDetailsPage() {
                   <div className="rounded-md border p-3">
                     <div className="text-sm text-slate-600">Payment</div>
                     <div className="font-medium flex items-center gap-2">
-                      {paymentInfo.isPaid ? '✅' : paymentInfo.status === 'processing' ? '⏳' : '💳'}
+                      <span aria-hidden>{getPaymentMethodIcon(order.PAYMENT_NAME || "")}</span>
                       {paymentInfo.displayName}
                     </div>
                   </div>
@@ -485,7 +476,7 @@ export default function SupplierOrderDetailsPage() {
                   </div>
                   {order?.PAYMENT_ID && (
                     <div className="md:col-span-2">
-                      <div className="text-sm text-slate-600">Payment Reference</div>
+                      <div className="text-sm text-slate-600">IHUTE reference</div>
                       <div className="font-mono text-sm">{order.PAYMENT_ID}</div>
                     </div>
                   )}

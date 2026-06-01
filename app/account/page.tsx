@@ -2,13 +2,13 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ArrowLeft, User as UserIcon, Save, Store, ImagePlus } from "lucide-react"
 import { useAuthStore, type User } from "@/lib/auth-store"
+import SupplierLayout from "@/app/supplier/layout"
 
 export default function AccountPage() {
   const router = useRouter()
@@ -100,6 +100,14 @@ export default function AccountPage() {
     }
   }, [hasHydrated, isAuthenticated, user, router])
 
+  const goBack = () => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back()
+      return
+    }
+    router.push("/supplier/dashboard")
+  }
+
   const handleShopImageUpload = async () => {
     if (!user?.ishyigaAccount || !shopImageFile) return
     setUploadingImage(true)
@@ -186,17 +194,18 @@ export default function AccountPage() {
   const categoryLabel = (form.businessCategory || "").trim()
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100/80">
-      <div className="container max-w-3xl py-8 px-4">
-        <Link
-          href="/"
-          className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-6"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back
-        </Link>
+    <SupplierLayout>
+      <div className="mx-auto max-w-6xl">
+          <button
+            type="button"
+            onClick={goBack}
+            className="mb-5 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-3 py-1.5 text-sm text-slate-600 shadow-sm hover:border-sky-200 hover:text-sky-900"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </button>
 
-        <Card className="overflow-hidden border-slate-200/80 shadow-md">
+        <Card className="overflow-hidden border-slate-200/80 bg-white/95 shadow-xl shadow-sky-100/50 backdrop-blur">
           <div className="border-b bg-gradient-to-r from-sky-600 via-sky-500 to-blue-700 px-6 py-8 text-white">
             <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-start gap-4">
@@ -266,7 +275,7 @@ export default function AccountPage() {
             <CardDescription>View and edit your account details.</CardDescription>
           </CardHeader>
 
-          <CardContent className="space-y-8 px-6 pb-8 pt-6">
+          <CardContent className="space-y-8 px-4 pb-8 pt-6 sm:px-6">
             {message ? (
               <div
                 role="status"
@@ -321,7 +330,8 @@ export default function AccountPage() {
               </div>
             </section>
 
-            <section className="space-y-4">
+            <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+            <section className="space-y-4 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
               <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Contact</h2>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
@@ -363,7 +373,7 @@ export default function AccountPage() {
               </div>
             </section>
 
-            <section className="space-y-4">
+            <section className="space-y-4 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
               <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Payments</h2>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
@@ -402,7 +412,7 @@ export default function AccountPage() {
               </div>
             </section>
 
-            <section className="space-y-4">
+            <section className="space-y-4 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm xl:col-span-2">
               <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">About your shop</h2>
               <div className="rounded-xl border border-slate-200/80 bg-white px-4 py-3 shadow-sm">
                 <Label htmlFor="description" className="text-muted-foreground">
@@ -420,7 +430,7 @@ export default function AccountPage() {
               </div>
             </section>
 
-            <section className="space-y-4">
+            <section className="space-y-4 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm xl:col-span-2">
               <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Account</h2>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
@@ -466,9 +476,10 @@ export default function AccountPage() {
                 </div>
               </div>
             </section>
+            </div>
           </CardContent>
         </Card>
       </div>
-    </div>
+    </SupplierLayout>
   )
 }

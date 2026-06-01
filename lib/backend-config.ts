@@ -32,7 +32,7 @@ function getExplicitBackendBase(): string {
   const backendUrl = process.env.BACKEND_URL?.trim() || ""
   const javaBackendBase = process.env.JAVA_BACKEND_BASE?.trim() || ""
   const publicApiUrl = process.env.NEXT_PUBLIC_API_URL?.trim() || ""
-  return backendUrl || javaBackendBase || (looksLikeJavaTradingBase(publicApiUrl) ? publicApiUrl : "")
+  return javaBackendBase || backendUrl || (looksLikeJavaTradingBase(publicApiUrl) ? publicApiUrl : "")
 }
 
 /**
@@ -45,7 +45,9 @@ export function getServerProxyBackendBase(): string {
 
 /**
  * Java backend base URL (no trailing slash).
- * Priority: `BACKEND_URL` → `JAVA_BACKEND_BASE` → `NEXT_PUBLIC_API_URL`, then local / production defaults.
+ * Priority: `JAVA_BACKEND_BASE` → `BACKEND_URL` → `NEXT_PUBLIC_API_URL` (when it looks like Trading),
+ * then local / production defaults. Prefer JAVA_BACKEND_BASE so a stale root `.env` BACKEND_URL=8082
+ * does not override `.env.local` Tomcat on 8080.
  */
 export function getBackendBase(): string {
   const explicit = getExplicitBackendBase()
@@ -329,6 +331,11 @@ export function getJavaAuthUrlCandidates(): string[] {
     /* keep primary */
   }
   return [...set]
+}
+
+/** AdminServlet is mapped at WAR root `/AdminServlet` (not under `/Kaos/`). */
+export function getAdminServletUrl(): string {
+  return `${getBackendBase()}/AdminServlet`
 }
 
 /**
