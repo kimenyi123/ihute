@@ -68,8 +68,8 @@ export async function POST(req: NextRequest) {
         const body = await req.json();
 
         console.log(`[RATING-API] POST action: ${body.action}`);
-
-        const resp = await fetch(RATING_SERVLET_URL, {
+        // Try JSON POST first (most callers send JSON)
+        let resp = await fetch(RATING_SERVLET_URL, {
             method: "POST",
             headers: { "Accept": "application/json", "Content-Type": "application/json" },
             body: JSON.stringify(body),
@@ -78,17 +78,47 @@ export async function POST(req: NextRequest) {
 
         console.log(`[RATING-API] Response status: ${resp.status}`);
 
-        const contentType = resp.headers.get("content-type") || ""
+        let contentType = resp.headers.get("content-type") || ""
+
+        // If upstream did not return JSON and this is a submitRating, retry as form-encoded
+        if (!contentType.includes("application/json") && String(body.action) === "submitRating") {
+            try {
+                console.warn(`[RATING-API] JSON POST returned ${contentType}; retrying as form-urlencoded`)
+                const form = new URLSearchParams()
+                // copy known fields; fall back to stringifying complex objects
+                if (body.action) form.set("action", String(body.action))
+                if (body.orderId != null) form.set("orderId", String(body.orderId))
+                if (body.sellerAccount) form.set("sellerAccount", String(body.sellerAccount))
+                if (body.buyerPhone) form.set("buyerPhone", String(body.buyerPhone))
+                if (body.supplierRating != null) form.set("supplierRating", String(body.supplierRating))
+                if (body.supplierFeedback) form.set("supplierFeedback", String(body.supplierFeedback))
+                if (body.itemRatings) form.set("itemRatings", JSON.stringify(body.itemRatings))
+                if (body.menuItems) form.set("menuItems", JSON.stringify(body.menuItems))
+
+                const resp2 = await fetch(RATING_SERVLET_URL, {
+                    method: "POST",
+                    headers: { "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+                    body: form.toString(),
+                    cache: "no-store",
+                })
+
+                resp = resp2
+                contentType = resp.headers.get("content-type") || ""
+                console.log(`[RATING-API] Retry (form) status: ${resp.status}, content-type: ${contentType}`)
+            } catch (err) {
+                console.error("[RATING-API] Form retry error:", err)
+            }
+        }
 
         if (contentType.includes("application/json")) {
-            const data = await resp.json();
+            const data = await resp.json().catch(() => null)
             console.log(`[RATING-API] Response data:`, data);
-            return NextResponse.json(data, { status: resp.ok ? 200 : 500 });
+            return NextResponse.json(data ?? { ok: false, error: "Upstream returned invalid JSON" }, { status: resp.ok ? 200 : 502 });
         } else {
-            const text = await resp.text()
+            const text = await resp.text().catch(() => "")
             console.warn(`[RATING-API] Expected JSON but got ${contentType}. Returning error.`)
             return NextResponse.json(
-                { ok: false, error: `Upstream returned non-JSON response`, upstreamStatus: resp.status, upstreamBodySnippet: text.slice(0, 100) },
+                { ok: false, error: `Upstream returned non-JSON response`, upstreamStatus: resp.status, upstreamBodySnippet: (text || "").slice(0, 200) },
                 { status: 502 }
             )
         }
