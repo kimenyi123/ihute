@@ -179,6 +179,9 @@ export async function POST(req: Request) {
       else paymentId = `COD_${Date.now()}`
     }
     const reference = String(bodyIn.reference ?? "").trim()
+    const orderNote = String(
+      bodyIn.orderNote ?? bodyIn.orderNotes ?? bodyIn.notes ?? bodyIn.ORDER_NOTE ?? bodyIn.CONDITIONS ?? ""
+    ).trim()
     const isDigitalPayment =
       paymentName.includes("MOMO") || paymentName.includes("AIRTEL") || paymentName.includes("CARD")
     const paymentStatus = isDigitalPayment || reference.length > 0 ? "PAID" : "PENDING"
@@ -207,6 +210,7 @@ export async function POST(req: Request) {
       paymentName,
       paymentId,
       reference,
+      orderNote,
       currency: String(bodyIn.currency ?? "RWF"),
       paymentStatus,
       items,
@@ -254,6 +258,9 @@ export async function POST(req: Request) {
         form.set("paymentName", shared.paymentName)
         form.set("paymentId", shared.paymentId)
         form.set("reference", shared.reference)
+        if (shared.orderNote) form.set("orderNote", shared.orderNote)
+        if (shared.orderNote) form.set("ORDER_NOTE", shared.orderNote)
+        if (shared.orderNote) form.set("CONDITIONS", shared.orderNote)
         form.set("currency", shared.currency)
         form.set("paymentStatus", shared.paymentStatus)
         form.set("PAYMENT_STATUS", shared.paymentStatus)
@@ -324,6 +331,9 @@ export async function POST(req: Request) {
                 paymentName: shared.paymentName,
                 paymentId: shared.paymentId,
                 reference: shared.reference,
+                orderNote: shared.orderNote,
+                ORDER_NOTE: shared.orderNote,
+                CONDITIONS: shared.orderNote,
                 currency: shared.currency,
                 paymentStatus: shared.paymentStatus,
                 PAYMENT_STATUS: shared.paymentStatus,
