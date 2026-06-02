@@ -4324,6 +4324,7 @@ export default function GrandmaPage() {
           currency: "RWF",
           items,
           reference,
+          orderNotes: orderNotes.trim(),
           subtotal: Math.round(itemsTotal),
         }),
       })
@@ -4379,6 +4380,7 @@ export default function GrandmaPage() {
           qty: Number(it.qty) || 1,
         })),
         itemsCount: items.length,
+        orderNotes: orderNotes.trim(),
         ...(data.trackToken ? { publicToken: String(data.trackToken) } : {}),
       }
       useOrdersStore.getState().upsertOrder(placedOrder)
