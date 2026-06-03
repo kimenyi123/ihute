@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { ArrowLeft, User as UserIcon, Save, Store, ImagePlus } from "lucide-react"
 import { useAuthStore, type User } from "@/lib/auth-store"
 import SupplierLayout from "@/app/supplier/layout"
+import { resolvePublicAssetUrl } from "@/lib/public-asset-url"
 
 export default function AccountPage() {
   const router = useRouter()
@@ -212,7 +213,7 @@ export default function AccountPage() {
                 <div className="relative shrink-0">
                   <div className="h-24 w-24 overflow-hidden rounded-2xl border-4 border-white/30 bg-white/10 shadow-lg ring-2 ring-white/20 sm:h-28 sm:w-28">
                     <img
-                      src={shopImageUrl || "/img/shops/default.png"}
+                      src={resolvePublicAssetUrl(shopImageUrl) || "/img/shops/default.png"}
                       alt=""
                       className="h-full w-full object-cover"
                     />
@@ -294,7 +295,7 @@ export default function AccountPage() {
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
                 <div className="relative mx-auto w-full max-w-[200px] shrink-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-inner aspect-square sm:mx-0 sm:max-w-[140px]">
                   <img
-                    src={shopImageUrl || "/img/shops/default.png"}
+                    src={resolvePublicAssetUrl(shopImageUrl) || "/img/shops/default.png"}
                     alt="Shop profile"
                     className="h-full w-full object-cover"
                   />

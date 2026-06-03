@@ -47,7 +47,42 @@ export function getProductOverridesFile(): string {
   return path.join(process.cwd(), ".data", "supplier-image-overrides.json")
 }
 
-/** Public URL for a shop image file (served via Next API — works on beta when static /uploads is missing). */
+/** Browser-facing URL for a shop image (absolute when NEXT_PUBLIC_SITE_URL is set — reliable on beta). */
 export function shopImagePublicUrl(fileName: string): string {
-  return `/api/images/shops/${encodeURIComponent(fileName)}`
+  const rel = `/api/images/shops/${encodeURIComponent(fileName)}`
+  const site = (process.env.NEXT_PUBLIC_SITE_URL || "").trim().replace(/\/+$/, "")
+  const base = (process.env.NEXT_PUBLIC_BASE_PATH || "").trim().replace(/\/+$/, "")
+  if (site) {
+    return `${site}${base}${rel}`
+  }
+  return `${base}${rel}`
+}
+
+/** Normalize stored override paths to a loadable shop logo URL. */
+export function normalizeShopImagePublicUrl(url: string): string {
+  const u = url.trim()
+  if (!u) return u
+  if (u.startsWith("http://") || u.startsWith("https://")) return u
+
+  const site = (process.env.NEXT_PUBLIC_SITE_URL || "").trim().replace(/\/+$/, "")
+  const base = (process.env.NEXT_PUBLIC_BASE_PATH || "").trim().replace(/\/+$/, "")
+  const prefix = `${base}/uploads/shops/`
+  const barePrefix = "/uploads/shops/"
+
+  let rel = u
+  if (u.startsWith(prefix)) {
+    rel = `/api/images/shops/${encodeURIComponent(u.slice(prefix.length).split("?")[0])}`
+  } else if (u.startsWith(barePrefix)) {
+    rel = `/api/images/shops/${encodeURIComponent(u.slice(barePrefix.length).split("?")[0])}`
+  } else if (u.startsWith("/api/images/shops/") && site) {
+    return `${site}${base}${u}`
+  }
+
+  if (site && rel.startsWith("/")) {
+    return `${site}${base}${rel}`
+  }
+  if (base && rel.startsWith("/") && !rel.startsWith(base)) {
+    return `${base}${rel}`
+  }
+  return rel
 }

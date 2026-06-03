@@ -7,6 +7,7 @@ import {
   getProductUploadsDir,
   getShopOverridesFile,
   getShopUploadsDir,
+  normalizeShopImagePublicUrl,
   shopImagePublicUrl,
 } from "@/lib/image-upload-paths"
 
@@ -34,15 +35,7 @@ function keyFor(scope: Scope, account: string, itemCode: string): string {
 
 /** Map legacy `/uploads/shops/x.png` entries to API serve URLs on read. */
 function normalizeShopImageUrl(url: string): string {
-  const u = url.trim()
-  if (!u) return u
-  if (u.startsWith("/api/images/shops/")) return u
-  const prefix = "/uploads/shops/"
-  if (u.startsWith(prefix)) {
-    const fileName = u.slice(prefix.length).split("?")[0]
-    if (fileName) return shopImagePublicUrl(fileName)
-  }
-  return u
+  return normalizeShopImagePublicUrl(url)
 }
 
 async function readShopOverrideMap(): Promise<Record<string, string>> {
