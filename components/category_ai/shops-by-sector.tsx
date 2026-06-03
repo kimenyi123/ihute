@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useMemo } from "react"
 import Link from "next/link"
-import Image from "next/image"
 import { Card, CardContent } from "@/components/ui/card"
 import { Store } from "lucide-react"
 import { useTranslation } from "@/hooks/use-translation"
@@ -55,6 +54,38 @@ const FALLBACK_SECTORS: SectorCategory[] = [
 const SHOP_LOGO_BY_KEY: Record<string, string> = {
   rite: "/shops/rite-pharmacy-logo.png",
   alg000005204: "/shops/rite-pharmacy-logo.png",
+}
+
+/** Same key normalization as `/api/images/overrides` (account page shop photo uploads). */
+function normalizeShopAccountKey(account: string): string {
+  return account.replace(/\s+/g, " ").trim().toUpperCase()
+}
+
+async function fetchShopImageOverrideMap(): Promise<Record<string, string>> {
+  try {
+    const res = await fetch("/api/images/overrides?scope=shop", { cache: "no-store" })
+    const data = await res.json().catch(() => ({}))
+    if (data?.ok && data.map && typeof data.map === "object") {
+      return data.map as Record<string, string>
+    }
+  } catch {
+    // keep static/fallback logos only
+  }
+  return {}
+}
+
+function useShopImageOverrideMap(): Record<string, string> {
+  const [map, setMap] = useState<Record<string, string>>({})
+  useEffect(() => {
+    let cancelled = false
+    void fetchShopImageOverrideMap().then((m) => {
+      if (!cancelled) setMap(m)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  return map
 }
 
 function sectorSortIndex(categoryId: string): number {
@@ -154,17 +185,55 @@ export function mapListSuppliersWithProductsToShops(arr: unknown[]): ShopInfo[] 
   }).filter((s: ShopInfo) => s.seller_account || s.seller_name)
 }
 
-function shopLogoSrc(shop: ShopInfo): string | null {
+function shopLogoSrc(shop: ShopInfo, imageMap?: Record<string, string>): string | null {
   const nick = (shop.officialNickname || "").toString().trim().toLowerCase()
-  const acct = (shop.seller_account || "").toString().trim().toLowerCase()
+  const acctLower = (shop.seller_account || "").toString().trim().toLowerCase()
   if (nick && SHOP_LOGO_BY_KEY[nick]) return SHOP_LOGO_BY_KEY[nick]
-  if (acct && SHOP_LOGO_BY_KEY[acct]) return SHOP_LOGO_BY_KEY[acct]
+  if (acctLower && SHOP_LOGO_BY_KEY[acctLower]) return SHOP_LOGO_BY_KEY[acctLower]
+
+  const accountKey = normalizeShopAccountKey(shop.seller_account || "")
+  if (accountKey && imageMap) {
+    const uploaded =
+      imageMap[accountKey] ||
+      imageMap[shop.seller_account.trim()] ||
+      imageMap[acctLower]
+    if (uploaded) return uploaded
+  }
   return null
+}
+
+function ShopCardLogo({ src, name }: { src: string; name: string }) {
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt={name ? `${name} logo` : ""}
+      className="block h-full w-full bg-white object-contain p-0.5"
+    />
+  )
+}
+
+function ShopCardLogoFrame({ logo, name }: { logo: string | null; name: string }) {
+  return (
+    <div
+      className="mb-2.5 mx-auto w-[min(100%,7.5rem)] aspect-square sm:w-[min(100%,8.5rem)] shrink-0 overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-sm"
+      aria-hidden={!logo}
+    >
+      {logo ? (
+        <ShopCardLogo src={logo} name={name} />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center bg-muted/40">
+          <Store className="h-11 w-11 text-muted-foreground" />
+        </div>
+      )}
+    </div>
+  )
 }
 
 /** Fetch sectors from homepage categories, then for each sector fetch sellers and show shops grouped by sector. */
 export function ShopsBySector() {
   const { t } = useTranslation()
+  const shopImageMap = useShopImageOverrideMap()
   const [sectors, setSectors] = useState<SectorCategory[]>([])
   const [shopsBySector, setShopsBySector] = useState<Record<string, ShopInfo[]>>({})
   const [loading, setLoading] = useState(true)
@@ -300,7 +369,7 @@ export function ShopsBySector() {
                   const href = canLink
                     ? `/shop-with-me/${encodeURIComponent((shop.officialNickname || "").trim().toLowerCase())}`
                     : ""
-                  const logo = shopLogoSrc(shop)
+                  const logo = shopLogoSrc(shop, shopImageMap)
                   const lines = shop.stockLineCount
                   const cardKey = `${shop.seller_account || "na"}-${shop.seller_name}`
 
@@ -312,20 +381,8 @@ export function ShopsBySector() {
                       )}
                       title={canLink ? undefined : t("shopsListLinkDisabledHint" as TranslationKey)}
                     >
-                      <CardContent className="p-3 flex flex-col items-center justify-center text-center min-h-[112px]">
-                        <div className="rounded-lg bg-muted/50 p-2 mb-1.5 size-[52px] flex items-center justify-center overflow-hidden">
-                          {logo ? (
-                            <Image
-                              src={logo}
-                              alt=""
-                              width={44}
-                              height={44}
-                              className="object-contain max-h-[44px] w-auto"
-                            />
-                          ) : (
-                            <Store className="h-6 w-6 text-muted-foreground" />
-                          )}
-                        </div>
+                      <CardContent className="p-3 sm:p-4 flex flex-col items-center justify-center text-center min-h-[148px]">
+                        <ShopCardLogoFrame logo={logo} name={shop.seller_name} />
                         <span className="text-sm font-medium text-foreground line-clamp-2">{shop.seller_name}</span>
                         {shop.seller_location && (
                           <span className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{shop.seller_location}</span>
@@ -391,6 +448,7 @@ export function ShopsForSingleSector({
   filterQuery?: string
 }) {
   const { t } = useTranslation()
+  const shopImageMap = useShopImageOverrideMap()
   const locationPref = usePrefsStore((s) => s.location)
   const [shopPage, setShopPage] = useState(1)
   const SHOPS_PER_PAGE = 15
@@ -447,32 +505,20 @@ export function ShopsForSingleSector({
             const href = canLink
               ? `/shop-with-me/${encodeURIComponent((shop.officialNickname || "").trim().toLowerCase())}`
               : ""
-            const logo = shopLogoSrc(shop)
+            const logo = shopLogoSrc(shop, shopImageMap)
             const lines = shop.stockLineCount
             const cardKey = `${shop.seller_account || "na"}-${shop.seller_name}`
 
             const card = (
               <Card
                 className={cn(
-                  "h-full min-h-[120px] border transition-all",
+                  "h-full min-h-[156px] border transition-all",
                   canLink ? "hover:shadow-md cursor-pointer" : "opacity-80 border-dashed cursor-not-allowed"
                 )}
                 title={canLink ? undefined : t("shopsListLinkDisabledHint" as TranslationKey)}
               >
                 <CardContent className="p-3 flex flex-col items-center justify-center text-center">
-                  <div className="rounded-lg bg-muted/50 p-2 mb-1.5 size-[52px] flex items-center justify-center overflow-hidden">
-                    {logo ? (
-                      <Image
-                        src={logo}
-                        alt=""
-                        width={44}
-                        height={44}
-                        className="object-contain max-h-[44px] w-auto"
-                      />
-                    ) : (
-                      <Store className="h-6 w-6 text-muted-foreground" />
-                    )}
-                  </div>
+                  <ShopCardLogoFrame logo={logo} name={shop.seller_name} />
                   <span className="text-sm font-medium text-foreground line-clamp-2">{shop.seller_name}</span>
                   {shop.seller_location && (
                     <span className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{shop.seller_location}</span>

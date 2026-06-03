@@ -19,7 +19,7 @@ import {
 } from "@/lib/urubuto-transactions"
 import { cn } from "@/lib/utils"
 import { useLanguageStore, type Language } from "@/lib/language-store"
-import { ChevronDown, ChevronLeft, ChevronRight, Copy, CreditCard, Loader2, RefreshCw, Search, Smartphone, Wallet } from "lucide-react"
+import { ChevronDown, ChevronLeft, ChevronRight, Copy, CreditCard, Download, Loader2, RefreshCw, Search, Smartphone, Wallet } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 
 type MethodFilter = "all" | "WALLET" | "CARD"
@@ -50,9 +50,13 @@ const REPORT_UI: Record<Language, {
   searchRef: string
   searchPlaceholder: string
   noMatchingPayments: string
+  noPaymentsYet: string
+  noPaymentsGuidance: string
   showing: (from: number, to: number, total: number) => string
   clearFilters: string
   noTransactions: string
+  exportCsv: string
+  exportingCsv: string
   when: string
   customer: string
   amount: string
@@ -100,9 +104,13 @@ const REPORT_UI: Record<Language, {
     searchRef: "Search ref",
     searchPlaceholder: "IHUTE ref, MoMo FT, cart, payer...",
     noMatchingPayments: "No matching payments",
+    noPaymentsYet: "No payments yet",
+    noPaymentsGuidance: "When customers pay with UrubutoPay at checkout or POS, MoMo wallet and card payments will appear here.",
     showing: (from, to, total) => `Showing ${from}-${to} of ${total}`,
     clearFilters: "Clear filters",
     noTransactions: "No transactions match these filters yet. When customers pay with UrubutoPay (MoMo or card) at checkout, they appear here.",
+    exportCsv: "Export CSV",
+    exportingCsv: "Exporting...",
     when: "When",
     customer: "Customer",
     amount: "Amount",
@@ -150,9 +158,13 @@ const REPORT_UI: Record<Language, {
     searchRef: "Shaka ref",
     searchPlaceholder: "IHUTE ref, MoMo FT, cart, uwishyuye...",
     noMatchingPayments: "Nta bwishyu buhuye",
+    noPaymentsYet: "Nta bwishyu buraboneka",
+    noPaymentsGuidance: "Abakiriya nibishyura na UrubutoPay kuri checkout cyangwa POS, ubwishyu bwa MoMo wallet na card buzagaragara hano.",
     showing: (from, to, total) => `Birerekana ${from}-${to} kuri ${total}`,
     clearFilters: "Kuraho amayungurura",
     noTransactions: "Nta bwishyu buhuye n'aya mayungurura. Abakiriya nibishyura na UrubutoPay (MoMo cyangwa card), bizagaragara hano.",
+    exportCsv: "Sohora CSV",
+    exportingCsv: "Birimo gusohorwa...",
     when: "Igihe",
     customer: "Umukiriya",
     amount: "Amafaranga",
@@ -200,9 +212,13 @@ const REPORT_UI: Record<Language, {
     searchRef: "Rechercher ref",
     searchPlaceholder: "Réf. IHUTE, MoMo FT, panier, payeur...",
     noMatchingPayments: "Aucun paiement correspondant",
+    noPaymentsYet: "Aucun paiement pour le moment",
+    noPaymentsGuidance: "Quand les clients paient avec UrubutoPay au paiement ou au POS, les paiements MoMo et carte apparaîtront ici.",
     showing: (from, to, total) => `Affichage ${from}-${to} sur ${total}`,
     clearFilters: "Effacer les filtres",
     noTransactions: "Aucune transaction ne correspond à ces filtres. Quand les clients paient avec UrubutoPay (MoMo ou carte), elles apparaissent ici.",
+    exportCsv: "Exporter CSV",
+    exportingCsv: "Exportation...",
     when: "Date",
     customer: "Client",
     amount: "Montant",
@@ -496,8 +512,11 @@ export function UrubutoTransactionReport({
   const [dateTo, setDateTo] = useState("")
   const [searchInput, setSearchInput] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
+  const [exportingCsv, setExportingCsv] = useState(false)
 
   const totalPages = Math.max(1, Math.ceil(filteredTotal / pageSize))
+  const filtersActive =
+    methodFilter !== "all" || statusFilter !== "all" || Boolean(dateFrom || dateTo || searchQuery)
 
   useEffect(() => {
     const id = setTimeout(() => {
@@ -567,6 +586,83 @@ export function UrubutoTransactionReport({
     toast({ title: ui.copied, description: text.slice(0, 40) + (text.length > 40 ? "..." : "") })
   }
 
+  const exportCsv = async () => {
+    if (!account || exportingCsv) return
+    setExportingCsv(true)
+    try {
+      const totalToExport = Math.max(filteredTotal, payments.length)
+      const res = await fetchSupplierUrubutoPayments({
+        account,
+        limit: Math.max(1, totalToExport),
+        offset: 0,
+        method: methodFilter,
+        status: statusFilter,
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+        search: searchQuery || undefined,
+      })
+      if (!res.ok) {
+        toast({ title: ui.couldNotLoad, description: res.error, variant: "destructive" })
+        return
+      }
+      const rows = res.payments.length ? res.payments : payments
+      const header = [
+        "createdAt",
+        "completedAt",
+        "customer",
+        "payerCode",
+        "amount",
+        "currency",
+        "method",
+        "status",
+        "ihuteReference",
+        "momoFtId",
+        "telcoReference",
+        "urubutoInternal",
+        "cartReference",
+        "orderId",
+      ]
+      const escapeCsv = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`
+      const lines = [header.map(escapeCsv).join(",")]
+      for (const row of rows) {
+        const displayStatus = resolveEffectiveUrubutoPaymentStatus(row.status)
+        const refs = buildUrubutoReferenceDisplay(row)
+        const guestPayer = /^guest$/i.test((row.payerNames ?? "").trim())
+        const customer =
+          row.orderBuyerName?.trim() ||
+          (!guestPayer && row.payerNames?.trim()) ||
+          (guestPayer ? ui.guest : ui.customerFallback)
+        lines.push(
+          [
+            row.createdAt,
+            row.completedAt,
+            customer,
+            row.payerCode,
+            row.amount,
+            row.currency || "RWF",
+            methodLabel(row.paymentMethod, ui).label,
+            statusLabel(displayStatus, ui).label,
+            refs.ihuteRef,
+            refs.momoFtId,
+            refs.telcoRef,
+            refs.urubutoInternal,
+            refs.cartRef,
+            row.orderId,
+          ].map(escapeCsv).join(","),
+        )
+      }
+      const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `urubuto-transactions-${new Date().toISOString().slice(0, 10)}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+    } finally {
+      setExportingCsv(false)
+    }
+  }
+
   return (
     <Card className="border-violet-200/80">
       <CardHeader className="pb-3">
@@ -580,10 +676,16 @@ export function UrubutoTransactionReport({
               {ui.description}
             </CardDescription>
           </div>
-          <Button type="button" variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            <span className="ml-2">{ui.refresh}</span>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={() => void exportCsv()} disabled={exportingCsv || filteredTotal === 0}>
+              {exportingCsv ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              <span className="ml-2">{exportingCsv ? ui.exportingCsv : ui.exportCsv}</span>
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              <span className="ml-2">{ui.refresh}</span>
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -699,9 +801,17 @@ export function UrubutoTransactionReport({
             <Loader2 className="h-7 w-7 animate-spin text-violet-600" />
           </div>
         ) : payments.length === 0 ? (
-          <p className="text-sm text-gray-600 py-6 text-center rounded-lg border border-dashed bg-gray-50/80">
-            {ui.noTransactions}
-          </p>
+          <div className="rounded-lg border border-dashed bg-gray-50/80 px-4 py-8 text-center">
+            <p className="text-sm font-semibold text-gray-800">{filtersActive ? ui.noMatchingPayments : ui.noPaymentsYet}</p>
+            <p className="mx-auto mt-1 max-w-xl text-sm text-gray-600">
+              {filtersActive ? ui.noTransactions : ui.noPaymentsGuidance}
+            </p>
+            {filtersActive ? (
+              <Button type="button" size="sm" variant="outline" className="mt-3" onClick={resetFilters}>
+                {ui.clearFilters}
+              </Button>
+            ) : null}
+          </div>
         ) : (
           <div className="rounded-lg border overflow-x-auto lg:overflow-x-visible [scrollbar-width:none] hover:[scrollbar-width:thin] [-ms-overflow-style:none] [&::-webkit-scrollbar]:h-0 hover:[&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300">
             <table className="w-full text-sm min-w-[920px] lg:min-w-0 table-fixed lg:table-auto">
