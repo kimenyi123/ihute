@@ -2,10 +2,16 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
-import { CheckCircle, XCircle, Eye, AlertCircle, Search, Trash2 } from 'lucide-react'
+import { Bell, CheckCircle, XCircle, Eye, AlertCircle, Search, Trash2 } from 'lucide-react'
 import { postAdminApi } from '@/lib/admin-client'
 import { CredentialSellersPanel } from '@/app/admin/sellers/CredentialSellersPanel'
 import { UrubutoKpiStrip } from '@/components/admin/urubuto-kpi-strip'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import {
+  formatUrubutoAuditPayloadLines,
+  formatUrubutoAuditTitle,
+  type UrubutoAuditEvent,
+} from '@/lib/urubuto-audit'
 
 interface Seller {
   id: number
@@ -28,7 +34,12 @@ interface UrubutoMerchantAppRow {
   displayName: string
   merchantStatus: string
   urubutoMerchantCode: string
+  urubutoServiceCode: string
   docCount: number
+  verifiedDocCount?: number
+  onboardingApproved?: boolean
+  sellerSubmittedAt?: string
+  adminReviewStatus?: string
   firstName: string
   lastName: string
   email: string
@@ -36,6 +47,14 @@ interface UrubutoMerchantAppRow {
   location: string
   sellerAccountStatus: string
   createdAt: string
+}
+
+interface UrubutoAdminNotificationsResponse {
+  ok?: boolean
+  events?: UrubutoAuditEvent[]
+  unreadCount?: number
+  recentCount?: number
+  error?: string
 }
 
 type SellersTab = 'applications' | 'urubuto' | 'active' | 'suspended' | 'credentials'
@@ -59,6 +78,10 @@ export default function SellersPage() {
   const [error, setError] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [urubutoStatusFilter, setUrubutoStatusFilter] = useState('')
+  const [urubutoEvents, setUrubutoEvents] = useState<UrubutoAuditEvent[]>([])
+  const [urubutoEventCount, setUrubutoEventCount] = useState(0)
+  const [urubutoEventsLoading, setUrubutoEventsLoading] = useState(false)
+  const [urubutoBellOpen, setUrubutoBellOpen] = useState(false)
   const pageSize = 10
 
   const [credRefreshTrigger, setCredRefreshTrigger] = useState(0)
@@ -98,12 +121,22 @@ export default function SellersPage() {
   }, [])
 
   useEffect(() => {
+    void loadUrubutoNotifications()
+    const id = setInterval(() => void loadUrubutoNotifications(), 60000)
+    return () => clearInterval(id)
+  }, [])
+
+  useEffect(() => {
     if (activeTab === 'credentials') {
       setLoading(false)
       return
     }
     loadSellers()
-  }, [activeTab, pageApps, pageUrubuto, pageActive, pageSuspended, searchTerm])
+  }, [activeTab, pageApps, pageUrubuto, pageActive, pageSuspended, searchTerm, urubutoStatusFilter])
+
+  useEffect(() => {
+    if (activeTab === 'urubuto') setPageUrubuto(1)
+  }, [activeTab, searchTerm, urubutoStatusFilter])
 
   const loadSellers = async () => {
     try {
@@ -132,7 +165,12 @@ export default function SellersPage() {
         page = pageSuspended
       }
 
-      const res = await postAdminApi({ action, page, pageSize: size })
+      const payload: Record<string, unknown> = { action, page, pageSize: size }
+      if (activeTab === 'urubuto') {
+        if (searchTerm.trim()) payload.search = searchTerm.trim()
+        if (urubutoStatusFilter) payload.statusFilter = urubutoStatusFilter
+      }
+      const res = await postAdminApi(payload)
       const data = await res.json()
 
       if (data.ok) {
@@ -158,6 +196,53 @@ export default function SellersPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const loadUrubutoNotifications = async (): Promise<UrubutoAuditEvent[]> => {
+    try {
+      setUrubutoEventsLoading(true)
+      const res = await postAdminApi({ action: 'getUrubutoAdminNotifications', limit: 12 })
+      const data = (await res.json()) as UrubutoAdminNotificationsResponse
+      if (data.ok) {
+        const events = data.events || []
+        setUrubutoEvents(events)
+        setUrubutoEventCount(Number(data.unreadCount ?? data.recentCount ?? 0))
+        return events
+      }
+    } catch (error) {
+      console.error('Error loading Urubuto notifications:', error)
+    } finally {
+      setUrubutoEventsLoading(false)
+    }
+    return []
+  }
+
+  const markUrubutoNotificationRead = async (event: UrubutoAuditEvent) => {
+    const key = event.eventKey
+    if (!key || event.isRead) return
+    setUrubutoEventCount((count) => Math.max(0, count - 1))
+    setUrubutoEvents((prev) =>
+      prev.map((item) => (item.eventKey === key ? { ...item, isRead: true } : item)),
+    )
+    try {
+      const res = await postAdminApi({
+        action: 'markUrubutoAdminNotificationsRead',
+        eventKeys: JSON.stringify([key]),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data.ok) {
+        await loadUrubutoNotifications()
+      }
+    } catch (error) {
+      console.error('Error marking Urubuto notifications read:', error)
+      await loadUrubutoNotifications()
+    }
+  }
+
+  const handleUrubutoBellOpenChange = (open: boolean) => {
+    setUrubutoBellOpen(open)
+    if (!open) return
+    void loadUrubutoNotifications()
   }
 
   const handleApprove = async (sellerAccount: string) => {
@@ -265,6 +350,38 @@ export default function SellersPage() {
     }
   }
 
+  const handleDeleteUrubutoApplication = async (row: UrubutoMerchantAppRow) => {
+    const label = row.displayName || row.sellerPayerCode
+    if (
+      !confirm(
+        `Delete UrubutoPay application for ${label} (${row.sellerPayerCode})?\n\nThis removes only the Urubuto application/onboarding record and uploaded Urubuto documents. It does not delete the seller account. Applications with payment history cannot be deleted.`,
+      )
+    ) {
+      return
+    }
+
+    try {
+      setActionLoading(`urubuto-delete-${row.sellerPayerCode}`)
+      const res = await postAdminApi({
+        action: 'deleteUrubutoMerchantApplication',
+        sellerAccount: row.sellerPayerCode,
+      })
+      const data = await res.json()
+      if (!res.ok || !data.ok) {
+        alert('Delete failed: ' + (data.error || data.message || 'Unknown error'))
+        return
+      }
+      alert(data.message || 'Urubuto application deleted')
+      await loadSellers()
+      void loadUrubutoNotifications()
+    } catch (error) {
+      console.error('Error deleting Urubuto application:', error)
+      alert('Delete request failed')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
   // Filter active sellers based on search
   const filteredActiveSellers = useMemo(() => {
     if (activeTab !== 'active' || !searchTerm.trim()) {
@@ -283,26 +400,11 @@ export default function SellersPage() {
   }, [activeSellers, searchTerm, activeTab])
 
   const filteredUrubutoRows = useMemo(() => {
-    let rows = urubutoRows
-    if (urubutoStatusFilter) {
-      rows = rows.filter((r) => r.merchantStatus === urubutoStatusFilter)
-    }
-    if (searchTerm.trim()) {
-      const term = searchTerm.toLowerCase()
-      rows = rows.filter(
-        (r) =>
-          r.sellerPayerCode?.toLowerCase().includes(term) ||
-          r.displayName?.toLowerCase().includes(term) ||
-          r.email?.toLowerCase().includes(term) ||
-          r.firstName?.toLowerCase().includes(term) ||
-          r.lastName?.toLowerCase().includes(term)
-      )
-    }
-    return rows
-  }, [urubutoRows, urubutoStatusFilter, searchTerm])
+    return urubutoRows
+  }, [urubutoRows])
 
   const exportUrubutoCsv = () => {
-    const header = ['sellerPayerCode', 'displayName', 'email', 'tel', 'merchantStatus', 'docCount', 'urubutoMerchantCode', 'createdAt']
+    const header = ['sellerPayerCode', 'displayName', 'email', 'tel', 'reviewStatus', 'merchantStatus', 'docCount', 'verifiedDocCount', 'urubutoMerchantCode', 'urubutoServiceCode', 'createdAt']
     const lines = [header.join(',')]
     for (const r of filteredUrubutoRows) {
       lines.push(
@@ -311,9 +413,12 @@ export default function SellersPage() {
           r.displayName,
           r.email,
           r.tel,
+          r.adminReviewStatus,
           r.merchantStatus,
           String(r.docCount),
+          String(r.verifiedDocCount ?? 0),
           r.urubutoMerchantCode,
+          r.urubutoServiceCode,
           r.createdAt,
         ]
           .map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`)
@@ -337,14 +442,110 @@ export default function SellersPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Sellers Management</h1>
-        <p className="text-gray-600 mt-1">
-          Manage seller accounts. <strong className="font-medium text-gray-800">LIVE</strong> tab is seller shop
-          registrations. <strong className="font-medium text-gray-800">UrubutoPay</strong> tab lists merchant onboarding
-          applications from IHUTE, POS, POS MINI, or ERP — all stored on the Trading backend (
-          <code className="text-xs bg-gray-100 px-1 rounded">urubuto_merchant</code>).
-        </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Sellers Management</h1>
+          <p className="text-gray-600 mt-1">
+            Manage seller accounts. <strong className="font-medium text-gray-800">LIVE</strong> tab is seller shop
+            registrations. <strong className="font-medium text-gray-800">UrubutoPay</strong> tab lists merchant onboarding
+            applications from IHUTE, POS, POS MINI, or ERP — all stored on the Trading backend (
+            <code className="text-xs bg-gray-100 px-1 rounded">urubuto_merchant</code>).
+          </p>
+        </div>
+        <Popover open={urubutoBellOpen} onOpenChange={handleUrubutoBellOpenChange}>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className="relative inline-flex h-10 w-10 shrink-0 items-center justify-center gap-2 self-start whitespace-nowrap rounded-lg border border-violet-200 bg-white px-0 text-sm font-medium text-gray-700 shadow-sm hover:bg-violet-50 hover:text-violet-900 sm:w-auto sm:px-3"
+              aria-label="Urubuto notifications"
+              aria-expanded={urubutoBellOpen}
+            >
+              <Bell className="h-4 w-4 text-violet-700" />
+              <span className="hidden sm:inline">Urubuto</span>
+              {urubutoEventCount > 0 && (
+                <span className="absolute -right-2 -top-2 inline-flex min-w-5 items-center justify-center rounded-full bg-violet-700 px-1.5 py-0.5 text-[11px] font-semibold leading-none text-white ring-2 ring-white">
+                  {urubutoEventCount > 99 ? '99+' : urubutoEventCount}
+                </span>
+              )}
+            </button>
+          </PopoverTrigger>
+          <PopoverContent
+            align="end"
+            sideOffset={10}
+            className="mr-2 w-[calc(100vw-2rem)] max-w-[440px] overflow-hidden p-0 sm:mr-0"
+          >
+            <div className="border-b bg-violet-50/70 px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-gray-900">Urubuto notifications</p>
+                  <p className="mt-0.5 truncate text-xs text-gray-500">Documents, applications, and activation events</p>
+                </div>
+                {urubutoEventCount > 0 && (
+                  <span className="shrink-0 rounded-full bg-violet-700 px-2 py-0.5 text-[11px] font-semibold text-white">
+                    {urubutoEventCount > 99 ? '99+' : urubutoEventCount}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="max-h-[min(70vh,28rem)] overflow-y-auto p-2">
+              {urubutoEventsLoading && urubutoEvents.length === 0 ? (
+                <p className="px-2 py-6 text-center text-sm text-gray-500">Loading notifications...</p>
+              ) : urubutoEvents.length === 0 ? (
+                <p className="px-2 py-6 text-center text-sm text-gray-500">No recent Urubuto events.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {urubutoEvents.map((event, index) => {
+                    const details = formatUrubutoAuditPayloadLines(event.payloadJson)
+                    const sellerCode = event.sellerPayerCode || ''
+                    return (
+                      <li key={`${event.id ?? 'event'}-${index}`} className="rounded-lg border border-gray-100 bg-white p-3 shadow-sm hover:border-violet-200 hover:bg-violet-50/40">
+                        <Link
+                          href={sellerCode ? `/admin/sellers/urubuto/${encodeURIComponent(sellerCode)}` : '/admin/sellers?tab=urubuto'}
+                          className="block"
+                          onClick={() => {
+                            void markUrubutoNotificationRead(event)
+                            setUrubutoBellOpen(false)
+                          }}
+                        >
+                          <div className="flex min-w-0 items-start justify-between gap-3">
+                            <p className="min-w-0 truncate text-sm font-semibold text-gray-900">
+                              {formatUrubutoAuditTitle(event.action)}
+                              {!event.isRead && <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-violet-600 align-middle" />}
+                            </p>
+                            {event.createdAt && (
+                              <span className="shrink-0 pt-0.5 text-[10px] font-medium text-gray-500">
+                                {new Date(event.createdAt).toLocaleDateString()}
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-600">
+                            <span className="max-w-full truncate font-medium">{event.displayName || 'Urubuto merchant'}</span>
+                            {sellerCode ? (
+                              <span className="max-w-full truncate rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] text-gray-700">
+                                {sellerCode}
+                              </span>
+                            ) : null}
+                          </div>
+                          {details.length > 0 && (
+                            <div className="mt-2 space-y-0.5 text-xs text-gray-500">
+                              {details.slice(0, 2).map((detail) => (
+                                <p key={detail} className="truncate">{detail}</p>
+                              ))}
+                              {details.length > 2 && <p className="text-[11px] text-gray-400">+{details.length - 2} more details</p>}
+                            </div>
+                          )}
+                        </Link>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </div>
+            <div className="border-t bg-gray-50 px-4 py-2 text-[11px] leading-relaxed text-gray-500">
+              Count shows recent actionable Urubuto events from the last 7 days.
+            </div>
+          </PopoverContent>
+        </Popover>
       </div>
 
       {/* Tabs */}
@@ -390,6 +591,7 @@ export default function SellersPage() {
 
       {activeTab === 'urubuto' && (
         <div className="bg-white p-4 rounded-lg border shadow-sm">
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
             <input
@@ -399,6 +601,19 @@ export default function SellersPage() {
               placeholder="Search payer code, shop name, email…"
               className="w-full pl-10 pr-10 py-2 border rounded-lg focus:ring-2 focus:ring-violet-500 outline-none"
             />
+          </div>
+          <select
+            className="rounded-lg border px-3 py-2 text-sm focus:ring-2 focus:ring-violet-500 outline-none"
+            value={urubutoStatusFilter}
+            onChange={(e) => setUrubutoStatusFilter(e.target.value)}
+          >
+            <option value="">All statuses</option>
+            <option value="pending">Pending</option>
+            <option value="under_review">Under review</option>
+            <option value="live">Live</option>
+            <option value="missing_service_code">Missing service code</option>
+            <option value="rejected">Rejected</option>
+          </select>
           </div>
         </div>
       )}
@@ -464,16 +679,6 @@ export default function SellersPage() {
             <>
             <UrubutoKpiStrip />
             <div className="flex flex-wrap gap-3 mb-3 items-center">
-              <select
-                className="rounded border px-3 py-1.5 text-sm"
-                value={urubutoStatusFilter}
-                onChange={(e) => setUrubutoStatusFilter(e.target.value)}
-              >
-                <option value="">All statuses</option>
-                <option value="PENDING">PENDING</option>
-                <option value="ACTIVE">ACTIVE</option>
-                <option value="REJECTED">REJECTED</option>
-              </select>
               <button
                 type="button"
                 onClick={exportUrubutoCsv}
@@ -492,14 +697,14 @@ export default function SellersPage() {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
                       Profile / contacts
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
-                      Merchant status
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
+                      Review status
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
                       Docs
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
-                      Urubuto code
+                      Urubuto codes
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
                       Applied
@@ -512,7 +717,9 @@ export default function SellersPage() {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {filteredUrubutoRows.map((row) => {
                     const applied = row.createdAt ? new Date(row.createdAt).getTime() : 0
-                    const stale = applied > 0 && Date.now() - applied > 48 * 3600 * 1000 && !row.urubutoMerchantCode
+                    const stale = applied > 0 && Date.now() - applied > 48 * 3600 * 1000 && (!row.urubutoMerchantCode || !row.urubutoServiceCode)
+                    const reviewStatus = row.adminReviewStatus || 'pending'
+                    const reviewLabel = reviewStatus.replace(/_/g, ' ')
                     return (
                     <tr key={row.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -527,33 +734,56 @@ export default function SellersPage() {
                         <div className="text-xs text-gray-400">{row.tel || ''}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="inline-flex rounded-full px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-800">
-                          {row.merchantStatus}
+                        <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium capitalize ${
+                          reviewStatus === 'live'
+                            ? 'bg-green-100 text-green-800'
+                            : reviewStatus === 'under_review'
+                              ? 'bg-blue-100 text-blue-800'
+                              : reviewStatus === 'missing_service_code'
+                                ? 'bg-amber-100 text-amber-900'
+                                : 'bg-gray-100 text-gray-800'
+                        }`}>
+                          {reviewLabel}
                         </span>
+                        <div className="text-xs text-gray-500 mt-1">Merchant: {row.merchantStatus || '—'}</div>
                         {row.sellerAccountStatus && (
                           <div className="text-xs text-gray-500 mt-1">Seller: {row.sellerAccountStatus}</div>
                         )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {row.docCount}/3
+                        {row.verifiedDocCount ?? 0}/3 verified
+                        <div className="text-xs text-gray-500">{row.docCount}/3 uploaded</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-700">
-                        {row.urubutoMerchantCode || '—'}
+                        <div>Merchant: {row.urubutoMerchantCode || '—'}</div>
+                        <div>Service: {row.urubutoServiceCode || '—'}</div>
                         {stale && (
-                          <span className="block text-xs text-amber-700 font-sans mt-0.5">SLA &gt;48h no code</span>
+                          <span className="block text-xs text-amber-700 font-sans mt-0.5">SLA &gt;48h missing code</span>
                         )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-500">
                         {row.createdAt ? new Date(row.createdAt).toLocaleString() : '—'}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        <Link
-                          href={`/admin/sellers/urubuto/${encodeURIComponent(row.sellerPayerCode)}`}
-                          className="text-blue-600 hover:text-blue-900 inline-flex items-center gap-1"
-                          title="UrubutoPay application and documents"
-                        >
-                          <Eye size={18} />
-                        </Link>
+                        <div className="flex items-center justify-end gap-2">
+                          <Link
+                            href={`/admin/sellers/urubuto/${encodeURIComponent(row.sellerPayerCode)}`}
+                            className="inline-flex items-center gap-1 rounded p-1 text-blue-600 hover:bg-blue-50 hover:text-blue-900"
+                            title="UrubutoPay application and documents"
+                          >
+                            <Eye size={18} />
+                          </Link>
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteUrubutoApplication(row)}
+                            disabled={actionLoading === `urubuto-delete-${row.sellerPayerCode}`}
+                            className="inline-flex items-center gap-1 rounded p-1 text-red-600 hover:bg-red-50 hover:text-red-900 disabled:cursor-not-allowed disabled:opacity-50"
+                            title="Delete Urubuto application only"
+                          >
+                            <Trash2 size={18} />
+                            <span className="sr-only">Delete Urubuto application</span>
+                          </button>
+                        </div>
                       </td>
                     </tr>
                     )
