@@ -9,7 +9,10 @@ type Scope = "shop" | "product"
 const DATA_DIR = path.join(process.cwd(), ".data")
 const PUBLIC_DIR = path.join(process.cwd(), "public")
 const PRODUCT_OVERRIDES_FILE = path.join(DATA_DIR, "supplier-image-overrides.json")
-const SHOP_OVERRIDES_FILE = path.join(DATA_DIR, "shop-image-overrides.json")
+/** Legacy local-only index (gitignored). */
+const SHOP_OVERRIDES_LEGACY_FILE = path.join(DATA_DIR, "shop-image-overrides.json")
+/** Deployable index next to shop images — commit with `public/uploads/shops/*`. */
+const SHOP_OVERRIDES_PUBLIC_FILE = path.join(PUBLIC_DIR, "uploads", "shops", "overrides.json")
 
 function clean(input: unknown): string {
   return typeof input === "string" ? input.trim() : ""
@@ -30,7 +33,18 @@ function keyFor(scope: Scope, account: string, itemCode: string): string {
 }
 
 function fileForScope(scope: Scope): string {
-  return scope === "shop" ? SHOP_OVERRIDES_FILE : PRODUCT_OVERRIDES_FILE
+  return scope === "shop" ? SHOP_OVERRIDES_LEGACY_FILE : PRODUCT_OVERRIDES_FILE
+}
+
+async function readShopOverrideMap(): Promise<Record<string, string>> {
+  const legacy = await readJsonMap(SHOP_OVERRIDES_LEGACY_FILE)
+  const published = await readJsonMap(SHOP_OVERRIDES_PUBLIC_FILE)
+  return { ...legacy, ...published }
+}
+
+async function writeShopOverrideMap(map: Record<string, string>): Promise<void> {
+  await writeJsonMap(SHOP_OVERRIDES_PUBLIC_FILE, map)
+  await writeJsonMap(SHOP_OVERRIDES_LEGACY_FILE, map)
 }
 
 async function readJsonMap(filePath: string): Promise<Record<string, string>> {
@@ -57,7 +71,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "scope must be 'shop' or 'product'" }, { status: 400 })
   }
 
-  const map = await readJsonMap(fileForScope(scope))
+  const map = scope === "shop" ? await readShopOverrideMap() : await readJsonMap(fileForScope(scope))
   if (!account) {
     return NextResponse.json({ ok: true, scope, map })
   }
@@ -123,10 +137,16 @@ export async function POST(req: NextRequest) {
   await writeFile(absolutePath, buf)
 
   const imageUrl = `/${relativePath.replace(/\\/g, "/")}`
-  const mapFile = fileForScope(scope)
-  const map = await readJsonMap(mapFile)
-  map[keyFor(scope, account, itemCode)] = imageUrl
-  await writeJsonMap(mapFile, map)
+  if (scope === "shop") {
+    const map = await readShopOverrideMap()
+    map[keyFor(scope, account, itemCode)] = imageUrl
+    await writeShopOverrideMap(map)
+  } else {
+    const mapFile = fileForScope(scope)
+    const map = await readJsonMap(mapFile)
+    map[keyFor(scope, account, itemCode)] = imageUrl
+    await writeJsonMap(mapFile, map)
+  }
 
   return NextResponse.json({
     ok: true,
