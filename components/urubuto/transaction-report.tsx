@@ -466,7 +466,7 @@ function SummaryTile({
         onClick={onClick}
       className={cn(
         "rounded-lg border p-3 text-left transition-colors",
-        onClick && "cursor-pointer hover:border-violet-400",
+              "cursor-pointer hover:border-violet-400",
         active ? "border-violet-500 bg-violet-50 ring-1 ring-violet-300" : "border-gray-200 bg-white",
       )}
     >
