@@ -21,6 +21,9 @@ export interface UrubutoChecklistItem {
   label: string
   fixedBy?: string
   rejectionReason?: string
+  status?: "missing" | "pending_review" | "verified" | "ready" | string
+  actionLabel?: string
+  actionTarget?: string
 }
 
 export interface UrubutoBreakdown {

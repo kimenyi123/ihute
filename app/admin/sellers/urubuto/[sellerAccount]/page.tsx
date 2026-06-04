@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
-import { ArrowLeft, Copy, Download, Loader2, RefreshCw } from "lucide-react"
+import { ArrowLeft, Copy, Download, Loader2, Mail, RefreshCw } from "lucide-react"
 import { postAdminApi, postAdminUrubutoMerchantDocumentDownload } from "@/lib/admin-client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -11,6 +11,11 @@ import { EligibilityChecklist } from "@/components/urubuto/eligibility-checklist
 import { UrubutoPipelineBadge } from "@/components/urubuto/pipeline-badge"
 import type { PipelineStage, UrubutoBreakdown, UrubutoChecklistItem } from "@/lib/urubuto-pipeline"
 import { DOC_TYPE_LABELS } from "@/lib/urubuto-pipeline"
+import {
+  formatUrubutoAuditPayloadLines,
+  formatUrubutoAuditTitle,
+  type UrubutoAuditEvent,
+} from "@/lib/urubuto-audit"
 
 interface UrubutoMerchantJson {
   id: number
@@ -51,9 +56,11 @@ export default function UrubutoMerchantApplicationPage() {
   const [onboarding, setOnboarding] = useState<UrubutoOnboardingJson | null>(null)
   const [documents, setDocuments] = useState<UrubutoDocRow[]>([])
   const [breakdown, setBreakdown] = useState<UrubutoBreakdown | null>(null)
-  const [audit, setAudit] = useState<{ action: string; actorEmail: string; createdAt: string }[]>([])
+  const [audit, setAudit] = useState<UrubutoAuditEvent[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [resendingEmail, setResendingEmail] = useState(false)
+  const [sendingLiveEmail, setSendingLiveEmail] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [downloadingId, setDownloadingId] = useState<number | null>(null)
@@ -153,6 +160,44 @@ export default function UrubutoMerchantApplicationPage() {
       onboardingApproved: onboardingApproved ? "true" : "false",
     }, "Merchant saved")
 
+  const resendReviewEmail = async () => {
+    setResendingEmail(true)
+    setFeedback(null)
+    try {
+      const res = await postAdminApi({ action: "resendUrubutoReviewEmail", sellerAccount })
+      const data = await res.json()
+      if (!res.ok || !data.ok) {
+        alert(data.error || data.message || "Could not resend review email")
+        return
+      }
+      await load()
+      setFeedback(data.message || "Review email resent")
+    } catch {
+      alert("Could not resend review email")
+    } finally {
+      setResendingEmail(false)
+    }
+  }
+
+  const sendLiveEmail = async () => {
+    setSendingLiveEmail(true)
+    setFeedback(null)
+    try {
+      const res = await postAdminApi({ action: "sendUrubutoLiveEmail", sellerAccount })
+      const data = await res.json()
+      if (!res.ok || !data.ok) {
+        alert(data.error || data.message || "Could not send seller live email")
+        return
+      }
+      await load()
+      setFeedback(data.message || "Seller live email sent")
+    } catch {
+      alert("Could not send seller live email")
+    } finally {
+      setSendingLiveEmail(false)
+    }
+  }
+
   const copy = (text: string) => {
     void navigator.clipboard.writeText(text)
   }
@@ -185,6 +230,14 @@ export default function UrubutoMerchantApplicationPage() {
 
   const stage = breakdown?.pipelineStage ?? "applied"
   const hasDownloadableDocument = (doc: UrubutoDocRow) => Boolean(doc.originalFilename?.trim())
+  const liveEmailMissing = [
+    merchant?.status === "ACTIVE" ? null : "set status to ACTIVE",
+    merchant?.urubutoMerchantCode?.trim() ? null : "add merchant code",
+    merchant?.urubutoServiceCode?.trim() ? null : "add service code",
+    onboarding?.onboardingApproved ? null : "approve IHUTE onboarding",
+  ].filter(Boolean) as string[]
+  const canSendLiveEmail =
+    liveEmailMissing.length === 0
 
   return (
     <div className="min-h-screen bg-gray-50 p-3 md:p-5 lg:p-6">
@@ -267,7 +320,7 @@ export default function UrubutoMerchantApplicationPage() {
 
               <Card>
                 <CardHeader className="px-4 py-3">
-                  <CardTitle className="text-base">Simulate eligibility</CardTitle>
+                  <CardTitle className="text-base">Onboarding progress</CardTitle>
                 </CardHeader>
                 <CardContent className="px-4 pb-4">
                   <p className="text-sm text-gray-700 mb-2">{breakdown?.sellerMessage}</p>
@@ -351,6 +404,54 @@ export default function UrubutoMerchantApplicationPage() {
                       Mark submitted to Urubuto
                     </Button>
                   </div>
+
+                  <div className="rounded-lg border border-gray-200 bg-gray-50/70 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Ops/internal email</p>
+                    <p className="mt-1 text-xs text-gray-600">
+                      Resends the internal review notification to IHUTE/Urubuto ops. This is not sent to the seller.
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={saving || resendingEmail || !onboarding?.sellerSubmittedAt}
+                      onClick={() => void resendReviewEmail()}
+                      className="mt-2 w-full whitespace-nowrap sm:w-auto"
+                      title={!onboarding?.sellerSubmittedAt ? "Available after the seller submits the application for review" : "Resend the ops review email"}
+                    >
+                      {resendingEmail ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Mail className="h-4 w-4 mr-1" />}
+                      Resend ops review email
+                    </Button>
+                    {!onboarding?.sellerSubmittedAt && (
+                      <p className="mt-2 text-xs text-amber-700">Available after the seller submits the application for review.</p>
+                    )}
+                  </div>
+
+                  <div className="rounded-lg border border-violet-200 bg-violet-50/50 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-violet-700">Seller live email</p>
+                    <p className="mt-1 text-xs text-gray-700">
+                      Sends the seller a congratulations email when UrubutoPay is fully ready on IHUTE.
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={saving || sendingLiveEmail || !canSendLiveEmail}
+                      onClick={() => void sendLiveEmail()}
+                      className="mt-2 w-full whitespace-nowrap border-violet-300 bg-white text-violet-800 hover:bg-violet-100 sm:w-auto"
+                      title={
+                        canSendLiveEmail
+                          ? "Send the seller their UrubutoPay live confirmation email"
+                          : `Live email available after: ${liveEmailMissing.join(", ")}`
+                      }
+                    >
+                      {sendingLiveEmail ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Mail className="h-4 w-4 mr-1" />}
+                      Send live email to seller
+                    </Button>
+                    {!canSendLiveEmail && (
+                      <p className="mt-2 text-xs text-amber-800">
+                        Live email available after: {liveEmailMissing.join(", ")}.
+                      </p>
+                    )}
+                  </div>
                   {feedback && (
                     <p className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-800">
                       {feedback}
@@ -390,9 +491,9 @@ export default function UrubutoMerchantApplicationPage() {
                 </CardHeader>
                 <CardContent className="px-4 pb-4">
                   {documents.length === 0 && <p className="text-sm text-gray-600">No documents yet.</p>}
-                  <div className="grid gap-3 lg:grid-cols-3">
+                  <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
                     {documents.map((d) => (
-                      <div key={d.documentId} className="rounded-lg border p-3 space-y-3">
+                      <div key={d.documentId} className="rounded-lg border bg-white p-3 space-y-3">
                         <div className="min-w-0">
                           <p className="font-medium leading-snug">{DOC_TYPE_LABELS[d.docType]?.en ?? d.docType}</p>
                           <p className="mt-0.5 break-all text-xs text-gray-500">{d.originalFilename}</p>
@@ -407,23 +508,24 @@ export default function UrubutoMerchantApplicationPage() {
                             <p className="text-xs text-red-700">Rejected: {d.rejectionReason}</p>
                           )}
                         </div>
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid gap-2 sm:grid-cols-2">
                           <Button
                             variant="outline"
                             size="sm"
                             className={
                               hasDownloadableDocument(d)
-                                ? "border-green-300 bg-green-50 text-green-800 hover:bg-green-100 hover:text-green-900"
-                                : undefined
+                                ? "w-full min-w-0 whitespace-nowrap border-green-300 bg-green-50 text-green-800 hover:bg-green-100 hover:text-green-900"
+                                : "w-full min-w-0 whitespace-nowrap"
                             }
                             disabled={downloadingId === d.documentId}
                             onClick={() => void handleDownload(d.documentId, d.originalFilename)}
                           >
-                            <Download className="h-4 w-4 mr-1" />
-                            Download
+                            <Download className="mr-1.5 h-4 w-4 shrink-0" />
+                            <span>Download</span>
                           </Button>
                           <Button
                             size="sm"
+                            className="w-full min-w-0 whitespace-nowrap"
                             disabled={saving}
                             onClick={() =>
                               void adminAction("verifyUrubutoMerchantDocument", {
@@ -434,9 +536,9 @@ export default function UrubutoMerchantApplicationPage() {
                             Verify
                           </Button>
                         </div>
-                        <div className="flex gap-2">
+                        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
                           <input
-                            className="min-w-0 flex-1 rounded border px-2 py-1 text-xs"
+                            className="min-h-9 w-full min-w-0 rounded border px-2 py-1.5 text-sm"
                             placeholder="Rejection reason"
                             value={rejectReason[d.documentId] ?? ""}
                             onChange={(e) =>
@@ -446,6 +548,7 @@ export default function UrubutoMerchantApplicationPage() {
                           <Button
                             size="sm"
                             variant="destructive"
+                            className="w-full whitespace-nowrap sm:w-auto sm:min-w-20"
                             disabled={saving}
                             onClick={() => {
                               const r = rejectReason[d.documentId]?.trim()
@@ -468,23 +571,37 @@ export default function UrubutoMerchantApplicationPage() {
                 </CardContent>
               </Card>
 
-              {audit.length > 0 && (
-                <Card>
-                  <CardHeader className="px-4 py-3">
-                    <CardTitle className="text-base">Activity log</CardTitle>
-                  </CardHeader>
-                  <CardContent className="px-4 pb-4">
+              <Card>
+                <CardHeader className="px-4 py-3">
+                  <CardTitle className="text-base">Audit history</CardTitle>
+                </CardHeader>
+                <CardContent className="px-4 pb-4">
+                  {audit.length === 0 ? (
+                    <p className="text-sm text-gray-600">No status, code, document, email, or note changes recorded yet.</p>
+                  ) : (
                     <ul className="text-xs space-y-2 max-h-48 overflow-y-auto">
-                      {audit.map((a, i) => (
-                        <li key={i} className="border-b border-gray-100 pb-1">
-                          <span className="font-medium">{a.action}</span>
-                          <span className="text-gray-500"> — {a.actorEmail || "system"} — {a.createdAt}</span>
-                        </li>
-                      ))}
+                      {audit.map((a, i) => {
+                        const payloadLines = formatUrubutoAuditPayloadLines(a.payloadJson)
+                        return (
+                          <li key={a.id ?? i} className="border-b border-gray-100 pb-2">
+                            <div>
+                              <span className="font-medium">{formatUrubutoAuditTitle(a.action)}</span>
+                              <span className="text-gray-500"> — {a.actorEmail || "system"} — {a.createdAt}</span>
+                            </div>
+                            {payloadLines.length > 0 && (
+                              <ul className="mt-1 space-y-0.5 text-[11px] text-gray-600">
+                                {payloadLines.map((line) => (
+                                  <li key={line}>{line}</li>
+                                ))}
+                              </ul>
+                            )}
+                          </li>
+                        )
+                      })}
                     </ul>
-                  </CardContent>
-                </Card>
-              )}
+                  )}
+                </CardContent>
+              </Card>
             </div>
           </div>
         )}
