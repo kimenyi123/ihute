@@ -917,6 +917,25 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
     [currentSeller?.PREFERRED_CATEGORIES, currentSeller?.DEPARTMENT]
   );
 
+  const shopMoodScopeRef = useRef<string>("");
+  useEffect(() => {
+    const scope = `${nicknameFromUrl || ""}|${selectedSeller || ""}`;
+    if (shopMoodScopeRef.current && shopMoodScopeRef.current !== scope) {
+      setMoodPreference(null);
+      setSurprisePreferences(null);
+      setSurpriseForm({});
+    }
+    shopMoodScopeRef.current = scope;
+  }, [nicknameFromUrl, selectedSeller]);
+
+  useEffect(() => {
+    if (!moodPreference) return;
+    if (!moodOptions.some((o) => o.id === moodPreference)) {
+      setMoodPreference(null);
+      setSurprisePreferences(null);
+    }
+  }, [moodOptions, moodPreference]);
+
   const surpriseDialogConfig = useMemo(
     () => (moodSector ? getSurpriseDialogConfig(moodSector, sellerCategorySlugs) : null),
     [moodSector, sellerCategorySlugs]

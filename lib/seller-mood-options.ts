@@ -350,6 +350,13 @@ export function resolveSellerMoodSectorFromSlugs(slugs: string[]): SellerMoodSec
   for (const slug of slugs) {
     if (LIQUOR_SECTOR_SLUGS.has(slug) || slug.includes("liquor")) return "liquor"
   }
+  // Boutique / electronics before food — mixed or wrong dept must not show restaurant moods
+  for (const slug of slugs) {
+    if (slug === "boutique" || slug.includes("boutique")) return "retail"
+  }
+  for (const slug of slugs) {
+    if (slug === "electronics" || slug.includes("electronic")) return "retail"
+  }
   for (const slug of slugs) {
     if (FOOD_SECTOR_SLUGS.has(slug) || isRestoBarPreferredCategories(slug)) return "food"
   }
@@ -398,6 +405,8 @@ export function getMoodOptionsForSeller(
   department?: string | null
 ): MoodOption[] {
   const slugs = parseSellerCategorySlugs(preferredCategories, department)
+  if (slugs.includes("boutique")) return MOOD_OPTIONS_BOUTIQUE
+  if (slugs.includes("electronics")) return MOOD_OPTIONS_ELECTRONICS
   const sector = resolveSellerMoodSectorFromSlugs(slugs)
   if (!sector) return []
   return getMoodOptionsForSector(sector, slugs)
