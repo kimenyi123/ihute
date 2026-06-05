@@ -8,6 +8,7 @@ import { useTranslation } from "@/hooks/use-translation"
 import { usePrefsStore } from "@/lib/prefs-store"
 import type { TranslationKey } from "@/lib/translations"
 import { cn } from "@/lib/utils"
+import { resolveSellerPhotoUrl } from "@/lib/seller-photo-url"
 
 interface SectorCategory {
   categoryId: string
@@ -23,6 +24,8 @@ export interface ShopInfo {
   officialNickname: string | null
   /** Lines / SKUs from seller listing (product_count or products.length from backend). */
   stockLineCount?: number
+  /** account_seller.photo from backend listing. */
+  sellerPhoto?: string
 }
 
 const SECTOR_ORDER = ["bar-resto", "resto-bar", "pharmacy", "supermarket", "liquor-store", "coffee-shop", "boutique", "beauty", "general"]
@@ -181,11 +184,19 @@ export function mapListSuppliersWithProductsToShops(arr: unknown[]): ShopInfo[] 
       seller_location: x.seller_location ?? x.LOCATION,
       officialNickname: pickSupplierNickname(x),
       stockLineCount: pickStockLineCount(rec),
+      sellerPhoto: String(
+        x.seller_photo ?? x.sellerPhoto ?? x.photo ?? x.PHOTO ?? ""
+      ).trim() || undefined,
     }
   }).filter((s: ShopInfo) => s.seller_account || s.seller_name)
 }
 
 function shopLogoSrc(shop: ShopInfo, imageMap?: Record<string, string>): string | null {
+  if (shop.sellerPhoto) {
+    const resolved = resolveSellerPhotoUrl(shop.sellerPhoto)
+    if (resolved) return resolved
+  }
+
   const nick = (shop.officialNickname || "").toString().trim().toLowerCase()
   const acctLower = (shop.seller_account || "").toString().trim().toLowerCase()
   if (nick && SHOP_LOGO_BY_KEY[nick]) return SHOP_LOGO_BY_KEY[nick]

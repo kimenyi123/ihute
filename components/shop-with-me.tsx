@@ -22,18 +22,6 @@ import {
   LayoutGrid,
   SlidersHorizontal,
   Star,
-  Carrot,
-  Flame,
-  Egg,
-  Wine,
-  Beer,
-  Coffee,
-  GlassWater,
-  Sparkles,
-  Pill,
-  Baby,
-  Leaf,
-  HeartPulse,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -83,6 +71,21 @@ import {
   resolveItemEmballageRaw,
 } from "@/lib/package-price";
 import { itemEmballageDisplaySuffix } from "@/lib/cart-display-utils";
+import { buildCartImageFields } from "@/lib/cart-image-fields";
+import {
+  getMoodOptionsForSeller,
+  isSurpriseMoodId,
+  parseSellerCategorySlugs,
+  resolveSellerMoodSector,
+  sellerIsPharmacyCategory,
+} from "@/lib/seller-mood-options";
+import { filterProductsByMoodOption } from "@/lib/seller-mood-filter";
+import {
+  getSurpriseDialogConfig,
+  filterProductsBySurprisePreferences,
+  SURPRISE_MOOD_ID,
+  type SurprisePreferences,
+} from "@/lib/seller-surprise-config";
 import { LocationBadge } from "@/components/location-badge";
 
 /** Optional fields for production: plug in from DB when available. */
@@ -226,24 +229,19 @@ const MOOD_CONFIG: Record<
   },
 };
 
-/** User choices from Surprise me :) popup. Used to filter/surface products. */
-export type SurprisePreferences = {
-  males: number;
-  females: number;
-  kids: number;
-  hungry: boolean;
-  onDiet: boolean;
-  cold: boolean;
-  thirsty: boolean;
-  wantAlcohol: boolean;
-};
-
-/** Filter products for Surprise section based on table + mood. */
-function filterSurpriseByPreferences(
+/** Filter products for Surprise section based on table + mood (food — legacy path). */
+function filterSurpriseByPreferencesFood(
   products: ShopWithMeProduct[],
-  prefs: SurprisePreferences
+  prefs: Record<string, number | boolean>
 ): ShopWithMeProduct[] {
-  const { males, females, kids, hungry, onDiet, cold, thirsty, wantAlcohol } = prefs;
+  const males = Number(prefs.males) || 0;
+  const females = Number(prefs.females) || 0;
+  const kids = Number(prefs.kids) || 0;
+  const hungry = Boolean(prefs.hungry);
+  const onDiet = Boolean(prefs.onDiet);
+  const cold = Boolean(prefs.cold);
+  const thirsty = Boolean(prefs.thirsty);
+  const wantAlcohol = Boolean(prefs.wantAlcohol);
   const match = (p: ShopWithMeProduct, regex: RegExp) => {
     const meta = getProductMeta(p);
     const name = String((p as Record<string, unknown>).item_commercial_name ?? "").toLowerCase();
@@ -314,31 +312,7 @@ function buildSurpriseMix(products: ShopWithMeProduct[]): ShopWithMeProduct[] {
   return [...result, ...remaining];
 }
 
-/** Bar/restaurant "How I feel today" mood pills: display only. Merchandising logic in MOOD_CONFIG. */
-const MOOD_OPTIONS = [
-  { id: "meat", label: "I'm a meat lover", Icon: Flame, colorClass: "text-orange-600", categoryRegex: /main course|burger|barbecue|bbq|meat|platter|sizzling|rice|pasta|pizza/i },
-  { id: "vg", label: "I'm a VG", Icon: Carrot, colorClass: "text-emerald-600", categoryRegex: /vegetable|salad|cold starter|dessert|beverage|juice|smoothie|soft drink|virgin|tea|coffee/i },
-  { id: "white-meat", label: "I eat white meat", Icon: Egg, colorClass: "text-amber-600", categoryRegex: /chicken|fish|seafood|salad|cold starter|hot starter|main course|rice|pasta/i },
-  { id: "white-wine", label: "Alcohol", Icon: Wine, colorClass: "text-lime-400", categoryRegex: ALCOHOL_REGEX },
-  { id: "whisky", label: "Non-Alcohol", Icon: Sparkles, colorClass: "text-amber-700", categoryRegex: NON_ALCOHOL_REGEX },
-  { id: "beer", label: "Trending Now", Icon: Beer, colorClass: "text-amber-500", categoryRegex: /beer|lager|ale/i },
-  { id: "cocktails", label: "Discounted", Icon: Sparkles, colorClass: "text-pink-500", categoryRegex: /cocktail|shot cocktail|coffee cocktail/i },
-  { id: "coffee", label: "Favorites", Icon: Coffee, colorClass: "text-amber-800", categoryRegex: /coffee|hot coffee|iced coffee|tea/i },
-  { id: "no-alcohol", label: "Surprise me :)", Icon: GlassWater, colorClass: "text-sky-500", categoryRegex: NON_ALCOHOL_REGEX },
-];
-
-/** Pharmacy "How I feel today" mood pills: first five adapted for health/medical; last four shared (Trending, Discounted, Favorites, Surprise). */
-const MOOD_OPTIONS_PHARMACY = [
-  { id: "pain", label: "Pain relief", Icon: Pill, colorClass: "text-red-500", categoryRegex: /pain|paracetamol|analgesic|ibuprofen|headache|fever|dolor|douleur|aspirin/i },
-  { id: "vitamins", label: "Vitamins & supplements", Icon: Leaf, colorClass: "text-emerald-600", categoryRegex: /vitamin|supplement|mineral|iron|calcium|multivitamin|omega|probiotic/i },
-  { id: "skincare", label: "Skincare", Icon: Sparkles, colorClass: "text-pink-500", categoryRegex: /skin|cream|lotion|cosmetic|beauty|sunscreen|moisturizer|soin|visage/i },
-  { id: "kids", label: "For kids", Icon: Baby, colorClass: "text-sky-500", categoryRegex: /child|kids|pediatric|baby|infant|syrup|enfant|pediatri/i },
-  { id: "adults", label: "For adults", Icon: HeartPulse, colorClass: "text-amber-600", categoryRegex: /adult|medicine|pharma|general|tablet|capsule|medicament|comprime/i },
-  { id: "beer", label: "Trending Now", Icon: Beer, colorClass: "text-amber-500", categoryRegex: /beer|lager|ale/i },
-  { id: "cocktails", label: "Discounted", Icon: Sparkles, colorClass: "text-pink-500", categoryRegex: /cocktail|shot cocktail|coffee cocktail/i },
-  { id: "coffee", label: "Favorites", Icon: Coffee, colorClass: "text-amber-800", categoryRegex: /coffee|hot coffee|iced coffee|tea/i },
-  { id: "no-alcohol", label: "Surprise me :)", Icon: GlassWater, colorClass: "text-sky-500", categoryRegex: /./i },
-];
+/** Mood merchandising config — option lists live in lib/seller-mood-options.ts by sector. */
 
 function extractNumericPrice(value: unknown): number {
   if (typeof value === "number") return value;
@@ -670,9 +644,7 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
   const [moodPreference, setMoodPreference] = useState<string | null>(null);
   const [surpriseDialogOpen, setSurpriseDialogOpen] = useState(false);
   const [surprisePreferences, setSurprisePreferences] = useState<SurprisePreferences | null>(null);
-  const [surpriseForm, setSurpriseForm] = useState<SurprisePreferences>({
-    males: 0, females: 0, kids: 0, hungry: false, onDiet: false, cold: false, thirsty: false, wantAlcohol: false,
-  });
+  const [surpriseForm, setSurpriseForm] = useState<SurprisePreferences>({});
   const [categories, setCategories] = useState<CategorySection[]>([]);
   const [itemsPerPage, setItemsPerPage] = useState(12);
   const [categoryPages, setCategoryPages] = useState<Record<string, number>>({});
@@ -782,20 +754,21 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
       const itemName = matched
         ? String((matched as any).item_commercial_name ?? (matched as any).item_name ?? it.name)
         : it.name;
-      const img = matched ? (matched.image_url ?? matched.item_image_url ?? matched.image) : undefined;
       const unit = matched ? String((matched as any).item_packet ?? "pcs") : "pcs";
       const price = matched
         ? (extractNumericPrice((matched as any).selling_price ?? (matched as any).price) || it.price)
         : it.price;
+      const productRecord = matched
+        ? (matched as Record<string, unknown>)
+        : ({ item_key_words: itemCode, item_commercial_name: itemName } as Record<string, unknown>);
       addItem(
         {
           id: itemCode,
-          itemCode,
           name: itemName,
           price,
           unit,
           selectedUnit: unit,
-          image: typeof img === "string" ? img : undefined,
+          ...buildCartImageFields(productRecord, itemCode),
           supplierId: currentSeller.ISHYIGA_ACCOUNT || "",
           supplierName: currentSeller.OWNER || currentSeller.SELLER_NAMES || currentSeller.NICKNAME || "Supplier",
           supplierLocation: currentSeller.LOCATION,
@@ -912,14 +885,48 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
     department.includes("pub") ||
     department.includes("cafe");
 
-  const isPharmacy =
-    preferred.includes("pharmacy") ||
-    department.includes("pharmacy") ||
-    (currentSeller?.OWNER || currentSeller?.SELLER_NAMES || "")
-      .toLowerCase()
-      .includes("phar");
+  const isPharmacy = sellerIsPharmacyCategory(
+    currentSeller?.PREFERRED_CATEGORIES,
+    currentSeller?.DEPARTMENT
+  );
 
-  const moodOptions = isPharmacy ? MOOD_OPTIONS_PHARMACY : MOOD_OPTIONS;
+  const moodOptions = useMemo(
+    () =>
+      getMoodOptionsForSeller(
+        currentSeller?.PREFERRED_CATEGORIES,
+        currentSeller?.DEPARTMENT
+      ),
+    [currentSeller?.PREFERRED_CATEGORIES, currentSeller?.DEPARTMENT]
+  );
+
+  const sellerCategorySlugs = useMemo(
+    () =>
+      parseSellerCategorySlugs(
+        currentSeller?.PREFERRED_CATEGORIES,
+        currentSeller?.DEPARTMENT
+      ),
+    [currentSeller?.PREFERRED_CATEGORIES, currentSeller?.DEPARTMENT]
+  );
+
+  const moodSector = useMemo(
+    () =>
+      resolveSellerMoodSector(
+        currentSeller?.PREFERRED_CATEGORIES,
+        currentSeller?.DEPARTMENT
+      ),
+    [currentSeller?.PREFERRED_CATEGORIES, currentSeller?.DEPARTMENT]
+  );
+
+  const surpriseDialogConfig = useMemo(
+    () => (moodSector ? getSurpriseDialogConfig(moodSector, sellerCategorySlugs) : null),
+    [moodSector, sellerCategorySlugs]
+  );
+
+  const openSurpriseDialog = () => {
+    if (!surpriseDialogConfig) return;
+    setSurpriseForm({ ...surpriseDialogConfig.defaultValues });
+    setSurpriseDialogOpen(true);
+  };
 
   const isDeliveryShop = preferred
     ? ["shop", "store", "pharmacy", "grocery", "delivery"].some((cat) => preferred.includes(cat))
@@ -1139,34 +1146,79 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
 
   /** Total items from backend (full Redis/API list) */
   const totalItemsFromBackend = currentSeller?.products?.length ?? currentSeller?.product_count ?? 0;
-  /** Categories to display: category filter + optional mood. Mood uses MOOD_CONFIG (filter/sort/section title). Surprise uses popup preferences when set. */
+  /** Categories to display: category filter + optional mood (product keyword match by sector). */
   const categoriesToShow = useMemo(() => {
     let list = categoryFilter ? categories.filter((c) => c.name === categoryFilter) : categories;
     if (!moodPreference) return list;
 
-    const config = MOOD_CONFIG[moodPreference];
-    if (config) {
-      const sourceList = categoryFilter ? list : categories;
-      const allProducts = sourceList.flatMap((c) => c.products);
-      let filtered = allProducts.filter(config.filter);
-      if (moodPreference === "no-alcohol" && surprisePreferences) {
-        filtered = filterSurpriseByPreferences(filtered, surprisePreferences);
+    const option = moodOptions.find((o) => o.id === moodPreference);
+    if (!option) return list;
+
+    const sourceList = categoryFilter ? list : categories;
+    const allProducts = sourceList.flatMap((c) => c.products);
+    const useLegacyFoodConfig =
+      moodSector === "food" || moodSector === "liquor";
+    const config = useLegacyFoodConfig ? MOOD_CONFIG[moodPreference] : undefined;
+
+    let filtered: ShopWithMeProduct[] = config
+      ? allProducts.filter(config.filter)
+      : filterProductsByMoodOption(allProducts as Record<string, unknown>[], option);
+
+    if (option.id === "beer") {
+      filtered = filtered.filter((p) => getProductMeta(p).inStock);
+    } else if (option.id === "cocktails") {
+      filtered = filtered.filter((p) => getProductMeta(p).discountPercent > 0);
+    }
+
+    if (isSurpriseMoodId(moodPreference) && surprisePreferences && moodSector) {
+      filtered = filterProductsBySurprisePreferences(
+        filtered as Record<string, unknown>[],
+        surprisePreferences,
+        moodSector,
+        sellerCategorySlugs
+      ) as ShopWithMeProduct[];
+      if (moodSector === "food" && filtered.length === 0) {
+        filtered = filterSurpriseByPreferencesFood(allProducts, surprisePreferences);
       }
-      const ordered = config.sortProducts
-        ? config.sortProducts(filtered)
-        : config.sort
-          ? [...filtered].sort(config.sort)
-          : filtered;
-      if (ordered.length > 0)
-        list = [{ name: config.sectionLabel, products: ordered, expanded: true }];
-      else
-        list = [];
+    }
+
+    let ordered: ShopWithMeProduct[] = config?.sortProducts
+      ? config.sortProducts(filtered)
+      : config?.sort
+        ? [...filtered].sort(config.sort)
+        : filtered;
+
+    if (option.id === "beer") {
+      ordered = [...ordered].sort(
+        (a, b) => getProductMeta(b).trendScore - getProductMeta(a).trendScore
+      );
+    } else if (option.id === "cocktails") {
+      ordered = [...ordered].sort(
+        (a, b) => getProductMeta(b).discountPercent - getProductMeta(a).discountPercent
+      );
+    } else if (option.id === "coffee") {
+      ordered = [...ordered].sort(
+        (a, b) => (getProductMeta(b).favoriteScore ?? 0) - (getProductMeta(a).favoriteScore ?? 0)
+      );
+    } else if (isSurpriseMoodId(moodPreference)) {
+      ordered = buildSurpriseMix(ordered.length > 0 ? ordered : allProducts);
+    }
+
+    if (ordered.length > 0) {
+      list = [{ name: config?.sectionLabel ?? option.label, products: ordered, expanded: true }];
     } else {
-      const option = moodOptions.find((o) => o.id === moodPreference);
-      if (option) list = list.filter((c) => option.categoryRegex.test(c.name));
+      list = [];
     }
     return list;
-  }, [categories, categoryFilter, moodPreference, surprisePreferences, moodOptions]);
+  }, [
+    categories,
+    categoryFilter,
+    moodPreference,
+    surprisePreferences,
+    moodOptions,
+    moodSector,
+    sellerCategorySlugs,
+  ]);
   /** Filtered count (after search and category filter) */
   const totalProductCount = categoriesToShow.reduce((sum, cat) => {
     const filtered = getFilteredProducts(cat.products);
@@ -1285,13 +1337,17 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
                 <h1 className="text-xl sm:text-2xl font-bold text-foreground break-words">
                   {currentSeller.OWNER || currentSeller.SELLER_NAMES || currentSeller.NICKNAME}
                 </h1>
-                {/* How I feel today: mood pills with icons */}
+                {/* How I feel today: pills from account_seller.preferedcategories (PREFERRED_CATEGORIES) */}
+                {moodOptions.length > 0 ? (
                 <div className="mt-3 space-y-1.5">
                   <p className="text-xs font-medium text-muted-foreground">How I feel today:</p>
                   <div
                     className="flex flex-wrap gap-2"
                     data-mood={moodPreference ?? ""}
-                    data-cursor-element-id="cursor-el-48"
+                    data-seller-sector={resolveSellerMoodSector(
+                      currentSeller?.PREFERRED_CATEGORIES,
+                      currentSeller?.DEPARTMENT
+                    ) ?? ""}
                   >
                     {moodOptions.map(({ id, label, Icon, colorClass }) => {
                       const isSelected = moodPreference === id;
@@ -1300,13 +1356,16 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
                           key={id}
                           type="button"
                           onClick={() => {
-                            if (id === "no-alcohol") {
+                            if (isSurpriseMoodId(id)) {
                               if (isSelected) {
                                 setMoodPreference(null);
                                 setSurprisePreferences(null);
-                              } else setSurpriseDialogOpen(true);
+                              } else {
+                                openSurpriseDialog();
+                              }
                             } else {
                               setMoodPreference(isSelected ? null : id);
+                              setSurprisePreferences(null);
                             }
                           }}
                           className={cn(
@@ -1333,6 +1392,7 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
                     )}
                   </div>
                 </div>
+                ) : null}
               </div>
 
               {hasTableContext && tableFromQuery?.trim() && (
@@ -1793,83 +1853,72 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
         </DialogContent>
       </Dialog>
 
-      {/* Surprise me :) popup – table + mood to filter results */}
+      {/* Surprise me :) popup — fields depend on shop category (pharmacy, food, boutique, etc.) */}
       <Dialog open={surpriseDialogOpen} onOpenChange={setSurpriseDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Surprise me :)</DialogTitle>
+            <DialogTitle>{surpriseDialogConfig?.title ?? "Surprise me :)"}</DialogTitle>
             <DialogDescription>
-              How many on the table? Pick how you feel and we’ll suggest products for you.
+              {surpriseDialogConfig?.description ??
+                "Pick what you need and we’ll suggest matching products."}
             </DialogDescription>
           </DialogHeader>
           <div className="py-4 space-y-5">
-            <div>
-              <p className="text-sm font-medium text-foreground mb-2">How many on table?</p>
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <Label htmlFor="surprise-males" className="text-xs text-muted-foreground">Males</Label>
-                  <Input
-                    id="surprise-males"
-                    type="number"
-                    min={0}
-                    value={surpriseForm.males || ""}
-                    onChange={(e) => setSurpriseForm((f) => ({ ...f, males: Math.max(0, parseInt(e.target.value, 10) || 0) }))}
-                    className="mt-1 h-9"
-                    placeholder="0"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="surprise-females" className="text-xs text-muted-foreground">Females</Label>
-                  <Input
-                    id="surprise-females"
-                    type="number"
-                    min={0}
-                    value={surpriseForm.females || ""}
-                    onChange={(e) => setSurpriseForm((f) => ({ ...f, females: Math.max(0, parseInt(e.target.value, 10) || 0) }))}
-                    className="mt-1 h-9"
-                    placeholder="0"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="surprise-kids" className="text-xs text-muted-foreground">Kids</Label>
-                  <Input
-                    id="surprise-kids"
-                    type="number"
-                    min={0}
-                    value={surpriseForm.kids || ""}
-                    onChange={(e) => setSurpriseForm((f) => ({ ...f, kids: Math.max(0, parseInt(e.target.value, 10) || 0) }))}
-                    className="mt-1 h-9"
-                    placeholder="0"
-                  />
-                </div>
+            {surpriseDialogConfig?.sections.map((section, si) => (
+              <div key={si}>
+                {section.title ? (
+                  <p className="text-sm font-medium text-foreground mb-2">{section.title}</p>
+                ) : null}
+                {section.fields[0]?.type === "number" ? (
+                  <div className="grid grid-cols-3 gap-3">
+                    {section.fields.map((field) => (
+                      <div key={field.key}>
+                        <Label htmlFor={`surprise-${field.key}`} className="text-xs text-muted-foreground">
+                          {field.label}
+                        </Label>
+                        <Input
+                          id={`surprise-${field.key}`}
+                          type="number"
+                          min={0}
+                          value={Number(surpriseForm[field.key] ?? 0) || ""}
+                          onChange={(e) =>
+                            setSurpriseForm((f) => ({
+                              ...f,
+                              [field.key]: Math.max(0, parseInt(e.target.value, 10) || 0),
+                            }))
+                          }
+                          className="mt-1 h-9"
+                          placeholder={field.placeholder ?? "0"}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {section.fields.map((field) => (
+                      <button
+                        key={field.key}
+                        type="button"
+                        onClick={() =>
+                          setSurpriseForm((f) => ({
+                            ...f,
+                            [field.key]: !Boolean(f[field.key]),
+                          }))
+                        }
+                        className={cn(
+                          "inline-flex items-center px-3 py-1.5 rounded-full border text-sm transition-colors",
+                          surpriseForm[field.key]
+                            ? "bg-[#1e3a5f] text-white border-[#1e3a5f]"
+                            : "bg-background hover:bg-muted border-border"
+                        )}
+                      >
+                        {field.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-            </div>
-            <div>
-              <p className="text-sm font-medium text-foreground mb-2">I feel…</p>
-              <div className="flex flex-wrap gap-2">
-                {[
-                  { key: "hungry", label: "I feel hungry" },
-                  { key: "onDiet", label: "I am on diet" },
-                  { key: "cold", label: "I'm cold" },
-                  { key: "thirsty", label: "I'm thirsty" },
-                  { key: "wantAlcohol", label: "I want to get drunk" },
-                ].map(({ key, label }) => (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => setSurpriseForm((f) => ({ ...f, [key]: !(f as Record<string, unknown>)[key] }))}
-                    className={cn(
-                      "inline-flex items-center px-3 py-1.5 rounded-full border text-sm transition-colors",
-                      (surpriseForm as Record<string, unknown>)[key]
-                        ? "bg-[#1e3a5f] text-white border-[#1e3a5f]"
-                        : "bg-background hover:bg-muted border-border"
-                    )}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
+            ))}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setSurpriseDialogOpen(false)}>
@@ -1877,8 +1926,8 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
             </Button>
             <Button
               onClick={() => {
-                setSurprisePreferences(surpriseForm);
-                setMoodPreference("no-alcohol");
+                setSurprisePreferences({ ...surpriseForm });
+                setMoodPreference(SURPRISE_MOOD_ID);
                 setSurpriseDialogOpen(false);
               }}
             >
@@ -2027,11 +2076,7 @@ function ProductCard({
         name: productName,
         price: price,
         unit: "pcs",
-        image:
-          validImage && !imgError && imageUrl !== NO_IMAGE_URL
-            ? imageUrl
-            : getProductImageSrc(product as Record<string, unknown>),
-        itemCode,
+        ...buildCartImageFields(p, itemCode),
         supplierId: supplierId,
         supplierName: ownerName || "Supplier",
         supplierLocation: undefined,
