@@ -7,7 +7,9 @@ import {
   getProductUploadsDir,
   getShopOverridesFile,
   getShopUploadsDir,
+  normalizeProductImagePublicUrl,
   normalizeShopImagePublicUrl,
+  productImagePublicUrl,
   shopImagePublicUrl,
 } from "@/lib/image-upload-paths"
 
@@ -78,8 +80,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "scope must be 'shop' or 'product'" }, { status: 400 })
   }
 
-  const map =
+  const rawMap =
     scope === "shop" ? await readShopOverrideMap() : await readJsonMap(getProductOverridesFile())
+  const map =
+    scope === "shop"
+      ? rawMap
+      : Object.fromEntries(
+          Object.entries(rawMap).map(([k, v]) => [k, normalizeProductImagePublicUrl(v)])
+        )
   if (!account) {
     return NextResponse.json({ ok: true, scope, map })
   }
@@ -153,7 +161,7 @@ export async function POST(req: NextRequest) {
   const imageUrl =
     scope === "shop"
       ? shopImagePublicUrl(fileName)
-      : `/uploads/products/${fileName}`
+      : productImagePublicUrl(fileName)
 
   if (scope === "shop") {
     const map = await readShopOverrideMap()

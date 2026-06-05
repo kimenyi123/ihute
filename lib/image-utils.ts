@@ -1,3 +1,5 @@
+import { normalizeProductImagePublicUrl } from "@/lib/public-asset-url"
+
 /**
  * Central image URL resolution for product/supplier images.
  * Backend and Redis can return image in: image_url, item_image_url, IMAGE_URL, image.
@@ -106,7 +108,11 @@ function collectBackendImageUrls(source: ProductImageSource | null | undefined):
     if (raw == null) continue
     const s = typeof raw === "string" ? raw.trim() : String(raw).trim()
     if (s === "") continue
-    const n = normalizeImageUrl(s)
+    let n = normalizeImageUrl(s)
+    if (!n || !isValidImageUrl(n)) continue
+    if (n.includes("/uploads/products/") || n.includes("/api/images/products/")) {
+      n = normalizeProductImagePublicUrl(n)
+    }
     if (!n || !isValidImageUrl(n)) continue
     if (seen.has(n)) continue
     seen.add(n)
@@ -134,7 +140,11 @@ export function getProductImageCandidates(source: ProductImageSource | null | un
   const seen = new Set<string>()
   const out: string[] = []
   const add = (u: string | null | undefined) => {
-    const n = normalizeImageUrl(u ?? null)
+    let n = normalizeImageUrl(u ?? null)
+    if (!n || !isValidImageUrl(n)) return
+    if (n.includes("/uploads/products/") || n.includes("/api/images/products/")) {
+      n = normalizeProductImagePublicUrl(n)
+    }
     if (!n || !isValidImageUrl(n)) return
     if (seen.has(n)) return
     seen.add(n)

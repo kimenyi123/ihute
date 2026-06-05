@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { ArrowLeft, User as UserIcon, Save, Store, ImagePlus } from "lucide-react"
 import { useAuthStore, type User } from "@/lib/auth-store"
 import SupplierLayout from "@/app/supplier/layout"
-import { resolvePublicAssetUrl } from "@/lib/public-asset-url"
+import { resolveSellerPhotoUrl } from "@/lib/seller-photo-url"
 
 export default function AccountPage() {
   const router = useRouter()
@@ -68,7 +68,7 @@ export default function AccountPage() {
       fetch(`/api/account/profile?${params.toString()}`)
         .then((res) => res.json())
         .then((data) => {
-          if (data?.ok && data.profile) {
+            if (data?.ok && data.profile) {
             const p = data.profile
             setForm((prev: Partial<User>) => ({
               ...prev,
@@ -85,16 +85,9 @@ export default function AccountPage() {
               businessName: p.businessName ?? prev.businessName,
               businessCategory: p.businessCategory ?? prev.businessCategory,
             }))
-          }
-        })
-        .catch(() => {})
-    }
-    if (user.ishyigaAccount) {
-      fetch(`/api/images/overrides?scope=shop&account=${encodeURIComponent(user.ishyigaAccount)}`, { cache: "no-store" })
-        .then((res) => res.json())
-        .then((data) => {
-          if (data?.ok && typeof data.imageUrl === "string") {
-            setShopImageUrl(data.imageUrl)
+            if (typeof p.photo === "string" && p.photo.trim()) {
+              setShopImageUrl(resolveSellerPhotoUrl(p.photo))
+            }
           }
         })
         .catch(() => {})
@@ -115,10 +108,9 @@ export default function AccountPage() {
     setMessage(null)
     try {
       const fd = new FormData()
-      fd.append("scope", "shop")
       fd.append("account", user.ishyigaAccount)
       fd.append("file", shopImageFile)
-      const res = await fetch("/api/images/overrides", {
+      const res = await fetch("/api/account/photo", {
         method: "POST",
         body: fd,
       })
@@ -126,7 +118,7 @@ export default function AccountPage() {
       if (!res.ok || !data?.ok) {
         throw new Error(data?.error || "Shop image upload failed")
       }
-      setShopImageUrl(String(data.imageUrl || ""))
+      setShopImageUrl(resolveSellerPhotoUrl(String(data.photo || "")))
       setShopImageFile(null)
       setMessage({ type: "success", text: "Shop profile image updated." })
     } catch (e) {
@@ -213,7 +205,7 @@ export default function AccountPage() {
                 <div className="relative shrink-0">
                   <div className="h-24 w-24 overflow-hidden rounded-2xl border-4 border-white/30 bg-white/10 shadow-lg ring-2 ring-white/20 sm:h-28 sm:w-28">
                     <img
-                      src={resolvePublicAssetUrl(shopImageUrl) || "/img/shops/default.png"}
+                      src={shopImageUrl || "/img/shops/default.png"}
                       alt=""
                       className="h-full w-full object-cover"
                     />
@@ -295,7 +287,7 @@ export default function AccountPage() {
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
                 <div className="relative mx-auto w-full max-w-[200px] shrink-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-inner aspect-square sm:mx-0 sm:max-w-[140px]">
                   <img
-                    src={resolvePublicAssetUrl(shopImageUrl) || "/img/shops/default.png"}
+                    src={shopImageUrl || "/img/shops/default.png"}
                     alt="Shop profile"
                     className="h-full w-full object-cover"
                   />
