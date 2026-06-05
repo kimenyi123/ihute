@@ -136,7 +136,7 @@ type LogisticsId = "human" | "bike" | "moto"
 type LogisticsOption = { id: LogisticsId; icon: string; label: string; baseRwf: number; rwfPerKm: number }
 
 /** Buyer chooses delivery vs collecting at shop — avoids mixing modes. */
-type FulfillmentMode = "delivery" | "pickup"
+type FulfillmentMode = "delivery" | "pickup" | "takeaway"
 
 type PaymentId = "momo" | "airtel" | "bk" | "cash"
 type PaymentMode = { id: PaymentId; label: string; iconSrc: string }
@@ -474,11 +474,14 @@ const GRANDMA_LABELS: Record<
     sectionLogistics: string
     logisticsNote: string
     logisticsNotePickup: string
+    logisticsNoteTakeaway: string
     fulfillmentSectionTitle: string
     fulfillmentDeliveryTitle: string
     fulfillmentDeliverySub: string
     fulfillmentPickupTitle: string
     fulfillmentPickupSub: string
+    fulfillmentTakeawayTitle: string
+    fulfillmentTakeawaySub: string
     fulfillmentDeliveryModesHint: string
     etaAtShop: string
     etaPickupSub: string
@@ -643,11 +646,14 @@ const GRANDMA_LABELS: Record<
       "Delivery fee uses distance to this shop ({km} km) and the option you pick (replace with your pricing API).",
     logisticsNotePickup:
       "Self pickup: you collect the order at this shop. No delivery fee — logistics is RWF 0.",
+    logisticsNoteTakeaway: "Takeaway: collect your order ready-packed for takeaway (RWF 500 fee).",
     fulfillmentSectionTitle: "How do you want to receive this order?",
     fulfillmentDeliveryTitle: "Delivery",
     fulfillmentDeliverySub: "Bring it to my address (delivery fee applies).",
     fulfillmentPickupTitle: "Self pickup",
     fulfillmentPickupSub: "I will collect at the shop (no delivery fee).",
+    fulfillmentTakeawayTitle: "Takeaway",
+    fulfillmentTakeawaySub: "Pack it for takeaway (RWF 500 fee).",
     fulfillmentDeliveryModesHint: "Choose how it travels to you:",
     etaAtShop: "At shop",
     etaPickupSub: "Pickup at the shop — no courier ETA. Coordinate with the seller after ordering.",
@@ -810,11 +816,14 @@ const GRANDMA_LABELS: Record<
     sectionLogistics: "Ubugendesheje",
     logisticsNote: "Igiciro cy'ubugendesheje gishingiye ku ntera kugera ku iduka ({km} km) n'uburyo wahisemo.",
     logisticsNotePickup: "Ujya kwakira ku iduka ubwawe. Nta giciro cy'ubugendesheje — ni RWF 0.",
+    logisticsNoteTakeaway: "Takeaway: kwakira ibyokurya byawe bivunjwe mu gipakeni (RWF 500).",
     fulfillmentSectionTitle: "Ushaka kubona ibi bitumize gute?",
     fulfillmentDeliveryTitle: "Kubigezaho",
     fulfillmentDeliverySub: "Binkugezaho aho ndi (igiciro cy'ubugendesheje kihari).",
     fulfillmentPickupTitle: "Kwakira ku iduka",
     fulfillmentPickupSub: "Nzajya kwakira ku iduka ubwanjye (nta giciro cy'ubugendesheje).",
+    fulfillmentTakeawayTitle: "Takeaway",
+    fulfillmentTakeawaySub: "Gibihungire mu gipakeni (RWF 500).",
     fulfillmentDeliveryModesHint: "Hitamo uburyo bwo kubigeza iwawe:",
     etaAtShop: "Ku iduka",
     etaPickupSub: "Urakira ku iduka — nta gihe cy'umugendesheje. Vugana n'iduka nyuma yo gutumiza.",
@@ -980,11 +989,14 @@ const GRANDMA_LABELS: Record<
       "Les frais utilisent la distance jusqu'à ce magasin ({km} km) et le mode choisi.",
     logisticsNotePickup:
       "Retrait au magasin : vous récupérez la commande sur place. Pas de frais de livraison (0 RWF).",
+    logisticsNoteTakeaway: "À emporter : emballé pour la route (frais de RWF 500).",
     fulfillmentSectionTitle: "Comment souhaitez-vous recevoir cette commande ?",
     fulfillmentDeliveryTitle: "Livraison",
     fulfillmentDeliverySub: "À mon adresse (frais de livraison).",
     fulfillmentPickupTitle: "Retrait au magasin",
     fulfillmentPickupSub: "Je viens chercher au magasin (sans frais de livraison).",
+    fulfillmentTakeawayTitle: "À emporter",
+    fulfillmentTakeawaySub: "Emballé pour la route (RWF 500).",
     fulfillmentDeliveryModesHint: "Choisissez le mode de transport :",
     etaAtShop: "Au magasin",
     etaPickupSub: "Retrait sur place — pas d’ETA coursier. Coordonnez-vous avec le vendeur après commande.",
@@ -2477,13 +2489,14 @@ export default function GrandmaPage() {
 
   const logisticsTotal = useMemo(() => {
     if (fulfillmentMode === "pickup") return 0
+    if (fulfillmentMode === "takeaway") return 500
     const opt = LOGISTICS.find((x) => x.id === selectedLogistics)
     return opt ? logisticsQuote(opt, deliveryKm) : 0
   }, [fulfillmentMode, selectedLogistics, deliveryKm])
 
   const etaRange = useMemo(
     () =>
-      fulfillmentMode === "pickup"
+      fulfillmentMode === "pickup" || fulfillmentMode === "takeaway"
         ? { lo: 0, hi: 0 }
         : deliveryEtaRange(deliveryKm, selectedLogistics),
     [deliveryKm, selectedLogistics, fulfillmentMode]
@@ -2535,7 +2548,7 @@ export default function GrandmaPage() {
     }
     try {
       const lsFul = localStorage.getItem("grandma:fulfillmentMode")
-      if (lsFul === "delivery" || lsFul === "pickup") setFulfillmentMode(lsFul)
+      if (lsFul === "delivery" || lsFul === "pickup" || lsFul === "takeaway") setFulfillmentMode(lsFul)
       else setFulfillmentMode("delivery")
     } catch {
       setFulfillmentMode("delivery")
@@ -2580,7 +2593,7 @@ export default function GrandmaPage() {
   }, [fulfillmentMode, prefsHydrated])
 
   useEffect(() => {
-    if (fulfillmentMode === "pickup") setCourierModalOpen(false)
+    if (fulfillmentMode === "pickup" || fulfillmentMode === "takeaway") setCourierModalOpen(false)
   }, [fulfillmentMode])
 
   useEffect(() => {
@@ -4168,7 +4181,7 @@ export default function GrandmaPage() {
 
   const etaSubText = useMemo(() => {
     const tr = GRANDMA_LABELS[language]
-    if (fulfillmentMode === "pickup") return tr.etaPickupSub
+    if (fulfillmentMode === "pickup" || fulfillmentMode === "takeaway") return tr.etaPickupSub
     const km = deliveryKm.toFixed(1)
     const mode =
       selectedLogistics === "human" ? tr.logHuman : selectedLogistics === "bike" ? tr.logBike : tr.logMoto
@@ -4305,6 +4318,8 @@ export default function GrandmaPage() {
       const referenceParts =
         fulfillmentMode === "pickup"
           ? ["SELF-PICKUP", orderNotes.trim()].filter(Boolean)
+          : fulfillmentMode === "takeaway"
+          ? ["TAKEAWAY", orderNotes.trim()].filter(Boolean)
           : [`DELIVERY-${selectedLogistics}`, orderNotes.trim()].filter(Boolean)
       const baseRef = referenceParts.length ? referenceParts.join(" | ") : ""
       const reference = (baseRef + billingTail).slice(0, 500)
@@ -4547,10 +4562,10 @@ export default function GrandmaPage() {
         .summary-remove-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:none;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:12px;font-weight:700;color:#b42318;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.04);}
         .summary-remove-btn svg{width:16px;height:16px;flex-shrink:0;}
         .summary-remove-btn:active{transform:scale(.98);background:#fff5f5;}
-        .fulfillment-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;}
+        .fulfillment-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px;}
         .fulfill-sub{font-size:12px;font-weight:600;color:var(--muted);margin-top:6px;line-height:1.3;text-align:center;padding:0 4px;}
         .logistics-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px;}
-        .log-option{background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px 8px;text-align:center;cursor:pointer;box-shadow:0 8px 18px rgba(24,151,224,.06);}
+        .log-option{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 10px;text-align:center;cursor:pointer;box-shadow:0 8px 18px rgba(24,151,224,.06);}
         .log-option.active{border:2px solid var(--blue);background:#f2f9ff;}
         .log-icon{font-size:28px;display:block;margin-bottom:6px;line-height:1;}
         .log-label{font-weight:700;font-size:14px;}
@@ -5830,11 +5845,31 @@ export default function GrandmaPage() {
             <div className="log-label">{tPay.fulfillmentPickupTitle}</div>
             <div className="fulfill-sub">{tPay.fulfillmentPickupSub}</div>
           </div>
+          <div
+            className={`log-option ${fulfillmentMode === "takeaway" ? "active" : ""}`}
+            onClick={() => setFulfillmentMode("takeaway")}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault()
+                setFulfillmentMode("takeaway")
+              }
+            }}
+          >
+            <span className="log-icon" aria-hidden>
+              🥡
+            </span>
+            <div className="log-label">{tPay.fulfillmentTakeawayTitle}</div>
+            <div className="fulfill-sub">{tPay.fulfillmentTakeawaySub}</div>
+          </div>
         </div>
 
         <p className="note" style={{ marginTop: 0, marginBottom: 10 }}>
           {fulfillmentMode === "delivery"
             ? tPay.logisticsNote.replace("{km}", deliveryKm.toFixed(1))
+            : fulfillmentMode === "takeaway"
+            ? tPay.logisticsNoteTakeaway
             : tPay.logisticsNotePickup}
         </p>
 
@@ -6023,7 +6058,7 @@ export default function GrandmaPage() {
           <div className="pay-detail-row">
             <span className="pay-detail-label">{tPay.eta}</span>
             <span className="pay-detail-value">
-              {fulfillmentMode === "pickup" ? tPay.etaAtShop : `${etaRange.lo}–${etaRange.hi} min`}
+              {fulfillmentMode === "pickup" || fulfillmentMode === "takeaway" ? tPay.etaAtShop : `${etaRange.lo}–${etaRange.hi} min`}
             </span>
           </div>
           <div className="pay-detail-sub" style={{ paddingTop: 2 }}>
