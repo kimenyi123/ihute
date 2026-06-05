@@ -5728,7 +5728,8 @@ export default function GrandmaPage() {
                 type="button"
                 aria-label={`Remove ${p.name} from cart`}
                 onClick={() => setQtyDirect(p.id, 0)}
-                className="flex items-center gap-2 border border-slate-200 rounded-2xl px-4 py-3 text-rose-600 font-semibold bg-white hover:bg-rose-50 transition"
+                disabled={grandmaSmsPayCheck === "paid"}
+                className="flex items-center gap-2 border border-slate-200 rounded-2xl px-4 py-3 text-rose-600 font-semibold bg-white hover:bg-rose-50 transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white"
               >
                 <Trash2 size={18} />
                 Remove
@@ -5740,7 +5741,8 @@ export default function GrandmaPage() {
                 {/* EDIT BUTTON */}
                 <button
                   type="button"
-                  className="border border-slate-200 rounded-2xl px-4 py-3 bg-white hover:bg-slate-50 transition text-slate-700 font-semibold"
+                  disabled={grandmaSmsPayCheck === "paid"}
+                  className="border border-slate-200 rounded-2xl px-4 py-3 bg-white hover:bg-slate-50 transition text-slate-700 font-semibold disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white"
                 >
                   Edit Qty
                 </button>
@@ -5750,6 +5752,7 @@ export default function GrandmaPage() {
                   type="number"
                   min={1}
                   value={p.qty}
+                  disabled={grandmaSmsPayCheck === "paid"}
                   onChange={(e) => {
                     const value = Number(e.target.value)
 
@@ -5760,7 +5763,7 @@ export default function GrandmaPage() {
                       setQtyDirect(p.id, value)
                     }
                   }}
-                  className="w-[90px] border border-slate-200 rounded-2xl px-4 py-3 text-center font-bold text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                  className="w-[90px] border border-slate-200 rounded-2xl px-4 py-3 text-center font-bold text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100 disabled:opacity-50 disabled:cursor-not-allowed"
                 />
               </div>
 
@@ -5956,7 +5959,9 @@ export default function GrandmaPage() {
             placeholder="Allergies, delivery instructions, substitutions…"
             value={orderNotes}
             onChange={(e) => setOrderNotes(e.target.value)}
+            disabled={grandmaSmsPayCheck === "paid"}
             aria-label="Order notes"
+            style={grandmaSmsPayCheck === "paid" ? { opacity: 0.5, cursor: "not-allowed" } : {}}
           />
         </div>
 
@@ -6212,25 +6217,47 @@ export default function GrandmaPage() {
                   </p>
                   <Textarea
                     value={grandmaMomoSmsPaste}
-                    onChange={(e) => {
-                      setGrandmaMomoSmsPaste(e.target.value)
-                      setGrandmaSmsPayCheck(null)
-                      setGrandmaSmsMatchResult(null)
+                    readOnly
+                    onPaste={(e) => {
+                      e.preventDefault()
+                      const pastedText = e.clipboardData?.getData('text/plain') || ''
+                      if (pastedText) {
+                        setGrandmaMomoSmsPaste(pastedText)
+                        setGrandmaSmsPayCheck(null)
+                        setGrandmaSmsMatchResult(null)
+                      }
                     }}
                     className="min-h-[88px] resize-y border-[#dbe7f3] text-sm"
-                    placeholder="MTN MoMo…"
+                    placeholder="MTN MoMo… (paste SMS only)"
                     aria-label={tPay.payStepReadMoMoSmsTitle}
                   />
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="w-full border-[#dbe7f3] bg-[#f7fbff] text-[#17324d] hover:bg-[#eef6ff]"
-                    onClick={() => verifyGrandmaMoMoSms()}
-                    disabled={grandTotal < 1 || !grandmaMomoSmsPaste.trim()}
-                  >
-                    {tPay.payStepVerifySms}
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="flex-1 border-[#dbe7f3] bg-[#f7fbff] text-[#17324d] hover:bg-[#eef6ff]"
+                      onClick={() => verifyGrandmaMoMoSms()}
+                      disabled={grandTotal < 1 || !grandmaMomoSmsPaste.trim() || grandmaSmsPayCheck === "paid"}
+                    >
+                      {tPay.payStepVerifySms}
+                    </Button>
+                    {grandmaSmsPayCheck === "mismatch" ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="border-red-300 text-red-600 hover:bg-red-50"
+                        onClick={() => {
+                          setGrandmaMomoSmsPaste("")
+                          setGrandmaSmsPayCheck(null)
+                          setGrandmaSmsMatchResult(null)
+                        }}
+                      >
+                        Clear & Retry
+                      </Button>
+                    ) : null}
+                  </div>
                   {grandmaSmsPayCheck === "paid" ? (
                     <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-2 text-xs font-medium text-emerald-900">
                       {grandmaSmsMatchResult?.txId
@@ -6340,25 +6367,47 @@ export default function GrandmaPage() {
                   </p>
                   <Textarea
                     value={grandmaMomoSmsPaste}
-                    onChange={(e) => {
-                      setGrandmaMomoSmsPaste(e.target.value)
-                      setGrandmaSmsPayCheck(null)
-                      setGrandmaSmsMatchResult(null)
+                    readOnly
+                    onPaste={(e) => {
+                      e.preventDefault()
+                      const pastedText = e.clipboardData?.getData('text/plain') || ''
+                      if (pastedText) {
+                        setGrandmaMomoSmsPaste(pastedText)
+                        setGrandmaSmsPayCheck(null)
+                        setGrandmaSmsMatchResult(null)
+                      }
                     }}
                     className="min-h-[88px] resize-y border-[#dbe7f3] text-sm"
-                    placeholder="Airtel Money…"
+                    placeholder="Airtel Money… (paste SMS only)"
                     aria-label={tPay.payStepReadMoMoSmsTitle}
                   />
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="w-full border-[#dbe7f3] bg-[#f7fbff] text-[#17324d] hover:bg-[#eef6ff]"
-                    onClick={() => verifyGrandmaMoMoSms()}
-                    disabled={grandTotal < 1 || !grandmaMomoSmsPaste.trim()}
-                  >
-                    {tPay.payStepVerifySms}
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="flex-1 border-[#dbe7f3] bg-[#f7fbff] text-[#17324d] hover:bg-[#eef6ff]"
+                      onClick={() => verifyGrandmaMoMoSms()}
+                      disabled={grandTotal < 1 || !grandmaMomoSmsPaste.trim() || grandmaSmsPayCheck === "paid"}
+                    >
+                      {tPay.payStepVerifySms}
+                    </Button>
+                    {grandmaSmsPayCheck === "mismatch" ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="border-red-300 text-red-600 hover:bg-red-50"
+                        onClick={() => {
+                          setGrandmaMomoSmsPaste("")
+                          setGrandmaSmsPayCheck(null)
+                          setGrandmaSmsMatchResult(null)
+                        }}
+                      >
+                        Clear & Retry
+                      </Button>
+                    ) : null}
+                  </div>
                   {grandmaSmsPayCheck === "paid" ? (
                     <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-2 text-xs font-medium text-emerald-900">
                       {grandmaSmsMatchResult?.txId
