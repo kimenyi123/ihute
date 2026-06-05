@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { MapPin, Navigation, Save, History, ArrowLeft, Loader2, Search, FileText, Upload } from "lucide-react";
 import dynamic from "next/dynamic";
+import { resolveSellerPhotoUrl } from "@/lib/seller-photo-url";
 
 const SETTINGS_UI: Record<Language, {
   locationDetected: string;
@@ -656,13 +657,14 @@ out body 15;
 
     useEffect(() => {
         if (!user?.ishyigaAccount) return;
-        fetch(`/api/images/overrides?scope=shop&account=${encodeURIComponent(user.ishyigaAccount)}`, {
+        fetch(`/api/account/profile?account=${encodeURIComponent(user.ishyigaAccount)}`, {
             cache: "no-store",
         })
             .then((res) => res.json())
             .then((data) => {
-                if (data?.ok && typeof data.imageUrl === "string") {
-                    setShopImageUrl(data.imageUrl);
+                const photo = data?.profile?.photo;
+                if (data?.ok && typeof photo === "string" && photo.trim()) {
+                    setShopImageUrl(resolveSellerPhotoUrl(photo));
                 }
             })
             .catch(() => {});
@@ -870,10 +872,9 @@ out body 15;
         setError(null);
         try {
             const fd = new FormData();
-            fd.append("scope", "shop");
             fd.append("account", user.ishyigaAccount);
             fd.append("file", shopImageFile);
-            const res = await fetch("/api/images/overrides", {
+            const res = await fetch("/api/account/photo", {
                 method: "POST",
                 body: fd,
             });
@@ -881,7 +882,7 @@ out body 15;
             if (!res.ok || !data?.ok) {
                 throw new Error(data?.error || "Failed to upload shop image");
             }
-            setShopImageUrl(String(data.imageUrl || ""));
+            setShopImageUrl(resolveSellerPhotoUrl(String(data.photo || "")));
             setShopImageFile(null);
         } catch (e: unknown) {
             setError(e instanceof Error ? e.message : "Failed to upload shop image");
