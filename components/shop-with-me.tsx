@@ -1888,7 +1888,9 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
                             }))
                           }
                           className="mt-1 h-9"
-                          placeholder={field.placeholder ?? "0"}
+                          placeholder={
+                            field.type === "number" ? (field.placeholder ?? "0") : "0"
+                          }
                         />
                       </div>
                     ))}
