@@ -5,7 +5,44 @@ import {
 } from "@/lib/supplier-stock-excel-parse"
 import type { ImportResult } from "@/lib/supplierStockApi"
 
-const CONCURRENCY = 8
+const CONCURRENCY = 1
+
+async function postClearStockCatalog(
+  account: string,
+  cookie: string,
+  signal?: AbortSignal,
+): Promise<{ ok: boolean; error?: string }> {
+  const url = `${getSupplierStockUrl()}?action=clearStockCatalog`
+  try {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Cookie: cookie,
+      },
+      body: JSON.stringify({ action: "clearStockCatalog", account }),
+      cache: "no-store",
+      signal,
+    })
+    const text = await resp.text()
+    let data: { ok?: boolean; error?: string } = {}
+    try {
+      data = JSON.parse(text) as { ok?: boolean; error?: string }
+    } catch {
+      return { ok: false, error: text.slice(0, 120) || `HTTP ${resp.status}` }
+    }
+    if (!resp.ok || data.ok === false) {
+      return { ok: false, error: data.error || `HTTP ${resp.status}` }
+    }
+    return { ok: true }
+  } catch (e) {
+    if (e instanceof Error && e.name === "AbortError") {
+      return { ok: false, error: "aborted" }
+    }
+    return { ok: false, error: e instanceof Error ? e.message : "Request failed" }
+  }
+}
 
 async function postAddProduct(
   account: string,
@@ -82,7 +119,8 @@ async function runPool<T>(
 }
 
 /**
- * Fallback when Java `importExcel` fails or returns zero imports: parse file in Next.js and call addProduct per row.
+ * Fallback when Java `importExcel` is unreachable: clear catalog first, then addProduct per row.
+ * Never stacks on top of an existing catalog (unlike the old behaviour that caused 300→1000+ dupes).
  */
 export async function importStockExcelViaAddProduct(
   file: Blob,
@@ -95,6 +133,16 @@ export async function importStockExcelViaAddProduct(
   if (signal?.aborted) {
     return { ok: false, message: "Import cancelled", error: "Import cancelled" }
   }
+
+  const cleared = await postClearStockCatalog(account, cookie, signal)
+  if (!cleared.ok) {
+    return {
+      ok: false,
+      message: "Could not clear existing stock before import",
+      error: cleared.error ?? "clearStockCatalog failed",
+    }
+  }
+
   const parsed = parseStockExcelBuffer(buffer, fileName)
 
   if (parsed.errors.length && parsed.rows.length === 0) {

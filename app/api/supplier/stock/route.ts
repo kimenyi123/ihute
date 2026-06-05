@@ -95,12 +95,18 @@ export async function GET(req: NextRequest) {
 
     console.log(`[SUPPLIER-STOCK] Found ${products.length} products (source: ${data.source || 'unknown'})`)
 
+    const lastStockUploadAt =
+      data.lastStockUploadAt ??
+      data.last_stock_upload_at ??
+      null
+
     return NextResponse.json(
       {
         ok: true,
         products,
         count: products.length,
         source: data.source || "unknown",
+        lastStockUploadAt,
       },
       {
         status: 200,
@@ -174,6 +180,7 @@ export async function POST(req: NextRequest) {
         const urlWithAccount = `${STOCK_SERVLET_URL}?action=importExcel&account=${encodeURIComponent(account)}`
         let data: ImportExcelBackendPayload | null = null
         let backendFailed = false
+        let javaUnreachable = false
 
         try {
           const backendResp = await fetch(urlWithAccount, {
@@ -194,6 +201,7 @@ export async function POST(req: NextRequest) {
           }
         } catch (e) {
           backendFailed = true
+          javaUnreachable = true
           if (e instanceof Error && e.name === "AbortError") {
             clearTimeout(timeout)
             return NextResponse.json(
@@ -219,6 +227,22 @@ export async function POST(req: NextRequest) {
           })
         }
 
+        // Java responded with an error (e.g. POI classpath) — never run destructive fallback.
+        if (!javaUnreachable) {
+          clearTimeout(timeout)
+          const err =
+            data?.error ||
+            "Bulk import failed on the Java server. Rebuild the WAR (POI jars) and upload again."
+          return NextResponse.json(
+            {
+              ok: false,
+              error: err,
+              itemsImported: data?.itemsImported ?? 0,
+            },
+            { status: 502 },
+          )
+        }
+
         if (fileEntry instanceof Blob) {
           const merged = mergeAbortSignals([controller.signal, req.signal])
           const fallback = await importStockExcelViaAddProduct(
@@ -231,7 +255,7 @@ export async function POST(req: NextRequest) {
           clearTimeout(timeout)
           const note =
             backendFailed && fallback.ok
-              ? " Saved via app (Java bulk import was unavailable)."
+              ? " Saved via row-by-row import (Java bulk import was unavailable)."
               : ""
           return NextResponse.json({
             ...fallback,
@@ -245,9 +269,10 @@ export async function POST(req: NextRequest) {
             ok: false,
             error:
               data?.error ||
-              "Import failed. Upload a valid Excel/CSV file with ITEM, QTE, and PRICE columns.",
+              "Bulk import failed. Fix the Java backend and upload again — do not retry repeatedly or counts will stack.",
+            itemsImported: data?.itemsImported ?? 0,
           },
-          { status: 500 },
+          { status: backendFailed ? 502 : 400 },
         )
       }
 
