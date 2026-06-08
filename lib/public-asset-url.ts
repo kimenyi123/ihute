@@ -67,9 +67,18 @@ export function normalizeProductImagePublicUrl(url: string): string {
 export function normalizeShopImagePublicUrl(url: string): string {
   const u = url.trim()
   if (!u) return u
-  if (u.startsWith("http://") || u.startsWith("https://")) return u
 
   const { site, base } = siteBase()
+
+  // Rebuild any absolute /api/images/shops/ URL with current site (fixes legacy ihute.rw/Trading_beta/beta/… entries).
+  const shopsApi = u.match(/\/api\/images\/shops\/([^?#]+)/i)
+  if (shopsApi) {
+    const rel = `/api/images/shops/${shopsApi[1]}`
+    return site ? `${site}${base}${rel}` : withSiteBase(rel)
+  }
+
+  if (u.startsWith("http://") || u.startsWith("https://")) return u
+
   const prefix = `${base}/uploads/shops/`
   const barePrefix = "/uploads/shops/"
 

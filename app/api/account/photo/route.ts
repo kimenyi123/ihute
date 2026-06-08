@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getAccountProfileUrl, getProxyTimeoutMs } from "@/lib/backend-config"
+import { persistShopImageUpload } from "@/lib/shop-image-overrides"
+
+export const runtime = "nodejs"
 
 const PROXY_TIMEOUT_MS = Math.max(30000, getProxyTimeoutMs())
 
 /**
  * POST /api/account/photo
- * Multipart: account, file — saves shop logo to Kaos WAR and account_seller.photo.
+ * Multipart: account, file — saves to Kaos WAR + account_seller.photo, and to Next.js
+ * uploads/overrides so category cards on beta.ihute.rw can load the logo.
  */
 export async function POST(req: NextRequest) {
   const form = await req.formData()
@@ -22,9 +26,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Only image files are allowed" }, { status: 400 })
   }
 
+  const fileBuf = Buffer.from(await file.arrayBuffer())
+  const fileName = file.name || "shop-photo"
+
+  let nextImage: { imageUrl: string; storedPath: string } | null = null
+  try {
+    nextImage = await persistShopImageUpload(account, fileBuf, file.type, fileName)
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "Could not save shop image locally"
+    return NextResponse.json({ ok: false, error: msg }, { status: 500 })
+  }
+
   const outFd = new FormData()
   outFd.append("account", account)
-  outFd.append("file", file, file.name || "shop-photo")
+  outFd.append("file", new Blob([fileBuf], { type: file.type }), fileName)
 
   const url = getAccountProfileUrl()
   const controller = new AbortController()
@@ -42,18 +57,32 @@ export async function POST(req: NextRequest) {
     try {
       data = JSON.parse(text)
     } catch {
-      return NextResponse.json(
-        { ok: false, error: "Backend returned invalid JSON", fromBackend: true },
-        { status: 502 }
-      )
+      return NextResponse.json({
+        ok: true,
+        photo: nextImage.imageUrl,
+        imageUrl: nextImage.imageUrl,
+        backendPhoto: "",
+        backendOk: false,
+        warning: "Backend returned invalid JSON; logo saved for category page only",
+      })
     }
     if (!res.ok || !data?.ok) {
-      return NextResponse.json(
-        { ok: false, error: data?.error || `Backend ${res.status}`, fromBackend: true },
-        { status: res.status >= 500 ? 502 : res.status }
-      )
+      return NextResponse.json({
+        ok: true,
+        photo: nextImage.imageUrl,
+        imageUrl: nextImage.imageUrl,
+        backendPhoto: "",
+        backendOk: false,
+        warning: data?.error || `Backend ${res.status}; logo saved for category page only`,
+      })
     }
-    return NextResponse.json({ ok: true, photo: data.photo || "" })
+    return NextResponse.json({
+      ok: true,
+      photo: nextImage.imageUrl,
+      imageUrl: nextImage.imageUrl,
+      backendPhoto: data.photo || "",
+      backendOk: true,
+    })
   } catch (e: unknown) {
     const err = e as { name?: string; message?: string }
     if (err?.name === "AbortError") {

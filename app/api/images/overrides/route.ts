@@ -160,7 +160,7 @@ export async function POST(req: NextRequest) {
 
   const imageUrl =
     scope === "shop"
-      ? shopImagePublicUrl(fileName)
+      ? `/api/images/shops/${encodeURIComponent(fileName)}`
       : productImagePublicUrl(fileName)
 
   if (scope === "shop") {
@@ -178,7 +178,7 @@ export async function POST(req: NextRequest) {
     scope,
     account,
     itemCode: scope === "product" ? itemCode : undefined,
-    imageUrl,
+    imageUrl: scope === "shop" ? shopImagePublicUrl(fileName) : imageUrl,
     storedPath: absolutePath,
   })
 }

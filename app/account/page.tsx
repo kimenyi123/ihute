@@ -118,7 +118,8 @@ export default function AccountPage() {
       if (!res.ok || !data?.ok) {
         throw new Error(data?.error || "Shop image upload failed")
       }
-      setShopImageUrl(resolveSellerPhotoUrl(String(data.photo || "")))
+      const displayUrl = String(data.imageUrl || data.photo || "")
+      setShopImageUrl(resolveSellerPhotoUrl(displayUrl))
       setShopImageFile(null)
       setMessage({ type: "success", text: "Shop profile image updated." })
     } catch (e) {
