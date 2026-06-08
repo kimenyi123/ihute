@@ -6217,7 +6217,17 @@ export default function GrandmaPage() {
                   </p>
                   <Textarea
                     value={grandmaMomoSmsPaste}
-                    readOnly
+                    onChange={(e) => {
+                      // Prevent manual typing - only allow via paste
+                      const inputEvent = e.nativeEvent as InputEvent
+                      if (inputEvent.inputType !== 'insertFromPaste') {
+                        return
+                      }
+                    }}
+                    onFocus={(e) => {
+                      // Ensure keyboard is visible on mobile
+                      e.currentTarget.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                    }}
                     onPaste={(e) => {
                       e.preventDefault()
                       const pastedText = e.clipboardData?.getData('text/plain') || ''
@@ -6230,6 +6240,8 @@ export default function GrandmaPage() {
                     className="min-h-[88px] resize-y border-[#dbe7f3] text-sm"
                     placeholder="MTN MoMo… (paste SMS only)"
                     aria-label={tPay.payStepReadMoMoSmsTitle}
+                    inputMode="text"
+                    autoComplete="off"
                   />
                   <div className="flex gap-2">
                     <Button
@@ -6367,7 +6379,17 @@ export default function GrandmaPage() {
                   </p>
                   <Textarea
                     value={grandmaMomoSmsPaste}
-                    readOnly
+                    onChange={(e) => {
+                      // Prevent manual typing - only allow via paste
+                      const inputEvent = e.nativeEvent as InputEvent
+                      if (inputEvent.inputType !== 'insertFromPaste') {
+                        return
+                      }
+                    }}
+                    onFocus={(e) => {
+                      // Ensure keyboard is visible on mobile
+                      e.currentTarget.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                    }}
                     onPaste={(e) => {
                       e.preventDefault()
                       const pastedText = e.clipboardData?.getData('text/plain') || ''
@@ -6380,6 +6402,8 @@ export default function GrandmaPage() {
                     className="min-h-[88px] resize-y border-[#dbe7f3] text-sm"
                     placeholder="Airtel Money… (paste SMS only)"
                     aria-label={tPay.payStepReadMoMoSmsTitle}
+                    inputMode="text"
+                    autoComplete="off"
                   />
                   <div className="flex gap-2">
                     <Button
