@@ -6218,18 +6218,17 @@ export default function GrandmaPage() {
                   <Textarea
                     value={grandmaMomoSmsPaste}
                     onChange={(e) => {
-                      // Prevent manual typing - only allow via paste
-                      const inputEvent = e.nativeEvent as InputEvent
-                      if (inputEvent.inputType !== 'insertFromPaste') {
-                        return
-                      }
+                      // Allow both typing and pasting
+                      setGrandmaMomoSmsPaste(e.target.value)
+                      setGrandmaSmsPayCheck(null)
+                      setGrandmaSmsMatchResult(null)
                     }}
                     onFocus={(e) => {
                       // Ensure keyboard is visible on mobile
                       e.currentTarget.scrollIntoView({ behavior: 'smooth', block: 'center' })
                     }}
                     onPaste={(e) => {
-                      e.preventDefault()
+                      // Allow paste events as well
                       const pastedText = e.clipboardData?.getData('text/plain') || ''
                       if (pastedText) {
                         setGrandmaMomoSmsPaste(pastedText)
@@ -6238,7 +6237,7 @@ export default function GrandmaPage() {
                       }
                     }}
                     className="min-h-[88px] resize-y border-[#dbe7f3] text-sm"
-                    placeholder="MTN MoMo… (paste SMS only)"
+                    placeholder="MTN MoMo… (type or paste SMS)"
                     aria-label={tPay.payStepReadMoMoSmsTitle}
                     inputMode="text"
                     autoComplete="off"
@@ -6380,18 +6379,17 @@ export default function GrandmaPage() {
                   <Textarea
                     value={grandmaMomoSmsPaste}
                     onChange={(e) => {
-                      // Prevent manual typing - only allow via paste
-                      const inputEvent = e.nativeEvent as InputEvent
-                      if (inputEvent.inputType !== 'insertFromPaste') {
-                        return
-                      }
+                      // Allow both typing and pasting
+                      setGrandmaMomoSmsPaste(e.target.value)
+                      setGrandmaSmsPayCheck(null)
+                      setGrandmaSmsMatchResult(null)
                     }}
                     onFocus={(e) => {
                       // Ensure keyboard is visible on mobile
                       e.currentTarget.scrollIntoView({ behavior: 'smooth', block: 'center' })
                     }}
                     onPaste={(e) => {
-                      e.preventDefault()
+                      // Allow paste events as well
                       const pastedText = e.clipboardData?.getData('text/plain') || ''
                       if (pastedText) {
                         setGrandmaMomoSmsPaste(pastedText)
@@ -6400,7 +6398,7 @@ export default function GrandmaPage() {
                       }
                     }}
                     className="min-h-[88px] resize-y border-[#dbe7f3] text-sm"
-                    placeholder="Airtel Money… (paste SMS only)"
+                    placeholder="Airtel Money… (type or paste SMS)"
                     aria-label={tPay.payStepReadMoMoSmsTitle}
                     inputMode="text"
                     autoComplete="off"
