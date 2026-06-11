@@ -58,34 +58,26 @@ import { parseItemStateBatchExpiry } from "@/lib/item-state-display";
 import { SupplierProductTableImage } from "@/components/supplier-product-table-image";
 import { ResponsiveTable } from "@/components/ui/responsive-table";
 import { cn } from "@/lib/utils";
+import {
+  formatSupplierSyncTimestampOrNull,
+} from "@/lib/supplier-sync-datetime";
 
-/** Redis / API may send last_sync_time, LAST_SYNC_TIME, or lastSyncTime */
-function parseSupplierProductLastSyncMs(p: Record<string, unknown>): number | null {
-  const raw =
-    p.last_sync_time ??
-    p.LAST_SYNC_TIME ??
-    p.lastSyncTime ??
-    p.last_sync;
-  if (raw == null || String(raw).trim() === "") return null;
-  const s = String(raw).trim();
-  const normalized = s.includes("T") ? s : s.replace(/^(\d{4}-\d{2}-\d{2}) (\d)/, "$1T$2");
-  const d = new Date(normalized);
-  return Number.isNaN(d.getTime()) ? null : d.getTime();
+/** Last bulk/excel/Redis upload — not per-row refresh stamps from catalog GET. */
+function formatLastStockUploadLabel(uploadAt: string | null | undefined): string | null {
+  return formatSupplierSyncTimestampOrNull(uploadAt);
 }
 
-function formatSupplierProductLastSync(p: Record<string, unknown>): string {
-  const ms = parseSupplierProductLastSyncMs(p);
-  if (ms != null) {
-    return new Date(ms).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
-  }
-  const raw =
-    p.last_sync_time ??
-    p.LAST_SYNC_TIME ??
-    p.lastSyncTime ??
-    p.last_sync;
-  if (raw == null || String(raw).trim() === "") return "—";
-  return String(raw).trim();
+function formatProductLastSyncCell(
+  lastUploadAt: string | null,
+  _product: Record<string, unknown>,
+): string {
+  return formatLastStockUploadLabel(lastUploadAt) ?? "—";
 }
+
+const PRODUCT_TABLE_MIN_WIDTH = "1360px";
+const productTh =
+  "px-2 py-2.5 text-left text-xs font-semibold text-slate-700 whitespace-nowrap align-bottom [hyphens:none]";
+const productThCenter = `${productTh} text-center`;
 
 const QRCode = dynamic(() => import("react-qr-code"), { ssr: false });
 
@@ -305,13 +297,13 @@ const DASH_UI: Record<Language, {
     noProductsFound: "Nta bicuruzwa byabonetse",
     addYourFirstProduct: "Ongeraho Igicuruzwa cya Mbere",
     thProduct: "Igicuruzwa",
-    thSellingPrice: "Igiciro cyo Kugurisha",
-    thCostPrice: "Igiciro cy\u2019Igurisha",
+    thSellingPrice: "Igiciro cyo kugurisha",
+    thCostPrice: "Igiciro cy'ubuguzi",
     thPackage: "Ipaki",
     thBatch: "Umukumbi",
-    thExpiry: "Igihe Kirangirira",
+    thExpiry: "Irangirira",
     thStock: "Sitoki",
-    thLastSync: "Igihe cyanyuma",
+    thLastSync: "Sync",
     thStatus: "Imimerere",
     thValue: "Agaciro",
     thImage: "Ishusho",
@@ -319,9 +311,9 @@ const DASH_UI: Record<Language, {
     noPrice: "Nta giciro",
     expired: "Byarenze igihe",
     check: "Suzuma",
-    statusOutOfStock: "Nta Sitoki",
-    statusLowStock: "Sitoki Nke",
-    statusActive: "Bikoreshwa",
+    statusOutOfStock: "Nta sitoki",
+    statusLowStock: "Sitoki nke",
+    statusActive: "Birimo",
     show: "Erekana",
     entries: "umurongo",
     showing: "Kwerekana",
@@ -409,13 +401,13 @@ const DASH_UI: Record<Language, {
     noProductsFound: "Aucun produit trouv\u00e9",
     addYourFirstProduct: "Ajoutez votre Premier Produit",
     thProduct: "Produit",
-    thSellingPrice: "Prix de Vente",
-    thCostPrice: "Prix de Revient",
+    thSellingPrice: "Prix vente",
+    thCostPrice: "Prix revient",
     thPackage: "Emballage",
     thBatch: "Lot",
     thExpiry: "Expiration",
     thStock: "Stock",
-    thLastSync: "Derni\u00e8re synchro",
+    thLastSync: "Sync",
     thStatus: "Statut",
     thValue: "Valeur",
     thImage: "Image",
@@ -446,10 +438,12 @@ const DASH_UI: Record<Language, {
 
 function SupplierDashboard() {
   const router = useRouter();
-  const { user, isAuthenticated, logout } = useAuthStore();
+  const { user, isAuthenticated, hasHydrated, logout } = useAuthStore();
   const language = useLanguageStore((s) => s.language);
   const ui = DASH_UI[language] ?? DASH_UI.en;
   const [supplierProducts, setSupplierProducts] = useState<any[]>([]);
+  /** Last bulk/excel/Redis upload time from backend meta — not refreshed on page load */
+  const [lastStockUploadAt, setLastStockUploadAt] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
@@ -520,6 +514,8 @@ function SupplierDashboard() {
   };
 
   useEffect(() => {
+    if (!hasHydrated) return;
+
     if (!isAuthenticated || user?.role !== "supplier") {
       router.push("/login");
       return;
@@ -537,8 +533,11 @@ function SupplierDashboard() {
       setError(null);
     }
 
+    const controller = new AbortController();
+
     fetch(`/api/supplier/stock?account=${encodeURIComponent(user.ishyigaAccount)}&_=${Date.now()}`, {
       cache: "no-store",
+      signal: controller.signal,
     })
       .then((res) => {
         if (!res.ok) {
@@ -558,6 +557,13 @@ function SupplierDashboard() {
         }
 
         setError(null);
+        setLastStockUploadAt(() => {
+          const fromApi = data.lastStockUploadAt ?? data.last_stock_upload_at ?? null;
+          if (fromApi != null && String(fromApi).trim()) {
+            return String(fromApi).trim();
+          }
+          return null;
+        });
 
         const products = data.products || [];
         console.log(`Received ${products.length} products from ${data.source}`);
@@ -709,11 +715,14 @@ function SupplierDashboard() {
         setLoading(false);
       })
       .catch((err) => {
+        if (controller.signal.aborted) return;
         console.error("Error fetching stock:", err);
         setError(err.message);
         setLoading(false);
       });
-  }, [isAuthenticated, user?.ishyigaAccount, user?.role, router, stockRefreshKey]);
+
+    return () => controller.abort();
+  }, [hasHydrated, isAuthenticated, user?.ishyigaAccount, user?.role, router, stockRefreshKey]);
 
   useEffect(() => {
     if (!user?.ishyigaAccount || user?.role !== "supplier") return;
@@ -813,18 +822,7 @@ function SupplierDashboard() {
     return sum + lineCost * Number(p.stock ?? 0);
   }, 0);
 
-  const latestInventorySyncLabel = (() => {
-    let best: number | null = null;
-    for (const p of supplierProducts) {
-      const t = parseSupplierProductLastSyncMs(p as Record<string, unknown>);
-      if (t != null && (best == null || t > best)) best = t;
-    }
-    if (best == null) return null;
-    return new Date(best).toLocaleString(undefined, {
-      dateStyle: "short",
-      timeStyle: "short",
-    });
-  })();
+  const latestInventorySyncLabel = formatLastStockUploadLabel(lastStockUploadAt);
 
   const bestSellingHero = useMemo(() => {
     if (!analytics?.bestSelling?.length) return null;
@@ -1139,7 +1137,7 @@ function SupplierDashboard() {
                           {p.itemName || p.ITEM_NAME}
                         </span>
                         <span className="mt-0.5 block text-xs text-slate-500 ">
-                          {ui.lastSync}: {formatSupplierProductLastSync(p as Record<string, unknown>)}
+                          {ui.lastSync}: {formatProductLastSyncCell(lastStockUploadAt, p as Record<string, unknown>)}
                         </span>
                       </div>
                       <span className="text-yellow-700 font-medium shrink-0">
@@ -1502,44 +1500,44 @@ function SupplierDashboard() {
               </div>
             ) : (
               <>
-                <ResponsiveTable className="rounded-lg border border-slate-200 " minWidth="1100px">
-                  <table className="w-full">
+                <ResponsiveTable className="rounded-lg border border-slate-200" minWidth={PRODUCT_TABLE_MIN_WIDTH}>
+                  <table className="w-full border-collapse text-sm">
                     <thead className="border-b border-slate-200 bg-slate-100">
                       <tr>
-                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 ">
+                        <th className={`${productTh} min-w-[11rem]`} title={ui.thProduct}>
                           {ui.thProduct}
                         </th>
-                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 ">
+                        <th className={`${productTh} min-w-[6.5rem]`} title={ui.thSellingPrice}>
                           {ui.thSellingPrice}
                         </th>
-                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 ">
+                        <th className={`${productTh} min-w-[6.5rem]`} title={ui.thCostPrice}>
                           {ui.thCostPrice}
                         </th>
-                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 ">
+                        <th className={`${productTh} min-w-[4.5rem]`} title={ui.thPackage}>
                           {ui.thPackage}
                         </th>
-                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 ">
+                        <th className={`${productTh} min-w-[4.5rem]`} title={ui.thBatch}>
                           {ui.thBatch}
                         </th>
-                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700  whitespace-nowrap">
+                        <th className={`${productTh} min-w-[5.5rem]`} title={ui.thExpiry}>
                           {ui.thExpiry}
                         </th>
-                        <th className="px-4 py-3 text-center text-sm font-semibold text-slate-700 ">
+                        <th className={`${productThCenter} min-w-[4rem]`} title={ui.thStock}>
                           {ui.thStock}
                         </th>
-                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700  whitespace-nowrap">
+                        <th className={`${productTh} min-w-[8.5rem]`} title={ui.thLastSync}>
                           {ui.thLastSync}
                         </th>
-                        <th className="px-4 py-3 text-center text-sm font-semibold text-slate-700 ">
+                        <th className={`${productThCenter} min-w-[5.5rem]`} title={ui.thStatus}>
                           {ui.thStatus}
                         </th>
-                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 ">
+                        <th className={`${productTh} min-w-[5rem]`} title={ui.thValue}>
                           {ui.thValue}
                         </th>
-                        <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 ">
+                        <th className={`${productTh} min-w-[4rem]`} title={ui.thImage}>
                           {ui.thImage}
                         </th>
-                        <th className="px-4 py-3 text-center text-sm font-semibold text-slate-700 ">
+                        <th className={`${productThCenter} min-w-[5.5rem]`} title={ui.thActions}>
                           {ui.thActions}
                         </th>
                       </tr>
@@ -1581,20 +1579,20 @@ function SupplierDashboard() {
                             key={uniqueKey}
                             className="transition-colors hover:bg-slate-50 "
                           >
-                            <td className="px-4 py-4">
-                              <div className="flex items-center gap-3">
-                                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-200 ">
+                            <td className="px-2 py-3 min-w-[11rem]">
+                              <div className="flex items-center gap-2">
+                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-200 ">
                                   <Package className="h-5 w-5 text-slate-500 " />
                                 </div>
-                                <div>
-                                  <p className="font-medium text-slate-900 ">
+                                <div className="min-w-0">
+                                  <p className="font-medium text-slate-900 break-words">
                                     {displayName}
                                   </p>
-                                  <p className="text-xs text-slate-500 ">{displayCode}</p>
+                                  <p className="text-xs text-slate-500 break-all">{displayCode}</p>
                                 </div>
                               </div>
                             </td>
-                            <td className="px-4 py-4">
+                            <td className="whitespace-nowrap px-2 py-3 tabular-nums">
                               {displaySelling > 0 ? (
                                 <span className="whitespace-nowrap font-medium text-slate-900 ">
                                   {displaySelling.toLocaleString()}{" "}
@@ -1606,7 +1604,7 @@ function SupplierDashboard() {
                                 </span>
                               )}
                             </td>
-                            <td className="px-4 py-4">
+                            <td className="whitespace-nowrap px-2 py-3 tabular-nums">
                               <span className="font-medium text-slate-900 ">
                                 {displayCost.toLocaleString(undefined, {
                                   minimumFractionDigits: 1,
@@ -1615,21 +1613,21 @@ function SupplierDashboard() {
                                 {p.currency ?? "RWF"}
                               </span>
                             </td>
-                            <td className="max-w-[140px] px-4 py-4 text-sm text-slate-700 ">
-                              <span className="break-words" title={emballageDisplay}>
+                            <td className="whitespace-nowrap px-2 py-3 text-sm text-slate-700 ">
+                              <span title={emballageDisplay}>
                                 {emballageDisplay}
                               </span>
                             </td>
-                            <td className="max-w-[120px] px-4 py-4 text-sm text-slate-700 ">
+                            <td className="whitespace-nowrap px-2 py-3 text-sm text-slate-700 ">
                               {batch ? (
-                                <span className="break-words font-mono text-xs" title={batch}>
+                                <span className="font-mono text-xs" title={batch}>
                                   {batch}
                                 </span>
                               ) : (
                                 <span className="text-slate-400">—</span>
                               )}
                             </td>
-                            <td className="px-4 py-4 text-sm">
+                            <td className="whitespace-nowrap px-2 py-3 text-sm">
                               {expiryLabel ? (
                                 <div>
                                   <span
@@ -1667,7 +1665,7 @@ function SupplierDashboard() {
                                 <span className="text-slate-400">—</span>
                               )}
                             </td>
-                            <td className="px-4 py-4 text-center">
+                            <td className="whitespace-nowrap px-2 py-3 text-center tabular-nums">
                               <span
                                 className={`font-semibold ${
                                   p.stock === 0
@@ -1680,12 +1678,12 @@ function SupplierDashboard() {
                                 {p.stock}
                               </span>
                             </td>
-                            <td className="whitespace-nowrap px-4 py-4 text-sm tabular-nums text-slate-600 ">
-                              {formatSupplierProductLastSync(p as Record<string, unknown>)}
+                            <td className="whitespace-nowrap px-2 py-3 text-sm tabular-nums text-slate-600 ">
+                              {formatProductLastSyncCell(lastStockUploadAt, p as Record<string, unknown>)}
                             </td>
-                            <td className="px-4 py-4 text-center">
+                            <td className="whitespace-nowrap px-2 py-3 text-center">
                               <span
-                                className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${
+                                className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ${
                                   p.stock === 0
                                     ? "bg-red-100 text-red-700"
                                     : p.stock <= 10
@@ -1696,7 +1694,7 @@ function SupplierDashboard() {
                                 {p.stock === 0 ? ui.statusOutOfStock : p.stock <= 10 ? ui.statusLowStock : ui.statusActive}
                               </span>
                             </td>
-                            <td className="px-4 py-4">
+                            <td className="whitespace-nowrap px-2 py-3 tabular-nums">
                               {revenue > 0 ? (
                                 <span className="font-medium text-slate-900 ">
                                   {revenue.toLocaleString()} RWF
@@ -1707,13 +1705,13 @@ function SupplierDashboard() {
                                 </span>
                               )}
                             </td>
-                            <td className="px-4 py-4 align-top">
+                            <td className="px-2 py-3 align-top">
                               <SupplierProductTableImage
                                 product={p as Record<string, unknown>}
                                 alt={displayName}
                               />
                             </td>
-                            <td className="px-4 py-4">
+                            <td className="whitespace-nowrap px-2 py-3">
                               <div className="flex items-center justify-center gap-2">
                                 <Button
                                   asChild

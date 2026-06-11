@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { Trash2, Loader2 } from "lucide-react"
+import { normalizeProductImagePublicUrl } from "@/lib/public-asset-url"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -102,7 +103,9 @@ export default function SupplierEditProductPage() {
               productStock = parseInt(foundProduct.stock || foundProduct.QUANTITY || 0)
             }
 
-            const productImageUrl = foundProduct.item_image_url || foundProduct.image_url || foundProduct.IMAGE_URL || ""
+            const rawImage =
+              foundProduct.item_image_url || foundProduct.image_url || foundProduct.IMAGE_URL || ""
+            const productImageUrl = rawImage ? normalizeProductImagePublicUrl(String(rawImage)) : ""
             const mapped: Product = {
               id: productId,
               name: productName,
@@ -173,6 +176,23 @@ export default function SupplierEditProductPage() {
           const imgJson = await imgRes.json().catch(() => ({}))
           if (!imgRes.ok || !imgJson?.ok) {
             throw new Error(imgJson?.error || "Product updated but image upload failed")
+          }
+          const uploadedUrl = String(imgJson.imageUrl || "").trim()
+          if (uploadedUrl) {
+            const imgSave = await fetch("/api/supplier/stock", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                action: "updateProduct",
+                account: user.ishyigaAccount,
+                itemCode: normalizedCode,
+                imageUrl: uploadedUrl,
+              }),
+            })
+            const imgSaveJson = await imgSave.json().catch(() => ({}))
+            if (!imgSave.ok || !imgSaveJson?.ok) {
+              throw new Error(imgSaveJson?.error || "Image uploaded but failed to save IMAGE_URL in database")
+            }
           }
         }
         toast({

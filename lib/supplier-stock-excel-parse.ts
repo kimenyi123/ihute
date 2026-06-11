@@ -40,12 +40,16 @@ function parseNum(raw: unknown): number {
   return roundRwfPrice(raw)
 }
 
-function slugCode(name: string, index: number): string {
-  const base = name
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, "")
-    .slice(0, 8)
-  return `${base || "ITEM"}-${String(index + 1).padStart(4, "0")}`
+function stableProductCodeFromName(name: string): string {
+  const norm = name.trim().toLowerCase().normalize("NFC")
+  if (!norm) return "ITEM-00000000"
+  let h = 0
+  for (let i = 0; i < norm.length; i++) {
+    h = (Math.imul(31, h) + norm.charCodeAt(i)) | 0
+  }
+  const uh = (h >>> 0).toString(16).toUpperCase().padStart(8, "0")
+  const slug = norm.replace(/[^a-z0-9]/g, "").slice(0, 12).toUpperCase() || "ITEM"
+  return `${slug}-${uh}`
 }
 
 /** Column keys + optional flag when QTE column is missing (default quantity 1 per row). */
@@ -64,7 +68,7 @@ function rowToParsed(
 
   const keywords = col.keywords ? String(cells[col.keywords] ?? "").trim() : ""
   const codeCol = col.code ? String(cells[col.code] ?? "").trim() : ""
-  const itemCode = (codeCol || keywords || slugCode(itemName, rowIndex)).slice(0, 64)
+  const itemCode = (codeCol || stableProductCodeFromName(itemName)).slice(0, 64)
 
   return {
     itemName,

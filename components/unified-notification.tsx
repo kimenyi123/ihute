@@ -171,7 +171,7 @@ function getOrderStatusBadgeClass(status: TrackOrderStatus): string {
 }
 
 export function UnifiedNotification() {
-  const { user, isAuthenticated } = useAuthStore()
+  const { user, isAuthenticated, hasHydrated } = useAuthStore()
   const router = useRouter()
   const pathname = usePathname()
   const [notifications, setNotifications] = useState<UnifiedNotification[]>([])
@@ -213,7 +213,9 @@ export function UnifiedNotification() {
 
   // Fetch order notifications
   useEffect(() => {
-    if (!isAuthenticated || user?.role !== "supplier") return
+    if (!hasHydrated || !isAuthenticated || user?.role !== "supplier") return
+
+    const controller = new AbortController()
 
     const fetchOrders = async () => {
       try {
@@ -222,6 +224,7 @@ export function UnifiedNotification() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ sellerAccount: user.ishyigaAccount }),
           cache: "no-store",
+          signal: controller.signal,
         })
         const json = await res.json()
 
@@ -292,25 +295,33 @@ export function UnifiedNotification() {
           })
         }
       } catch (err) {
+        if (controller.signal.aborted) return
         console.error("Failed to fetch order notifications:", err)
       }
     }
 
     const interval = setInterval(fetchOrders, 30000)
     fetchOrders()
-    return () => clearInterval(interval)
-  }, [isAuthenticated, user?.role, user?.ishyigaAccount, pinned])
+    return () => {
+      controller.abort()
+      clearInterval(interval)
+    }
+  }, [hasHydrated, isAuthenticated, user?.role, user?.ishyigaAccount, pinned])
 
   // Fetch rating notifications
   useEffect(() => {
-    if (!isAuthenticated || !user) return
+    if (!hasHydrated || !isAuthenticated || !user) return
+
+    const controller = new AbortController()
 
     const fetchRatings = async () => {
       try {
         const userEmail = user?.email || user?.ishyigaAccount
         if (!userEmail) return
 
-        const res = await fetch(`/api/notifications/unread?userId=${encodeURIComponent(userEmail)}`)
+        const res = await fetch(`/api/notifications/unread?userId=${encodeURIComponent(userEmail)}`, {
+          signal: controller.signal,
+        })
         const data = await res.json()
 
         if (data.ok && Array.isArray(data.notifications)) {
@@ -360,18 +371,24 @@ export function UnifiedNotification() {
           })
         }
       } catch (err) {
+        if (controller.signal.aborted) return
         console.error("Failed to fetch rating notifications:", err)
       }
     }
 
     const interval = setInterval(fetchRatings, 30000)
     fetchRatings()
-    return () => clearInterval(interval)
-  }, [isAuthenticated, user, pinned])
+    return () => {
+      controller.abort()
+      clearInterval(interval)
+    }
+  }, [hasHydrated, isAuthenticated, user, pinned])
 
   // Urubuto onboarding / live notifications (supplier)
   useEffect(() => {
-    if (!isAuthenticated || user?.role !== "supplier" || !user?.ishyigaAccount) return
+    if (!hasHydrated || !isAuthenticated || user?.role !== "supplier" || !user?.ishyigaAccount) return
+
+    const controller = new AbortController()
 
     const fetchUrubuto = async () => {
       try {
@@ -379,6 +396,7 @@ export function UnifiedNotification() {
         if (!account) return
         const res = await fetch(
           `/api/supplier/urubuto/notifications?account=${encodeURIComponent(account)}&limit=8&unreadOnly=1`,
+          { signal: controller.signal },
         )
         const data = await res.json()
         if (!data.ok || !Array.isArray(data.notifications)) return
@@ -423,14 +441,18 @@ export function UnifiedNotification() {
           }).slice(0, 10)
         })
       } catch (err) {
+        if (controller.signal.aborted) return
         console.error("Failed to fetch Urubuto notifications:", err)
       }
     }
 
     const interval = setInterval(fetchUrubuto, 45000)
     fetchUrubuto()
-    return () => clearInterval(interval)
-  }, [isAuthenticated, user?.role, user?.ishyigaAccount, pinned])
+    return () => {
+      controller.abort()
+      clearInterval(interval)
+    }
+  }, [hasHydrated, isAuthenticated, user?.role, user?.ishyigaAccount, pinned])
 
   const markAsRead = async (notification: UnifiedNotification) => {
     if (notification.type === "order") {
