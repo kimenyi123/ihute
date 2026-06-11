@@ -131,7 +131,7 @@ function buildJavaBackendBaseCandidates(): string[] {
       .filter((n) => !Number.isNaN(n) && n > 0)
     for (const n of envPorts) ports.add(n)
 
-    const contexts = ["Trading", "Ihute", "trading_ai", "Trading_beta", "trading_beta"]
+    const contexts = ["Trading", "Ihute", "trading_ai", "Trading_beta", "trading_beta", "Trading_dev", "trading_dev"]
     for (const h of hosts) {
       for (const port of ports) {
         for (const ctx of contexts) {

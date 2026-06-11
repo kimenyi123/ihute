@@ -8,6 +8,7 @@ import { useTranslation } from "@/hooks/use-translation"
 import { usePrefsStore } from "@/lib/prefs-store"
 import type { TranslationKey } from "@/lib/translations"
 import { cn } from "@/lib/utils"
+import { resolveSellerPhotoUrl } from "@/lib/seller-photo-url"
 
 interface SectorCategory {
   categoryId: string
@@ -23,6 +24,8 @@ export interface ShopInfo {
   officialNickname: string | null
   /** Lines / SKUs from seller listing (product_count or products.length from backend). */
   stockLineCount?: number
+  /** account_seller.photo from backend listing. */
+  sellerPhoto?: string
 }
 
 const SECTOR_ORDER = ["bar-resto", "resto-bar", "pharmacy", "supermarket", "liquor-store", "coffee-shop", "boutique", "beauty", "general"]
@@ -181,6 +184,9 @@ export function mapListSuppliersWithProductsToShops(arr: unknown[]): ShopInfo[] 
       seller_location: x.seller_location ?? x.LOCATION,
       officialNickname: pickSupplierNickname(x),
       stockLineCount: pickStockLineCount(rec),
+      sellerPhoto: String(
+        x.seller_photo ?? x.sellerPhoto ?? x.photo ?? x.PHOTO ?? ""
+      ).trim() || undefined,
     }
   }).filter((s: ShopInfo) => s.seller_account || s.seller_name)
 }
@@ -188,10 +194,9 @@ export function mapListSuppliersWithProductsToShops(arr: unknown[]): ShopInfo[] 
 function shopLogoSrc(shop: ShopInfo, imageMap?: Record<string, string>): string | null {
   const nick = (shop.officialNickname || "").toString().trim().toLowerCase()
   const acctLower = (shop.seller_account || "").toString().trim().toLowerCase()
-  if (nick && SHOP_LOGO_BY_KEY[nick]) return SHOP_LOGO_BY_KEY[nick]
-  if (acctLower && SHOP_LOGO_BY_KEY[acctLower]) return SHOP_LOGO_BY_KEY[acctLower]
-
   const accountKey = normalizeShopAccountKey(shop.seller_account || "")
+
+  // Next.js uploads (beta-safe) beat Java /img/shops paths that 404 after redeploy or localhost-only uploads.
   if (accountKey && imageMap) {
     const uploaded =
       imageMap[accountKey] ||
@@ -199,16 +204,33 @@ function shopLogoSrc(shop: ShopInfo, imageMap?: Record<string, string>): string 
       imageMap[acctLower]
     if (uploaded) return uploaded
   }
+
+  if (shop.sellerPhoto) {
+    const resolved = resolveSellerPhotoUrl(shop.sellerPhoto)
+    if (resolved) return resolved
+  }
+
+  if (nick && SHOP_LOGO_BY_KEY[nick]) return SHOP_LOGO_BY_KEY[nick]
+  if (acctLower && SHOP_LOGO_BY_KEY[acctLower]) return SHOP_LOGO_BY_KEY[acctLower]
   return null
 }
 
 function ShopCardLogo({ src, name }: { src: string; name: string }) {
+  const [failed, setFailed] = useState(false)
+  if (failed) {
+    return (
+      <div className="flex h-full w-full items-center justify-center bg-muted/40">
+        <Store className="h-11 w-11 text-muted-foreground" />
+      </div>
+    )
+  }
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={src}
       alt={name ? `${name} logo` : ""}
       className="block h-full w-full bg-white object-contain p-0.5"
+      onError={() => setFailed(true)}
     />
   )
 }
@@ -220,7 +242,7 @@ function ShopCardLogoFrame({ logo, name }: { logo: string | null; name: string }
       aria-hidden={!logo}
     >
       {logo ? (
-        <ShopCardLogo src={logo} name={name} />
+        <ShopCardLogo key={logo} src={logo} name={name} />
       ) : (
         <div className="flex h-full w-full items-center justify-center bg-muted/40">
           <Store className="h-11 w-11 text-muted-foreground" />

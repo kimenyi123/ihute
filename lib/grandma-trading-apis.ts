@@ -19,7 +19,7 @@ import {
 } from "@/lib/backend-config"
 
 /** WAR / servlet version; Tomcat `{base}/grandma` shows this and `GRANDMA_APP_VERSION` (see `lib/grandma-urls.ts`). */
-export const GRANDMA_TRADING_AI_VERSION = "1.0.9" as const
+export const GRANDMA_TRADING_AI_VERSION = "1.1.2" as const
 
 /** Named endpoints for tracking — avoids scattering magic paths next to `fetchSuggestions`. */
 export function getGrandmaTradingApiMatrix() {

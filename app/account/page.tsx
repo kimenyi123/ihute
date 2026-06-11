@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { ArrowLeft, User as UserIcon, Save, Store, ImagePlus } from "lucide-react"
 import { useAuthStore, type User } from "@/lib/auth-store"
 import SupplierLayout from "@/app/supplier/layout"
+import { resolveSellerPhotoUrl } from "@/lib/seller-photo-url"
 
 export default function AccountPage() {
   const router = useRouter()
@@ -67,7 +68,7 @@ export default function AccountPage() {
       fetch(`/api/account/profile?${params.toString()}`)
         .then((res) => res.json())
         .then((data) => {
-          if (data?.ok && data.profile) {
+            if (data?.ok && data.profile) {
             const p = data.profile
             setForm((prev: Partial<User>) => ({
               ...prev,
@@ -84,16 +85,9 @@ export default function AccountPage() {
               businessName: p.businessName ?? prev.businessName,
               businessCategory: p.businessCategory ?? prev.businessCategory,
             }))
-          }
-        })
-        .catch(() => {})
-    }
-    if (user.ishyigaAccount) {
-      fetch(`/api/images/overrides?scope=shop&account=${encodeURIComponent(user.ishyigaAccount)}`, { cache: "no-store" })
-        .then((res) => res.json())
-        .then((data) => {
-          if (data?.ok && typeof data.imageUrl === "string") {
-            setShopImageUrl(data.imageUrl)
+            if (typeof p.photo === "string" && p.photo.trim()) {
+              setShopImageUrl(resolveSellerPhotoUrl(p.photo))
+            }
           }
         })
         .catch(() => {})
@@ -114,10 +108,9 @@ export default function AccountPage() {
     setMessage(null)
     try {
       const fd = new FormData()
-      fd.append("scope", "shop")
       fd.append("account", user.ishyigaAccount)
       fd.append("file", shopImageFile)
-      const res = await fetch("/api/images/overrides", {
+      const res = await fetch("/api/account/photo", {
         method: "POST",
         body: fd,
       })
@@ -125,7 +118,8 @@ export default function AccountPage() {
       if (!res.ok || !data?.ok) {
         throw new Error(data?.error || "Shop image upload failed")
       }
-      setShopImageUrl(String(data.imageUrl || ""))
+      const displayUrl = String(data.imageUrl || data.photo || "")
+      setShopImageUrl(resolveSellerPhotoUrl(displayUrl))
       setShopImageFile(null)
       setMessage({ type: "success", text: "Shop profile image updated." })
     } catch (e) {
