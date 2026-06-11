@@ -542,7 +542,7 @@ const GRANDMA_LABELS: Record<
     sellerDashBulletFulfillQueue: string
     sellerDashGrowthIdle: string
     sellerDashCtaStock: string
-    /** Opens Shop with Me (NIKI catalog) to add / source products */
+    /** Opens Shop with Me (nike catalog) to add / source products */
     sellerDashCtaNikiStock: string
     sellerDashCtaOrders: string
     sellerDashDeliveredTail: string
