@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server"
-import { getAuthUrl, getJavaAuthUrlCandidates } from "@/lib/backend-config"
+import { getAuthUrl, resolveJavaAuthEndpointForReset } from "@/lib/backend-config"
 import { resetPasswordViaMysql } from "@/lib/forgot-password-mysql"
-import { coerceTelRawForPasswordReset, rwJavaResetTelVariants } from "@/lib/rwanda-phone"
+import {
+  coerceTelRawForPasswordReset,
+  normalizePhoneDigitsForAuth,
+  normalizeRwandaMobileE164,
+  rwJavaResetTelVariants,
+} from "@/lib/rwanda-phone"
 
 const JAVA_AUTH_URL = getAuthUrl()
 
@@ -16,6 +21,70 @@ function isUnknownAction(json: { error?: string; code?: string } | null): boolea
   const e = (json?.error ?? "").toLowerCase()
   const c = json?.code ?? ""
   return c === "AUTH_UNKNOWN_ACTION" || e.includes("unknown action")
+}
+
+function isResetFlowMismatch(json: { error?: string; code?: string } | null): boolean {
+  const e = (json?.error ?? "").toLowerCase()
+  const c = (json?.code ?? "").toUpperCase()
+  return c === "AUTH_CHANGE_PW_MISSING_CURRENT" || e.includes("current password is required")
+}
+
+export function shouldReturnControlledResetError(
+  json: { error?: string; code?: string } | null,
+  badJsonSeen: boolean,
+  dbError?: string | null
+): boolean {
+  return badJsonSeen || isUnknownAction(json) || isResetFlowMismatch(json) || dbError === "no_db"
+}
+
+export function buildResetFailureResponse(rid: string) {
+  return NextResponse.json(
+    {
+      ok: false,
+      error: "Password reset failed, please try again.",
+      rid,
+      code: "AUTH_RESET_FAIL",
+    },
+    { status: 503 }
+  )
+}
+
+export function buildWrongEndpointResponse(rid: string) {
+  return NextResponse.json(
+    {
+      ok: false,
+      code: "AUTH_RESET_WRONG_ENDPOINT",
+      message: "Reset password is calling the wrong backend endpoint",
+      rid,
+    },
+    { status: 503 }
+  )
+}
+
+function isWrongResetEndpointResponse(json: { error?: string; code?: string } | null): boolean {
+  const code = (json?.code ?? "").toUpperCase()
+  const error = (json?.error ?? "").toLowerCase()
+  return code === "AUTH_CHANGE_PW_MISSING_CURRENT" || error.includes("current password is required")
+}
+
+export function isInvalidAuthEndpointResponse(status: number, contentType: string | null, text: string): boolean {
+  if (status === 404 || status === 405) return true
+  const ct = (contentType || "").toLowerCase()
+  if (ct.includes("text/html")) return true
+  const head = text.slice(0, 2000).toLowerCase()
+  return /<!doctype html|<html[\s>]|<body[\s>]/i.test(head) || /http status 404/i.test(head)
+}
+
+export function buildAuthEndpointInvalidResponse(rid: string) {
+  return NextResponse.json(
+    {
+      ok: false,
+      code: "AUTH_SERVICE_ENDPOINT_INVALID",
+      message: "Authentication service endpoint not reachable or misconfigured",
+      rid,
+    },
+    { status: 503 }
+  )
 }
 
 type AuthJson = {
@@ -36,7 +105,10 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}))
     const emailTrimmed = String(body?.email ?? "").trim()
     const telRaw = coerceTelRawForPasswordReset(String(body?.tel ?? ""))
-    const telVariants = telRaw ? rwJavaResetTelVariants(telRaw) : []
+    const canonicalTel = normalizeRwandaMobileE164(telRaw) || normalizePhoneDigitsForAuth(telRaw) || telRaw
+    const telVariants = telRaw
+      ? Array.from(new Set([canonicalTel, telRaw, ...rwJavaResetTelVariants(telRaw)].filter(Boolean)))
+      : []
     const streetNumber = String(body?.streetNumber ?? "").trim()
     const newPassword = String(body?.newPassword ?? "")
 
@@ -60,6 +132,10 @@ export async function POST(req: Request) {
       }
 
       if (!JAVA_AUTH_URL) {
+        if (fbPre.error === "no_db") {
+          return buildResetFailureResponse(rid)
+        }
+
         return NextResponse.json(
           {
             ok: false,
@@ -70,8 +146,10 @@ export async function POST(req: Request) {
         )
       }
 
-      const candidates = getJavaAuthUrlCandidates()
-      const actionVariants = ["reset_password", "resetPassword", "reset-password"]
+      const candidates = await resolveJavaAuthEndpointForReset()
+      // The deployed UserAuthServlet currently expects the camelCase reset action name.
+      // Keep the Java attempt limited to that supported form instead of probing unsupported variants.
+      const actionVariants = ["resetPassword"]
       const javaFetchMs = javaResetFetchTimeoutMs()
 
       let lastJson: AuthJson = {}
@@ -81,7 +159,24 @@ export async function POST(req: Request) {
       type JavaAttempt =
         | { tel: string; candidate: string; action: string; kind: "ok"; res: Response; json: AuthJson }
         | { tel: string; candidate: string; action: string; kind: "fetch_err"; err: string }
-        | { tel: string; candidate: string; action: string; kind: "bad_json"; raw: string }
+        | {
+            tel: string
+            candidate: string
+            action: string
+            kind: "bad_json"
+            raw: string
+            status: number
+            contentType: string | null
+          }
+        | {
+            tel: string
+            candidate: string
+            action: string
+            kind: "invalid_endpoint"
+            raw: string
+            status: number
+            contentType: string | null
+          }
 
       const attemptPromises: Promise<JavaAttempt>[] = []
       for (const candidate of candidates) {
@@ -104,11 +199,30 @@ export async function POST(req: Request) {
                     signal: AbortSignal.timeout(javaFetchMs),
                   })
                   const text = await res.text()
+                  if (isInvalidAuthEndpointResponse(res.status, res.headers.get("content-type"), text)) {
+                    return {
+                      tel,
+                      candidate,
+                      action: actionName,
+                      kind: "invalid_endpoint" as const,
+                      raw: text.slice(0, 400),
+                      status: res.status,
+                      contentType: res.headers.get("content-type"),
+                    }
+                  }
                   let json: AuthJson
                   try {
                     json = text ? JSON.parse(text) : {}
                   } catch {
-                    return { tel, candidate, action: actionName, kind: "bad_json" as const, raw: text.slice(0, 400) }
+                    return {
+                      tel,
+                      candidate,
+                      action: actionName,
+                      kind: "bad_json" as const,
+                      raw: text.slice(0, 400),
+                      status: res.status,
+                      contentType: res.headers.get("content-type"),
+                    }
                   }
                   return { tel, candidate, action: actionName, kind: "ok" as const, res, json }
                 } catch (e: unknown) {
@@ -123,11 +237,19 @@ export async function POST(req: Request) {
 
       const javaAttempts = await Promise.all(attemptPromises)
       const badJsonAttempts: Array<{ tel: string; candidate: string; action: string; raw: string }> = []
+      let invalidEndpointSeen = false
 
       for (const a of javaAttempts) {
+        if (a.kind === "invalid_endpoint") {
+          invalidEndpointSeen = true
+          console.warn(
+            `[api/auth/forgot-password][${rid}] invalid endpoint candidate=${a.candidate} action=${a.action} tel=${a.tel} status=${a.status} contentType=${a.contentType ?? "n/a"} raw=${a.raw.replace(/\s+/g, " ").slice(0, 180)}`
+          )
+          continue
+        }
         if (a.kind === "bad_json") {
           console.warn(
-            `[api/auth/forgot-password][${rid}] bad_json from java candidate=${a.candidate} action=${a.action} tel=${a.tel}`
+            `[api/auth/forgot-password][${rid}] bad_json from java candidate=${a.candidate} action=${a.action} tel=${a.tel} status=${a.status} contentType=${a.contentType ?? "n/a"} raw=${a.raw.replace(/\s+/g, " ").slice(0, 180)}`
           )
           badJsonAttempts.push({ tel: a.tel, candidate: a.candidate, action: a.action, raw: a.raw })
           continue
@@ -149,42 +271,20 @@ export async function POST(req: Request) {
         }
       }
 
-      if (badJsonAttempts.length > 0 && (!lastJson || Object.keys(lastJson).length === 0)) {
-        const firstBad = badJsonAttempts[0]
-        return NextResponse.json(
-          {
-            ok: false,
-            error: "Bad response from auth server",
-            raw: firstBad.raw,
-            rid,
-          },
-          { status: 502 }
-        )
+      if (invalidEndpointSeen) {
+        return buildAuthEndpointInvalidResponse(rid)
       }
 
-      if (isUnknownAction(lastJson)) {
-        const hint = fbPre.error !== "no_db" && fbPre.error ? ` MySQL fallback: ${fbPre.error}` : ""
-        const baseErr =
-          "Password reset is not available on this server yet. Deploy the latest trading_ai WAR (UserAuthServlet with reset_password), or set FORGOT_PASSWORD_MYSQL_* / ONBOARDING_MYSQL_* in .env.local for a database fallback." +
-          hint
+      if (isWrongResetEndpointResponse(lastJson)) {
+        return buildWrongEndpointResponse(rid)
+      }
 
-        // In development include the upstream JSON for debugging to make it easier
-        // to identify which actions the Java servlet supports. Avoid leaking
-        // upstream details in production.
-        const debugDetails = process.env.NODE_ENV !== "production" ? { upstream: lastJson } : undefined
+      if (badJsonAttempts.length > 0 && (!lastJson || Object.keys(lastJson).length === 0)) {
+        return buildResetFailureResponse(rid)
+      }
 
-        return NextResponse.json(
-          Object.assign(
-            {
-              ok: false,
-              error: baseErr,
-              code: lastJson?.code ?? "AUTH_UNKNOWN_ACTION",
-              rid,
-            },
-            debugDetails || {}
-          ),
-          { status: 503 }
-        )
+      if (shouldReturnControlledResetError(lastJson, badJsonAttempts.length > 0, fbPre.error)) {
+        return buildResetFailureResponse(rid)
       }
 
       if (fbPre.error !== "no_db") {

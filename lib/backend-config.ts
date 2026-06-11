@@ -77,6 +77,8 @@ export function getBackendBase(): string {
 /** Cached when {@link warmJavaBackendBase} finds Tomcat (see port/context sweep). */
 let resolvedJavaBackendBase: string | null = null
 let warmJavaBackendInFlight: Promise<void> | null = null
+let cachedValidJavaAuthEndpoint: string | null = null
+let authEndpointValidationInFlight: Promise<string | null> | null = null
 
 /**
  * Base URL for server-side Java proxies after {@link warmJavaBackendBase} (falls back to {@link getBackendBase}).
@@ -308,6 +310,69 @@ export function getShopWithMeUrl(): string {
 
 export function getAuthUrl(): string {
   return process.env.JAVA_AUTH_URL || `${getBackendBaseForProxy()}/Kaos/user-auth`
+}
+
+function looksLikeHtmlResponse(text: string, contentType: string | null): boolean {
+  const ct = (contentType || "").toLowerCase()
+  if (ct.includes("text/html")) return true
+  const head = text.slice(0, 2000).toLowerCase()
+  return /<!doctype html|<html[\s>]|<body[\s>]/i.test(head) || /http status 404/i.test(head)
+}
+
+async function probeJavaAuthCandidate(candidate: string): Promise<boolean> {
+  const form = new URLSearchParams()
+  form.set("action", "login")
+  form.set("email", "probe.invalid@example.test")
+  form.set("password", "probe")
+
+  const res = await fetch(candidate, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json, text/plain, */*",
+    },
+    body: form.toString(),
+    cache: "no-store",
+    signal: AbortSignal.timeout(4_000),
+  })
+
+  const text = await res.text()
+  if (res.status === 404 || res.status === 405) return false
+
+  if (looksLikeHtmlResponse(text, res.headers.get("content-type"))) return false
+
+  try {
+    JSON.parse(text)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function resolveJavaAuthEndpointForReset(): Promise<string[]> {
+  if (cachedValidJavaAuthEndpoint) return [cachedValidJavaAuthEndpoint]
+  if (authEndpointValidationInFlight) return (await authEndpointValidationInFlight) ? [await authEndpointValidationInFlight] : getJavaAuthUrlCandidates()
+
+  authEndpointValidationInFlight = (async () => {
+    for (const candidate of getJavaAuthUrlCandidates()) {
+      try {
+        if (await probeJavaAuthCandidate(candidate)) {
+          cachedValidJavaAuthEndpoint = candidate
+          return candidate
+        }
+      } catch {
+        /* keep trying */
+      }
+    }
+    return null
+  })()
+
+  try {
+    const candidate = await authEndpointValidationInFlight
+    return candidate ? [candidate] : getJavaAuthUrlCandidates()
+  } finally {
+    authEndpointValidationInFlight = null
+  }
 }
 
 /**

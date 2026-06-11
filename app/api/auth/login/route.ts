@@ -1,10 +1,40 @@
 import { NextResponse } from "next/server"
 import { getJavaAuthUrlCandidates, isTomcatMissingServlet, warmJavaBackendBase } from "@/lib/backend-config"
 import { getJavaSetCookieValues, rewriteForwardedSetCookie } from "@/lib/java-proxy-cookies"
-import { rwJavaLoginIdentifiers } from "@/lib/rwanda-phone"
+import { normalizePhoneDigitsForAuth, rwJavaLoginIdentifiers } from "@/lib/rwanda-phone"
 
 /** First servlet URL that returned JSON (not Tomcat 404 HTML); avoids probing every login attempt. */
 let cachedJavaAuthUrl: string | null = null
+
+export function getLoginFailureCode(
+  error: unknown,
+  status: number,
+  code: unknown
+): "invalid_credentials" | "user_not_found" | "server_error" {
+  const message = String(error ?? "").toLowerCase()
+  const codeText = String(code ?? "").toLowerCase()
+
+  if (
+    message.includes("invalid credentials") ||
+    message.includes("wrong password") ||
+    message.includes("password incorrect") ||
+    codeText.includes("invalid_credentials") ||
+    codeText.includes("auth_login_fail")
+  ) {
+    return "invalid_credentials"
+  }
+
+  if (
+    message.includes("user not found") ||
+    message.includes("no account found") ||
+    message.includes("account does not exist") ||
+    codeText.includes("user_not_found")
+  ) {
+    return "user_not_found"
+  }
+
+  return status >= 500 ? "server_error" : "invalid_credentials"
+}
 
 export async function POST(req: Request) {
   const rid = crypto.randomUUID()
@@ -20,7 +50,8 @@ export async function POST(req: Request) {
 
     const { email, password } = await req.json()
     const rawLogin = String(email ?? "").trim()
-    const loginCandidates = rwJavaLoginIdentifiers(rawLogin)
+    const normalizedLogin = normalizePhoneDigitsForAuth(rawLogin) || rawLogin
+    const loginCandidates = Array.from(new Set(rwJavaLoginIdentifiers(normalizedLogin).filter(Boolean)))
     console.log(
       `[api/auth/login][proxyRid=${rid}] request raw=${rawLogin || "(empty)"} passwordLen=${password?.length ?? 0} try=${loginCandidates.join(" | ")}`
     )
@@ -92,13 +123,14 @@ export async function POST(req: Request) {
 
           if (!attempt.ok && attempt.status >= 500) {
             clearTimeout(to)
-            return NextResponse.json(
+            const failureCode = getLoginFailureCode(parsed?.error, attempt.status, parsed?.code)
+      return NextResponse.json(
               {
                 ok: false,
                 error: (parsed?.error as string) || `Auth failed (${attempt.status})`,
                 rid,
                 javaRid: typeof parsed?.rid === "string" ? parsed.rid : undefined,
-                code: typeof parsed?.code === "string" ? parsed.code : undefined,
+                code: failureCode,
               },
               { status: attempt.status >= 400 && attempt.status < 600 ? attempt.status : 502 }
             )
@@ -125,6 +157,7 @@ export async function POST(req: Request) {
           error:
             "Could not reach Java login on any probed URL (Tomcat 404). Start Tomcat and deploy this WAR, or set BACKEND_URL / JAVA_BACKEND_BASE (e.g. http://localhost:8080/Trading). Probe uses localhost ports 8080–8082 and contexts Trading, Ihute, trading_ai.",
           rid,
+          code: "server_error",
         },
         { status: 502 },
       )
@@ -140,11 +173,13 @@ export async function POST(req: Request) {
       console.warn(
         `[api/auth/login][proxyRid=${rid}] Java HTTP !ok status=${res.status} javaRid=${javaMeta.javaRid ?? "n/a"} code=${javaMeta.code ?? "n/a"}`
       )
+      const failureCode = getLoginFailureCode(json.error, res.status, json.code)
       return NextResponse.json(
         {
           ok: false,
           error: (json.error as string) || `Auth failed (${res.status})`,
           ...javaMeta,
+          code: failureCode,
         },
         { status: 401 }
       )
@@ -154,11 +189,13 @@ export async function POST(req: Request) {
       console.warn(
         `[api/auth/login][proxyRid=${rid}] login rejected javaRid=${javaMeta.javaRid ?? "n/a"} code=${javaMeta.code ?? "n/a"} error=${String(json?.error ?? "")}`
       )
+      const failureCode = getLoginFailureCode(json.error, res.status, json.code)
       return NextResponse.json(
         {
           ok: false,
           error: (json.error as string) || "Login failed",
           ...javaMeta,
+          code: failureCode,
         },
         { status: 401 }
       )
