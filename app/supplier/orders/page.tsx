@@ -13,6 +13,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Search, RotateCw, Calendar } from "lucide-react"
 import { SdcInfoCell, sdcRaw } from "@/components/sdc-info-cell"
 import { useLanguageStore, type Language } from "@/lib/language-store"
+import {
+  formatSupplierOrdersTablePayment,
+  supplierPaymentFilterKey,
+} from "@/lib/payment-utils"
 
 // ===========================================
 // Multilingual UI strings
@@ -557,7 +561,13 @@ export default function SupplierOrdersPage() {
             return raw
           })(),
           isKioskOrder,
-          paymentStatus: /(pay[_\s-]*on[_\s-]*delivery|cod)/i.test(String(t.PAYMENT_NAME ?? t.payment_name ?? "")) ? "unpaid" : "paid",
+          paymentStatus: supplierPaymentFilterKey(
+            String(t.PAYMENT_STATUS ?? t.payment_status ?? ""),
+          ),
+          paymentLabel: formatSupplierOrdersTablePayment(
+            String(t.PAYMENT_NAME ?? t.payment_name ?? ""),
+            String(t.PAYMENT_STATUS ?? t.payment_status ?? ""),
+          ),
           servedAmount:
             pickAnyNum(t, "SERVED_AMOUNT", "servedAmount", "AMOUNT_SERVED", "SERVED_TOTAL") ?? 0,
           servedQty:
@@ -618,6 +628,7 @@ export default function SupplierOrdersPage() {
           (o.createdAt && String(o.createdAt).toLowerCase().includes(q)) ||
           (o.subtotal != null && String(o.subtotal).includes(q)) ||
           (o.paymentStatus && o.paymentStatus.toLowerCase().includes(q)) ||
+          ((o as Order & { paymentLabel?: string }).paymentLabel?.toLowerCase().includes(q)) ||
           (o.status && o.status.toLowerCase().includes(q))
       )
     }
@@ -930,7 +941,7 @@ export default function SupplierOrdersPage() {
                       <SdcInfoCell order={order} />
                     </TableCell>
                     <TableCell>{order.subtotal.toLocaleString()} RWF</TableCell>
-                    <TableCell>{order.paymentStatus}</TableCell>
+                    <TableCell>{(order as Order & { paymentLabel?: string }).paymentLabel ?? order.paymentStatus}</TableCell>
                     <TableCell>
                       <InlineStatusPicker order={order} orders={orders} setOrders={setOrders} />
                     </TableCell>
