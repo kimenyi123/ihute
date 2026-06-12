@@ -207,20 +207,29 @@ export function matchMoMoSmsToOrderTotal(
 
   // 3. Check transaction freshness (date/time)
   let dateValid: boolean | null = null
-  if (parsedDateObj) {
-    const now = new Date()
-    const ageMs = now.getTime() - parsedDateObj.getTime()
-    const maxAgeMs = maxAgeMinutes * 60 * 1000
-    dateValid = ageMs >= -60_000 && ageMs <= maxAgeMs
-    if (!dateValid) {
-      return {
-        ...base,
-        matched: false,
-        amount: hit,
-        dateValid: false,
-        merchantCodeValid: null,
-        rejectReason: "expired_sms",
-      }
+  if (!parsedDateObj) {
+    return {
+      ...base,
+      matched: false,
+      amount: hit,
+      dateValid: false,
+      merchantCodeValid: null,
+      rejectReason: "expired_sms",
+    }
+  }
+
+  const now = new Date()
+  const ageMs = now.getTime() - parsedDateObj.getTime()
+  const maxAgeMs = maxAgeMinutes * 60 * 1000
+  dateValid = ageMs >= -60_000 && ageMs <= maxAgeMs
+  if (!dateValid) {
+    return {
+      ...base,
+      matched: false,
+      amount: hit,
+      dateValid: false,
+      merchantCodeValid: null,
+      rejectReason: "expired_sms",
     }
   }
 

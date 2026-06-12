@@ -759,7 +759,7 @@ const GRANDMA_LABELS: Record<
     payStepAfterCheckoutHint: "You get an order ID and a track link — no sign-in required to buy.",
     payStepReadMoMoSmsTitle: "Paste MoMo SMS (read confirmation)",
     payStepReadMoMoSmsHint:
-      "After paying, copy the MTN message here. We match the RWF amount to your total ({total} RWF).",
+      "After paying, copy the MTN message here. We match the paid amount to your total ({total} RWF) and accept only fresh SMS from the last 15 minutes.",
     payStepVerifySms: "Match to my total",
     payStepPaymentPaidMatched: "Paid — SMS amount matches your order total.",
     payStepPaymentPaidMatchedWithTxn:
@@ -929,7 +929,7 @@ const GRANDMA_LABELS: Record<
     payStepAfterCheckoutHint: "Uhabwa nimero y'itumiza na link yo gukurikirana — ntusabwe kwinjira mbere.",
     payStepReadMoMoSmsTitle: "Shyiraho SMS ya MoMo (kwemeza kwishyura)",
     payStepReadMoMoSmsHint:
-      "Nyuma yo kwishyura, koporora ubutumwa bwa MTN ubushyire hano. Tugereranya amafaranga n'igiciro ({total} RWF).",
+      "Nyuma yo kwishyura, koporora ubutumwa bwa MTN ubushyire hano. Tugereranya amafaranga y'ishyura n'igiciro ({total} RWF) kandi twemera SMS isa n'iminota 15 ishize gusa.",
     payStepVerifySms: "Gereranya n'igiciro",
     payStepPaymentPaidMatched: "Byishyuwe — amafaranga muri SMS ahuye n'igiciro.",
     payStepPaymentPaidMatchedWithTxn:
@@ -1103,7 +1103,7 @@ const GRANDMA_LABELS: Record<
     payStepAfterCheckoutHint: "Vous recevez un n° de commande et un lien de suivi — achat sans compte possible.",
     payStepReadMoMoSmsTitle: "Collez le SMS MoMo (confirmation)",
     payStepReadMoMoSmsHint:
-      "Après paiement, collez le SMS MTN. Nous comparons au total ({total} RWF).",
+      "Après paiement, collez le SMS MTN. Nous comparons le montant payé au total ({total} RWF) et nous n'acceptons que les SMS récents des 15 dernières minutes.",
     payStepVerifySms: "Comparer au total",
     payStepPaymentPaidMatched: "Payé — le SMS correspond au total.",
     payStepPaymentPaidMatchedWithTxn:
@@ -6286,9 +6286,11 @@ export default function GrandmaPage() {
                   ) : null}
                   {grandmaSmsPayCheck === "mismatch" && grandmaSmsMatchResult ? (
                     <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-2 text-xs text-red-900">
-                      {tPay.payStepPaymentMismatch
-                        .replace("{got}", String(grandmaSmsMatchResult.amount ?? "—"))
-                        .replace("{expected}", Math.round(grandTotal).toLocaleString())}
+                      {grandmaSmsMatchResult.rejectReason === "expired_sms"
+                        ? "This MoMo SMS is too old or missing its timestamp. Please use the fresh confirmation SMS from the last 15 minutes."
+                        : tPay.payStepPaymentMismatch
+                            .replace("{got}", String(grandmaSmsMatchResult.amount ?? "—"))
+                            .replace("{expected}", Math.round(grandTotal).toLocaleString())}
                     </div>
                   ) : null}
                 </div>
@@ -6447,9 +6449,11 @@ export default function GrandmaPage() {
                   ) : null}
                   {grandmaSmsPayCheck === "mismatch" && grandmaSmsMatchResult ? (
                     <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-2 text-xs text-red-900">
-                      {tPay.payStepPaymentMismatch
-                        .replace("{got}", String(grandmaSmsMatchResult.amount ?? "—"))
-                        .replace("{expected}", Math.round(grandTotal).toLocaleString())}
+                      {grandmaSmsMatchResult.rejectReason === "expired_sms"
+                        ? "This MoMo SMS is too old or missing its timestamp. Please use the fresh confirmation SMS from the last 15 minutes."
+                        : tPay.payStepPaymentMismatch
+                            .replace("{got}", String(grandmaSmsMatchResult.amount ?? "—"))
+                            .replace("{expected}", Math.round(grandTotal).toLocaleString())}
                     </div>
                   ) : null}
                 </div>
