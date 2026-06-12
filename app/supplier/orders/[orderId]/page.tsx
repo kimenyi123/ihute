@@ -289,7 +289,7 @@ export default function SupplierOrderDetailsPage() {
                     <div className="text-sm text-slate-600">Payment</div>
                     <div className="font-medium flex items-center gap-2">
                       <span aria-hidden>{getPaymentMethodIcon(order.PAYMENT_NAME || "")}</span>
-                      {paymentInfo.displayName}
+                      {paymentInfo.methodLabel}
                     </div>
                   </div>
                   <div className="rounded-md border p-3">
@@ -458,7 +458,7 @@ export default function SupplierOrderDetailsPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <div className="text-sm text-slate-600">Payment Method</div>
-                    <div className="font-medium">{paymentInfo.displayName}</div>
+                    <div className="font-medium">{paymentInfo.methodLabel}</div>
                   </div>
                   <div>
                     <div className="text-sm text-slate-600">Payment Status</div>
