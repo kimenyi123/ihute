@@ -3,6 +3,7 @@ import { getOrdersUrl } from "@/lib/backend-config"
 import { getOrCreatePublicTokenForOrderId } from "@/lib/order-tracking-token"
 import { DEFAULT_GUEST_ISHYIGA_ACCOUNT } from "@/lib/guest-checkout"
 import { orderErrorMessageWithProductNames } from "@/lib/order-error-display"
+import { resolveOrderPaymentStatus } from "@/lib/payment-utils"
 
 /** Java createOrder can be slow on cold Tomcat; default 60s (override with ORDER_CREATE_JAVA_TIMEOUT_MS). */
 const ORDER_CREATE_JAVA_TIMEOUT_MS = (() => {
@@ -182,9 +183,14 @@ export async function POST(req: Request) {
     const orderNote = String(
       bodyIn.orderNote ?? bodyIn.orderNotes ?? bodyIn.notes ?? bodyIn.ORDER_NOTE ?? bodyIn.CONDITIONS ?? ""
     ).trim()
-    const isDigitalPayment =
-      paymentName.includes("MOMO") || paymentName.includes("AIRTEL") || paymentName.includes("CARD")
-    const paymentStatus = isDigitalPayment || reference.length > 0 ? "PAID" : "PENDING"
+    const requestedPaymentStatus = String(
+      bodyIn.paymentStatus ?? bodyIn.PAYMENT_STATUS ?? "",
+    ).trim()
+    const paymentStatus = resolveOrderPaymentStatus(paymentName, {
+      paymentStatus: requestedPaymentStatus,
+      reference,
+      paymentId,
+    })
 
     /** Browser guest checkout — Java OrdersServlet must null-check buyer or read this flag (see GUEST_CHECKOUT_BUYER_ACCOUNT). */
     const isGuestCheckout = Boolean(
