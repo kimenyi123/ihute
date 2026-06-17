@@ -174,6 +174,12 @@ function OrderSuccessPageInner() {
   }
 
   const displayOrderNo = String(orderDetails?.orderId ?? orderId ?? "")
+  const orderDescription = (
+    orderDetails?.CONDITIONS?.trim() ||
+    orderDetails?.ORDER_NOTE?.trim() ||
+    orderDetails?.orderNote?.trim() ||
+    ""
+  )
 
   const siteBase = (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw").replace(/\/Trading\/?$/, "")
   const trackSlugForUrl = trackToken || orderId
@@ -212,6 +218,16 @@ function OrderSuccessPageInner() {
       const paidAmount = isPaid ? orderDetails.total : 0
 
       console.log("[Order Success] Building WhatsApp message - Payment:", paymentMethod, "isPaid:", isPaid)
+      console.log("[Order Success] Order Details - CONDITIONS:", orderDetails.CONDITIONS, "ORDER_NOTE:", orderDetails.ORDER_NOTE)
+
+      // Build order description block if present (show above product list)
+      const descriptionText = (orderDetails.CONDITIONS?.trim() || orderDetails.ORDER_NOTE?.trim() || orderDetails.orderNote?.trim())
+        ? (orderDetails.CONDITIONS || orderDetails.ORDER_NOTE || orderDetails.orderNote)
+        : ""
+
+      const descriptionBlock = descriptionText
+        ? ["", "Order Description:", descriptionText, ""]
+        : []
 
       message = [
         "Order",
@@ -220,41 +236,58 @@ function OrderSuccessPageInner() {
         orderDetails.buyerLocation ? `Location: ${orderDetails.buyerLocation}` : "",
         `Order ID: ${displayOrderNo}`,
         momoTxId ? `MoMo TxId: ${momoTxId}` : "",
-        "",
+        ...descriptionBlock,
         "```",
         header,
         sep,
         ...lines,
         "```",
-        "",
         `Total: ${formatCurrency(orderDetails.total)}`,
         `Discount: ${formatCurrency(0)}`,
         `Paid: ${formatCurrency(paidAmount)}`,
         "",
         `Paid at: ${formatPaymentMethod(paymentMethod)}`,
-        `Message: ${displayOrderNo ? `ORDER ${displayOrderNo}` : "-"}`,
         `My phone: ${buyerPhone}`,
         "",
         `Follow: ${trackingUrl}`,
       ]
+
+      // Log the message array to see if notes are included
+      const notesCondition = orderDetails.CONDITIONS?.trim() || orderDetails.ORDER_NOTE?.trim() || orderDetails.orderNote?.trim()
+      console.log("[Order Success] Notes condition result:", notesCondition)
+      console.log("[Order Success] Message array before filter:", message)
+
+      message = message
         .filter(Boolean)
         .join("\n")
+
+      console.log("[Order Success] Final WhatsApp message:", message)
     } else {
       // Fallback message without product details
+      console.log("[Order Success] Using fallback message (no items)")
+      const fallbackDescription = (orderDetails?.CONDITIONS?.trim() || orderDetails?.ORDER_NOTE?.trim() || orderDetails?.orderNote?.trim())
+        ? (orderDetails?.CONDITIONS || orderDetails?.ORDER_NOTE || orderDetails?.orderNote)
+        : ""
+
       message = [
         "Order",
         "",
         `Shop: ${sellerName}`,
         `Order ID: ${displayOrderNo}`,
         momoTxId ? `MoMo TxId: ${momoTxId}` : "",
-        "",
+        ...(fallbackDescription ? ["", "Order Description:", fallbackDescription, ""] : []),
         `Total: ${Number(total).toLocaleString()} RWF`,
         `My phone: ${buyerPhone}`,
         "",
         `Follow: ${trackingUrl}`,
       ]
+      
+      console.log("[Order Success] Fallback message array before filter:", message)
+      message = message
         .filter(Boolean)
         .join("\n")
+      
+      console.log("[Order Success] Fallback final WhatsApp message:", message)
     }
 
     const sellerPhoneNormalized = resolveSellerPhoneForWhatsApp(sellerPhone, orderDetails)
@@ -344,6 +377,12 @@ function OrderSuccessPageInner() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2 rounded-xl bg-slate-50 p-4">
+              {orderDescription ? (
+                <div className="mb-3 rounded-2xl border border-slate-200 bg-white p-3 text-sm text-slate-800">
+                  <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Order Description</div>
+                  <div className="mt-1 font-medium">{orderDescription}</div>
+                </div>
+              ) : null}
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Order ID</span>
                 <span className="font-mono font-bold">{displayOrderNo || orderId || trackToken}</span>
@@ -371,9 +410,22 @@ function OrderSuccessPageInner() {
                 <span className="text-muted-foreground">Total</span>
                 <span className="font-bold">{Number(total).toLocaleString()} RWF</span>
               </div>
+              {/* Order description is shown in the receipt preview (above product list) */}
             </div>
           </CardContent>
         </Card>
+
+          {/* Receipt preview: shows Order Description above product list */}
+          {whatsappMessage ? (
+            <Card className="border-0 shadow-xl rounded-2xl bg-white text-slate-900">
+              <CardHeader>
+                <CardTitle className="text-lg">Order receipt</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <pre className="whitespace-pre-wrap font-mono text-sm text-slate-800">{whatsappMessage}</pre>
+              </CardContent>
+            </Card>
+          ) : null}
 
         <Card className="border-0 shadow-xl rounded-2xl bg-white text-slate-900">
           <CardHeader>

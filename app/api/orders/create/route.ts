@@ -182,6 +182,7 @@ export async function POST(req: Request) {
     const orderNote = String(
       bodyIn.orderNote ?? bodyIn.orderNotes ?? bodyIn.notes ?? bodyIn.ORDER_NOTE ?? bodyIn.CONDITIONS ?? ""
     ).trim()
+    console.log("[Orders Create API] Received orderNote:", orderNote || "[empty]", "from body.orderNote:", bodyIn.orderNote)
     const isDigitalPayment =
       paymentName.includes("MOMO") || paymentName.includes("AIRTEL") || paymentName.includes("CARD")
     const paymentStatus = isDigitalPayment || reference.length > 0 ? "PAID" : "PENDING"

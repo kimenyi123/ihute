@@ -805,40 +805,40 @@ const GRANDMA_LABELS: Record<
     sortDistance: " Bitondetswe hakurikijwe intera.",
     shopsIntro: "Hitamo iduka muri {cat}. Ayo uhitamo kenshi ni yo abanza.{sort}",
     sectorPanelShops: "amaduka",
-    sectorPanelItems: "ibicuruzwa",
+    sectorPanelItems: "Umubare wibicuruzwa ",
     footerHome: "Ahabanza",
     footerShops: "Amaduka",
-    footerItems: "Ibicuruzwa",
+    footerItems: "Umubare Ibicuruzwa",
     footerSummary: "Incamake",
     footerPay: "Ishyura",
     footerDashboard: "Ikibaho cy'iduka",
     footerDashboardShort: "Ikibaho",
-    sectionLogistics: "Ubugendesheje",
-    logisticsNote: "Igiciro cy'ubugendesheje gishingiye ku ntera kugera ku iduka ({km} km) n'uburyo wahisemo.",
-    logisticsNotePickup: "Ujya kwakira ku iduka ubwawe. Nta giciro cy'ubugendesheje — ni RWF 0.",
+    sectionLogistics: "Amafaranaga Yokubikugezaho ",
+    logisticsNote: "Igiciro cy'okubikugezaho gishingiye ku ntera kugera ku iduka ({km} km) n'uburyo wahisemo.",
+    logisticsNotePickup: "Ujya kwakira ku iduka ubwawe. Nta giciro cy'okubikugezaho — ni RWF 0.",
     logisticsNoteTakeaway: "Takeaway: kwakira ibyokurya byawe bivunjwe mu gipakeni (RWF 500).",
     fulfillmentSectionTitle: "Ushaka kubona ibi bitumize gute?",
     fulfillmentDeliveryTitle: "Kubigezaho",
-    fulfillmentDeliverySub: "Binkugezaho aho ndi (igiciro cy'ubugendesheje kihari).",
-    fulfillmentPickupTitle: "Kwakira ku iduka",
-    fulfillmentPickupSub: "Nzajya kwakira ku iduka ubwanjye (nta giciro cy'ubugendesheje).",
+    fulfillmentDeliverySub: "Tubikugezaho ahuherereye hose M'Rwnanda",
+    fulfillmentPickupTitle: "Kubifatira kwiduka",
+    fulfillmentPickupSub: "Nzajya kwakira ku iduka ubwanjye (nta giciro cy'okubikugezaho).",
     fulfillmentTakeawayTitle: "Takeaway",
-    fulfillmentTakeawaySub: "Gibihungire mu gipakeni (RWF 500).",
+    fulfillmentTakeawaySub: "Tugufungira muri takeway ibiringombwa (RWF 500).",
     fulfillmentDeliveryModesHint: "Hitamo uburyo bwo kubigeza iwawe:",
     etaAtShop: "Ku iduka",
     etaPickupSub: "Urakira ku iduka — nta gihe cy'umugendesheje. Vugana n'iduka nyuma yo gutumiza.",
     summaryLineItems: "Ibicuruzwa",
     summaryLineItemsTotal: "Igiciro cy'ibicuruzwa",
-    summaryLineLogisticsRow: "Ubugendesheje",
+    summaryLineLogisticsRow: "Kubikugezaho",
     summaryLineGrandTotal: "Igiciro cyose hamwe",
     preferredBadge: "Uhitamo",
     logHuman: "Ku maguru",
     logBike: "Igare",
     logMoto: "Moto",
     amountShop: "Amafaranga y'iduka",
-    ihuteFees: "Ihute 1% — iva ku iduka, ntiyongerwa ku wishyura wawe",
+    ihuteFees: "Ihute 1% — Akatwa kumucuruzi,Ntavakuwishyura(umuguzi)",
     taxes: "Imisoro",
-    amountLogistics: "Amafaranga y'ubugendesheje",
+    amountLogistics: "Amafaranga y'okubikugezaho",
     totalPay: "Igiciro cyose",
     sendOrder: "Ohereza itumiza",
     stockOnHandLabel: "Iboneka: {n}",
@@ -4188,6 +4188,15 @@ export default function GrandmaPage() {
     return tr.etaSub.replace("{km}", km).replace("{mode}", mode)
   }, [language, deliveryKm, selectedLogistics, fulfillmentMode])
 
+  const selectedLogisticsLabel = useMemo(() => {
+    const tr = GRANDMA_LABELS[language]
+    if (fulfillmentMode === "pickup") return tr.fulfillmentPickupTitle
+    if (fulfillmentMode === "takeaway") return tr.fulfillmentTakeawayTitle
+    const mode =
+      selectedLogistics === "human" ? tr.logHuman : selectedLogistics === "bike" ? tr.logBike : tr.logMoto
+    return `${tr.fulfillmentDeliveryTitle} · ${mode}`
+  }, [language, fulfillmentMode, selectedLogistics])
+
   const submitGrandmaOrder = useCallback(async () => {
     if (!selectedShop || selectedProducts.length === 0) {
       const msg =
@@ -5604,7 +5613,12 @@ export default function GrandmaPage() {
               {itemsCount} items
             </span>
           </div>
-          <div id="bottomTotal">Total: {formatRwf(itemsTotal)}</div>
+          <div id="bottomTotal">
+          Total: {formatRwf(itemsTotal)}
+          <div className="bottom-logistics-note" style={{ fontSize: 12, opacity: 0.8, marginTop: 2 }}>
+            {selectedLogisticsLabel}
+          </div>
+        </div>
         </div>
         {hasGrandmaStockBlock ? (
           <div
