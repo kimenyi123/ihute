@@ -362,7 +362,16 @@ export async function DELETE(req: NextRequest) {
 
   try {
     const searchParams = req.nextUrl.searchParams
-    const itemCode = searchParams.get("itemCode")
+    // Extract itemCode from path: /api/supplier/stock/ITEM123
+    const pathname = req.nextUrl.pathname
+    const pathSegments = pathname.split('/')
+    let itemCode = pathSegments[pathSegments.length - 1] // Get last segment
+    
+    // If not in path, try query parameters
+    if (!itemCode || itemCode === 'stock') {
+      itemCode = searchParams.get("itemCode") || ""
+    }
+    
     const account = searchParams.get("account")
 
     console.log(`[SUPPLIER-STOCK] DELETE request - itemCode: ${itemCode}, account: ${account}`)
