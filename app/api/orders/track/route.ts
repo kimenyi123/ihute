@@ -312,6 +312,8 @@ export async function POST(req: NextRequest) {
     const paymentLegacyDisplay = rawPaymentStatus
     const effectivePaymentStatus = rawPaymentStatus
 
+    const orderNote = String(data.CONDITIONS ?? data.ORDER_NOTE ?? data.orderNote ?? "").trim()
+
     const itemsArray = Array.isArray(data.items)
       ? data.items.map((item: any) => {
           const qty = Number(item.QUANTITY ?? item.qty ?? item.QTY ?? 1) || 1
@@ -379,13 +381,17 @@ export async function POST(req: NextRequest) {
       REFERENCE: data.REFERENCE,
       AMOUNT: totalAmount,
       SERVED_AMOUNT: Number(data.SERVED_AMOUNT ?? data.servedAmount ?? data.AMOUNT_SERVED ?? 0),
-      CONDITIONS: data.CONDITIONS ?? data.ORDER_NOTE ?? data.orderNote ?? "",
+      orderNote,
+      ORDER_NOTE: orderNote,
+      CONDITIONS: orderNote,
       CURRENCY: currency,
       CREATED_AT: createdAt,
       IS_TABLE_COMMAND: Boolean(data.IS_TABLE_COMMAND ?? data.table_command),
       TABLE_NAME: data.TABLE_NAME || data.table_name,
       TABLE_LOCATION: data.TABLE_LOCATION || data.table_location,
     }
+
+    console.log("[Orders Track API] Returning CONDITIONS:", order.CONDITIONS || "[empty]", "from data:", { CONDITIONS: data.CONDITIONS, ORDER_NOTE: data.ORDER_NOTE, orderNote: data.orderNote })
 
     const clientMeta = getOrderMeta(String(orderId))
     if (clientMeta?.buyerDeliveryAddress) {

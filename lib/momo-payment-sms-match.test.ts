@@ -37,3 +37,43 @@ test('rejects an old SMS that is outside the 15-minute window', () => {
   assert.equal(result.rejectReason, 'expired_sms')
   assert.equal(result.dateValid, false)
 })
+
+test('parses a phone-based MTN MoMo payment SMS and matches order total', () => {
+  const sms = '*165*S*1100 RWF transferred to Devotha IRADUKUNDA (250784991475) at 2026-06-17 12:15:08 .Fee: 100RWF.Balance: 18178RWF.Dial *182*1*3# and send money abroad *RW#,TxId:28548053516*S*'
+
+  const result = matchMoMoSmsToOrderTotal(sms, 1100, 2)
+
+  assert.equal(result.matched, true)
+  assert.equal(result.amount, 1100)
+  assert.equal(result.txId, '28548053516')
+  assert.equal(result.receiverName, 'Devotha IRADUKUNDA')
+  assert.equal(result.receiverPhone, '250784991475')
+  assert.equal(result.receiverCode, null)
+})
+
+test('parses a phone-based MTN MoMo payment SMS without TxId and matches order total', () => {
+  const sms = '*165*S*1000 RWF transferred to Devotha IRADUKUNDA (250784991475) at 2026-06-17 16:29:08. Fee: 100RWF. Balance: 18178RWF. Dial *182*1*3# and send money abroad *RW#'
+
+  const result = matchMoMoSmsToOrderTotal(sms, 1000, 2)
+
+  assert.equal(result.matched, true)
+  assert.equal(result.amount, 1000)
+  assert.equal(result.txId, null)
+  assert.equal(result.receiverName, 'Devotha IRADUKUNDA')
+  assert.equal(result.receiverPhone, '250784991475')
+  assert.equal(result.receiverCode, null)
+})
+
+test('parses a code-based MTN MoMo payment SMS and matches order total without TxId', () => {
+  const now = new Date()
+  const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
+  const sms = `*EN#Your payment of 200 RWF to Cassien Sindayigaya 121464 was completed at ${stamp}. Balance: 1,788 RWF. Fee 0 RWF.*`
+
+  const result = matchMoMoSmsToOrderTotal(sms, 200, 2)
+
+  assert.equal(result.matched, true)
+  assert.equal(result.amount, 200)
+  assert.equal(result.receiverName, 'Cassien Sindayigaya')
+  assert.equal(result.receiverCode, '121464')
+  assert.equal(result.txId, null)
+})
