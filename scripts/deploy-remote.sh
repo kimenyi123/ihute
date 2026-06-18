@@ -3,7 +3,7 @@
 #
 # Usage:
 #   ./scripts/deploy-remote.sh /var/www/ihute-frontend master ihute-frontend
-#   ./scripts/deploy-remote.sh /var/www/ihute-frontend-dev develop ihute-frontend-dev
+#   ./scripts/deploy-remote.sh /var/www/ihute-frontend-dev master ihute-dev
 #
 set -euo pipefail
 
@@ -40,6 +40,12 @@ fi
 source "$(dirname "$0")/server-git-sync.sh"
 server_git_sync "$DEPLOY_BRANCH"
 
+# Re-exec after git pull so we run the updated script (bash reads the file at start).
+if [[ -z "${DEPLOY_REMOTE_REEXEC:-}" ]]; then
+  export DEPLOY_REMOTE_REEXEC=1
+  exec bash "$DEPLOY_PATH/scripts/deploy-remote.sh" "$@"
+fi
+
 if [[ -f .env ]]; then
   log "Using existing .env in $DEPLOY_PATH"
 else
@@ -47,6 +53,8 @@ else
 fi
 
 log "Installing dependencies (include devDependencies for next build)…"
+# .env may set NODE_ENV=production — must not skip devDeps needed by next build.
+unset NODE_ENV
 npm ci --include=dev
 
 log "Building Next.js…"

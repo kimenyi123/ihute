@@ -12,17 +12,17 @@ case "$ENVIRONMENT" in
     ;;
   dev)
     echo "DEPLOY_PATH=/var/www/ihute-frontend-dev"
-    echo "PM2_APP_NAME=ihute-frontend-dev"
+    echo "PM2_APP_NAME=ihute-dev"
     echo "DEPLOYMENT_NAME=staging"
     ;;
   beta)
     echo "DEPLOY_PATH=/var/www/ihute-frontend_beta"
-    echo "PM2_APP_NAME=ihute-frontend-beta"
+    echo "PM2_APP_NAME=ihute-beta"
     echo "DEPLOYMENT_NAME=test"
     ;;
   grandma)
     echo "DEPLOY_PATH=/var/www/grandma-ihute"
-    echo "PM2_APP_NAME=grandma-ihute"
+    echo "PM2_APP_NAME=ihute-grandma"
     echo "DEPLOYMENT_NAME=grandma"
     ;;
   *)

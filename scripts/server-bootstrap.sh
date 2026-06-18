@@ -42,6 +42,6 @@ fi
 
 log "Next steps:"
 log "  1. Copy .env into each /var/www/* directory (see .env.dev.example)"
-log "  2. Run first deploy: $deploy_script $WWW_ROOT/ihute-frontend-dev master ihute-frontend-dev"
+log "  2. Run first deploy: $deploy_script $WWW_ROOT/ihute-frontend-dev master ihute-dev"
 log "  3. pm2 start $WWW_ROOT/ihute-frontend/ecosystem.config.cjs && pm2 save && pm2 startup"
 log "  4. Configure Bitbucket variables: DEPLOY_HOST, DEPLOY_USER, DEPLOY_PASS"

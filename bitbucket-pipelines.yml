@@ -55,7 +55,7 @@ definitions:
         script:
           - *resolve-branch
           - export DEPLOY_PATH=/var/www/ihute-frontend-dev
-          - export PM2_APP_NAME=ihute-frontend-dev
+          - export PM2_APP_NAME=ihute-dev
           - *ssh-remote-deploy
 
     - step: &deploy-beta
@@ -64,7 +64,7 @@ definitions:
         script:
           - *resolve-branch
           - export DEPLOY_PATH=/var/www/ihute-frontend_beta
-          - export PM2_APP_NAME=ihute-frontend-beta
+          - export PM2_APP_NAME=ihute-beta
           - *ssh-remote-deploy
 
     - step: &deploy-grandma
@@ -73,7 +73,7 @@ definitions:
         script:
           - *resolve-branch
           - export DEPLOY_PATH=/var/www/grandma-ihute
-          - export PM2_APP_NAME=grandma-ihute
+          - export PM2_APP_NAME=ihute-grandma
           - *ssh-remote-deploy
 
     - step: &deploy-selected
