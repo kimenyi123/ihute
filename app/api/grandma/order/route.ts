@@ -29,6 +29,14 @@ export async function POST(req: NextRequest) {
       body.subtotal != null && String(body.subtotal).trim() !== ""
         ? Number(body.subtotal)
         : NaN
+    const orderNotes = String(
+      body.orderNotes ??
+      body.orderNote ??
+      body.notes ??
+      body.ORDER_NOTE ??
+      body.CONDITIONS ??
+      ""
+    ).trim()
     const payload = {
       buyerEmail: String(body.buyerEmail ?? "").trim(),
       buyerName: String(body.buyerName ?? "").trim(),
@@ -43,6 +51,7 @@ export async function POST(req: NextRequest) {
       currency: String(body.currency ?? "RWF"),
       isTableCommand: false,
       items,
+      ...(orderNotes ? { orderNote: orderNotes, ORDER_NOTE: orderNotes, CONDITIONS: orderNotes } : {}),
       ...(Number.isFinite(subtotal) && subtotal > 0 ? { subtotal } : {}),
     }
 

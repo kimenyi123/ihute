@@ -44,6 +44,26 @@ const nextConfig = {
         source: '/api/analytics/:path*',
         destination: `${javaBase}/api/analytics/:path*`,
       },
+      {
+        source: '/api/payers',
+        destination: `${javaBase}/api/payers`,
+      },
+      {
+        source: '/api/payers/:path*',
+        destination: `${javaBase}/api/payers/:path*`,
+      },
+      {
+        source: '/api/seller-payers',
+        destination: `${javaBase}/api/seller-payers`,
+      },
+      {
+        source: '/api/seller-payers/:path*',
+        destination: `${javaBase}/api/seller-payers/:path*`,
+      },
+      {
+        source: '/api/seller-payments/:path*',
+        destination: `${javaBase}/api/seller-payments/:path*`,
+      },
     ]
   },
 

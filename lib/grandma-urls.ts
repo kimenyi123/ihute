@@ -3,7 +3,7 @@
  * Boundaries with the rest of the stack: docs/grandma-boundaries.md
  */
 /** Grandma shell + API version (bump with releases). */
-export const GRANDMA_APP_VERSION = "1.1.0"
+export const GRANDMA_APP_VERSION = "1.1.3"
 
 export const GRANDMA_PATHS = {
   appRoot: "/grandma",

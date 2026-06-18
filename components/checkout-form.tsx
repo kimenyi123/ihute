@@ -233,7 +233,7 @@ export function CheckoutForm() {
               ? "PAID_CARD"
               : "PAY_ON_DELIVERY",
           paymentId: `TXN-${Date.now()}`,
-          reference: data.notes || `ORDER-${Date.now()}`,
+          orderNote: data.notes || "",
           currency: "RWF",
 
           items: items.map((it) => {
@@ -258,8 +258,10 @@ export function CheckoutForm() {
           }),
 
           subtotal: getTotalPrice(),
-        }),
-      })
+        }) as any,
+      } as RequestInit)
+      
+      console.log("[Checkout] Request payload notes - orderNote:", data.notes || "[empty]")
 
       const json = await res.json()
 
@@ -273,12 +275,12 @@ export function CheckoutForm() {
       }
 
       console.log("✅ Order created successfully:", json)
+      console.log("[Checkout] Order note sent:", data.notes || "[empty]")
 
       clearCart()
       const slug = (json as { trackToken?: string }).trackToken || json.orderId
-      router.push(`/track-order/${encodeURIComponent(String(slug))}`)
       await flushCartToServer(user?.email ?? "", [])
-      router.push(`/track-order/${json.orderId}`)
+      router.push(`/track-order/${encodeURIComponent(String(slug))}`)
 
     } catch (e: any) {
       console.error("❌ Order creation error:", e)

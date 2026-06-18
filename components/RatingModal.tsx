@@ -76,7 +76,11 @@ export function RatingModal({ orderId, sellerId, sellerName, buyerPhone, items, 
                 buyerPhone: buyerPhone || "",
                 supplierRating,
                 supplierFeedback,
-                itemRatings: formattedItemRatings
+                itemRatings: formattedItemRatings,
+                menuItems: items.map((item) => ({
+                    itemCode: item.code,
+                    itemName: item.name,
+                })),
             }
 
             console.log("[RatingModal] Submitting rating:", payload)

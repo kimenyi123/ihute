@@ -49,6 +49,12 @@ export type MoMoSmsMatchResult = {
   parsedDate: string | null
   /** Whether the merchant code in SMS matches the expected shop code */
   merchantCodeValid: boolean | null
+  /** Payment recipient name when available from the SMS */
+  receiverName?: string | null
+  /** Payment recipient phone number when available from the SMS */
+  receiverPhone?: string | null
+  /** Payment recipient merchant code when available from the SMS */
+  receiverCode?: string | null
   /** Reason for rejection */
   rejectReason: "none" | "amount_mismatch" | "no_amount" | "expired_sms" | "wrong_merchant" | "no_txid"
 }
@@ -68,6 +74,28 @@ export function extractMoMoTxIdFromSms(text: string): string | null {
     if (id && /^\d{6,}$/.test(id)) return id
   }
   return null
+}
+
+export function extractMoMoPhonePaymentDetailsFromSms(text: string): { receiverName: string; receiverPhone: string } | null {
+  const s = String(text ?? "")
+  const pattern = /transferred to\s+([^\n\r(]+?)\s*\((\d{9,})\)\s*at\s+/i
+  const m = s.match(pattern)
+  if (!m) return null
+  return {
+    receiverName: m[1].trim().replace(/[\s\n\r]+/g, " "),
+    receiverPhone: m[2].trim(),
+  }
+}
+
+export function extractMoMoCodePaymentDetailsFromSms(text: string): { receiverName: string; receiverCode: string } | null {
+  const s = String(text ?? "")
+  const pattern = /Your payment of\s+[\d\s,.]+\s*(?:RWF|FRW|Frw|frw)\s+to\s+(.+?)\s+(\d{3,})\s+was\s+completed\s+at/i
+  const m = s.match(pattern)
+  if (!m) return null
+  return {
+    receiverName: m[1].trim().replace(/[\s\n\r]+/g, " "),
+    receiverCode: m[2].trim(),
+  }
 }
 
 /**
@@ -164,13 +192,18 @@ export function matchMoMoSmsToOrderTotal(
 ): MoMoSmsMatchResult {
   const candidates = extractRwfAmountCandidatesFromText(sms)
   const txId = extractMoMoTxIdFromSms(sms)
+  const phonePaymentDetails = extractMoMoPhonePaymentDetailsFromSms(sms)
+  const codePaymentDetails = extractMoMoCodePaymentDetailsFromSms(sms)
   const parsedDateObj = extractDateFromMoMoSms(sms)
   const parsedDate = parsedDateObj ? parsedDateObj.toISOString() : null
 
-  const base: Pick<MoMoSmsMatchResult, "candidates" | "txId" | "parsedDate"> = {
+  const base: Pick<MoMoSmsMatchResult, "candidates" | "txId" | "parsedDate" | "receiverName" | "receiverPhone" | "receiverCode"> = {
     candidates,
     txId,
     parsedDate,
+    receiverName: phonePaymentDetails?.receiverName ?? codePaymentDetails?.receiverName ?? null,
+    receiverPhone: phonePaymentDetails?.receiverPhone ?? null,
+    receiverCode: codePaymentDetails?.receiverCode ?? null,
   }
 
   if (!Number.isFinite(orderTotalRwf) || orderTotalRwf < 1) {
@@ -193,8 +226,9 @@ export function matchMoMoSmsToOrderTotal(
     }
   }
 
-  // 2. TxId must be present for a genuine confirmation
-  if (!txId) {
+  // 2. TxId must be present for a genuine confirmation unless this is a recognized phone- or merchant-code-based format.
+  const allowNoTxId = Boolean(codePaymentDetails || phonePaymentDetails)
+  if (!txId && !allowNoTxId) {
     return {
       ...base,
       matched: false,
@@ -207,20 +241,29 @@ export function matchMoMoSmsToOrderTotal(
 
   // 3. Check transaction freshness (date/time)
   let dateValid: boolean | null = null
-  if (parsedDateObj) {
-    const now = new Date()
-    const ageMs = now.getTime() - parsedDateObj.getTime()
-    const maxAgeMs = maxAgeMinutes * 60 * 1000
-    dateValid = ageMs >= -60_000 && ageMs <= maxAgeMs
-    if (!dateValid) {
-      return {
-        ...base,
-        matched: false,
-        amount: hit,
-        dateValid: false,
-        merchantCodeValid: null,
-        rejectReason: "expired_sms",
-      }
+  if (!parsedDateObj) {
+    return {
+      ...base,
+      matched: false,
+      amount: hit,
+      dateValid: false,
+      merchantCodeValid: null,
+      rejectReason: "expired_sms",
+    }
+  }
+
+  const now = new Date()
+  const ageMs = now.getTime() - parsedDateObj.getTime()
+  const maxAgeMs = maxAgeMinutes * 60 * 1000
+  dateValid = ageMs >= -60_000 && ageMs <= maxAgeMs
+  if (!dateValid) {
+    return {
+      ...base,
+      matched: false,
+      amount: hit,
+      dateValid: false,
+      merchantCodeValid: null,
+      rejectReason: "expired_sms",
     }
   }
 

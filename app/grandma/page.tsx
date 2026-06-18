@@ -136,7 +136,7 @@ type LogisticsId = "human" | "bike" | "moto"
 type LogisticsOption = { id: LogisticsId; icon: string; label: string; baseRwf: number; rwfPerKm: number }
 
 /** Buyer chooses delivery vs collecting at shop — avoids mixing modes. */
-type FulfillmentMode = "delivery" | "pickup"
+type FulfillmentMode = "delivery" | "pickup" | "takeaway"
 
 type PaymentId = "momo" | "airtel" | "bk" | "cash"
 type PaymentMode = { id: PaymentId; label: string; iconSrc: string }
@@ -474,11 +474,14 @@ const GRANDMA_LABELS: Record<
     sectionLogistics: string
     logisticsNote: string
     logisticsNotePickup: string
+    logisticsNoteTakeaway: string
     fulfillmentSectionTitle: string
     fulfillmentDeliveryTitle: string
     fulfillmentDeliverySub: string
     fulfillmentPickupTitle: string
     fulfillmentPickupSub: string
+    fulfillmentTakeawayTitle: string
+    fulfillmentTakeawaySub: string
     fulfillmentDeliveryModesHint: string
     etaAtShop: string
     etaPickupSub: string
@@ -539,7 +542,7 @@ const GRANDMA_LABELS: Record<
     sellerDashBulletFulfillQueue: string
     sellerDashGrowthIdle: string
     sellerDashCtaStock: string
-    /** Opens Shop with Me (NIKI catalog) to add / source products */
+    /** Opens Shop with Me (nike catalog) to add / source products */
     sellerDashCtaNikiStock: string
     sellerDashCtaOrders: string
     sellerDashDeliveredTail: string
@@ -643,11 +646,14 @@ const GRANDMA_LABELS: Record<
       "Delivery fee uses distance to this shop ({km} km) and the option you pick (replace with your pricing API).",
     logisticsNotePickup:
       "Self pickup: you collect the order at this shop. No delivery fee — logistics is RWF 0.",
+    logisticsNoteTakeaway: "Takeaway: collect your order ready-packed for takeaway (RWF 500 fee).",
     fulfillmentSectionTitle: "How do you want to receive this order?",
     fulfillmentDeliveryTitle: "Delivery",
     fulfillmentDeliverySub: "Bring it to my address (delivery fee applies).",
     fulfillmentPickupTitle: "Self pickup",
     fulfillmentPickupSub: "I will collect at the shop (no delivery fee).",
+    fulfillmentTakeawayTitle: "Takeaway",
+    fulfillmentTakeawaySub: "Pack it for takeaway (RWF 500 fee).",
     fulfillmentDeliveryModesHint: "Choose how it travels to you:",
     etaAtShop: "At shop",
     etaPickupSub: "Pickup at the shop — no courier ETA. Coordinate with the seller after ordering.",
@@ -753,7 +759,7 @@ const GRANDMA_LABELS: Record<
     payStepAfterCheckoutHint: "You get an order ID and a track link — no sign-in required to buy.",
     payStepReadMoMoSmsTitle: "Paste MoMo SMS (read confirmation)",
     payStepReadMoMoSmsHint:
-      "After paying, copy the MTN message here. We match the RWF amount to your total ({total} RWF).",
+      "After paying, copy the MTN message here. We match the paid amount to your total ({total} RWF) and accept only fresh SMS from the last 15 minutes.",
     payStepVerifySms: "Match to my total",
     payStepPaymentPaidMatched: "Paid — SMS amount matches your order total.",
     payStepPaymentPaidMatchedWithTxn:
@@ -799,37 +805,40 @@ const GRANDMA_LABELS: Record<
     sortDistance: " Bitondetswe hakurikijwe intera.",
     shopsIntro: "Hitamo iduka muri {cat}. Ayo uhitamo kenshi ni yo abanza.{sort}",
     sectorPanelShops: "amaduka",
-    sectorPanelItems: "ibicuruzwa",
+    sectorPanelItems: "Umubare wibicuruzwa ",
     footerHome: "Ahabanza",
     footerShops: "Amaduka",
-    footerItems: "Ibicuruzwa",
+    footerItems: "Umubare Ibicuruzwa",
     footerSummary: "Incamake",
     footerPay: "Ishyura",
     footerDashboard: "Ikibaho cy'iduka",
     footerDashboardShort: "Ikibaho",
-    sectionLogistics: "Ubugendesheje",
-    logisticsNote: "Igiciro cy'ubugendesheje gishingiye ku ntera kugera ku iduka ({km} km) n'uburyo wahisemo.",
-    logisticsNotePickup: "Ujya kwakira ku iduka ubwawe. Nta giciro cy'ubugendesheje — ni RWF 0.",
+    sectionLogistics: "Amafaranaga Yokubikugezaho ",
+    logisticsNote: "Igiciro cy'okubikugezaho gishingiye ku ntera kugera ku iduka ({km} km) n'uburyo wahisemo.",
+    logisticsNotePickup: "Ujya kwakira ku iduka ubwawe. Nta giciro cy'okubikugezaho — ni RWF 0.",
+    logisticsNoteTakeaway: "Takeaway: kwakira ibyokurya byawe bivunjwe mu gipakeni (RWF 500).",
     fulfillmentSectionTitle: "Ushaka kubona ibi bitumize gute?",
     fulfillmentDeliveryTitle: "Kubigezaho",
-    fulfillmentDeliverySub: "Binkugezaho aho ndi (igiciro cy'ubugendesheje kihari).",
-    fulfillmentPickupTitle: "Kwakira ku iduka",
-    fulfillmentPickupSub: "Nzajya kwakira ku iduka ubwanjye (nta giciro cy'ubugendesheje).",
+    fulfillmentDeliverySub: "Tubikugezaho ahuherereye hose M'Rwnanda",
+    fulfillmentPickupTitle: "Kubifatira kwiduka",
+    fulfillmentPickupSub: "Nzajya kwakira ku iduka ubwanjye (nta giciro cy'okubikugezaho).",
+    fulfillmentTakeawayTitle: "Takeaway",
+    fulfillmentTakeawaySub: "Tugufungira muri takeway ibiringombwa (RWF 500).",
     fulfillmentDeliveryModesHint: "Hitamo uburyo bwo kubigeza iwawe:",
     etaAtShop: "Ku iduka",
     etaPickupSub: "Urakira ku iduka — nta gihe cy'umugendesheje. Vugana n'iduka nyuma yo gutumiza.",
     summaryLineItems: "Ibicuruzwa",
     summaryLineItemsTotal: "Igiciro cy'ibicuruzwa",
-    summaryLineLogisticsRow: "Ubugendesheje",
+    summaryLineLogisticsRow: "Kubikugezaho",
     summaryLineGrandTotal: "Igiciro cyose hamwe",
     preferredBadge: "Uhitamo",
     logHuman: "Ku maguru",
     logBike: "Igare",
     logMoto: "Moto",
     amountShop: "Amafaranga y'iduka",
-    ihuteFees: "Ihute 1% — iva ku iduka, ntiyongerwa ku wishyura wawe",
+    ihuteFees: "Ihute 1% — Akatwa kumucuruzi,Ntavakuwishyura(umuguzi)",
     taxes: "Imisoro",
-    amountLogistics: "Amafaranga y'ubugendesheje",
+    amountLogistics: "Amafaranga y'okubikugezaho",
     totalPay: "Igiciro cyose",
     sendOrder: "Ohereza itumiza",
     stockOnHandLabel: "Iboneka: {n}",
@@ -920,7 +929,7 @@ const GRANDMA_LABELS: Record<
     payStepAfterCheckoutHint: "Uhabwa nimero y'itumiza na link yo gukurikirana — ntusabwe kwinjira mbere.",
     payStepReadMoMoSmsTitle: "Shyiraho SMS ya MoMo (kwemeza kwishyura)",
     payStepReadMoMoSmsHint:
-      "Nyuma yo kwishyura, koporora ubutumwa bwa MTN ubushyire hano. Tugereranya amafaranga n'igiciro ({total} RWF).",
+      "Nyuma yo kwishyura, koporora ubutumwa bwa MTN ubushyire hano. Tugereranya amafaranga y'ishyura n'igiciro ({total} RWF) kandi twemera SMS isa n'iminota 15 ishize gusa.",
     payStepVerifySms: "Gereranya n'igiciro",
     payStepPaymentPaidMatched: "Byishyuwe — amafaranga muri SMS ahuye n'igiciro.",
     payStepPaymentPaidMatchedWithTxn:
@@ -980,11 +989,14 @@ const GRANDMA_LABELS: Record<
       "Les frais utilisent la distance jusqu'à ce magasin ({km} km) et le mode choisi.",
     logisticsNotePickup:
       "Retrait au magasin : vous récupérez la commande sur place. Pas de frais de livraison (0 RWF).",
+    logisticsNoteTakeaway: "À emporter : emballé pour la route (frais de RWF 500).",
     fulfillmentSectionTitle: "Comment souhaitez-vous recevoir cette commande ?",
     fulfillmentDeliveryTitle: "Livraison",
     fulfillmentDeliverySub: "À mon adresse (frais de livraison).",
     fulfillmentPickupTitle: "Retrait au magasin",
     fulfillmentPickupSub: "Je viens chercher au magasin (sans frais de livraison).",
+    fulfillmentTakeawayTitle: "À emporter",
+    fulfillmentTakeawaySub: "Emballé pour la route (RWF 500).",
     fulfillmentDeliveryModesHint: "Choisissez le mode de transport :",
     etaAtShop: "Au magasin",
     etaPickupSub: "Retrait sur place — pas d’ETA coursier. Coordonnez-vous avec le vendeur après commande.",
@@ -1091,7 +1103,7 @@ const GRANDMA_LABELS: Record<
     payStepAfterCheckoutHint: "Vous recevez un n° de commande et un lien de suivi — achat sans compte possible.",
     payStepReadMoMoSmsTitle: "Collez le SMS MoMo (confirmation)",
     payStepReadMoMoSmsHint:
-      "Après paiement, collez le SMS MTN. Nous comparons au total ({total} RWF).",
+      "Après paiement, collez le SMS MTN. Nous comparons le montant payé au total ({total} RWF) et nous n'acceptons que les SMS récents des 15 dernières minutes.",
     payStepVerifySms: "Comparer au total",
     payStepPaymentPaidMatched: "Payé — le SMS correspond au total.",
     payStepPaymentPaidMatchedWithTxn:
@@ -2477,13 +2489,14 @@ export default function GrandmaPage() {
 
   const logisticsTotal = useMemo(() => {
     if (fulfillmentMode === "pickup") return 0
+    if (fulfillmentMode === "takeaway") return 500
     const opt = LOGISTICS.find((x) => x.id === selectedLogistics)
     return opt ? logisticsQuote(opt, deliveryKm) : 0
   }, [fulfillmentMode, selectedLogistics, deliveryKm])
 
   const etaRange = useMemo(
     () =>
-      fulfillmentMode === "pickup"
+      fulfillmentMode === "pickup" || fulfillmentMode === "takeaway"
         ? { lo: 0, hi: 0 }
         : deliveryEtaRange(deliveryKm, selectedLogistics),
     [deliveryKm, selectedLogistics, fulfillmentMode]
@@ -2535,7 +2548,7 @@ export default function GrandmaPage() {
     }
     try {
       const lsFul = localStorage.getItem("grandma:fulfillmentMode")
-      if (lsFul === "delivery" || lsFul === "pickup") setFulfillmentMode(lsFul)
+      if (lsFul === "delivery" || lsFul === "pickup" || lsFul === "takeaway") setFulfillmentMode(lsFul)
       else setFulfillmentMode("delivery")
     } catch {
       setFulfillmentMode("delivery")
@@ -2580,7 +2593,7 @@ export default function GrandmaPage() {
   }, [fulfillmentMode, prefsHydrated])
 
   useEffect(() => {
-    if (fulfillmentMode === "pickup") setCourierModalOpen(false)
+    if (fulfillmentMode === "pickup" || fulfillmentMode === "takeaway") setCourierModalOpen(false)
   }, [fulfillmentMode])
 
   useEffect(() => {
@@ -4168,12 +4181,21 @@ export default function GrandmaPage() {
 
   const etaSubText = useMemo(() => {
     const tr = GRANDMA_LABELS[language]
-    if (fulfillmentMode === "pickup") return tr.etaPickupSub
+    if (fulfillmentMode === "pickup" || fulfillmentMode === "takeaway") return tr.etaPickupSub
     const km = deliveryKm.toFixed(1)
     const mode =
       selectedLogistics === "human" ? tr.logHuman : selectedLogistics === "bike" ? tr.logBike : tr.logMoto
     return tr.etaSub.replace("{km}", km).replace("{mode}", mode)
   }, [language, deliveryKm, selectedLogistics, fulfillmentMode])
+
+  const selectedLogisticsLabel = useMemo(() => {
+    const tr = GRANDMA_LABELS[language]
+    if (fulfillmentMode === "pickup") return tr.fulfillmentPickupTitle
+    if (fulfillmentMode === "takeaway") return tr.fulfillmentTakeawayTitle
+    const mode =
+      selectedLogistics === "human" ? tr.logHuman : selectedLogistics === "bike" ? tr.logBike : tr.logMoto
+    return `${tr.fulfillmentDeliveryTitle} · ${mode}`
+  }, [language, fulfillmentMode, selectedLogistics])
 
   const submitGrandmaOrder = useCallback(async () => {
     if (!selectedShop || selectedProducts.length === 0) {
@@ -4305,6 +4327,8 @@ export default function GrandmaPage() {
       const referenceParts =
         fulfillmentMode === "pickup"
           ? ["SELF-PICKUP", orderNotes.trim()].filter(Boolean)
+          : fulfillmentMode === "takeaway"
+          ? ["TAKEAWAY", orderNotes.trim()].filter(Boolean)
           : [`DELIVERY-${selectedLogistics}`, orderNotes.trim()].filter(Boolean)
       const baseRef = referenceParts.length ? referenceParts.join(" | ") : ""
       const reference = (baseRef + billingTail).slice(0, 500)
@@ -4324,6 +4348,7 @@ export default function GrandmaPage() {
           currency: "RWF",
           items,
           reference,
+          orderNotes: orderNotes.trim(),
           subtotal: Math.round(itemsTotal),
         }),
       })
@@ -4379,6 +4404,7 @@ export default function GrandmaPage() {
           qty: Number(it.qty) || 1,
         })),
         itemsCount: items.length,
+        orderNotes: orderNotes.trim(),
         ...(data.trackToken ? { publicToken: String(data.trackToken) } : {}),
       }
       useOrdersStore.getState().upsertOrder(placedOrder)
@@ -4545,10 +4571,10 @@ export default function GrandmaPage() {
         .summary-remove-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:none;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:12px;font-weight:700;color:#b42318;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.04);}
         .summary-remove-btn svg{width:16px;height:16px;flex-shrink:0;}
         .summary-remove-btn:active{transform:scale(.98);background:#fff5f5;}
-        .fulfillment-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;}
+        .fulfillment-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px;}
         .fulfill-sub{font-size:12px;font-weight:600;color:var(--muted);margin-top:6px;line-height:1.3;text-align:center;padding:0 4px;}
         .logistics-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px;}
-        .log-option{background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px 8px;text-align:center;cursor:pointer;box-shadow:0 8px 18px rgba(24,151,224,.06);}
+        .log-option{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 10px;text-align:center;cursor:pointer;box-shadow:0 8px 18px rgba(24,151,224,.06);}
         .log-option.active{border:2px solid var(--blue);background:#f2f9ff;}
         .log-icon{font-size:28px;display:block;margin-bottom:6px;line-height:1;}
         .log-label{font-weight:700;font-size:14px;}
@@ -4745,39 +4771,34 @@ export default function GrandmaPage() {
               </button>
             ) : null}
           </div>
-          {appMode === "buyer" ? (
-            <div className="topbar-order-actions">
-              <button
-                type="button"
-                className="orders-btn"
-                aria-label="Quick Shop"
-                title="Quick Shop"
-                onClick={() =>
-                  router.push(
-                    `${GRANDMA_OUTBOUND.umuriro}?redirect=${encodeURIComponent(GRANDMA_PATHS.appRoot)}`,
-                  )
-                }
-              >
-                ⚡
-              </button>
-              <button
-                type="button"
-                className="orders-btn"
-                aria-label={settingsUi.myOrders}
-                title={settingsUi.myOrders}
-                onClick={() => {
-                  const target = GRANDMA_PATHS.buyerOrders
-                  if (isAuthenticated) router.push(target)
-                  else
-                    router.push(
-                      `${GRANDMA_PATHS.login}?redirect=${encodeURIComponent(target)}`,
-                    )
-                }}
-              >
-                📦
-              </button>
-            </div>
-          ) : null}
+        {appMode === "buyer" ? (
+  <div className="topbar-order-actions">
+    <button
+      type="button"
+      className="orders-btn"
+      aria-label="Quick Shop"
+      title="Quick Shop"
+      onClick={() => {
+        router.push(GRANDMA_OUTBOUND.umuriro)
+      }}
+    >
+      ⚡
+    </button>
+
+    <button
+      type="button"
+      className="orders-btn"
+      aria-label={settingsUi.myOrders}
+      title={settingsUi.myOrders}
+      onClick={() => {
+        router.push(GRANDMA_PATHS.buyerOrders)
+      }}
+    >
+      📦
+    </button>
+  </div>
+) : null}
+          
           <button
             className="more-btn"
             onClick={() => setSettingsOpen(true)}
@@ -5592,7 +5613,12 @@ export default function GrandmaPage() {
               {itemsCount} items
             </span>
           </div>
-          <div id="bottomTotal">Total: {formatRwf(itemsTotal)}</div>
+          <div id="bottomTotal">
+          Total: {formatRwf(itemsTotal)}
+          <div className="bottom-logistics-note" style={{ fontSize: 12, opacity: 0.8, marginTop: 2 }}>
+            {selectedLogisticsLabel}
+          </div>
+        </div>
         </div>
         {hasGrandmaStockBlock ? (
           <div
@@ -5716,7 +5742,8 @@ export default function GrandmaPage() {
                 type="button"
                 aria-label={`Remove ${p.name} from cart`}
                 onClick={() => setQtyDirect(p.id, 0)}
-                className="flex items-center gap-2 border border-slate-200 rounded-2xl px-4 py-3 text-rose-600 font-semibold bg-white hover:bg-rose-50 transition"
+                disabled={grandmaSmsPayCheck === "paid"}
+                className="flex items-center gap-2 border border-slate-200 rounded-2xl px-4 py-3 text-rose-600 font-semibold bg-white hover:bg-rose-50 transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white"
               >
                 <Trash2 size={18} />
                 Remove
@@ -5728,7 +5755,8 @@ export default function GrandmaPage() {
                 {/* EDIT BUTTON */}
                 <button
                   type="button"
-                  className="border border-slate-200 rounded-2xl px-4 py-3 bg-white hover:bg-slate-50 transition text-slate-700 font-semibold"
+                  disabled={grandmaSmsPayCheck === "paid"}
+                  className="border border-slate-200 rounded-2xl px-4 py-3 bg-white hover:bg-slate-50 transition text-slate-700 font-semibold disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white"
                 >
                   Edit Qty
                 </button>
@@ -5738,6 +5766,7 @@ export default function GrandmaPage() {
                   type="number"
                   min={1}
                   value={p.qty}
+                  disabled={grandmaSmsPayCheck === "paid"}
                   onChange={(e) => {
                     const value = Number(e.target.value)
 
@@ -5748,7 +5777,7 @@ export default function GrandmaPage() {
                       setQtyDirect(p.id, value)
                     }
                   }}
-                  className="w-[90px] border border-slate-200 rounded-2xl px-4 py-3 text-center font-bold text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                  className="w-[90px] border border-slate-200 rounded-2xl px-4 py-3 text-center font-bold text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100 disabled:opacity-50 disabled:cursor-not-allowed"
                 />
               </div>
 
@@ -5833,11 +5862,31 @@ export default function GrandmaPage() {
             <div className="log-label">{tPay.fulfillmentPickupTitle}</div>
             <div className="fulfill-sub">{tPay.fulfillmentPickupSub}</div>
           </div>
+          <div
+            className={`log-option ${fulfillmentMode === "takeaway" ? "active" : ""}`}
+            onClick={() => setFulfillmentMode("takeaway")}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault()
+                setFulfillmentMode("takeaway")
+              }
+            }}
+          >
+            <span className="log-icon" aria-hidden>
+              🥡
+            </span>
+            <div className="log-label">{tPay.fulfillmentTakeawayTitle}</div>
+            <div className="fulfill-sub">{tPay.fulfillmentTakeawaySub}</div>
+          </div>
         </div>
 
         <p className="note" style={{ marginTop: 0, marginBottom: 10 }}>
           {fulfillmentMode === "delivery"
             ? tPay.logisticsNote.replace("{km}", deliveryKm.toFixed(1))
+            : fulfillmentMode === "takeaway"
+            ? tPay.logisticsNoteTakeaway
             : tPay.logisticsNotePickup}
         </p>
 
@@ -5924,7 +5973,9 @@ export default function GrandmaPage() {
             placeholder="Allergies, delivery instructions, substitutions…"
             value={orderNotes}
             onChange={(e) => setOrderNotes(e.target.value)}
+            disabled={grandmaSmsPayCheck === "paid"}
             aria-label="Order notes"
+            style={grandmaSmsPayCheck === "paid" ? { opacity: 0.5, cursor: "not-allowed" } : {}}
           />
         </div>
 
@@ -6026,7 +6077,7 @@ export default function GrandmaPage() {
           <div className="pay-detail-row">
             <span className="pay-detail-label">{tPay.eta}</span>
             <span className="pay-detail-value">
-              {fulfillmentMode === "pickup" ? tPay.etaAtShop : `${etaRange.lo}–${etaRange.hi} min`}
+              {fulfillmentMode === "pickup" || fulfillmentMode === "takeaway" ? tPay.etaAtShop : `${etaRange.lo}–${etaRange.hi} min`}
             </span>
           </div>
           <div className="pay-detail-sub" style={{ paddingTop: 2 }}>
@@ -6087,14 +6138,9 @@ export default function GrandmaPage() {
                   onChange={(e) => setGrandmaBuyerPhoneInput(e.target.value)}
                   className="pay-input-tap min-h-[48px] border-emerald-200 bg-white text-base focus-visible:ring-emerald-500/30"
                 />
-                <p className="text-xs leading-snug text-emerald-900/80">
-                  {tPay.paymentGuestPhoneNote}{" "}
-                  <a
-                    href={`${GRANDMA_PATHS.login}?redirect=${encodeURIComponent(GRANDMA_PATHS.appRoot)}`}
-                    className="font-semibold text-emerald-800 underline underline-offset-2"
-                  >
-                    {tPay.signIn}
-                  </a>
+                  <p className="text-xs leading-snug text-emerald-900/80">
+                  {tPay.paymentGuestPhoneNote} {" "}
+                  <span className="font-semibold text-emerald-800">{tPay.signIn}</span>
                 </p>
               </div>
             ) : null}
@@ -6186,24 +6232,57 @@ export default function GrandmaPage() {
                   <Textarea
                     value={grandmaMomoSmsPaste}
                     onChange={(e) => {
+                      // Allow both typing and pasting
                       setGrandmaMomoSmsPaste(e.target.value)
                       setGrandmaSmsPayCheck(null)
                       setGrandmaSmsMatchResult(null)
                     }}
+                    onFocus={(e) => {
+                      // Ensure keyboard is visible on mobile
+                      e.currentTarget.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                    }}
+                    onPaste={(e) => {
+                      // Allow paste events as well
+                      const pastedText = e.clipboardData?.getData('text/plain') || ''
+                      if (pastedText) {
+                        setGrandmaMomoSmsPaste(pastedText)
+                        setGrandmaSmsPayCheck(null)
+                        setGrandmaSmsMatchResult(null)
+                      }
+                    }}
                     className="min-h-[88px] resize-y border-[#dbe7f3] text-sm"
-                    placeholder="MTN MoMo…"
+                    placeholder="MTN MoMo… (type or paste SMS)"
                     aria-label={tPay.payStepReadMoMoSmsTitle}
+                    inputMode="text"
+                    autoComplete="off"
                   />
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="w-full border-[#dbe7f3] bg-[#f7fbff] text-[#17324d] hover:bg-[#eef6ff]"
-                    onClick={() => verifyGrandmaMoMoSms()}
-                    disabled={grandTotal < 1 || !grandmaMomoSmsPaste.trim()}
-                  >
-                    {tPay.payStepVerifySms}
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="flex-1 border-[#dbe7f3] bg-[#f7fbff] text-[#17324d] hover:bg-[#eef6ff]"
+                      onClick={() => verifyGrandmaMoMoSms()}
+                      disabled={grandTotal < 1 || !grandmaMomoSmsPaste.trim() || grandmaSmsPayCheck === "paid"}
+                    >
+                      {tPay.payStepVerifySms}
+                    </Button>
+                    {grandmaSmsPayCheck === "mismatch" ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="border-red-300 text-red-600 hover:bg-red-50"
+                        onClick={() => {
+                          setGrandmaMomoSmsPaste("")
+                          setGrandmaSmsPayCheck(null)
+                          setGrandmaSmsMatchResult(null)
+                        }}
+                      >
+                        Clear & Retry
+                      </Button>
+                    ) : null}
+                  </div>
                   {grandmaSmsPayCheck === "paid" ? (
                     <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-2 text-xs font-medium text-emerald-900">
                       {grandmaSmsMatchResult?.txId
@@ -6221,9 +6300,11 @@ export default function GrandmaPage() {
                   ) : null}
                   {grandmaSmsPayCheck === "mismatch" && grandmaSmsMatchResult ? (
                     <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-2 text-xs text-red-900">
-                      {tPay.payStepPaymentMismatch
-                        .replace("{got}", String(grandmaSmsMatchResult.amount ?? "—"))
-                        .replace("{expected}", Math.round(grandTotal).toLocaleString())}
+                      {grandmaSmsMatchResult.rejectReason === "expired_sms"
+                        ? "This MoMo SMS is too old or missing its timestamp. Please use the fresh confirmation SMS from the last 15 minutes."
+                        : tPay.payStepPaymentMismatch
+                            .replace("{got}", String(grandmaSmsMatchResult.amount ?? "—"))
+                            .replace("{expected}", Math.round(grandTotal).toLocaleString())}
                     </div>
                   ) : null}
                 </div>
@@ -6314,24 +6395,57 @@ export default function GrandmaPage() {
                   <Textarea
                     value={grandmaMomoSmsPaste}
                     onChange={(e) => {
+                      // Allow both typing and pasting
                       setGrandmaMomoSmsPaste(e.target.value)
                       setGrandmaSmsPayCheck(null)
                       setGrandmaSmsMatchResult(null)
                     }}
+                    onFocus={(e) => {
+                      // Ensure keyboard is visible on mobile
+                      e.currentTarget.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                    }}
+                    onPaste={(e) => {
+                      // Allow paste events as well
+                      const pastedText = e.clipboardData?.getData('text/plain') || ''
+                      if (pastedText) {
+                        setGrandmaMomoSmsPaste(pastedText)
+                        setGrandmaSmsPayCheck(null)
+                        setGrandmaSmsMatchResult(null)
+                      }
+                    }}
                     className="min-h-[88px] resize-y border-[#dbe7f3] text-sm"
-                    placeholder="Airtel Money…"
+                    placeholder="Airtel Money… (type or paste SMS)"
                     aria-label={tPay.payStepReadMoMoSmsTitle}
+                    inputMode="text"
+                    autoComplete="off"
                   />
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="w-full border-[#dbe7f3] bg-[#f7fbff] text-[#17324d] hover:bg-[#eef6ff]"
-                    onClick={() => verifyGrandmaMoMoSms()}
-                    disabled={grandTotal < 1 || !grandmaMomoSmsPaste.trim()}
-                  >
-                    {tPay.payStepVerifySms}
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="flex-1 border-[#dbe7f3] bg-[#f7fbff] text-[#17324d] hover:bg-[#eef6ff]"
+                      onClick={() => verifyGrandmaMoMoSms()}
+                      disabled={grandTotal < 1 || !grandmaMomoSmsPaste.trim() || grandmaSmsPayCheck === "paid"}
+                    >
+                      {tPay.payStepVerifySms}
+                    </Button>
+                    {grandmaSmsPayCheck === "mismatch" ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="border-red-300 text-red-600 hover:bg-red-50"
+                        onClick={() => {
+                          setGrandmaMomoSmsPaste("")
+                          setGrandmaSmsPayCheck(null)
+                          setGrandmaSmsMatchResult(null)
+                        }}
+                      >
+                        Clear & Retry
+                      </Button>
+                    ) : null}
+                  </div>
                   {grandmaSmsPayCheck === "paid" ? (
                     <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-2 text-xs font-medium text-emerald-900">
                       {grandmaSmsMatchResult?.txId
@@ -6349,9 +6463,11 @@ export default function GrandmaPage() {
                   ) : null}
                   {grandmaSmsPayCheck === "mismatch" && grandmaSmsMatchResult ? (
                     <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-2 text-xs text-red-900">
-                      {tPay.payStepPaymentMismatch
-                        .replace("{got}", String(grandmaSmsMatchResult.amount ?? "—"))
-                        .replace("{expected}", Math.round(grandTotal).toLocaleString())}
+                      {grandmaSmsMatchResult.rejectReason === "expired_sms"
+                        ? "This MoMo SMS is too old or missing its timestamp. Please use the fresh confirmation SMS from the last 15 minutes."
+                        : tPay.payStepPaymentMismatch
+                            .replace("{got}", String(grandmaSmsMatchResult.amount ?? "—"))
+                            .replace("{expected}", Math.round(grandTotal).toLocaleString())}
                     </div>
                   ) : null}
                 </div>
@@ -6913,11 +7029,7 @@ export default function GrandmaPage() {
                       onClick={() => {
                         setSettingsOpen(false)
                         const target = GRANDMA_PATHS.buyerOrders
-                        if (isAuthenticated) router.push(target)
-                        else
-                          router.push(
-                            `${GRANDMA_PATHS.login}?redirect=${encodeURIComponent(target)}`,
-                          )
+                        router.push(target)
                       }}
                       className="mt-2 w-full rounded-xl border border-border bg-background px-3 py-2.5 text-left text-sm font-bold hover:bg-muted/60"
                     >

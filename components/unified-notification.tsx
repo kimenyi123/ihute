@@ -5,7 +5,7 @@ import { useAuthStore } from "@/lib/auth-store"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Bell, X, ShoppingCart, Pin, PinOff, Star } from "lucide-react"
+import { Bell, X, ShoppingCart, Pin, PinOff, Star, Wallet } from "lucide-react"
 import { usePathname, useRouter } from "next/navigation"
 import { RatingModal } from "./RatingModal"
 import { cn } from "@/lib/utils"
@@ -34,7 +34,49 @@ type RatingNotification = {
   isRead: boolean
 }
 
-type UnifiedNotification = OrderNotification | RatingNotification
+type UrubutoNotification = {
+  id: number
+  type: "urubuto"
+  message: string
+  action: string
+  createdAt: string
+  isRead: boolean
+}
+
+type UnifiedNotification = OrderNotification | RatingNotification | UrubutoNotification
+
+const SELLER_NOTIF_DISMISSED_KEY = "ihute-seller-dismissed-notifs"
+
+type DismissedNotifStore = { orders: string[]; urubuto: number[] }
+
+function loadDismissedNotifs(): DismissedNotifStore {
+  if (typeof window === "undefined") return { orders: [], urubuto: [] }
+  try {
+    const raw = localStorage.getItem(SELLER_NOTIF_DISMISSED_KEY)
+    if (!raw) return { orders: [], urubuto: [] }
+    const parsed = JSON.parse(raw) as DismissedNotifStore
+    return {
+      orders: Array.isArray(parsed.orders) ? parsed.orders.map(String) : [],
+      urubuto: Array.isArray(parsed.urubuto) ? parsed.urubuto : [],
+    }
+  } catch {
+    return { orders: [], urubuto: [] }
+  }
+}
+
+function saveDismissedNotifs(store: DismissedNotifStore) {
+  if (typeof window === "undefined") return
+  localStorage.setItem(SELLER_NOTIF_DISMISSED_KEY, JSON.stringify(store))
+}
+
+function dismissOrderNotif(orderId: string) {
+  const store = loadDismissedNotifs()
+  const id = String(orderId)
+  if (!store.orders.includes(id)) {
+    store.orders.push(id)
+    saveDismissedNotifs(store)
+  }
+}
 
 // Minimal shape we expect from the backend
 type RawOrder = {
@@ -129,7 +171,7 @@ function getOrderStatusBadgeClass(status: TrackOrderStatus): string {
 }
 
 export function UnifiedNotification() {
-  const { user, isAuthenticated } = useAuthStore()
+  const { user, isAuthenticated, hasHydrated } = useAuthStore()
   const router = useRouter()
   const pathname = usePathname()
   const [notifications, setNotifications] = useState<UnifiedNotification[]>([])
@@ -160,9 +202,20 @@ export function UnifiedNotification() {
     }
   }, [pinned])
 
+  // Clear Urubuto items from bell when marked read on /supplier/urubuto
+  useEffect(() => {
+    const onUrubutoRead = () => {
+      setNotifications((prev) => prev.filter((n) => n.type !== "urubuto"))
+    }
+    window.addEventListener("ihute-urubuto-notifications-read", onUrubutoRead)
+    return () => window.removeEventListener("ihute-urubuto-notifications-read", onUrubutoRead)
+  }, [])
+
   // Fetch order notifications
   useEffect(() => {
-    if (!isAuthenticated || user?.role !== "supplier") return
+    if (!hasHydrated || !isAuthenticated || user?.role !== "supplier") return
+
+    const controller = new AbortController()
 
     const fetchOrders = async () => {
       try {
@@ -171,11 +224,13 @@ export function UnifiedNotification() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ sellerAccount: user.ishyigaAccount }),
           cache: "no-store",
+          signal: controller.signal,
         })
         const json = await res.json()
 
         if (json?.ok && Array.isArray(json.orders)) {
           const raw: RawOrder[] = json.orders as RawOrder[]
+          const dismissed = loadDismissedNotifs()
 
           const recent: OrderNotification[] = raw
             .map((order: RawOrder): OrderNotification | null => {
@@ -188,23 +243,29 @@ export function UnifiedNotification() {
                 order.status ??
                 order.STATUS
               const rawPaymentStatus = order.PAYMENT_STATUS ?? order.paymentStatus
+              const payStatus = String(rawPaymentStatus ?? "").trim().toUpperCase()
+              if (payStatus === "PAID" || payStatus === "COMPLETED") {
+                return null
+              }
               const status = mapBackendOrderStatusToTrack(
                 rawOrderStatus ? String(rawOrderStatus) : undefined,
                 rawPaymentStatus ? String(rawPaymentStatus) : undefined,
               )
+              const orderId = String(order.ID_ORDER ?? "")
               return {
-                id: `order-${String(order.ID_ORDER ?? "")}`,
+                id: `order-${orderId}`,
                 type: "order",
                 orderId: order.ID_ORDER ?? "",
                 buyerName,
                 amount: Number(order.AMOUNT ?? order.total ?? 0),
                 timestamp: new Date(tsMs).toISOString(),
-                isNew: true,
+                isNew: !dismissed.orders.includes(orderId),
                 status,
                 statusLabel: getOrderStatusLabel(status),
               }
             })
             .filter((x: OrderNotification | null): x is OrderNotification => x !== null)
+            .filter((n: OrderNotification) => n.isNew)
             .filter((n: OrderNotification) => new Date(n.timestamp).getTime() > Date.now() - 24 * 60 * 60 * 1000)
             .sort((a: OrderNotification, b: OrderNotification) =>
               new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
@@ -212,41 +273,55 @@ export function UnifiedNotification() {
             .slice(0, 5)
 
           setNotifications((prev) => {
-            const ratings = prev.filter((n): n is RatingNotification => n.type === "rating")
-            const seen = new Set(prev.filter((n): n is OrderNotification => n.type === "order").map((n) => String(n.orderId)))
-            const deduped = recent.filter((n) => !seen.has(String(n.orderId)))
-            
-            if (pinned && deduped.length > 0) {
+            const other = prev.filter((n): n is RatingNotification | UrubutoNotification => n.type !== "order")
+            if (pinned && recent.length > 0) {
               setShowNotifications(true)
             }
-            
-            return [...deduped, ...ratings].sort((a, b) => {
-              const aTime = a.type === "order" ? new Date(a.timestamp).getTime() : a.createdAt
-              const bTime = b.type === "order" ? new Date(b.timestamp).getTime() : b.createdAt
+            return [...recent, ...other].sort((a, b) => {
+              const aTime =
+                a.type === "order"
+                  ? new Date(a.timestamp).getTime()
+                  : a.type === "rating"
+                    ? a.createdAt
+                    : new Date(a.createdAt).getTime()
+              const bTime =
+                b.type === "order"
+                  ? new Date(b.timestamp).getTime()
+                  : b.type === "rating"
+                    ? b.createdAt
+                    : new Date(b.createdAt).getTime()
               return bTime - aTime
             }).slice(0, 10)
           })
         }
       } catch (err) {
+        if (controller.signal.aborted) return
         console.error("Failed to fetch order notifications:", err)
       }
     }
 
     const interval = setInterval(fetchOrders, 30000)
     fetchOrders()
-    return () => clearInterval(interval)
-  }, [isAuthenticated, user?.role, user?.ishyigaAccount, pinned])
+    return () => {
+      controller.abort()
+      clearInterval(interval)
+    }
+  }, [hasHydrated, isAuthenticated, user?.role, user?.ishyigaAccount, pinned])
 
   // Fetch rating notifications
   useEffect(() => {
-    if (!isAuthenticated || !user) return
+    if (!hasHydrated || !isAuthenticated || !user) return
+
+    const controller = new AbortController()
 
     const fetchRatings = async () => {
       try {
         const userEmail = user?.email || user?.ishyigaAccount
         if (!userEmail) return
 
-        const res = await fetch(`/api/notifications/unread?userId=${encodeURIComponent(userEmail)}`)
+        const res = await fetch(`/api/notifications/unread?userId=${encodeURIComponent(userEmail)}`, {
+          signal: controller.signal,
+        })
         const data = await res.json()
 
         if (data.ok && Array.isArray(data.notifications)) {
@@ -270,7 +345,7 @@ export function UnifiedNotification() {
           }))
 
           setNotifications((prev) => {
-            const orders = prev.filter((n): n is OrderNotification => n.type === "order")
+            const other = prev.filter((n): n is OrderNotification | UrubutoNotification => n.type !== "rating")
             const seen = new Set(prev.filter((n): n is RatingNotification => n.type === "rating").map((n) => n.id))
             const deduped = ratingNotifs.filter((n) => !seen.has(n.id))
             
@@ -278,28 +353,121 @@ export function UnifiedNotification() {
               setShowNotifications(true)
             }
             
-            return [...orders, ...deduped].sort((a, b) => {
-              const aTime = a.type === "order" ? new Date(a.timestamp).getTime() : a.createdAt
-              const bTime = b.type === "order" ? new Date(b.timestamp).getTime() : b.createdAt
+            return [...other.filter((n) => n.type === "order" || n.type === "urubuto"), ...deduped].sort((a, b) => {
+              const aTime =
+                a.type === "order"
+                  ? new Date(a.timestamp).getTime()
+                  : a.type === "rating"
+                    ? a.createdAt
+                    : new Date(a.createdAt).getTime()
+              const bTime =
+                b.type === "order"
+                  ? new Date(b.timestamp).getTime()
+                  : b.type === "rating"
+                    ? b.createdAt
+                    : new Date(b.createdAt).getTime()
               return bTime - aTime
             }).slice(0, 10)
           })
         }
       } catch (err) {
+        if (controller.signal.aborted) return
         console.error("Failed to fetch rating notifications:", err)
       }
     }
 
     const interval = setInterval(fetchRatings, 30000)
     fetchRatings()
-    return () => clearInterval(interval)
-  }, [isAuthenticated, user, pinned])
+    return () => {
+      controller.abort()
+      clearInterval(interval)
+    }
+  }, [hasHydrated, isAuthenticated, user, pinned])
+
+  // Urubuto onboarding / live notifications (supplier)
+  useEffect(() => {
+    if (!hasHydrated || !isAuthenticated || user?.role !== "supplier" || !user?.ishyigaAccount) return
+
+    const controller = new AbortController()
+
+    const fetchUrubuto = async () => {
+      try {
+        const account = user.ishyigaAccount?.trim()
+        if (!account) return
+        const res = await fetch(
+          `/api/supplier/urubuto/notifications?account=${encodeURIComponent(account)}&limit=8&unreadOnly=1`,
+          { signal: controller.signal },
+        )
+        const data = await res.json()
+        if (!data.ok || !Array.isArray(data.notifications)) return
+
+        const urubutoNotifs: UrubutoNotification[] = data.notifications
+          .filter((n: { isRead?: boolean }) => !n.isRead)
+          .map((n: {
+            id: number
+            message?: string
+            action?: string
+            createdAt?: string
+            isRead?: boolean
+          }) => ({
+            id: n.id,
+            type: "urubuto" as const,
+            message: n.message || "UrubutoPay update",
+            action: n.action || "",
+            createdAt: n.createdAt || new Date().toISOString(),
+            isRead: false,
+          }))
+
+        setNotifications((prev) => {
+          const orders = prev.filter((x): x is OrderNotification => x.type === "order")
+          const ratings = prev.filter((x): x is RatingNotification => x.type === "rating")
+          if (pinned && urubutoNotifs.length > 0) {
+            setShowNotifications(true)
+          }
+          return [...orders, ...ratings, ...urubutoNotifs].sort((a, b) => {
+            const aTime =
+              a.type === "order"
+                ? new Date(a.timestamp).getTime()
+                : a.type === "rating"
+                  ? a.createdAt
+                  : new Date(a.createdAt).getTime()
+            const bTime =
+              b.type === "order"
+                ? new Date(b.timestamp).getTime()
+                : b.type === "rating"
+                  ? b.createdAt
+                  : new Date(b.createdAt).getTime()
+            return bTime - aTime
+          }).slice(0, 10)
+        })
+      } catch (err) {
+        if (controller.signal.aborted) return
+        console.error("Failed to fetch Urubuto notifications:", err)
+      }
+    }
+
+    const interval = setInterval(fetchUrubuto, 45000)
+    fetchUrubuto()
+    return () => {
+      controller.abort()
+      clearInterval(interval)
+    }
+  }, [hasHydrated, isAuthenticated, user?.role, user?.ishyigaAccount, pinned])
 
   const markAsRead = async (notification: UnifiedNotification) => {
     if (notification.type === "order") {
-      setNotifications((prev) =>
-        prev.map((n) => (n.type === "order" && n.id === notification.id ? { ...n, isNew: false } : n))
-      )
+      dismissOrderNotif(String(notification.orderId))
+      setNotifications((prev) => prev.filter((n) => n.type !== "order" || n.id !== notification.id))
+    } else if (notification.type === "urubuto") {
+      const account = user?.ishyigaAccount?.trim()
+      if (account) {
+        await fetch("/api/supplier/urubuto/notifications", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ account, notificationIds: [notification.id] }),
+        }).catch(() => undefined)
+      }
+      setNotifications((prev) => prev.filter((n) => n.type !== "urubuto" || n.id !== notification.id))
     } else {
       try {
         const userEmail = user?.email || user?.ishyigaAccount
@@ -318,8 +486,12 @@ export function UnifiedNotification() {
 
   const handleNotificationClick = async (notification: UnifiedNotification) => {
     if (notification.type === "order") {
+      await markAsRead(notification)
       router.push(`/supplier/orders/${notification.orderId}`)
-      markAsRead(notification)
+      if (!pinned) setShowNotifications(false)
+    } else if (notification.type === "urubuto") {
+      await markAsRead(notification)
+      router.push("/supplier/urubuto")
       if (!pinned) setShowNotifications(false)
     } else {
       // Handle rating notification
@@ -357,14 +529,20 @@ export function UnifiedNotification() {
   }
 
   const removeNotification = (notification: UnifiedNotification) => {
-    setNotifications((prev) => prev.filter((n) => 
-      n.type === "order" ? n.id !== notification.id : n.type === "rating" && n.id !== (notification as RatingNotification).id
-    ))
+    setNotifications((prev) =>
+      prev.filter((n) => {
+        if (notification.type === "order") return n.type !== "order" || n.id !== notification.id
+        if (notification.type === "rating") return n.type !== "rating" || n.id !== notification.id
+        return n.type !== "urubuto" || n.id !== notification.id
+      }),
+    )
   }
 
-  const newCount = notifications.filter((n) => 
-    n.type === "order" ? n.isNew : !n.isRead
-  ).length
+  const visibleNotifications = notifications.filter((n) =>
+    n.type === "order" ? n.isNew : n.type === "urubuto" ? !n.isRead : !n.isRead,
+  )
+
+  const newCount = visibleNotifications.length
 
   // Always show the bell for authenticated suppliers
   if (!isAuthenticated) return null
@@ -425,7 +603,7 @@ export function UnifiedNotification() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              {notifications.length === 0 ? (
+              {visibleNotifications.length === 0 ? (
                 <div className="p-8 text-center text-gray-500">
                   <Bell className="h-12 w-12 mx-auto mb-3 text-gray-300" />
                   <p className="font-medium">No notifications</p>
@@ -433,11 +611,12 @@ export function UnifiedNotification() {
                 </div>
               ) : (
                 <>
-                  {notifications.map((n) => (
+                  {visibleNotifications.map((n) => (
                 <div
-                  key={n.type === "order" ? n.id : `rating-${n.id}`}
+                  key={n.type === "order" ? n.id : n.type === "rating" ? `rating-${n.id}` : `urubuto-${n.id}`}
                   className={`p-3 rounded-lg border cursor-pointer ${
-                    (n.type === "order" && n.isNew) || (n.type === "rating" && !n.isRead)
+                    (n.type === "order" && n.isNew) ||
+                    ((n.type === "rating" || n.type === "urubuto") && !n.isRead)
                       ? "bg-blue-50 border-blue-200"
                       : "bg-gray-50"
                   }`}
@@ -459,11 +638,21 @@ export function UnifiedNotification() {
                           <p className="text-sm font-semibold">{n.amount.toLocaleString()} RWF</p>
                           <p className="text-xs text-gray-500">{fmt(n.timestamp)}</p>
                         </>
-                      ) : (
+                      ) : n.type === "rating" ? (
                         <>
                           <div className="flex items-center gap-2">
                             <Star className="h-4 w-4 text-yellow-500" />
                             <span className="font-medium text-sm">{n.title}</span>
+                            {!n.isRead && <Badge variant="default" className="text-xs">New</Badge>}
+                          </div>
+                          <p className="text-sm text-gray-600 mt-1">{n.message}</p>
+                          <p className="text-xs text-gray-500">{fmt(n.createdAt)}</p>
+                        </>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-2">
+                            <Wallet className="h-4 w-4 text-violet-600" />
+                            <span className="font-medium text-sm">UrubutoPay</span>
                             {!n.isRead && <Badge variant="default" className="text-xs">New</Badge>}
                           </div>
                           <p className="text-sm text-gray-600 mt-1">{n.message}</p>

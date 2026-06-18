@@ -10,6 +10,7 @@ import {
   resolvePublicTokenToOrderId,
 } from "@/lib/order-tracking-token"
 import { mapBackendOrderStatusToTrack, type TrackOrderStatus } from "@/lib/order-status-map"
+import { normalizeTableCommandPerson } from "@/lib/table-command-whatsapp"
 
 function rid() {
   return Math.random().toString(36).slice(2, 12)
@@ -271,6 +272,8 @@ export async function POST(req: NextRequest) {
           QTY: item.QUANTITY,
           UNIT_PRICE: item.UNIT_PRICE,
           UNIT: item.UNIT,
+          ORDERED_BY: item.ORDERED_BY ?? item.orderedBy,
+          ID_LIST: item.ID_LIST ?? item.lineId ?? item.id_list,
         })),
       }
 
@@ -309,23 +312,34 @@ export async function POST(req: NextRequest) {
     const paymentLegacyDisplay = rawPaymentStatus
     const effectivePaymentStatus = rawPaymentStatus
 
+    const orderNote = String(data.CONDITIONS ?? data.ORDER_NOTE ?? data.orderNote ?? "").trim()
+
     const itemsArray = Array.isArray(data.items)
-      ? data.items.map((item: any) => ({
+      ? data.items.map((item: any) => {
+          const qty = Number(item.QUANTITY ?? item.qty ?? item.QTY ?? 1) || 1
+          const unity = Number(item.UNITY_PRICE ?? item.unity_price ?? item.UNIT_PRICE ?? item.unitPrice ?? 0)
+          const request = Number(item.REQUEST_PRICE ?? item.request_price ?? item.REQUESTED_PRICE ?? 0)
+          const unitPrice = unity > 0 ? unity : request > 0 ? request : 0
+          return {
           ITEM_CODE: item.ITEM_CODE || item.item_code,
           ITEM_NAME: item.ITEM_NAME || item.name || "Product",
           name: item.ITEM_NAME || item.name || "Product",
-          QUANTITY: Number(item.QUANTITY ?? item.qty ?? item.QTY ?? 1),
-          qty: Number(item.QUANTITY ?? item.qty ?? item.QTY ?? 1),
+          QUANTITY: qty,
+          qty,
           SERVED_QTY: Number(item.CONFIRMED_RECEIVED_QTY ?? item.SERVED_QTY ?? item.served_qty ?? item.servedQty ?? item.received_quantity ?? 0),
           servedQty: Number(item.CONFIRMED_RECEIVED_QTY ?? item.SERVED_QTY ?? item.served_qty ?? item.servedQty ?? item.received_quantity ?? 0),
-          REQUEST_PRICE: Number(item.REQUEST_PRICE ?? item.request_price ?? item.REQUESTED_PRICE ?? item.UNIT_PRICE ?? item.unitPrice ?? 0),
-          UNITY_PRICE: Number(item.UNITY_PRICE ?? item.unity_price ?? item.SERVED_PRICE ?? item.served_price ?? item.UNIT_PRICE ?? item.unitPrice ?? 0),
+          REQUEST_PRICE: request || unitPrice,
+          UNITY_PRICE: unitPrice,
           servedAmount: Number(item.SERVED_AMOUNT ?? item.servedAmount ?? item.served_amount ?? item.UNITY_PRICE ?? item.unity_price ?? 0),
-          UNIT_PRICE: Number(item.UNIT_PRICE ?? item.unitPrice ?? 0),
-          unitPrice: Number(item.UNIT_PRICE ?? item.unitPrice ?? 0),
+          UNIT_PRICE: unitPrice,
+          unitPrice,
           UNIT: item.UNIT || item.unit,
           unit: item.UNIT || item.unit,
-        }))
+          ORDERED_BY: normalizeTableCommandPerson(item.ORDERED_BY ?? item.orderedBy),
+          orderedBy: normalizeTableCommandPerson(item.ORDERED_BY ?? item.orderedBy),
+          ID_LIST: Number(item.ID_LIST ?? item.lineId ?? item.id_list ?? 0) || undefined,
+          lineId: Number(item.ID_LIST ?? item.lineId ?? item.id_list ?? 0) || undefined,
+        }})
       : []
     const totalAmount = Number(data.AMOUNT ?? data.total ?? 0)
     const currency = (data.CURRENCY || "RWF").toString().trim()
@@ -367,13 +381,17 @@ export async function POST(req: NextRequest) {
       REFERENCE: data.REFERENCE,
       AMOUNT: totalAmount,
       SERVED_AMOUNT: Number(data.SERVED_AMOUNT ?? data.servedAmount ?? data.AMOUNT_SERVED ?? 0),
-      CONDITIONS: data.CONDITIONS ?? data.ORDER_NOTE ?? data.orderNote ?? "",
+      orderNote,
+      ORDER_NOTE: orderNote,
+      CONDITIONS: orderNote,
       CURRENCY: currency,
       CREATED_AT: createdAt,
       IS_TABLE_COMMAND: Boolean(data.IS_TABLE_COMMAND ?? data.table_command),
       TABLE_NAME: data.TABLE_NAME || data.table_name,
       TABLE_LOCATION: data.TABLE_LOCATION || data.table_location,
     }
+
+    console.log("[Orders Track API] Returning CONDITIONS:", order.CONDITIONS || "[empty]", "from data:", { CONDITIONS: data.CONDITIONS, ORDER_NOTE: data.ORDER_NOTE, orderNote: data.orderNote })
 
     const clientMeta = getOrderMeta(String(orderId))
     if (clientMeta?.buyerDeliveryAddress) {

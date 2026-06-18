@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server"
-import { getAuthUrl } from "@/lib/backend-config"
+import { getAuthUrl, resolveJavaAuthEndpointForReset } from "@/lib/backend-config"
 import { resetPasswordViaMysql } from "@/lib/forgot-password-mysql"
-import { coerceTelRawForPasswordReset, rwJavaResetTelVariants } from "@/lib/rwanda-phone"
+import {
+  coerceTelRawForPasswordReset,
+  normalizePhoneDigitsForAuth,
+  normalizeRwandaMobileE164,
+  rwJavaResetTelVariants,
+} from "@/lib/rwanda-phone"
 
 const JAVA_AUTH_URL = getAuthUrl()
 
@@ -18,6 +23,70 @@ function isUnknownAction(json: { error?: string; code?: string } | null): boolea
   return c === "AUTH_UNKNOWN_ACTION" || e.includes("unknown action")
 }
 
+function isResetFlowMismatch(json: { error?: string; code?: string } | null): boolean {
+  const e = (json?.error ?? "").toLowerCase()
+  const c = (json?.code ?? "").toUpperCase()
+  return c === "AUTH_CHANGE_PW_MISSING_CURRENT" || e.includes("current password is required")
+}
+
+export function shouldReturnControlledResetError(
+  json: { error?: string; code?: string } | null,
+  badJsonSeen: boolean,
+  dbError?: string | null
+): boolean {
+  return badJsonSeen || isUnknownAction(json) || isResetFlowMismatch(json) || dbError === "no_db"
+}
+
+export function buildResetFailureResponse(rid: string) {
+  return NextResponse.json(
+    {
+      ok: false,
+      error: "Password reset failed, please try again.",
+      rid,
+      code: "AUTH_RESET_FAIL",
+    },
+    { status: 503 }
+  )
+}
+
+export function buildWrongEndpointResponse(rid: string) {
+  return NextResponse.json(
+    {
+      ok: false,
+      code: "AUTH_RESET_WRONG_ENDPOINT",
+      message: "Reset password is calling the wrong backend endpoint",
+      rid,
+    },
+    { status: 503 }
+  )
+}
+
+function isWrongResetEndpointResponse(json: { error?: string; code?: string } | null): boolean {
+  const code = (json?.code ?? "").toUpperCase()
+  const error = (json?.error ?? "").toLowerCase()
+  return code === "AUTH_CHANGE_PW_MISSING_CURRENT" || error.includes("current password is required")
+}
+
+export function isInvalidAuthEndpointResponse(status: number, contentType: string | null, text: string): boolean {
+  if (status === 404 || status === 405) return true
+  const ct = (contentType || "").toLowerCase()
+  if (ct.includes("text/html")) return true
+  const head = text.slice(0, 2000).toLowerCase()
+  return /<!doctype html|<html[\s>]|<body[\s>]/i.test(head) || /http status 404/i.test(head)
+}
+
+export function buildAuthEndpointInvalidResponse(rid: string) {
+  return NextResponse.json(
+    {
+      ok: false,
+      code: "AUTH_SERVICE_ENDPOINT_INVALID",
+      message: "Authentication service endpoint not reachable or misconfigured",
+      rid,
+    },
+    { status: 503 }
+  )
+}
+
 type AuthJson = {
   ok?: boolean
   error?: string
@@ -32,15 +101,14 @@ export async function POST(req: Request) {
   const rid = crypto.randomUUID()
   const t0 = Date.now()
 
-  if (!JAVA_AUTH_URL) {
-    return NextResponse.json({ ok: false, error: "Auth backend not configured", rid }, { status: 500 })
-  }
-
   try {
     const body = await req.json().catch(() => ({}))
     const emailTrimmed = String(body?.email ?? "").trim()
     const telRaw = coerceTelRawForPasswordReset(String(body?.tel ?? ""))
-    const telVariants = telRaw ? rwJavaResetTelVariants(telRaw) : []
+    const canonicalTel = normalizeRwandaMobileE164(telRaw) || normalizePhoneDigitsForAuth(telRaw) || telRaw
+    const telVariants = telRaw
+      ? Array.from(new Set([canonicalTel, telRaw, ...rwJavaResetTelVariants(telRaw)].filter(Boolean)))
+      : []
     const streetNumber = String(body?.streetNumber ?? "").trim()
     const newPassword = String(body?.newPassword ?? "")
 
@@ -63,8 +131,25 @@ export async function POST(req: Request) {
         console.warn(`[api/auth/forgot-password][${rid}] mysql (continuing to Java): ${fbPre.error}`)
       }
 
-      const javaUrl = new URL(JAVA_AUTH_URL)
-      javaUrl.searchParams.set("action", "resetPassword")
+      if (!JAVA_AUTH_URL) {
+        if (fbPre.error === "no_db") {
+          return buildResetFailureResponse(rid)
+        }
+
+        return NextResponse.json(
+          {
+            ok: false,
+            error: fbPre.error || "Auth backend not configured for password reset",
+            rid,
+          },
+          { status: 503 }
+        )
+      }
+
+      const candidates = await resolveJavaAuthEndpointForReset()
+      // The deployed UserAuthServlet currently expects the camelCase reset action name.
+      // Keep the Java attempt limited to that supported form instead of probing unsupported variants.
+      const actionVariants = ["resetPassword"]
       const javaFetchMs = javaResetFetchTimeoutMs()
 
       let lastJson: AuthJson = {}
@@ -72,62 +157,113 @@ export async function POST(req: Request) {
       let lastFetchErr: string | null = null
 
       type JavaAttempt =
-        | { tel: string; kind: "ok"; res: Response; json: AuthJson }
-        | { tel: string; kind: "fetch_err"; err: string }
-        | { tel: string; kind: "bad_json"; raw: string }
-
-      const javaAttempts = await Promise.all(
-        telVariants.map(async (tel): Promise<JavaAttempt> => {
-          const form = new URLSearchParams()
-          form.set("action", "resetPassword")
-          if (emailTrimmed) form.set("email", emailTrimmed)
-          form.set("tel", tel)
-          form.set("streetNumber", streetNumber)
-          form.set("newPassword", newPassword)
-          try {
-            const res = await fetch(javaUrl.toString(), {
-              method: "POST",
-              headers: { "Content-Type": "application/x-www-form-urlencoded" },
-              body: form.toString(),
-              cache: "no-store",
-              signal: AbortSignal.timeout(javaFetchMs),
-            })
-            const text = await res.text()
-            let json: AuthJson
-            try {
-              json = text ? JSON.parse(text) : {}
-            } catch {
-              return { tel, kind: "bad_json" as const, raw: text.slice(0, 400) }
-            }
-            return { tel, kind: "ok" as const, res, json }
-          } catch (e: unknown) {
-            const err = e instanceof Error ? e.message : String(e)
-            return { tel, kind: "fetch_err" as const, err }
+        | { tel: string; candidate: string; action: string; kind: "ok"; res: Response; json: AuthJson }
+        | { tel: string; candidate: string; action: string; kind: "fetch_err"; err: string }
+        | {
+            tel: string
+            candidate: string
+            action: string
+            kind: "bad_json"
+            raw: string
+            status: number
+            contentType: string | null
           }
-        })
-      )
+        | {
+            tel: string
+            candidate: string
+            action: string
+            kind: "invalid_endpoint"
+            raw: string
+            status: number
+            contentType: string | null
+          }
 
-      for (const a of javaAttempts) {
-        if (a.kind === "bad_json") {
-          return NextResponse.json(
-            { ok: false, error: "Bad response from auth server", raw: a.raw, rid },
-            { status: 502 }
-          )
+      const attemptPromises: Promise<JavaAttempt>[] = []
+      for (const candidate of candidates) {
+        for (const tel of telVariants) {
+          for (const actionName of actionVariants) {
+            attemptPromises.push(
+              (async (): Promise<JavaAttempt> => {
+                const form = new URLSearchParams()
+                form.set("action", actionName)
+                if (emailTrimmed) form.set("email", emailTrimmed)
+                form.set("tel", tel)
+                form.set("streetNumber", streetNumber)
+                form.set("newPassword", newPassword)
+                try {
+                  const res = await fetch(candidate.toString(), {
+                    method: "POST",
+                    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                    body: form.toString(),
+                    cache: "no-store",
+                    signal: AbortSignal.timeout(javaFetchMs),
+                  })
+                  const text = await res.text()
+                  if (isInvalidAuthEndpointResponse(res.status, res.headers.get("content-type"), text)) {
+                    return {
+                      tel,
+                      candidate,
+                      action: actionName,
+                      kind: "invalid_endpoint" as const,
+                      raw: text.slice(0, 400),
+                      status: res.status,
+                      contentType: res.headers.get("content-type"),
+                    }
+                  }
+                  let json: AuthJson
+                  try {
+                    json = text ? JSON.parse(text) : {}
+                  } catch {
+                    return {
+                      tel,
+                      candidate,
+                      action: actionName,
+                      kind: "bad_json" as const,
+                      raw: text.slice(0, 400),
+                      status: res.status,
+                      contentType: res.headers.get("content-type"),
+                    }
+                  }
+                  return { tel, candidate, action: actionName, kind: "ok" as const, res, json }
+                } catch (e: unknown) {
+                  const err = e instanceof Error ? e.message : String(e)
+                  return { tel, candidate, action: actionName, kind: "fetch_err" as const, err }
+                }
+              })()
+            )
+          }
         }
       }
 
+      const javaAttempts = await Promise.all(attemptPromises)
+      const badJsonAttempts: Array<{ tel: string; candidate: string; action: string; raw: string }> = []
+      let invalidEndpointSeen = false
+
       for (const a of javaAttempts) {
-        if (a.kind === "fetch_err") {
-          lastFetchErr = a.err
-          console.warn(`[api/auth/forgot-password][${rid}] Java fetch failed tel=${a.tel}: ${a.err}`)
+        if (a.kind === "invalid_endpoint") {
+          invalidEndpointSeen = true
+          console.warn(
+            `[api/auth/forgot-password][${rid}] invalid endpoint candidate=${a.candidate} action=${a.action} tel=${a.tel} status=${a.status} contentType=${a.contentType ?? "n/a"} raw=${a.raw.replace(/\s+/g, " ").slice(0, 180)}`
+          )
           continue
         }
-        if (a.kind !== "ok") continue
+        if (a.kind === "bad_json") {
+          console.warn(
+            `[api/auth/forgot-password][${rid}] bad_json from java candidate=${a.candidate} action=${a.action} tel=${a.tel} status=${a.status} contentType=${a.contentType ?? "n/a"} raw=${a.raw.replace(/\s+/g, " ").slice(0, 180)}`
+          )
+          badJsonAttempts.push({ tel: a.tel, candidate: a.candidate, action: a.action, raw: a.raw })
+          continue
+        }
+        if (a.kind === "fetch_err") {
+          lastFetchErr = a.err
+          console.warn(`[api/auth/forgot-password][${rid}] Java fetch failed candidate=${a.candidate} action=${a.action} tel=${a.tel}: ${a.err}`)
+          continue
+        }
         const { tel, res, json } = a
         lastRes = res
         lastJson = json
         console.log(
-          `[api/auth/forgot-password][${rid}] try tel=${tel} http=${res.status} ok=${json?.ok} code=${json?.code ?? ""} error=${json?.error ?? ""}`
+          `[api/auth/forgot-password][${rid}] try candidate=${a.candidate} action=${a.action} tel=${tel} http=${res.status} ok=${json?.ok} code=${json?.code ?? ""} error=${json?.error ?? ""}`
         )
         if (json?.ok === true) {
           console.log(`[api/auth/forgot-password][${rid}] Java ok in ${Date.now() - t0}ms (tel=${tel})`)
@@ -135,22 +271,20 @@ export async function POST(req: Request) {
         }
       }
 
-      if (isUnknownAction(lastJson)) {
-        const hint =
-          fbPre.error !== "no_db" && fbPre.error
-            ? ` MySQL fallback: ${fbPre.error}`
-            : ""
-        return NextResponse.json(
-          {
-            ok: false,
-            error:
-              "Password reset is not available on this server yet. Deploy the latest trading_ai WAR (UserAuthServlet with resetPassword), or set FORGOT_PASSWORD_MYSQL_* / ONBOARDING_MYSQL_* in .env.local for a database fallback." +
-              hint,
-            code: lastJson?.code ?? "AUTH_UNKNOWN_ACTION",
-            rid,
-          },
-          { status: 503 }
-        )
+      if (invalidEndpointSeen) {
+        return buildAuthEndpointInvalidResponse(rid)
+      }
+
+      if (isWrongResetEndpointResponse(lastJson)) {
+        return buildWrongEndpointResponse(rid)
+      }
+
+      if (badJsonAttempts.length > 0 && (!lastJson || Object.keys(lastJson).length === 0)) {
+        return buildResetFailureResponse(rid)
+      }
+
+      if (shouldReturnControlledResetError(lastJson, badJsonAttempts.length > 0, fbPre.error)) {
+        return buildResetFailureResponse(rid)
       }
 
       if (fbPre.error !== "no_db") {

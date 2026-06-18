@@ -3,6 +3,7 @@ import { getOrdersUrl } from "@/lib/backend-config"
 import { getOrCreatePublicTokenForOrderId } from "@/lib/order-tracking-token"
 import { DEFAULT_GUEST_ISHYIGA_ACCOUNT } from "@/lib/guest-checkout"
 import { orderErrorMessageWithProductNames } from "@/lib/order-error-display"
+import { resolveOrderPaymentStatus } from "@/lib/payment-utils"
 
 /** Java createOrder can be slow on cold Tomcat; default 60s (override with ORDER_CREATE_JAVA_TIMEOUT_MS). */
 const ORDER_CREATE_JAVA_TIMEOUT_MS = (() => {
@@ -158,6 +159,7 @@ export async function POST(req: Request) {
       "PAID_MTN_MOMO",
       "PAID_AIRTEL_MOMO",
       "PAID_CARD",
+      "PAID_URUBUTO",
       "MTN_MOMO",
       "AIRTEL_MOMO",
       "MOMO",
@@ -178,9 +180,18 @@ export async function POST(req: Request) {
       else paymentId = `COD_${Date.now()}`
     }
     const reference = String(bodyIn.reference ?? "").trim()
-    const isDigitalPayment =
-      paymentName.includes("MOMO") || paymentName.includes("AIRTEL") || paymentName.includes("CARD")
-    const paymentStatus = isDigitalPayment || reference.length > 0 ? "PAID" : "PENDING"
+    const orderNote = String(
+      bodyIn.orderNote ?? bodyIn.orderNotes ?? bodyIn.notes ?? bodyIn.ORDER_NOTE ?? bodyIn.CONDITIONS ?? ""
+    ).trim()
+    console.log("[Orders Create API] Received orderNote:", orderNote || "[empty]", "from body.orderNote:", bodyIn.orderNote)
+    const requestedPaymentStatus = String(
+      bodyIn.paymentStatus ?? bodyIn.PAYMENT_STATUS ?? "",
+    ).trim()
+    const paymentStatus = resolveOrderPaymentStatus(paymentName, {
+      paymentStatus: requestedPaymentStatus,
+      reference,
+      paymentId,
+    })
 
     /** Browser guest checkout — Java OrdersServlet must null-check buyer or read this flag (see GUEST_CHECKOUT_BUYER_ACCOUNT). */
     const isGuestCheckout = Boolean(
@@ -206,6 +217,7 @@ export async function POST(req: Request) {
       paymentName,
       paymentId,
       reference,
+      orderNote,
       currency: String(bodyIn.currency ?? "RWF"),
       paymentStatus,
       items,
@@ -253,6 +265,9 @@ export async function POST(req: Request) {
         form.set("paymentName", shared.paymentName)
         form.set("paymentId", shared.paymentId)
         form.set("reference", shared.reference)
+        if (shared.orderNote) form.set("orderNote", shared.orderNote)
+        if (shared.orderNote) form.set("ORDER_NOTE", shared.orderNote)
+        if (shared.orderNote) form.set("CONDITIONS", shared.orderNote)
         form.set("currency", shared.currency)
         form.set("paymentStatus", shared.paymentStatus)
         form.set("PAYMENT_STATUS", shared.paymentStatus)
@@ -323,6 +338,9 @@ export async function POST(req: Request) {
                 paymentName: shared.paymentName,
                 paymentId: shared.paymentId,
                 reference: shared.reference,
+                orderNote: shared.orderNote,
+                ORDER_NOTE: shared.orderNote,
+                CONDITIONS: shared.orderNote,
                 currency: shared.currency,
                 paymentStatus: shared.paymentStatus,
                 PAYMENT_STATUS: shared.paymentStatus,
