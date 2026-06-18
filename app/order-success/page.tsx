@@ -235,7 +235,7 @@ function OrderSuccessPageInner() {
         ? (orderDetails?.CONDITIONS || orderDetails?.ORDER_NOTE || orderDetails?.orderNote)
         : ""
 
-      message = [
+      const fallbackLines = [
         "Order",
         "",
         `Shop: ${sellerName}`,
@@ -247,11 +247,9 @@ function OrderSuccessPageInner() {
         "",
         `Follow: ${trackingUrl}`,
       ]
-      
-      console.log("[Order Success] Fallback message array before filter:", message)
-      message = message
-        .filter(Boolean)
-        .join("\n")
+
+      console.log("[Order Success] Fallback message array before filter:", fallbackLines)
+      message = fallbackLines.filter(Boolean).join("\n")
       
       console.log("[Order Success] Fallback final WhatsApp message:", message)
     }
