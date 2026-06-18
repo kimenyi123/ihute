@@ -1,6 +1,7 @@
 // app/api/seller-orders/details/route.ts
 import { NextResponse } from "next/server"
 import { getOrdersUrl, getSellerOrdersUrl } from "@/lib/backend-config"
+import { normalizeTableCommandPerson } from "@/lib/table-command-whatsapp"
 
 const PRIMARY_URL = getOrdersUrl()
 
@@ -84,6 +85,10 @@ function normalize(data: any) {
       total: qty * requestPrice,
       UNIT: it.UNIT ?? it.unit ?? it.measurement ?? "",
       ITEM_CODE: it.ITEM_CODE ?? it.code ?? String(it.ID_ORDER ?? ""),
+      ORDERED_BY: normalizeTableCommandPerson(it.ORDERED_BY ?? it.orderedBy),
+      orderedBy: normalizeTableCommandPerson(it.ORDERED_BY ?? it.orderedBy),
+      ID_LIST: Number(it.ID_LIST ?? it.lineId ?? it.id_list ?? 0) || undefined,
+      lineId: Number(it.ID_LIST ?? it.lineId ?? it.id_list ?? 0) || undefined,
     }
   })
 

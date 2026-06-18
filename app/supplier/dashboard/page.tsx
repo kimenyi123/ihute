@@ -873,21 +873,32 @@ function SupplierDashboard() {
     const itemName = product.ITEM_NAME || product.itemName || "this product";
     if (!confirm(`Are you sure you want to delete ${itemName}?`)) return;
 
+    if (!user?.ishyigaAccount) {
+      alert("No supplier account found");
+      return;
+    }
+
     try {
       const itemCode = product.ITEM_CODE || product.itemCode;
-      const res = await fetch(`/api/supplier/stock/${itemCode}`, {
+      const params = new URLSearchParams({
+        itemCode: String(itemCode),
+        account: user.ishyigaAccount,
+      });
+      const res = await fetch(`/api/supplier/stock?${params.toString()}`, {
         method: "DELETE",
+        credentials: "include",
       });
 
-      if (res.ok) {
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok && data.ok) {
         setSupplierProducts((prev) =>
           prev.filter((prod) =>
             (prod.ITEM_CODE || prod.itemCode) !== itemCode
           )
         );
       } else {
-        const data = await res.json();
-        alert(data.message || "Failed to delete product");
+        alert(data.message || data.error || "Failed to delete product");
       }
     } catch {
       alert("Error deleting product");
