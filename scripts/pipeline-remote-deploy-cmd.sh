@@ -21,6 +21,7 @@ else
   git fetch origin "\$DEPLOY_BRANCH"
   git checkout "\$DEPLOY_BRANCH" 2>/dev/null || git checkout -b "\$DEPLOY_BRANCH" --track "origin/\$DEPLOY_BRANCH"
   git reset --hard "origin/\$DEPLOY_BRANCH"
+  unset NODE_ENV
   npm ci --include=dev
   npm run build
   export NODE_ENV=production
