@@ -351,7 +351,10 @@ async function probeJavaAuthCandidate(candidate: string): Promise<boolean> {
 
 export async function resolveJavaAuthEndpointForReset(): Promise<string[]> {
   if (cachedValidJavaAuthEndpoint) return [cachedValidJavaAuthEndpoint]
-  if (authEndpointValidationInFlight) return (await authEndpointValidationInFlight) ? [await authEndpointValidationInFlight] : getJavaAuthUrlCandidates()
+  if (authEndpointValidationInFlight) {
+    const candidate = await authEndpointValidationInFlight
+    return candidate ? [candidate] : getJavaAuthUrlCandidates()
+  }
 
   authEndpointValidationInFlight = (async () => {
     for (const candidate of getJavaAuthUrlCandidates()) {
