@@ -21,9 +21,9 @@ else
   git fetch origin "\$DEPLOY_BRANCH"
   git checkout "\$DEPLOY_BRANCH" 2>/dev/null || git checkout -b "\$DEPLOY_BRANCH" --track "origin/\$DEPLOY_BRANCH"
   git reset --hard "origin/\$DEPLOY_BRANCH"
-  export NODE_ENV=production
-  npm ci
+  npm ci --include=dev
   npm run build
+  export NODE_ENV=production
   if pm2 describe "\$PM2_APP_NAME" >/dev/null 2>&1; then
     pm2 restart "\$PM2_APP_NAME" --update-env
   else
