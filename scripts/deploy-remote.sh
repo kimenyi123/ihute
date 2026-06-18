@@ -46,13 +46,13 @@ else
   log "WARNING: no .env in $DEPLOY_PATH — copy from .env.dev.example / server secrets before first run"
 fi
 
-export NODE_ENV=production
-
-log "Installing dependencies…"
-npm ci
+log "Installing dependencies (include devDependencies for next build)…"
+npm ci --include=dev
 
 log "Building Next.js…"
 npm run build
+
+export NODE_ENV=production
 
 log "Restarting PM2 process: $PM2_APP_NAME"
 if pm2 describe "$PM2_APP_NAME" >/dev/null 2>&1; then
