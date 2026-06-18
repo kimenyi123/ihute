@@ -1,12 +1,10 @@
 /**
- * PM2 process list for ihute-frontend deployments on ubuntu-s-8vcpu-16gb-ams3-01.
+ * PM2 process list — names must match `pm2 list` on ubuntu-s-8vcpu-16gb-ams3-01.
  *
- * First-time setup on the server:
- *   pm2 start ecosystem.config.cjs
- *   pm2 save
- *   pm2 startup   # follow printed instructions so PM2 survives reboot
- *
- * Each app reads PORT and secrets from its own .env in cwd (Next.js loads automatically).
+ *   ihute-dev      → /var/www/ihute-frontend-dev   (dev.ihute.rw)
+ *   ihute-beta     → /var/www/ihute-frontend_beta  (beta.ihute.rw)
+ *   ihute-frontend → /var/www/ihute-frontend       (ihute.rw)
+ *   ihute-grandma  → /var/www/grandma-ihute        (shop.ihute.rw)
  */
 module.exports = {
   apps: [
@@ -24,7 +22,7 @@ module.exports = {
       },
     },
     {
-      name: "ihute-frontend-dev",
+      name: "ihute-dev",
       cwd: "/var/www/ihute-frontend-dev",
       script: "npm",
       args: "start",
@@ -37,7 +35,7 @@ module.exports = {
       },
     },
     {
-      name: "ihute-frontend-beta",
+      name: "ihute-beta",
       cwd: "/var/www/ihute-frontend_beta",
       script: "npm",
       args: "start",
@@ -50,7 +48,7 @@ module.exports = {
       },
     },
     {
-      name: "grandma-ihute",
+      name: "ihute-grandma",
       cwd: "/var/www/grandma-ihute",
       script: "npm",
       args: "start",

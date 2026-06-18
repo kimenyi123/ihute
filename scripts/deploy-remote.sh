@@ -3,7 +3,7 @@
 #
 # Usage:
 #   ./scripts/deploy-remote.sh /var/www/ihute-frontend master ihute-frontend
-#   ./scripts/deploy-remote.sh /var/www/ihute-frontend-dev develop ihute-frontend-dev
+#   ./scripts/deploy-remote.sh /var/www/ihute-frontend-dev master ihute-dev
 #
 set -euo pipefail
 

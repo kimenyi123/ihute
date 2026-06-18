@@ -7,9 +7,9 @@ Automated build and deploy to the DigitalOcean server (`ubuntu-s-8vcpu-16gb-ams3
 | Path | Environment | Site | Git branch | PM2 name |
 |------|-------------|------|------------|----------|
 | `/var/www/ihute-frontend` | Production | ihute.rw | `master` or `main` | `ihute-frontend` |
-| `/var/www/ihute-frontend-dev` | Dev | dev.ihute.rw | `master` (auto on push) | `ihute-frontend-dev` |
-| `/var/www/ihute-frontend_beta` | Beta | beta.ihute.rw | `beta` | `ihute-frontend-beta` |
-| `/var/www/grandma-ihute` | Grandma | shop.ihute.rw | `GRANDMA` | `grandma-ihute` |
+| `/var/www/ihute-frontend-dev` | Dev | dev.ihute.rw | `master` (auto on push) | `ihute-dev` |
+| `/var/www/ihute-frontend_beta` | Beta | beta.ihute.rw | `beta` | `ihute-beta` |
+| `/var/www/grandma-ihute` | Grandma | shop.ihute.rw | `GRANDMA` | `ihute-grandma` |
 
 Each directory is its own git clone with its own `.env` (never committed). Builds run **on the server** so `NEXT_PUBLIC_*` values come from that environment’s `.env`.
 
@@ -128,7 +128,7 @@ Repeat for `/var/www/ihute-frontend`, `ihute-frontend_beta`, and `grandma-ihute`
 chmod +x /var/www/ihute-frontend/scripts/deploy-remote.sh
 
 # Example: bootstrap dev
-/var/www/ihute-frontend/scripts/deploy-remote.sh /var/www/ihute-frontend-dev master ihute-frontend-dev
+/var/www/ihute-frontend/scripts/deploy-remote.sh /var/www/ihute-frontend-dev master ihute-dev
 
 # Or start all apps from ecosystem file (after each path has .env + build)
 cd /var/www/ihute-frontend
