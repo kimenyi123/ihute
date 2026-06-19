@@ -159,6 +159,7 @@ interface AddProductModalProps {
   onClose: () => void;
   onSave: (product: ProductFormData) => void;
   editingProduct?: ProductFormData | null;
+  existingCodes?: string[];
 }
 
 export interface ProductFormData {
@@ -180,7 +181,8 @@ export default function AddProductModal({
   isOpen, 
   onClose, 
   onSave, 
-  editingProduct 
+  editingProduct, 
+  existingCodes = [],
 }: AddProductModalProps) {
   const language = useLanguageStore((s) => s.language);
   const ui = PRODUCT_MODAL_UI[language] ?? PRODUCT_MODAL_UI.en;
@@ -196,6 +198,7 @@ export default function AddProductModal({
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [priceWarning, setPriceWarning] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -233,6 +236,7 @@ export default function AddProductModal({
     }
     clearImage();
     setErrors({});
+    setPriceWarning(null);
   }, [editingProduct, isOpen, clearImage]);
 
   useEffect(() => {
@@ -268,6 +272,7 @@ export default function AddProductModal({
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
+    setPriceWarning(null);
 
     if (!formData.itemName.trim()) {
       newErrors.itemName = ui.errNameRequired;
@@ -275,6 +280,19 @@ export default function AddProductModal({
 
     if (!formData.itemCode.trim()) {
       newErrors.itemCode = ui.errCodeRequired;
+    } else {
+      // Prevent duplicate product codes 
+      const codeToCheck = formData.itemCode.trim().toUpperCase();
+      const isEditingSameCode =
+        editingProduct &&
+        editingProduct.itemCode.toUpperCase() === codeToCheck;
+      if (
+        !isEditingSameCode &&
+        existingCodes.some(c => c.toUpperCase() === codeToCheck)
+      ) {
+        newErrors.itemCode =
+          "This product code already exists. Please enter a unique code.";
+      }
     }
 
     if (formData.quantity < 0) {
@@ -287,6 +305,19 @@ export default function AddProductModal({
 
     if (formData.cost && formData.cost < 0) {
       newErrors.cost = ui.errCost;
+    }
+
+    // Warn when selling price is below cost price 
+    if (
+      formData.price > 0 &&
+      formData.cost &&
+      formData.cost > 0 &&
+      formData.price < formData.cost
+    ) {
+      const loss = (formData.cost - formData.price).toFixed(0);
+      setPriceWarning(
+        `⚠️ Sale price is ${loss} RWF below cost price — you will sell at a loss.`
+      );
     }
 
     setErrors(newErrors);
@@ -545,6 +576,11 @@ export default function AddProductModal({
               />
               {errors.price && (
                 <p className="text-red-500 text-xs mt-1">{errors.price}</p>
+              )}
+              {priceWarning && (
+                <p className="text-orange-500 text-xs mt-1 font-medium">
+                  {priceWarning}
+                </p>
               )}
             </div>
 
