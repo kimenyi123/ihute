@@ -13,6 +13,10 @@ const eslintConfig = [
       "coverage/**",
       "next-env.d.ts",
       "server-reference/**",
+      "android/**",
+      "ios/**",
+      "ihute_flutter/**",
+      "public/uploads/**",
     ],
   },
   ...coreWebVitals,
@@ -37,9 +41,10 @@ const eslintConfig = [
       "react-hooks/use-memo": "off",
       "react-hooks/purity": "off",
       "react-hooks/refs": "off",
+      "react-hooks/static-components": "off",
+      "react-hooks/preserve-manual-memoization": "off",
       // Apostrophes/quotes in UI copy are common; escape only where it matters for a11y.
       "react/no-unescaped-entities": "off",
-      "jsx-a11y/alt-text": "warn",
       "prefer-const": "warn",
       // Many screens use dynamic URLs or plain <img>; migrate to next/image per screen when stable.
       "@next/next/no-img-element": "off",

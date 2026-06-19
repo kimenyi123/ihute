@@ -926,7 +926,8 @@ function CartSummaryBody() {
       buyerPhone: contactPhone,
       buyerLocation: location,
       reference: `COD_${Date.now()}`,
-      paymentId: `COD_${Date.now()}`
+      paymentId: `COD_${Date.now()}`,
+      paymentStatus: "pending",
     })
 
     setCodOpen(false)
