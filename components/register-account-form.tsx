@@ -56,13 +56,8 @@ export function RegisterAccountForm({
 }: RegisterAccountFormProps) {
   const router = useRouter()
   const login = useAuthStore((state) => state.login)
-  const [mounted, setMounted] = useState(false)
   const [role, setRole] = useState<FormRole>(initialRole)
   const [currentStep, setCurrentStep] = useState(1)
-
-  useEffect(() => {
-    setMounted(true)
-  }, [])
 
   useEffect(() => {
     setRole(initialRole)
@@ -203,7 +198,7 @@ export function RegisterAccountForm({
       }
     }
     if (currentStep === 2 && role === "seller") {
-      if (!formData.companyName || !formData.sector || !formData.deliveryMode) {
+      if (!formData.companyName || !formData.sector || !formData.deliveryMode || !formData.tin.trim()) {
         setError("Please fill in all required business fields"); return
       }
     }
@@ -244,16 +239,6 @@ export function RegisterAccountForm({
   )
 
   // ── Render ────────────────────────────────────────────────────────────────
-  if (!mounted) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50/50 to-slate-100 p-4">
-        <div className="w-full max-w-2xl flex items-center justify-center min-h-[320px]">
-          <p className="text-slate-500">Loading...</p>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50/50 to-slate-100 p-4">
       <div className="w-full max-w-2xl space-y-4">
@@ -379,6 +364,17 @@ export function RegisterAccountForm({
                         ))}
                       </SelectContent>
                     </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="tin">TIN (Tax ID) <span className="text-destructive">*</span></Label>
+                    <Input
+                      id="tin"
+                      placeholder="e.g. 123456789"
+                      value={formData.tin}
+                      onChange={(e) => set("tin", e.target.value)}
+                      required
+                    />
                   </div>
 
                   <div className="space-y-2">
