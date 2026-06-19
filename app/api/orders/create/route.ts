@@ -379,6 +379,7 @@ export async function POST(req: Request) {
           ok: true,
           orderId: oid,
           ...(trackToken ? { trackToken } : {}),
+          ...(json?.tableCommand ? { tableCommand: json.tableCommand } : {}),
           via: url,
           sellerTel: json?.sellerTel ?? "",
           paymentName: shared.paymentName,
