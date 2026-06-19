@@ -63,6 +63,7 @@ function OrderSuccessPageInner() {
   const buyerPhone = searchParams.get("buyerPhone")
   const total = searchParams.get("total")
   const fromGrandma = searchParams.get("from") === "grandma"
+  const fromTable = searchParams.get("fromTable") === "1"
   const autoWhatsApp = searchParams.get("autoWhatsApp") === "1"
   const momoTxId = searchParams.get("momoTxId")?.trim() || ""
   const paymentQuery = searchParams.get("payment")?.trim() || ""
@@ -74,6 +75,12 @@ function OrderSuccessPageInner() {
   const [showRatingModal, setShowRatingModal] = useState(false)
   const [ratingItems, setRatingItems] = useState<Array<{ code: string, name: string }>>([])
   const [hasCheckedRating, setHasCheckedRating] = useState(false)
+  /** Set after mount so tracking/WhatsApp URLs match SSR (relative) then upgrade to absolute. */
+  const [clientOrigin, setClientOrigin] = useState("")
+
+  useEffect(() => {
+    setClientOrigin(window.location.origin)
+  }, [])
 
   // ✅ Get table session reactively from store
   const tableSession = useTableCommandStore((state) => state.activeSession)
@@ -182,13 +189,16 @@ function OrderSuccessPageInner() {
     ""
   )
 
-  const siteBase = (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw").replace(/\/Trading\/?$/, "")
   const trackSlugForUrl = trackToken || orderId
   const trackPath = `/track-order/${encodeURIComponent(trackSlugForUrl || "")}${fromGrandma ? "?from=grandma" : ""}`
-  const trackingUrl =
-    typeof window !== "undefined"
-      ? `${window.location.origin}${trackPath}`
-      : `${siteBase.replace(/\/$/, "")}${trackPath}`
+  const siteBase = (process.env.NEXT_PUBLIC_SITE_URL || "https://ihute.rw")
+    .replace(/\/Trading\/?$/, "")
+    .replace(/\/$/, "")
+  const trackingUrl = clientOrigin
+    ? `${clientOrigin}${trackPath}`
+    : siteBase
+      ? `${siteBase}${trackPath}`
+      : trackPath
 
   // Build WhatsApp message with product details - memoized to recalculate when orderDetails changes
   const { whatsappMessage, whatsappHref } = useMemo(() => {
@@ -271,6 +281,7 @@ function OrderSuccessPageInner() {
     trackingUrl,
     momoTxId,
     paymentQuery,
+    clientOrigin,
   ])
 
   useEffect(() => {
@@ -462,6 +473,14 @@ function OrderSuccessPageInner() {
 
           {/* Action Buttons */}
           <div className="flex flex-col gap-3 pt-2">
+            {fromTable ? (
+              <Button className="w-full bg-white text-[#0369a1] hover:bg-white/90" asChild>
+                <Link href="/cart" className="inline-flex items-center justify-center gap-2">
+                  Add more to table
+                  <ArrowRight className="h-4 w-4 shrink-0" aria-hidden />
+                </Link>
+              </Button>
+            ) : null}
             {fromGrandma && orderId ? (
               <Button className="w-full bg-white text-[#0369a1] hover:bg-white/90" asChild>
                 <Link
