@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react"
 import { formatPaymentMethod } from "@/lib/payment-utils"
+import { buildOrderWhatsAppMessage, isTableCommandOrder } from "@/lib/table-command-whatsapp"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { RatingModal } from "@/components/RatingModal"
 import { useTableCommandStore } from "@/lib/table-command-store"
@@ -191,77 +192,42 @@ function OrderSuccessPageInner() {
 
   // Build WhatsApp message with product details - memoized to recalculate when orderDetails changes
   const { whatsappMessage, whatsappHref } = useMemo(() => {
-    const formatCurrency = (amount: number) => `${amount.toLocaleString()} RWF`
-    const padRight = (s: string, w: number) => (s.length >= w ? s : s + ' '.repeat(w - s.length))
-    const padLeft = (s: string, w: number) => (s.length >= w ? s : ' '.repeat(w - s.length) + s)
-    const trunc = (s: string, w: number) => (s.length > w ? s.slice(0, w - 1) + '…' : s)
-
-    let message = ''
+    let message = ""
 
     if (orderDetails?.items && orderDetails.items.length > 0) {
-      // Build detailed message with product table - matching cart-summary format
-      const NAME_W = 44, QTY_W = 5, AMT_W = 14
-      const header = padRight('Product name', NAME_W) + padLeft('Qty', QTY_W) + padLeft('Amount', AMT_W)
-      const sep = '-'.repeat(NAME_W + QTY_W + AMT_W)
-
-      const lines = orderDetails.items.map((item: any) => {
-        const nm = padRight(trunc(item.name.replace(/\s+/g, ' ').trim(), NAME_W), NAME_W)
-        const qt = padLeft(String(item.qty), QTY_W)
-        const amt = padLeft(formatCurrency(item.qty * item.unitPrice), AMT_W)
-        return nm + qt + amt
-      })
-
-      // Determine paid amount based on payment method
       const paymentMethod =
         orderDetails.paymentMethod || paymentQuery || "Unknown"
       const isPaid = paymentMethod && !paymentMethod.toLowerCase().includes("delivery")
       const paidAmount = isPaid ? orderDetails.total : 0
+      const isTable = isTableCommandOrder(orderDetails)
+      const descriptionText =
+        orderDetails.CONDITIONS?.trim() ||
+        orderDetails.ORDER_NOTE?.trim() ||
+        orderDetails.orderNote?.trim() ||
+        ""
 
-      console.log("[Order Success] Building WhatsApp message - Payment:", paymentMethod, "isPaid:", isPaid)
-      console.log("[Order Success] Order Details - CONDITIONS:", orderDetails.CONDITIONS, "ORDER_NOTE:", orderDetails.ORDER_NOTE)
-
-      // Build order description block if present (show above product list)
-      const descriptionText = (orderDetails.CONDITIONS?.trim() || orderDetails.ORDER_NOTE?.trim() || orderDetails.orderNote?.trim())
-        ? (orderDetails.CONDITIONS || orderDetails.ORDER_NOTE || orderDetails.orderNote)
-        : ""
-
-      const descriptionBlock = descriptionText
-        ? ["", "Order Description:", descriptionText, ""]
-        : []
-
-      message = [
-        "Order",
-        "",
-        `Shop: ${sellerName || orderDetails.sellerName}`,
-        orderDetails.buyerLocation ? `Location: ${orderDetails.buyerLocation}` : "",
-        `Order ID: ${displayOrderNo}`,
-        momoTxId ? `MoMo TxId: ${momoTxId}` : "",
-        ...descriptionBlock,
-        "```",
-        header,
-        sep,
-        ...lines,
-        "```",
-        `Total: ${formatCurrency(orderDetails.total)}`,
-        `Discount: ${formatCurrency(0)}`,
-        `Paid: ${formatCurrency(paidAmount)}`,
-        "",
-        `Paid at: ${formatPaymentMethod(paymentMethod)}`,
-        `My phone: ${buyerPhone}`,
-        "",
-        `Follow: ${trackingUrl}`,
-      ]
-
-      // Log the message array to see if notes are included
-      const notesCondition = orderDetails.CONDITIONS?.trim() || orderDetails.ORDER_NOTE?.trim() || orderDetails.orderNote?.trim()
-      console.log("[Order Success] Notes condition result:", notesCondition)
-      console.log("[Order Success] Message array before filter:", message)
-
-      message = message
-        .filter(Boolean)
-        .join("\n")
-
-      console.log("[Order Success] Final WhatsApp message:", message)
+      message = buildOrderWhatsAppMessage({
+        shop: sellerName || orderDetails.sellerName,
+        location: orderDetails.buyerLocation,
+        orderId: displayOrderNo,
+        items: orderDetails.items.map((item: any) => ({
+          name: item.name,
+          qty: item.qty,
+          unitPrice: item.unitPrice,
+          orderedBy: item.orderedBy ?? item.ORDERED_BY,
+          lineId: item.lineId ?? item.ID_LIST,
+        })),
+        total: orderDetails.total,
+        discount: 0,
+        paid: paidAmount,
+        paidAt: formatPaymentMethod(paymentMethod),
+        reference: displayOrderNo ? `ORDER ${displayOrderNo}` : undefined,
+        myPhone: buyerPhone ?? undefined,
+        link: trackingUrl,
+        isTableCommand: isTable,
+        momoTxId: momoTxId || undefined,
+        orderDescription: descriptionText || undefined,
+      })
     } else {
       // Fallback message without product details
       console.log("[Order Success] Using fallback message (no items)")
@@ -269,7 +235,7 @@ function OrderSuccessPageInner() {
         ? (orderDetails?.CONDITIONS || orderDetails?.ORDER_NOTE || orderDetails?.orderNote)
         : ""
 
-      message = [
+      const fallbackLines = [
         "Order",
         "",
         `Shop: ${sellerName}`,
@@ -281,11 +247,9 @@ function OrderSuccessPageInner() {
         "",
         `Follow: ${trackingUrl}`,
       ]
-      
-      console.log("[Order Success] Fallback message array before filter:", message)
-      message = message
-        .filter(Boolean)
-        .join("\n")
+
+      console.log("[Order Success] Fallback message array before filter:", fallbackLines)
+      message = fallbackLines.filter(Boolean).join("\n")
       
       console.log("[Order Success] Fallback final WhatsApp message:", message)
     }

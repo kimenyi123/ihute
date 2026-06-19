@@ -30,7 +30,7 @@ function looksLikeJavaTradingBase(raw: string): boolean {
 
 function getExplicitBackendBase(): string {
   const backendUrl = process.env.BACKEND_URL?.trim() || ""
-  const javaBackendBase = process.env.JAVA_BACKEND_BASE?.trim() || ""
+  const javaBackendBase = process.env.npm ?.trim() || ""
   const publicApiUrl = process.env.NEXT_PUBLIC_API_URL?.trim() || ""
   return javaBackendBase || backendUrl || (looksLikeJavaTradingBase(publicApiUrl) ? publicApiUrl : "")
 }
@@ -351,7 +351,10 @@ async function probeJavaAuthCandidate(candidate: string): Promise<boolean> {
 
 export async function resolveJavaAuthEndpointForReset(): Promise<string[]> {
   if (cachedValidJavaAuthEndpoint) return [cachedValidJavaAuthEndpoint]
-  if (authEndpointValidationInFlight) return (await authEndpointValidationInFlight) ? [await authEndpointValidationInFlight] : getJavaAuthUrlCandidates()
+  if (authEndpointValidationInFlight) {
+    const candidate = await authEndpointValidationInFlight
+    return candidate ? [candidate] : getJavaAuthUrlCandidates()
+  }
 
   authEndpointValidationInFlight = (async () => {
     for (const candidate of getJavaAuthUrlCandidates()) {
