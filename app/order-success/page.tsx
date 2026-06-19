@@ -182,12 +182,10 @@ function OrderSuccessPageInner() {
   )
 
   const siteBase = (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw").replace(/\/Trading\/?$/, "")
+  const publicShopBase = (process.env.NEXT_PUBLIC_SHOP_URL || process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://shop.ihute.rw").replace(/\/$/, "")
   const trackSlugForUrl = trackToken || orderId
   const trackPath = `/track-order/${encodeURIComponent(trackSlugForUrl || "")}${fromGrandma ? "?from=grandma" : ""}`
-  const trackingUrl =
-    typeof window !== "undefined"
-      ? `${window.location.origin}${trackPath}`
-      : `${siteBase.replace(/\/$/, "")}${trackPath}`
+  const trackingUrl = `${publicShopBase}${trackPath}`
 
   // Build WhatsApp message with product details - memoized to recalculate when orderDetails changes
   const { whatsappMessage, whatsappHref } = useMemo(() => {
@@ -376,6 +374,13 @@ function OrderSuccessPageInner() {
             <p className="mt-2 text-slate-600">Processing — the shop will confirm your order</p>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="flex justify-center">
+              <img
+                src="/img/logo.png"
+                alt="Ihute logo"
+                className="h-16 w-16 rounded-full bg-white p-2 shadow-sm object-contain"
+              />
+            </div>
             <div className="space-y-2 rounded-xl bg-slate-50 p-4">
               {orderDescription ? (
                 <div className="mb-3 rounded-2xl border border-slate-200 bg-white p-3 text-sm text-slate-800">
@@ -415,17 +420,16 @@ function OrderSuccessPageInner() {
           </CardContent>
         </Card>
 
-          {/* Receipt preview: shows Order Description above product list */}
-          {whatsappMessage ? (
-            <Card className="border-0 shadow-xl rounded-2xl bg-white text-slate-900">
-              <CardHeader>
-                <CardTitle className="text-lg">Order receipt</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <pre className="whitespace-pre-wrap font-mono text-sm text-slate-800">{whatsappMessage}</pre>
-              </CardContent>
-            </Card>
-          ) : null}
+        {whatsappMessage ? (
+          <Card className="border-0 shadow-xl rounded-2xl bg-white text-slate-900">
+            <CardHeader>
+              <CardTitle className="text-lg">Order receipt</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <pre className="whitespace-pre-wrap font-mono text-sm text-slate-800">{whatsappMessage}</pre>
+            </CardContent>
+          </Card>
+        ) : null}
 
         <Card className="border-0 shadow-xl rounded-2xl bg-white text-slate-900">
           <CardHeader>

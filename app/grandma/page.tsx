@@ -866,7 +866,7 @@ const GRANDMA_LABELS: Record<
     settingsSellerIntro: "Hitamo aho ushaka kujya hepfo, umaze kanda Funga.",
     settingsApplyClose: "Funga",
     settingsOpenSellerHome: "Ikibaho",
-    settingsOpenSellerOrders: "Amatumiza",
+    settingsOpenSellerOrders: "Ibyatumijwe",
     settingsOpenSellerItems: "Ibicuruzwa na sitoki",
     settingsSellerNeedLogin: "Injira na konti y'iduka kugira ngo ukoreshe uburyo bw'umucuruzi.",
     settingsSellerTapDenied: "Injira na konti y'iduka kugira ngo ujye ku buryo bw'umucuruzi.",
@@ -939,7 +939,7 @@ const GRANDMA_LABELS: Record<
     payStepPaymentNoAmountInSms: "Nta mafaranga yabonetse — shyiraho SMS yose ya MoMo.",
     payStepSendOrderLocked:
       "Ishyura ukoresheje MoMo, shyiraho SMS y'ikimenyetso, noneho buto ya Ohereza izagaragara.",
-    payStepErrMomoSms: "Emeza kwishyura ukoresheje SMS ya MoMo mbere yo kohereza itumiza.",
+    payStepErrMomoSms: "Emeza kwishyura ukoresheje SMS ya MoMo mbere yo kohereza commandes.",
   },
   fr: {
     demoLocation: "Kacyiru, Gasabo — définition dans les réglages",

@@ -608,6 +608,9 @@ function TrackOrderPageInner() {
   const internalOrderNo = String(order.orderId ?? orderId)
 
   const whatsappMessage = [
+    'ihute.rw - Shop Everything You Need',
+    "Rwanda's premier online marketplace for pharmacy, groceries, fashion, and more",
+    '',
     'Order',
     '',
     `Shop: ${order.sellerName}`,
@@ -628,7 +631,33 @@ function TrackOrderPageInner() {
     `Message: ${internalOrderNo ? `ORDER ${internalOrderNo}` : '-'}`,
     `My phone: ${order.buyerPhone || ''}`,
     '',
-    `Follow: ${typeof window !== "undefined" ? window.location.origin : ""}/track-order/${encodeURIComponent(shareTrackSlug)}${fromGrandma ? "?from=grandma" : ""}`
+    const publicShopBase = (process.env.NEXT_PUBLIC_SHOP_URL || process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://shop.ihute.rw").replace(/\/$/, "")
+
+  const whatsappMessage = [
+    'ihute.rw - Shop Everything You Need',
+    "Rwanda's premier online marketplace for pharmacy, groceries, fashion, and more",
+    '',
+    'Order',
+    '',
+    `Shop: ${order.sellerName}`,
+    displayBuyerLocation.trim() ? `Location: ${displayBuyerLocation.trim()}` : "",
+    `Order ID: ${internalOrderNo}`,
+    '',
+    '```',
+    header,
+    sep,
+    ...lines,
+    '```',
+    '',
+    `Total: ${formatCurrency(order.total)}`,
+    `Discount: ${formatCurrency(0)}`,
+    `Paid: ${formatCurrency(paidAmount)}`,
+    '',
+    `Paid at: ${formatPaymentMethod(order.paymentMethod)}`,
+    `Message: ${internalOrderNo ? `ORDER ${internalOrderNo}` : '-'}`,
+    `My phone: ${order.buyerPhone || ''}`,
+    '',
+    `Follow: ${publicShopBase}/track-order/${encodeURIComponent(shareTrackSlug)}${fromGrandma ? "?from=grandma" : ""}`
   ].filter(Boolean).join("\n")
 
   const whatsappHref = sellerPhoneNormalized ? waHrefFor(sellerPhoneNormalized, whatsappMessage) : ""
