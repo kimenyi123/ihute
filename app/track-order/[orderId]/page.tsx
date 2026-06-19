@@ -600,43 +600,15 @@ function TrackOrderPageInner() {
     return nm + qt + amt
   })
 
-  // Determine paid amount based on payment method
+  // Determine paid amount for the order
   const isPaid = order.paymentMethod && !order.paymentMethod.toLowerCase().includes('delivery')
   const paidAmount = isPaid ? order.total : 0
 
   const shareTrackSlug = publicToken || orderId
   const internalOrderNo = String(order.orderId ?? orderId)
+  const publicShopBase = (process.env.NEXT_PUBLIC_SHOP_URL || process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://shop.ihute.rw").replace(/\/$/, "")
 
   const whatsappMessage = [
-    'ihute.rw - Shop Everything You Need',
-    "Rwanda's premier online marketplace for pharmacy, groceries, fashion, and more",
-    '',
-    'Order',
-    '',
-    `Shop: ${order.sellerName}`,
-    displayBuyerLocation.trim() ? `Location: ${displayBuyerLocation.trim()}` : "",
-    `Order ID: ${internalOrderNo}`,
-    '',
-    '```',
-    header,
-    sep,
-    ...lines,
-    '```',
-    '',
-    `Total: ${formatCurrency(order.total)}`,
-    `Discount: ${formatCurrency(0)}`,
-    `Paid: ${formatCurrency(paidAmount)}`,
-    '',
-    `Paid at: ${formatPaymentMethod(order.paymentMethod)}`,
-    `Message: ${internalOrderNo ? `ORDER ${internalOrderNo}` : '-'}`,
-    `My phone: ${order.buyerPhone || ''}`,
-    '',
-    const publicShopBase = (process.env.NEXT_PUBLIC_SHOP_URL || process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://shop.ihute.rw").replace(/\/$/, "")
-
-  const whatsappMessage = [
-    'ihute.rw - Shop Everything You Need',
-    "Rwanda's premier online marketplace for pharmacy, groceries, fashion, and more",
-    '',
     'Order',
     '',
     `Shop: ${order.sellerName}`,
