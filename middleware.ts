@@ -36,6 +36,27 @@ export function middleware(req: NextRequest) {
     }
   }
 
+  if (pathname === "/register/buyer" || pathname === "/register/seller") {
+    const url = req.nextUrl.clone()
+    const role = pathname.includes("buyer") ? "buyer" : "seller"
+    const grandmaHost = host === "shop.ihute.rw" || host.startsWith("grandma.ihute.rw")
+
+    // Local dev override: add ?surface=grandma to URL to simulate shop.ihute.rw
+    const surfaceOverride = url.searchParams.get("surface")
+    const isGrandma =
+      grandmaHost ||
+      (process.env.NODE_ENV === "development" && surfaceOverride === "grandma")
+
+    if (isGrandma) {
+      url.pathname = `/register/grandma-${role}`
+      url.searchParams.delete("surface")
+    } else {
+      url.pathname = `/register/web-form`
+      url.searchParams.set("role", role)
+    }
+    return NextResponse.rewrite(url)
+  }
+
   // Grandma UI is served on shop.ihute.rw; apex /grandma was 404 for some deployments — send users to shop.
   if (host === "ihute.rw" || host === "www.ihute.rw") {
     if (pathname === "/grandma" || pathname.startsWith("/grandma/")) {
