@@ -53,6 +53,8 @@ type OrderDetail = {
   buyerName?: string
   buyerPhone?: string
   buyerLocation?: string
+  deliveryName?: string
+  deliveryAmount?: number
   items: Array<{
     name: string
     qty: number
@@ -280,20 +282,40 @@ function buildInvoiceText(order: OrderDetail): string {
     const lineTotal = Number(item.qty || 0) * Number(item.unitPrice || 0)
     return `${idx + 1}. ${item.name} | Qty: ${item.qty} | Amount: ${Number(item.unitPrice || 0).toLocaleString()} RWF | Total: ${lineTotal.toLocaleString()} RWF`
   })
+  const logisticsLabel = order.deliveryName || "Not specified"
+  const logisticsFeeValue = Number(order.deliveryAmount ?? 0)
+  const subtotalValue = order.items.reduce(
+    (sum, item) => sum + Number(item.qty || 0) * Number(item.unitPrice || 0),
+    0,
+  )
+  const discountValue = Math.max(0, subtotalValue + logisticsFeeValue - Number(order.total || 0))
+  const paidValue = String(order.paymentStatus || "").toLowerCase().includes("paid")
+    ? Number(order.total || 0)
+    : 0
+  const followUrl = `${process.env.NEXT_PUBLIC_SHOP_URL || process.env.NEXT_PUBLIC_SITE_URL || "https://shop.ihute.rw"}/track-order/${encodeURIComponent(order.orderId)}`
+
   return [
     `INVOICE - ORDER #${order.orderId}`,
-    `Date: ${new Date(order.createdAt).toLocaleString()}`,
+    `Date: ${new Date(order.createdAt).toLocaleDateString()}`,
     `Seller: ${order.sellerName || "—"}`,
     `Buyer: ${order.buyerName || "—"}`,
     `Buyer phone: ${order.buyerPhone || "—"}`,
     `Delivery location: ${order.buyerLocation || "—"}`,
-    `Payment method: ${formatPaymentMethod(order.paymentMethod)}`,
-    `Status: ${order.ORDER_STATUS || order.status || "—"}`,
+    `Logistics: ${logisticsLabel}`,
+    `Logistics fee: ${formatInvoiceAmount(logisticsFeeValue)}`,
     "",
     "Items:",
     ...lines,
     "",
-    `TOTAL: ${formatInvoiceAmount(order.total)}`,
+    `Subtotal: ${formatInvoiceAmount(subtotalValue)}`,
+    `Discount: ${formatInvoiceAmount(discountValue)}`,
+    `Total: ${formatInvoiceAmount(Number(order.total || 0))}`,
+    `Paid: ${formatInvoiceAmount(paidValue)}`,
+    `Paid at: ${formatPaymentMethod(order.paymentMethod)}`,
+    "",
+    `Follow: ${followUrl}`,
+    "",
+    `Status: ${order.ORDER_STATUS || order.status || "—"}`,
   ].join("\n")
 }
 
