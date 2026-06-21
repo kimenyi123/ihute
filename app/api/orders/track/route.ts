@@ -355,7 +355,6 @@ export async function POST(req: NextRequest) {
       buyerPhone: data.BUYER_PHONE || data.BUYER_TEL || undefined,
       buyerLocation: data.DELIVERY_LOCATION || data.BUYER_LOCATION || undefined,
       deliveryName: data.DELIVERY_NAME || data.deliveryName,
-      DELIVERY_NAME: data.DELIVERY_NAME || data.deliveryName,
       deliveryAmount: Number(data.DELIVERY_AMOUNT ?? data.deliveryAmount ?? 0),
       DELIVERY_AMOUNT: Number(data.DELIVERY_AMOUNT ?? data.deliveryAmount ?? 0),
       subtotal: Number(data.SUBTOTAL ?? data.subtotal ?? (Number.isFinite(totalAmount) ? totalAmount - Number(data.DELIVERY_AMOUNT ?? data.deliveryAmount ?? 0) : 0)),
