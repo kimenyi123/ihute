@@ -30,7 +30,7 @@ function looksLikeJavaTradingBase(raw: string): boolean {
 
 function getExplicitBackendBase(): string {
   const backendUrl = process.env.BACKEND_URL?.trim() || ""
-  const javaBackendBase = process.env.npm ?.trim() || ""
+  const javaBackendBase = process.env.JAVA_BACKEND_BASE?.trim() || ""
   const publicApiUrl = process.env.NEXT_PUBLIC_API_URL?.trim() || ""
   return javaBackendBase || backendUrl || (looksLikeJavaTradingBase(publicApiUrl) ? publicApiUrl : "")
 }

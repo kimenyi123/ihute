@@ -109,6 +109,9 @@ export function humanizeAuthLoginError(json: Record<string, unknown> | null | un
   if (code === "AUTH_LOGIN_FAIL" && /password|credential|invalid/i.test(err)) {
     return err || "Wrong password for this account."
   }
+  if (code === "AUTH_SERVER_ERROR") {
+    return err || "Login temporarily unavailable. Please try again."
+  }
   if (err) return err
   if (code) return `Login failed (${code})`
   return "Invalid credentials"
