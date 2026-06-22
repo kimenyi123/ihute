@@ -6,7 +6,7 @@ import { normalizePhoneDigitsForAuth, rwJavaLoginIdentifiers } from "@/lib/rwand
 /** First servlet URL that returned JSON (not Tomcat 404 HTML); avoids probing every login attempt. */
 let cachedJavaAuthUrl: string | null = null
 
-export function getLoginFailureCode(
+function getLoginFailureCode(
   error: unknown,
   status: number,
   code: unknown
