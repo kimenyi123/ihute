@@ -1119,6 +1119,16 @@ const GRANDMA_LABELS: Record<
 
 type GrandmaSmsPayCheck = "paid" | "mismatch" | "no_amount" | null
 
+function isGrandmaSmsPaymentMethod(id: PaymentId): boolean {
+  return id === "momo" || id === "airtel"
+}
+
+function applyGrandmaSmsMatchToCheck(result: MoMoSmsMatchResult): GrandmaSmsPayCheck {
+  if (!result.candidates.length) return "no_amount"
+  if (result.matched) return "paid"
+  return "mismatch"
+}
+
 function humanizeGrandmaOrderBackendError(raw: string, lang: GrandmaLang): string {
   if (!raw?.trim()) return raw
   const low = raw.toLowerCase()
@@ -3165,6 +3175,90 @@ export default function GrandmaPage() {
     return `tel:${grandmaAirtelUssd.replace(/#/g, "%23")}`
   }, [grandmaAirtelUssd])
 
+  const grandmaBuyerSession = useAuthStore((s) => s.user)
+
+  const grandmaPayerPhoneOk = useMemo(() => {
+    const payerRaw = grandmaBuyerSession?.phone || grandmaBuyerPhoneInput.trim()
+    return isGrandmaRwMobileDigits(payerRaw)
+  }, [grandmaBuyerSession?.phone, grandmaBuyerPhoneInput])
+
+  /** MoMo merchant digits from shop profile — optional SMS validation. */
+  const grandmaPaymentMerchantDigits = useMemo(() => {
+    const raw = selectedShop?.momo?.replace(/\D/g, "") ?? ""
+    return raw.length >= 3 ? raw : undefined
+  }, [selectedShop?.momo])
+
+  const runGrandmaSmsMatch = useCallback(
+    (text: string) => {
+      const trimmed = text.trim()
+      if (!trimmed || grandTotal < 1) {
+        setGrandmaSmsPayCheck(null)
+        setGrandmaSmsMatchResult(null)
+        return
+      }
+      const r = matchMoMoSmsToOrderTotal(
+        trimmed,
+        Math.round(grandTotal),
+        2,
+        grandmaPaymentMerchantDigits,
+      )
+      setGrandmaSmsMatchResult(r)
+      setGrandmaSmsPayCheck(applyGrandmaSmsMatchToCheck(r))
+    },
+    [grandTotal, grandmaPaymentMerchantDigits],
+  )
+
+  const verifyGrandmaPaymentSms = useCallback(() => {
+    if (!isGrandmaSmsPaymentMethod(selectedPayment) || grandTotal < 1) return
+    runGrandmaSmsMatch(grandmaMomoSmsPaste)
+  }, [selectedPayment, grandTotal, grandmaMomoSmsPaste, runGrandmaSmsMatch])
+
+  useEffect(() => {
+    setGrandmaSmsPayCheck(null)
+    setGrandmaSmsMatchResult(null)
+    if (!isGrandmaSmsPaymentMethod(selectedPayment)) {
+      setGrandmaMomoSmsPaste("")
+    }
+  }, [selectedPayment, grandTotal])
+
+  /** Auto-match pasted/typed MoMo or Airtel SMS → unlock Send Order when amount matches. */
+  useEffect(() => {
+    if (!isGrandmaSmsPaymentMethod(selectedPayment)) return
+    const text = grandmaMomoSmsPaste.trim()
+    if (text.length < 8) {
+      if (!text) {
+        setGrandmaSmsPayCheck(null)
+        setGrandmaSmsMatchResult(null)
+      }
+      return
+    }
+    const timer = window.setTimeout(() => {
+      runGrandmaSmsMatch(text)
+    }, 450)
+    return () => window.clearTimeout(timer)
+  }, [grandmaMomoSmsPaste, selectedPayment, runGrandmaSmsMatch])
+
+  const grandmaSmsPaymentReady = grandmaSmsPayCheck === "paid"
+
+  const grandmaCanSendOrder = useMemo(() => {
+    if (!selectedShop || selectedProducts.length === 0) return false
+    if (hasGrandmaStockBlock) return false
+    if (isGrandmaSmsPaymentMethod(selectedPayment)) {
+      return grandmaSmsPaymentReady && grandmaPayerPhoneOk
+    }
+    if (selectedPayment === "cash") return grandmaCashConfirm
+    if (selectedPayment === "bk") return grandmaPayerPhoneOk
+    return false
+  }, [
+    selectedShop,
+    selectedProducts.length,
+    hasGrandmaStockBlock,
+    selectedPayment,
+    grandmaSmsPaymentReady,
+    grandmaPayerPhoneOk,
+    grandmaCashConfirm,
+  ])
+
   const selectLogisticsMode = (id: LogisticsId) => {
     setSelectedLogistics(id)
   }
@@ -3189,75 +3283,9 @@ export default function GrandmaPage() {
     })
   }
 
-  const grandmaBuyerSession = useAuthStore((s) => s.user)
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
   /** Must be true before treating `user` as final — avoids seller mode snapping back to buyer on load. */
   const authHasHydrated = useAuthStore((s) => s.hasHydrated)
-
-  const grandmaPayerPhoneOk = useMemo(() => {
-    const payerRaw = grandmaBuyerSession?.phone || grandmaBuyerPhoneInput.trim()
-    return isGrandmaRwMobileDigits(payerRaw)
-  }, [grandmaBuyerSession?.phone, grandmaBuyerPhoneInput])
-
-  const verifyGrandmaMoMoSms = useCallback(() => {
-    setGrandmaSmsPayCheck(null)
-    setGrandmaSmsMatchResult(null)
-    if (selectedPayment !== "momo" || grandTotal < 1) return
-    const text = grandmaMomoSmsPaste.trim()
-    if (!text) return
-    const r = matchMoMoSmsToOrderTotal(text, Math.round(grandTotal))
-    setGrandmaSmsMatchResult(r)
-    if (!r.candidates.length) setGrandmaSmsPayCheck("no_amount")
-    else if (r.matched) setGrandmaSmsPayCheck("paid")
-    else setGrandmaSmsPayCheck("mismatch")
-  }, [selectedPayment, grandTotal, grandmaMomoSmsPaste])
-
-  useEffect(() => {
-    setGrandmaSmsPayCheck(null)
-    setGrandmaSmsMatchResult(null)
-    if (selectedPayment !== "momo") setGrandmaMomoSmsPaste("")
-  }, [selectedPayment, grandTotal])
-
-  useEffect(() => {
-    if (selectedPayment !== "momo") return
-    const text = grandmaMomoSmsPaste.trim()
-    if (text.length < 8) {
-      if (!text) {
-        setGrandmaSmsPayCheck(null)
-        setGrandmaSmsMatchResult(null)
-      }
-      return
-    }
-    const timer = window.setTimeout(() => {
-      const r = matchMoMoSmsToOrderTotal(text, Math.round(grandTotal))
-      setGrandmaSmsMatchResult(r)
-      if (!r.candidates.length) setGrandmaSmsPayCheck("no_amount")
-      else if (r.matched) setGrandmaSmsPayCheck("paid")
-      else setGrandmaSmsPayCheck("mismatch")
-    }, 450)
-    return () => window.clearTimeout(timer)
-  }, [grandmaMomoSmsPaste, grandTotal, selectedPayment])
-
-  const grandmaCanSendOrder = useMemo(() => {
-    if (!selectedShop || selectedProducts.length === 0) return false
-    if (hasGrandmaStockBlock) return false
-    if (selectedPayment === "momo") {
-      return grandmaSmsPayCheck === "paid" && grandmaPayerPhoneOk
-    }
-    if (selectedPayment === "airtel") {
-      return grandmaSmsPayCheck === "paid" && grandmaPayerPhoneOk
-    }
-    if (selectedPayment === "cash") return grandmaCashConfirm
-    return false
-  }, [
-    selectedShop,
-    selectedProducts.length,
-    hasGrandmaStockBlock,
-    selectedPayment,
-    grandmaSmsPayCheck,
-    grandmaPayerPhoneOk,
-    grandmaCashConfirm,
-  ])
 
   useEffect(() => {
     setStockQtyAttempts({})
@@ -4244,7 +4272,7 @@ export default function GrandmaPage() {
         setGrandmaOrderSubmitError(trSubmit.payStepErrCash)
         return
       }
-      if (selectedPayment === "momo" && grandmaSmsPayCheck !== "paid") {
+      if (isGrandmaSmsPaymentMethod(selectedPayment) && grandmaSmsPayCheck !== "paid") {
         setGrandmaOrderSubmitError(trSubmit.payStepErrMomoSms)
         return
       }
@@ -6118,7 +6146,7 @@ export default function GrandmaPage() {
           ))}
         </div>
 
-        {selectedShop && selectedPayment !== "bk" ? (
+        {selectedShop ? (
           <div
             className="card pay-method-form"
             style={{ textAlign: "left", marginTop: 12, marginBottom: 12, padding: "14px 16px" }}
@@ -6243,24 +6271,9 @@ export default function GrandmaPage() {
                   </p>
                   <Textarea
                     value={grandmaMomoSmsPaste}
-                    onChange={(e) => {
-                      // Allow both typing and pasting
-                      setGrandmaMomoSmsPaste(e.target.value)
-                      setGrandmaSmsPayCheck(null)
-                      setGrandmaSmsMatchResult(null)
-                    }}
+                    onChange={(e) => setGrandmaMomoSmsPaste(e.target.value)}
                     onFocus={(e) => {
-                      // Ensure keyboard is visible on mobile
-                      e.currentTarget.scrollIntoView({ behavior: 'smooth', block: 'center' })
-                    }}
-                    onPaste={(e) => {
-                      // Allow paste events as well
-                      const pastedText = e.clipboardData?.getData('text/plain') || ''
-                      if (pastedText) {
-                        setGrandmaMomoSmsPaste(pastedText)
-                        setGrandmaSmsPayCheck(null)
-                        setGrandmaSmsMatchResult(null)
-                      }
+                      e.currentTarget.scrollIntoView({ behavior: "smooth", block: "center" })
                     }}
                     className="min-h-[88px] resize-y border-[#dbe7f3] text-sm"
                     placeholder="MTN MoMo… (type or paste SMS)"
@@ -6274,8 +6287,8 @@ export default function GrandmaPage() {
                       variant="secondary"
                       size="sm"
                       className="flex-1 border-[#dbe7f3] bg-[#f7fbff] text-[#17324d] hover:bg-[#eef6ff]"
-                      onClick={() => verifyGrandmaMoMoSms()}
-                      disabled={grandTotal < 1 || !grandmaMomoSmsPaste.trim() || grandmaSmsPayCheck === "paid"}
+                      onClick={() => verifyGrandmaPaymentSms()}
+                      disabled={grandTotal < 1 || !grandmaMomoSmsPaste.trim() || grandmaSmsPaymentReady}
                     >
                       {tPay.payStepVerifySms}
                     </Button>
@@ -6406,24 +6419,9 @@ export default function GrandmaPage() {
                   </p>
                   <Textarea
                     value={grandmaMomoSmsPaste}
-                    onChange={(e) => {
-                      // Allow both typing and pasting
-                      setGrandmaMomoSmsPaste(e.target.value)
-                      setGrandmaSmsPayCheck(null)
-                      setGrandmaSmsMatchResult(null)
-                    }}
+                    onChange={(e) => setGrandmaMomoSmsPaste(e.target.value)}
                     onFocus={(e) => {
-                      // Ensure keyboard is visible on mobile
-                      e.currentTarget.scrollIntoView({ behavior: 'smooth', block: 'center' })
-                    }}
-                    onPaste={(e) => {
-                      // Allow paste events as well
-                      const pastedText = e.clipboardData?.getData('text/plain') || ''
-                      if (pastedText) {
-                        setGrandmaMomoSmsPaste(pastedText)
-                        setGrandmaSmsPayCheck(null)
-                        setGrandmaSmsMatchResult(null)
-                      }
+                      e.currentTarget.scrollIntoView({ behavior: "smooth", block: "center" })
                     }}
                     className="min-h-[88px] resize-y border-[#dbe7f3] text-sm"
                     placeholder="Airtel Money… (type or paste SMS)"
@@ -6437,8 +6435,8 @@ export default function GrandmaPage() {
                       variant="secondary"
                       size="sm"
                       className="flex-1 border-[#dbe7f3] bg-[#f7fbff] text-[#17324d] hover:bg-[#eef6ff]"
-                      onClick={() => verifyGrandmaMoMoSms()}
-                      disabled={grandTotal < 1 || !grandmaMomoSmsPaste.trim() || grandmaSmsPayCheck === "paid"}
+                      onClick={() => verifyGrandmaPaymentSms()}
+                      disabled={grandTotal < 1 || !grandmaMomoSmsPaste.trim() || grandmaSmsPaymentReady}
                     >
                       {tPay.payStepVerifySms}
                     </Button>
@@ -6483,6 +6481,16 @@ export default function GrandmaPage() {
                     </div>
                   ) : null}
                 </div>
+              </div>
+            ) : selectedPayment === "bk" ? (
+              <div className="space-y-3">
+                <div style={{ fontWeight: 700, fontSize: 13 }}>{tPay.payStepBkTitle}</div>
+                <p style={{ fontSize: 12, color: "var(--muted)", margin: 0, lineHeight: 1.45 }}>
+                  {tPay.payStepBkHelp}
+                </p>
+                <p style={{ fontSize: 12, margin: 0, lineHeight: 1.45 }}>
+                  {tPay.payStepCardsAccepted}. {tPay.payStepAfterCheckoutHint}
+                </p>
               </div>
             ) : (
               <div className="space-y-3">
@@ -6683,11 +6691,11 @@ export default function GrandmaPage() {
           <p className="card note" style={{ marginBottom: 12, fontSize: 13, lineHeight: 1.45 }}>
             {hasGrandmaStockBlock
               ? tPay.stockExceededPayBlock
-              : selectedPayment === "momo"
+              : isGrandmaSmsPaymentMethod(selectedPayment)
                 ? tPay.payStepSendOrderLocked
                 : selectedPayment === "cash"
                   ? tPay.payStepErrCash
-                  : selectedPayment === "airtel"
+                  : selectedPayment === "bk"
                     ? tPay.payStepErrPhone
                     : tPay.payStepSendOrderLocked}
           </p>
