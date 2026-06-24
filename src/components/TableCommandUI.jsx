@@ -371,14 +371,43 @@ export default function TableCommandUI({ userEmail, supplierAccount, supplierNam
 
             {/* Active Tables Section */}
             <div className="section active-tables-section">
-                <h3>📋 Active Tables ({activeTables.length})</h3>
+                <h3>📋 Active Tables
+                    <span
+                        key={activeTables.length}
+                        className={`table-count-badge ${activeTables.length > 0 ? 'badge-active' : 'badge-empty'} ${loading ? '' : 'badge-pop'}`}
+                    >
+                        {activeTables.length}
+                    </span>
+                </h3>
 
-                {loading && <p className="loading">⏳ Loading tables...</p>}
+                {loading && (
+                    <div className="table-grid">
+                        {[1, 2, 3].map((i) => (
+                            <div key={i} className="skeleton-card">
+                                <div className="skeleton-header">
+                                    <div className="skeleton-line skeleton-title"></div>
+                                    <div className="skeleton-line skeleton-badge"></div>
+                                </div>
+                                <div className="skeleton-body">
+                                    <div className="skeleton-line skeleton-text"></div>
+                                    <div className="skeleton-line skeleton-text"></div>
+                                    <div className="skeleton-line skeleton-text-short"></div>
+                                </div>
+                                <div className="skeleton-actions">
+                                    <div className="skeleton-line skeleton-btn"></div>
+                                    <div className="skeleton-line skeleton-btn"></div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
 
                 {!loading && activeTables.length === 0 && (
-                    <p className="empty-state">
-                        No active tables at this location. Create one to get started!
-                    </p>
+                    <div className="empty-state">
+                        <div className="empty-state-icon">🍽️</div>
+                        <p className="empty-state-title">No active tables</p>
+                        <p className="empty-state-sub">Create one above to get started!</p>
+                    </div>
                 )}
 
                 {!loading && activeTables.length > 0 && (
