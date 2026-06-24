@@ -158,6 +158,7 @@ export function buildOrderWhatsAppMessage(args: {
   location?: string
   orderId: string | number
   items: TableCommandLineItem[]
+  subtotal?: number
   total: number
   discount?: number
   paid: number
@@ -168,10 +169,21 @@ export function buildOrderWhatsAppMessage(args: {
   isTableCommand?: boolean
   momoTxId?: string
   orderDescription?: string
+  logisticsType?: string
+  logisticsFee?: number
 }): string {
   const formatCurrency = (amount: number) => `${amount.toLocaleString()} RWF`
   const discount = args.discount ?? 0
   const description = args.orderDescription?.trim()
+  const paidAt = args.paidAt?.trim() || "Unknown"
+  const subtotal = Number.isFinite(args.subtotal ?? NaN)
+    ? args.subtotal
+    : typeof args.logisticsFee === "number"
+    ? args.total - args.logisticsFee + discount
+    : undefined
+  const showReference = args.reference?.trim()
+  const myPhone = args.myPhone?.trim() || ""
+  const followLink = args.link?.trim() || ""
 
   let itemsSection: string
   if (args.isTableCommand) {
@@ -200,28 +212,30 @@ export function buildOrderWhatsAppMessage(args: {
   }
 
   const parts = [
-    "Order",
-    "",
-    `Shop: ${args.shop}`,
-    args.location?.trim() ? `Location: ${args.location.trim()}` : "",
-    `Order ID: ${args.orderId}`,
-    args.momoTxId ? `MoMo TxId: ${args.momoTxId}` : "",
-    description ? "" : null,
-    description ? "Order Description:" : null,
-    description || null,
-    "",
-    itemsSection,
-    "",
-    `Total: ${formatCurrency(args.total)}`,
-    `Discount: ${formatCurrency(discount)}`,
-    `Paid: ${formatCurrency(args.paid)}`,
-    "",
-    `Paid at: ${args.paidAt ?? ""}`,
-    `Message: ${args.reference || "-"}`,
-    `My phone: ${args.myPhone || ""}`,
-    "",
-    args.link ? `Follow: ${args.link}` : "",
-  ]
+      "Order",
+      "",
+      `Shop: ${args.shop}`,
+      args.location?.trim() ? `Location: ${args.location.trim()}` : "",
+      `Order ID: ${args.orderId}`,
+      args.momoTxId ? `MoMo TxId: ${args.momoTxId}` : "",
+      description ? "" : null,
+      description ? "Order Description:" : null,
+      description || null,
+      "",
+      itemsSection,
+      "",
+      typeof subtotal === "number" ? `Subtotal: ${formatCurrency(subtotal)}` : null,
+      typeof args.logisticsFee === "number" ? `Logistics fee: ${formatCurrency(args.logisticsFee)}` : null,
+      `Discount: ${formatCurrency(discount)}`,
+      `Total: ${formatCurrency(args.total)}`,
+      `Paid: ${formatCurrency(args.paid)}`,
+      "",
+      `Paid at: ${paidAt}`,
+      showReference ? `Message: ${args.reference}` : null,
+      myPhone ? `My phone: ${myPhone}` : null,
+      "",
+      followLink ? `Follow: ${followLink}` : null,
+    ]
 
-  return parts.filter((line) => line != null).join("\n")
+  return parts.filter(Boolean).join("\n")
 }

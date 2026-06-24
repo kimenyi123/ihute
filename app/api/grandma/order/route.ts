@@ -37,6 +37,8 @@ export async function POST(req: NextRequest) {
       body.CONDITIONS ??
       ""
     ).trim()
+    const deliveryName = String(body.deliveryName ?? body.DELIVERY_NAME ?? "").trim()
+    const deliveryAmount = Number(body.deliveryAmount ?? body.DELIVERY_AMOUNT ?? 0)
     const payload = {
       buyerEmail: String(body.buyerEmail ?? "").trim(),
       buyerName: String(body.buyerName ?? "").trim(),
@@ -52,6 +54,8 @@ export async function POST(req: NextRequest) {
       isTableCommand: false,
       items,
       ...(orderNotes ? { orderNote: orderNotes, ORDER_NOTE: orderNotes, CONDITIONS: orderNotes } : {}),
+      ...(deliveryName ? { deliveryName, DELIVERY_NAME: deliveryName } : {}),
+      ...(Number.isFinite(deliveryAmount) ? { deliveryAmount, DELIVERY_AMOUNT: deliveryAmount } : {}),
       ...(Number.isFinite(subtotal) && subtotal > 0 ? { subtotal } : {}),
     }
 

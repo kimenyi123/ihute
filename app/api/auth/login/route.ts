@@ -6,7 +6,7 @@ import { normalizePhoneDigitsForAuth, rwJavaLoginIdentifiers } from "@/lib/rwand
 /** First servlet URL that returned JSON (not Tomcat 404 HTML); avoids probing every login attempt. */
 let cachedJavaAuthUrl: string | null = null
 
-export function getLoginFailureCode(
+function getLoginFailureCode(
   error: unknown,
   status: number,
   code: unknown
@@ -31,6 +31,14 @@ export function getLoginFailureCode(
     codeText.includes("user_not_found")
   ) {
     return "user_not_found"
+  }
+
+  if (
+    message.includes("temporarily unavailable") ||
+    message.includes("service temporarily unavailable") ||
+    codeText.includes("auth_server_error")
+  ) {
+    return "server_error"
   }
 
   return status >= 500 ? "server_error" : "invalid_credentials"
@@ -77,6 +85,8 @@ export async function POST(req: Request) {
     let json: Record<string, unknown> | null = null
     let res: Response | null = null
     let lastParseError: unknown = null
+    let lastServerError: { status: number; parsed: Record<string, unknown>; url: string; loginId: string } | null = null
+    let lastNonServerResponse: { status: number; parsed: Record<string, unknown>; url: string; loginId: string } | null = null
 
     try {
       outer: for (const loginId of loginCandidates) {
@@ -121,19 +131,12 @@ export async function POST(req: Request) {
             `[api/auth/login][proxyRid=${rid}] try loginId=${loginId} url=${javaAuthUrl} http=${attempt.status} ok=${parsed?.ok} code=${String(parsed?.code ?? "")}`
           )
 
-          if (!attempt.ok && attempt.status >= 500) {
-            clearTimeout(to)
-            const failureCode = getLoginFailureCode(parsed?.error, attempt.status, parsed?.code)
-      return NextResponse.json(
-              {
-                ok: false,
-                error: (parsed?.error as string) || `Auth failed (${attempt.status})`,
-                rid,
-                javaRid: typeof parsed?.rid === "string" ? parsed.rid : undefined,
-                code: failureCode,
-              },
-              { status: attempt.status >= 400 && attempt.status < 600 ? attempt.status : 502 }
+          if (attempt.status >= 500) {
+            lastServerError = { status: attempt.status, parsed, url: javaAuthUrl, loginId }
+            console.warn(
+              `[api/auth/login][proxyRid=${rid}] server error for loginId=${loginId} url=${javaAuthUrl} status=${attempt.status} code=${String(parsed?.code ?? "")}`
             )
+            continue inner
           }
 
           res = attempt
@@ -141,12 +144,48 @@ export async function POST(req: Request) {
           if (attempt.ok && parsed?.ok === true) {
             break outer
           }
+
+          lastNonServerResponse = { status: attempt.status, parsed, url: javaAuthUrl, loginId }
           // Reached Java with valid JSON (e.g. wrong password); do not try other base URLs for this loginId.
           break inner
         }
       }
     } finally {
       clearTimeout(to)
+    }
+
+    if (lastNonServerResponse) {
+      console.warn(
+        `[api/auth/login][proxyRid=${rid}] returning last auth failure loginId=${lastNonServerResponse.loginId} url=${lastNonServerResponse.url} status=${lastNonServerResponse.status}`
+      )
+      const failureCode = getLoginFailureCode(lastNonServerResponse.parsed?.error, lastNonServerResponse.status, lastNonServerResponse.parsed?.code)
+      return NextResponse.json(
+        {
+          ok: false,
+          error: (lastNonServerResponse.parsed?.error as string) || `Auth failed (${lastNonServerResponse.status})`,
+          rid,
+          javaRid: typeof lastNonServerResponse.parsed?.rid === "string" ? lastNonServerResponse.parsed.rid : undefined,
+          code: failureCode,
+        },
+        { status: 401 }
+      )
+    }
+
+    if (lastServerError) {
+      console.warn(
+        `[api/auth/login][proxyRid=${rid}] returning last server error loginId=${lastServerError.loginId} url=${lastServerError.url} status=${lastServerError.status}`
+      )
+      const failureCode = getLoginFailureCode(lastServerError.parsed?.error, lastServerError.status, lastServerError.parsed?.code)
+      return NextResponse.json(
+        {
+          ok: false,
+          error: (lastServerError.parsed?.error as string) || "Auth failed due to server error",
+          rid,
+          javaRid: typeof lastServerError.parsed?.rid === "string" ? lastServerError.parsed.rid : undefined,
+          code: failureCode,
+        },
+        { status: lastServerError.status >= 400 && lastServerError.status < 600 ? lastServerError.status : 502 }
+      )
     }
 
     if (!json || !res) {

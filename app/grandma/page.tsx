@@ -774,7 +774,7 @@ const GRANDMA_LABELS: Record<
     demoLocation: "Kacyiru, Gasabo — hindura aho uri mu bigenga.",
     titleHome: "Ishyiga Ihute",
     shopsPrefix: "Amaduka ·",
-    titleSummary: "Incamake y'itumiza",
+    titleSummary: "Incamake y'ibyi'nasabye",
     titlePayment: "Uburyo bwo kwishyura",
     settings: "Ibigenga",
     settingsSub: "Hindura ururimi, aho uri, amaduka n'uburyo bwo kwishyura.",
@@ -794,10 +794,10 @@ const GRANDMA_LABELS: Record<
     yourLocation: "Aho uri",
     yourPhone: "Telefoni yawe",
     yourPhoneHint: "Iduka rizaguhamagara kuri iyi nimero. Niba winjiye ku konti yawe, ntibikenewe.",
-    paymentGuestPhoneLabel: "Nimero ya MoMo n'amakuru y'itumiza",
+    paymentGuestPhoneLabel: "Nimero ya MoMo n'amakuru y'a Order",
     paymentGuestPhonePlaceholder: "07… · nimero yo kwishyuriraho",
     paymentGuestPhoneNote: "Ntibisabwa niba winjiye ku konti ifite nimero ya telefoni.",
-    orderSubmitNeedPhone: "Andika nimero ya telefoni yawe kugira ngo wishyure kandi ubone amakuru y'itumiza.",
+    orderSubmitNeedPhone: "Andika nimero ya telefoni yawe kugira ngo wishyure kandi ubone amakuru y'a Order.",
     eta: "Igihe ugereranyije cyo kugera",
     etaSub: "Km ~{km} · {mode}",
     etaSubNoMode: "Hitamo uburyo bwo kubigeza iwawe ku ncamake kugira ngo urebe igihe cyo kugera.",
@@ -817,7 +817,7 @@ const GRANDMA_LABELS: Record<
     logisticsNote: "Igiciro cy'okubikugezaho gishingiye ku ntera kugera ku iduka ({km} km) n'uburyo wahisemo.",
     logisticsNotePickup: "Ujya kwakira ku iduka ubwawe. Nta giciro cy'okubikugezaho — ni RWF 0.",
     logisticsNoteTakeaway: "Takeaway: kwakira ibyokurya byawe bivunjwe mu gipakeni (RWF 500).",
-    fulfillmentSectionTitle: "Ushaka kubona ibi bitumize gute?",
+    fulfillmentSectionTitle: "HITAMO UBURYO BWOKUBIKUGEZAHO?",
     fulfillmentDeliveryTitle: "Kubigezaho",
     fulfillmentDeliverySub: "Tubikugezaho ahuherereye hose M'Rwnanda",
     fulfillmentPickupTitle: "Kubifatira kwiduka",
@@ -826,7 +826,7 @@ const GRANDMA_LABELS: Record<
     fulfillmentTakeawaySub: "Tugufungira muri takeway ibiringombwa (RWF 500).",
     fulfillmentDeliveryModesHint: "Hitamo uburyo bwo kubigeza iwawe:",
     etaAtShop: "Ku iduka",
-    etaPickupSub: "Urakira ku iduka — nta gihe cy'umugendesheje. Vugana n'iduka nyuma yo gutumiza.",
+    etaPickupSub: "Urakira ku iduka — nta gihe cy'ubitwara. Vugana n'iduka nyuma yo gutumiza.",
     summaryLineItems: "Ibicuruzwa",
     summaryLineItemsTotal: "Igiciro cy'ibicuruzwa",
     summaryLineLogisticsRow: "Kubikugezaho",
@@ -840,16 +840,16 @@ const GRANDMA_LABELS: Record<
     taxes: "Imisoro",
     amountLogistics: "Amafaranga y'okubikugezaho",
     totalPay: "Igiciro cyose",
-    sendOrder: "Ohereza itumiza",
+    sendOrder: "Saba ",
     stockOnHandLabel: "Iboneka: {n}",
     stockExceededLine: "Wasabye {requested} — ariko muri sitoki hari {available} gusa.",
     stockExceededPayBlock: "Gabanya ingano uhujeje n'ibiri muri sitoki mbere yo kwishyura.",
     stockExceededSubmit: "Gabanya ingano uhujeje n'ibiri muri sitoki mbere yo kohereza.",
-    deliveryPerson: "Umugendesheje",
-    hobbies: "Ibyishimo",
+    deliveryPerson: "UTWARA IBICURUZWA",
+    hobbies: "Kubikugezaho bishimishije ",
     kmToShop: "Km kugera ku iduka",
     reviewers: "abasubirije",
-    tapCouriers: "Kanda urebe abagendesheje 5 bari hafi y'iduka",
+    tapCouriers: "Kanda urebe abatwara ibicururwa 5 bari hafi y'iduka",
     closestToShop: "Bari hafi y'iduka",
     top5Available: "5 bahari",
     myOrders: "Ibyo natumije",
@@ -866,7 +866,7 @@ const GRANDMA_LABELS: Record<
     settingsSellerIntro: "Hitamo aho ushaka kujya hepfo, umaze kanda Funga.",
     settingsApplyClose: "Funga",
     settingsOpenSellerHome: "Ikibaho",
-    settingsOpenSellerOrders: "Amatumiza",
+    settingsOpenSellerOrders: "Ibyatumijwe",
     settingsOpenSellerItems: "Ibicuruzwa na sitoki",
     settingsSellerNeedLogin: "Injira na konti y'iduka kugira ngo ukoreshe uburyo bw'umucuruzi.",
     settingsSellerTapDenied: "Injira na konti y'iduka kugira ngo ujye ku buryo bw'umucuruzi.",
@@ -890,7 +890,7 @@ const GRANDMA_LABELS: Record<
     payStepPanelTitle: "Rangiza kwishyura",
     payStepDemoNote: "",
     payStepCommissionNote:
-      "1% ya Ihute yandikwa ku makuru y'itumiza (komisio y'ikompanyi, ku iduka; ntiyongerwa ku wishyura wawe).",
+      "1% ya Ihute yandikwa ku makuru y'ibyowasabye (komisio y'akompanyi, ku iduka; ntiyongerwa ku wishyura wawe).",
     payStepMtnTitle: "MTN MoMo",
     payStepMtnPayer: "Nimero ya MoMo (07…)",
     payStepMtnDial: "USSD — koporora ukore",
@@ -922,11 +922,11 @@ const GRANDMA_LABELS: Record<
     payStepMomoPin: "PIN",
     payStepAutoPayHintMtn: "Kwishyura gutangira uko gusa PIN ya MTN irangiye (imibare 5).",
     payStepAutoPayHintAirtel: "Kwishyura gutangira uko gusa PIN ya Airtel irangiye (imibare 4).",
-    payStepProcessing: "Birimo gutunganywa…",
+    payStepProcessing: "Birigukorwa",
     payStepErrMtnPin: "Andika PIN ya MTN MoMo (imibare 5).",
     payStepErrAirtelPin: "Andika PIN ya Airtel Money (imibare 4).",
     payStepCardsAccepted: "Amakarita yemewe",
-    payStepAfterCheckoutHint: "Uhabwa nimero y'itumiza na link yo gukurikirana — ntusabwe kwinjira mbere.",
+    payStepAfterCheckoutHint: "Uhabwa nimero y'Order na link yo gukurikirana — ntusabwe kwinjira mbere.",
     payStepReadMoMoSmsTitle: "Shyiraho SMS ya MoMo (kwemeza kwishyura)",
     payStepReadMoMoSmsHint:
       "Nyuma yo kwishyura, koporora ubutumwa bwa MTN ubushyire hano. Tugereranya amafaranga y'ishyura n'igiciro ({total} RWF) kandi twemera SMS isa n'iminota 15 ishize gusa.",
@@ -939,7 +939,7 @@ const GRANDMA_LABELS: Record<
     payStepPaymentNoAmountInSms: "Nta mafaranga yabonetse — shyiraho SMS yose ya MoMo.",
     payStepSendOrderLocked:
       "Ishyura ukoresheje MoMo, shyiraho SMS y'ikimenyetso, noneho buto ya Ohereza izagaragara.",
-    payStepErrMomoSms: "Emeza kwishyura ukoresheje SMS ya MoMo mbere yo kohereza itumiza.",
+    payStepErrMomoSms: "Emeza kwishyura ukoresheje SMS ya MoMo mbere yo kohereza commandes.",
   },
   fr: {
     demoLocation: "Kacyiru, Gasabo — définition dans les réglages",
@@ -4324,12 +4324,20 @@ export default function GrandmaPage() {
         }
       })
 
+      const selectedLogisticsOption = LOGISTICS.find((opt) => opt.id === selectedLogistics)
+      const selectedLogisticsLabel = selectedLogisticsOption?.label || selectedLogistics.toUpperCase()
+      const deliveryName =
+        fulfillmentMode === "pickup"
+          ? trSubmit.fulfillmentPickupTitle
+          : fulfillmentMode === "takeaway"
+          ? trSubmit.fulfillmentTakeawayTitle
+          : selectedLogisticsLabel
       const referenceParts =
         fulfillmentMode === "pickup"
           ? ["SELF-PICKUP", orderNotes.trim()].filter(Boolean)
           : fulfillmentMode === "takeaway"
-          ? ["TAKEAWAY", orderNotes.trim()].filter(Boolean)
-          : [`DELIVERY-${selectedLogistics}`, orderNotes.trim()].filter(Boolean)
+          ? [trSubmit.fulfillmentTakeawayTitle, orderNotes.trim()].filter(Boolean)
+          : [`DELIVERY-${selectedLogisticsLabel}`, orderNotes.trim()].filter(Boolean)
       const baseRef = referenceParts.length ? referenceParts.join(" | ") : ""
       const reference = (baseRef + billingTail).slice(0, 500)
 
@@ -4350,6 +4358,10 @@ export default function GrandmaPage() {
           reference,
           orderNotes: orderNotes.trim(),
           subtotal: Math.round(itemsTotal),
+          deliveryName,
+          DELIVERY_NAME: deliveryName,
+          deliveryAmount: Math.round(logisticsTotal),
+          DELIVERY_AMOUNT: Math.round(logisticsTotal),
         }),
       })
       const data = (await res.json().catch(() => ({}))) as {
@@ -4409,10 +4421,7 @@ export default function GrandmaPage() {
       }
       useOrdersStore.getState().upsertOrder(placedOrder)
       saveGrandmaPendingOrder(placedOrder)
-
       notifyGrandmaOrderPlaced(String(oid))
-
-      setProducts((prev) => prev.map((x) => ({ ...x, qty: 0 })))
       setOrderNotes("")
       setPrescriptionSlots((prev) => {
         prev.forEach((s) => URL.revokeObjectURL(s.url))
@@ -4428,9 +4437,12 @@ export default function GrandmaPage() {
         from: "grandma",
         autoWhatsApp: "1",
       })
+      if (orderNotes.trim()) q.set("orderNotes", orderNotes.trim())
       if (data.trackToken) q.set("trackToken", String(data.trackToken))
       if (payLabel) q.set("payment", payLabel)
       if (grandmaSmsMatchResult?.txId) q.set("momoTxId", grandmaSmsMatchResult.txId)
+      if (deliveryName) q.set("logisticsType", deliveryName)
+      q.set("logisticsAmount", String(Math.round(logisticsTotal)))
       router.push(`/order-success?${q.toString()}`)
     } catch (e: unknown) {
       const raw = e instanceof Error ? e.message : "Order request failed"

@@ -21,11 +21,6 @@ import {
   XCircle,
 } from "lucide-react"
 import { formatPaymentMethod } from "@/lib/payment-utils"
-import {
-  buildOrderWhatsAppMessage,
-  isTableCommandOrder,
-  type TableCommandLineItem,
-} from "@/lib/table-command-whatsapp"
 import { RatingModal } from "@/components/RatingModal"
 import { useOrderTracking } from "@/hooks/useOrderTracking"
 import { DeliveryCountdown } from "@/components/delivery-countdown"
@@ -58,13 +53,13 @@ type OrderDetail = {
   buyerName?: string
   buyerPhone?: string
   buyerLocation?: string
+  deliveryName?: string
+  deliveryAmount?: number
   items: Array<{
     name: string
     qty: number
     unitPrice: number
     unit?: string
-    orderedBy?: string
-    lineId?: number
   }>
   total: number
   paymentMethod: string
@@ -72,8 +67,6 @@ type OrderDetail = {
   status: OrderStatus
   /** Raw DB / servlet value (e.g. INVOICE>>LOADED) — shown verbatim when present */
   ORDER_STATUS?: string
-  IS_TABLE_COMMAND?: boolean
-  TABLE_NAME?: string
   createdAt: string
   estimatedDeliveryAt?: string
   driverPhone?: string
@@ -285,30 +278,44 @@ function formatInvoiceAmount(amount: number): string {
 }
 
 function buildInvoiceText(order: OrderDetail): string {
-  const isTable = isTableCommandOrder(order)
-  const itemLines = isTable
-    ? order.items.map((item) => {
-        const lineTotal = Number(item.qty || 0) * Number(item.unitPrice || 0)
-        return `${item.orderedBy ? `[${item.orderedBy}] ` : ""}${item.name} | Qty: ${item.qty} | Total: ${lineTotal.toLocaleString()} RWF`
-      })
-    : order.items.map((item, idx) => {
-        const lineTotal = Number(item.qty || 0) * Number(item.unitPrice || 0)
-        return `${idx + 1}. ${item.name} | Qty: ${item.qty} | Amount: ${Number(item.unitPrice || 0).toLocaleString()} RWF | Total: ${lineTotal.toLocaleString()} RWF`
-      })
+  const lines = order.items.map((item, idx) => {
+    const lineTotal = Number(item.qty || 0) * Number(item.unitPrice || 0)
+    return `${idx + 1}. ${item.name} | Qty: ${item.qty} | Amount: ${Number(item.unitPrice || 0).toLocaleString()} RWF | Total: ${lineTotal.toLocaleString()} RWF`
+  })
+  const logisticsLabel = order.deliveryName || "Not specified"
+  const logisticsFeeValue = Number(order.deliveryAmount ?? 0)
+  const subtotalValue = order.items.reduce(
+    (sum, item) => sum + Number(item.qty || 0) * Number(item.unitPrice || 0),
+    0,
+  )
+  const discountValue = Math.max(0, subtotalValue + logisticsFeeValue - Number(order.total || 0))
+  const paidValue = String(order.paymentStatus || "").toLowerCase().includes("paid")
+    ? Number(order.total || 0)
+    : 0
+  const followUrl = `${process.env.NEXT_PUBLIC_SHOP_URL || process.env.NEXT_PUBLIC_SITE_URL || "https://shop.ihute.rw"}/track-order/${encodeURIComponent(order.orderId)}`
+
   return [
     `INVOICE - ORDER #${order.orderId}`,
-    `Date: ${new Date(order.createdAt).toLocaleString()}`,
+    `Date: ${new Date(order.createdAt).toLocaleDateString()}`,
     `Seller: ${order.sellerName || "—"}`,
     `Buyer: ${order.buyerName || "—"}`,
     `Buyer phone: ${order.buyerPhone || "—"}`,
     `Delivery location: ${order.buyerLocation || "—"}`,
-    `Payment method: ${formatPaymentMethod(order.paymentMethod)}`,
-    `Status: ${order.ORDER_STATUS || order.status || "—"}`,
+    `Logistics: ${logisticsLabel}`,
+    `Logistics fee: ${formatInvoiceAmount(logisticsFeeValue)}`,
     "",
     "Items:",
-    ...itemLines,
+    ...lines,
     "",
-    `TOTAL: ${formatInvoiceAmount(order.total)}`,
+    `Subtotal: ${formatInvoiceAmount(subtotalValue)}`,
+    `Discount: ${formatInvoiceAmount(discountValue)}`,
+    `Total: ${formatInvoiceAmount(Number(order.total || 0))}`,
+    `Paid: ${formatInvoiceAmount(paidValue)}`,
+    `Paid at: ${formatPaymentMethod(order.paymentMethod)}`,
+    "",
+    `Follow: ${followUrl}`,
+    "",
+    `Status: ${order.ORDER_STATUS || order.status || "—"}`,
   ].join("\n")
 }
 
@@ -596,35 +603,56 @@ function TrackOrderPageInner() {
     buyerAddressOverride !== undefined ? buyerAddressOverride : (order.buyerLocation ?? "")
   const canEditDeliveryAddress = order.status !== "delivered" && order.status !== "cancelled"
 
-  const isTable = isTableCommandOrder(order)
-  const tableItems: TableCommandLineItem[] = order.items.map((item) => ({
-    name: item.name,
-    qty: item.qty,
-    unitPrice: item.unitPrice,
-    orderedBy: item.orderedBy,
-    lineId: item.lineId,
-  }))
+  // Format items for WhatsApp message
+  const formatCurrency = (amount: number) => `${amount.toLocaleString()} RWF`
 
-  const isPaid = order.paymentMethod && !order.paymentMethod.toLowerCase().includes("delivery")
+  // Build styled WhatsApp message
+  const padRight = (s: string, w: number) => (s.length >= w ? s : s + ' '.repeat(w - s.length))
+  const padLeft = (s: string, w: number) => (s.length >= w ? s : ' '.repeat(w - s.length) + s)
+  const trunc = (s: string, w: number) => (s.length > w ? s.slice(0, w - 1) + '…' : s)
+
+  const NAME_W = 44, QTY_W = 5, AMT_W = 14
+  const header = padRight('Product name', NAME_W) + padLeft('Qty', QTY_W) + padLeft('Amount', AMT_W)
+  const sep = '-'.repeat(NAME_W + QTY_W + AMT_W)
+
+  const lines = order.items.map((item) => {
+    const nm = padRight(trunc(item.name.replace(/\s+/g, ' ').trim(), NAME_W), NAME_W)
+    const qt = padLeft(String(item.qty), QTY_W)
+    const amt = padLeft(formatCurrency(item.qty * item.unitPrice), AMT_W)
+    return nm + qt + amt
+  })
+
+  // Determine paid amount for the order
+  const isPaid = order.paymentMethod && !order.paymentMethod.toLowerCase().includes('delivery')
   const paidAmount = isPaid ? order.total : 0
 
   const shareTrackSlug = publicToken || orderId
   const internalOrderNo = String(order.orderId ?? orderId)
+  const publicShopBase = (process.env.NEXT_PUBLIC_SHOP_URL || process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://shop.ihute.rw").replace(/\/$/, "")
 
-  const whatsappMessage = buildOrderWhatsAppMessage({
-    shop: order.sellerName,
-    location: displayBuyerLocation,
-    orderId: internalOrderNo,
-    items: tableItems,
-    total: order.total,
-    discount: 0,
-    paid: paidAmount,
-    paidAt: formatPaymentMethod(order.paymentMethod),
-    reference: internalOrderNo ? `ORDER ${internalOrderNo}` : undefined,
-    myPhone: order.buyerPhone,
-    link: `${typeof window !== "undefined" ? window.location.origin : ""}/track-order/${encodeURIComponent(shareTrackSlug)}${fromGrandma ? "?from=grandma" : ""}`,
-    isTableCommand: isTable,
-  })
+  const whatsappMessage = [
+    'Order',
+    '',
+    `Shop: ${order.sellerName}`,
+    displayBuyerLocation.trim() ? `Location: ${displayBuyerLocation.trim()}` : "",
+    `Order ID: ${internalOrderNo}`,
+    '',
+    '```',
+    header,
+    sep,
+    ...lines,
+    '```',
+    '',
+    `Total: ${formatCurrency(order.total)}`,
+    `Discount: ${formatCurrency(0)}`,
+    `Paid: ${formatCurrency(paidAmount)}`,
+    '',
+    `Paid at: ${formatPaymentMethod(order.paymentMethod)}`,
+    `Message: ${internalOrderNo ? `ORDER ${internalOrderNo}` : '-'}`,
+    `My phone: ${order.buyerPhone || ''}`,
+    '',
+    `Follow: ${publicShopBase}/track-order/${encodeURIComponent(shareTrackSlug)}${fromGrandma ? "?from=grandma" : ""}`
+  ].filter(Boolean).join("\n")
 
   const whatsappHref = sellerPhoneNormalized ? waHrefFor(sellerPhoneNormalized, whatsappMessage) : ""
 

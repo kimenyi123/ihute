@@ -61,13 +61,11 @@ function OrderSuccessPageInner() {
   const sellerName = searchParams.get("sellerName")
   const sellerPhone = searchParams.get("sellerPhone")
   const buyerPhone = searchParams.get("buyerPhone")
+  const orderNotesQuery = searchParams.get("orderNotes")?.trim() || ""
   const total = searchParams.get("total")
+  const logisticsTypeQuery = searchParams.get("logisticsType")?.trim() || ""
+  const logisticsAmountQuery = Number(searchParams.get("logisticsAmount") ?? "0")
   const fromGrandma = searchParams.get("from") === "grandma"
-  const fromTable = searchParams.get("fromTable") === "1"
-  const autoWhatsApp = searchParams.get("autoWhatsApp") === "1"
-  const momoTxId = searchParams.get("momoTxId")?.trim() || ""
-  const paymentQuery = searchParams.get("payment")?.trim() || ""
-  const homeHref = fromGrandma ? "/grandma" : "/"
 
   const [copied, setCopied] = useState(false)
   const [orderDetails, setOrderDetails] = useState<any>(null)
@@ -75,12 +73,73 @@ function OrderSuccessPageInner() {
   const [showRatingModal, setShowRatingModal] = useState(false)
   const [ratingItems, setRatingItems] = useState<Array<{ code: string, name: string }>>([])
   const [hasCheckedRating, setHasCheckedRating] = useState(false)
-  /** Set after mount so tracking/WhatsApp URLs match SSR (relative) then upgrade to absolute. */
-  const [clientOrigin, setClientOrigin] = useState("")
 
-  useEffect(() => {
-    setClientOrigin(window.location.origin)
-  }, [])
+  const logisticsType =
+    orderDetails?.DELIVERY_NAME || orderDetails?.deliveryName || logisticsTypeQuery || "Not specified"
+
+  const safeNumber = (value: unknown, fallback: number): number => {
+    const num = Number(value)
+    return Number.isFinite(num) ? num : fallback
+  }
+
+  const orderDeliveryAmount = Number(orderDetails?.DELIVERY_AMOUNT ?? orderDetails?.deliveryAmount)
+  const logisticsAmount =
+    Number.isFinite(orderDeliveryAmount) && orderDeliveryAmount > 0
+      ? orderDeliveryAmount
+      : logisticsAmountQuery
+
+  const rawOrderTotalFromDetails = Number(orderDetails?.total ?? orderDetails?.AMOUNT)
+  const totalAmount =
+    Number.isFinite(rawOrderTotalFromDetails) && rawOrderTotalFromDetails > 0
+      ? rawOrderTotalFromDetails
+      : Number(total ?? "0")
+
+  const subtotalFromItems =
+    orderDetails?.items?.reduce((sum: number, item: any) => {
+      const qty = Number(item.qty ?? item.QUANTITY ?? item.QTY ?? 0) || 0
+      const unitPrice = Number(item.unitPrice ?? item.UNIT_PRICE ?? item.UNITY_PRICE ?? item.UNITY_PRICE ?? 0) || 0
+      return sum + qty * unitPrice
+    }, 0) ?? 0
+
+  const subtotalFromOrder = safeNumber(orderDetails?.subtotal ?? orderDetails?.SUBTOTAL, Number.NaN)
+  const subtotalAmount = Math.max(
+    0,
+    Number.isFinite(subtotalFromItems) && subtotalFromItems > 0
+      ? subtotalFromItems
+      : Number.isFinite(subtotalFromOrder) && subtotalFromOrder > 0
+      ? subtotalFromOrder
+      : Number(total ?? "0") - logisticsAmount,
+  )
+
+  const fallbackGrandTotalAmount = subtotalAmount + logisticsAmount
+  const displayTotalAmount = fallbackGrandTotalAmount || totalAmount
+
+  const orderSubtotalFromDetails = safeNumber(orderDetails?.subtotal ?? orderDetails?.SUBTOTAL, Number.NaN)
+  const effectiveSubtotal = Number.isFinite(orderSubtotalFromDetails) && orderSubtotalFromDetails > 0
+    ? orderSubtotalFromDetails
+    : subtotalAmount
+
+  const orderTotalFromDetails = safeNumber(orderDetails?.total ?? orderDetails?.AMOUNT, Number.NaN)
+  const effectiveTotalAmount = Number.isFinite(orderTotalFromDetails) && orderTotalFromDetails > 0
+    ? orderTotalFromDetails
+    : displayTotalAmount
+
+  const discountAmount = Math.max(
+    0,
+    Math.round(effectiveSubtotal + logisticsAmount - effectiveTotalAmount),
+  )
+
+  const paymentQuery = searchParams.get("payment")?.trim() || ""
+  const paymentMethod = orderDetails?.paymentMethod || orderDetails?.PAYMENT_NAME || paymentQuery || ""
+  const isPaid = Boolean(
+    String(orderDetails?.paymentStatus ?? orderDetails?.PAYMENT_STATUS ?? "").toLowerCase().includes("paid") ||
+      (paymentMethod && !paymentMethod.toLowerCase().includes("delivery"))
+  )
+  const paidAmount = isPaid ? effectiveTotalAmount : 0
+
+  const autoWhatsApp = searchParams.get("autoWhatsApp") === "1"
+  const momoTxId = searchParams.get("momoTxId")?.trim() || ""
+  const homeHref = fromGrandma ? "/grandma" : "/"
 
   // ✅ Get table session reactively from store
   const tableSession = useTableCommandStore((state) => state.activeSession)
@@ -186,19 +245,15 @@ function OrderSuccessPageInner() {
     orderDetails?.CONDITIONS?.trim() ||
     orderDetails?.ORDER_NOTE?.trim() ||
     orderDetails?.orderNote?.trim() ||
+    orderNotesQuery ||
     ""
   )
 
+  const siteBase = (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw").replace(/\/Trading\/?$/, "")
+  const publicShopBase = (process.env.NEXT_PUBLIC_SHOP_URL || process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://shop.ihute.rw").replace(/\/$/, "")
   const trackSlugForUrl = trackToken || orderId
   const trackPath = `/track-order/${encodeURIComponent(trackSlugForUrl || "")}${fromGrandma ? "?from=grandma" : ""}`
-  const siteBase = (process.env.NEXT_PUBLIC_SITE_URL || "https://ihute.rw")
-    .replace(/\/Trading\/?$/, "")
-    .replace(/\/$/, "")
-  const trackingUrl = clientOrigin
-    ? `${clientOrigin}${trackPath}`
-    : siteBase
-      ? `${siteBase}${trackPath}`
-      : trackPath
+  const trackingUrl = `${publicShopBase}${trackPath}`
 
   // Build WhatsApp message with product details - memoized to recalculate when orderDetails changes
   const { whatsappMessage, whatsappHref } = useMemo(() => {
@@ -214,6 +269,7 @@ function OrderSuccessPageInner() {
         orderDetails.CONDITIONS?.trim() ||
         orderDetails.ORDER_NOTE?.trim() ||
         orderDetails.orderNote?.trim() ||
+        orderNotesQuery ||
         ""
 
       message = buildOrderWhatsAppMessage({
@@ -227,21 +283,26 @@ function OrderSuccessPageInner() {
           orderedBy: item.orderedBy ?? item.ORDERED_BY,
           lineId: item.lineId ?? item.ID_LIST,
         })),
-        total: orderDetails.total,
-        discount: 0,
+        subtotal: effectiveSubtotal,
+        total: effectiveTotalAmount,
+        discount: discountAmount,
         paid: paidAmount,
         paidAt: formatPaymentMethod(paymentMethod),
         reference: displayOrderNo ? `ORDER ${displayOrderNo}` : undefined,
-        myPhone: buyerPhone ?? undefined,
+        myPhone: String(orderDetails?.buyerPhone || orderDetails?.BUYER_PHONE || buyerPhone || ""),
         link: trackingUrl,
         isTableCommand: isTable,
         momoTxId: momoTxId || undefined,
         orderDescription: descriptionText || undefined,
+        logisticsType: logisticsType,
+        logisticsFee: logisticsAmount,
       })
     } else {
       // Fallback message without product details
       console.log("[Order Success] Using fallback message (no items)")
-      const fallbackDescription = (orderDetails?.CONDITIONS?.trim() || orderDetails?.ORDER_NOTE?.trim() || orderDetails?.orderNote?.trim())
+      const fallbackDescription = orderNotesQuery
+        ? orderNotesQuery
+        : (orderDetails?.CONDITIONS?.trim() || orderDetails?.ORDER_NOTE?.trim() || orderDetails?.orderNote?.trim())
         ? (orderDetails?.CONDITIONS || orderDetails?.ORDER_NOTE || orderDetails?.orderNote)
         : ""
 
@@ -252,8 +313,15 @@ function OrderSuccessPageInner() {
         `Order ID: ${displayOrderNo}`,
         momoTxId ? `MoMo TxId: ${momoTxId}` : "",
         ...(fallbackDescription ? ["", "Order Description:", fallbackDescription, ""] : []),
-        `Total: ${Number(total).toLocaleString()} RWF`,
-        `My phone: ${buyerPhone}`,
+        `Logistics: ${logisticsType}`,
+        `Subtotal: ${subtotalAmount.toLocaleString()} RWF`,
+        `Logistics fee: ${logisticsAmount.toLocaleString()} RWF`,
+        `Discount: ${discountAmount.toLocaleString()} RWF`,
+        `Total: ${effectiveTotalAmount.toLocaleString()} RWF`,
+        `Paid: ${paidAmount.toLocaleString()} RWF`,
+        "",
+        `Paid at: ${formatPaymentMethod(paymentMethod)}`,
+        `My phone: ${orderDetails?.buyerPhone || orderDetails?.BUYER_PHONE || buyerPhone || ""}`,
         "",
         `Follow: ${trackingUrl}`,
       ]
@@ -279,7 +347,6 @@ function OrderSuccessPageInner() {
     trackingUrl,
     momoTxId,
     paymentQuery,
-    clientOrigin,
   ])
 
   useEffect(() => {
@@ -351,6 +418,13 @@ function OrderSuccessPageInner() {
             <p className="mt-2 text-slate-600">Processing — the shop will confirm your order</p>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="flex justify-center">
+              <img
+                src="/img/logo.png"
+                alt="Ihute logo"
+                className="h-16 w-16 rounded-full bg-white p-2 shadow-sm object-contain"
+              />
+            </div>
             <div className="space-y-2 rounded-xl bg-slate-50 p-4">
               {orderDescription ? (
                 <div className="mb-3 rounded-2xl border border-slate-200 bg-white p-3 text-sm text-slate-800">
@@ -382,25 +456,77 @@ function OrderSuccessPageInner() {
                 </div>
               ) : null}
               <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Logistics</span>
+                <span className="font-medium">{logisticsType}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Subtotal</span>
+                <span className="font-medium tabular-nums">
+                  {subtotalAmount.toLocaleString()} RWF
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Logistics fee</span>
+                <span className="font-medium tabular-nums">
+                  {logisticsAmount.toLocaleString()} RWF
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Discount</span>
+                <span className="font-medium tabular-nums">
+                  {discountAmount.toLocaleString()} RWF
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Total</span>
-                <span className="font-bold">{Number(total).toLocaleString()} RWF</span>
+                <span className="font-bold">
+                  {effectiveTotalAmount.toLocaleString()} RWF
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Paid</span>
+                <span className="font-medium tabular-nums">
+                  {paidAmount.toLocaleString()} RWF
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Paid at</span>
+                <span className="font-medium">
+                  {formatPaymentMethod(paymentMethod)}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">My phone</span>
+                <span className="font-medium tabular-nums">
+                  {String(orderDetails?.buyerPhone || orderDetails?.BUYER_PHONE || buyerPhone || "")}
+                </span>
+              </div>
+              <div className="rounded-2xl bg-slate-100 p-3 text-sm">
+                <div className="text-muted-foreground">Follow</div>
+                <a
+                  href={trackingUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium text-slate-900 underline break-all"
+                >
+                  {trackingUrl}
+                </a>
               </div>
               {/* Order description is shown in the receipt preview (above product list) */}
             </div>
           </CardContent>
         </Card>
 
-          {/* Receipt preview: shows Order Description above product list */}
-          {whatsappMessage ? (
-            <Card className="border-0 shadow-xl rounded-2xl bg-white text-slate-900">
-              <CardHeader>
-                <CardTitle className="text-lg">Order receipt</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <pre className="whitespace-pre-wrap font-mono text-sm text-slate-800">{whatsappMessage}</pre>
-              </CardContent>
-            </Card>
-          ) : null}
+        {whatsappMessage ? (
+          <Card className="border-0 shadow-xl rounded-2xl bg-white text-slate-900">
+            <CardHeader>
+              <CardTitle className="text-lg">Order receipt</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <pre className="whitespace-pre-wrap font-mono text-sm text-slate-800">{whatsappMessage}</pre>
+            </CardContent>
+          </Card>
+        ) : null}
 
         <Card className="border-0 shadow-xl rounded-2xl bg-white text-slate-900">
           <CardHeader>
@@ -471,14 +597,6 @@ function OrderSuccessPageInner() {
 
           {/* Action Buttons */}
           <div className="flex flex-col gap-3 pt-2">
-            {fromTable ? (
-              <Button className="w-full bg-white text-[#0369a1] hover:bg-white/90" asChild>
-                <Link href="/cart" className="inline-flex items-center justify-center gap-2">
-                  Add more to table
-                  <ArrowRight className="h-4 w-4 shrink-0" aria-hidden />
-                </Link>
-              </Button>
-            ) : null}
             {fromGrandma && orderId ? (
               <Button className="w-full bg-white text-[#0369a1] hover:bg-white/90" asChild>
                 <Link
