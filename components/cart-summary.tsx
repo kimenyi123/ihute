@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { RadioOptionCard } from "@/components/ui/radio-option-card"
 import { Label } from "@/components/ui/label"
 import { formatPaymentMethod } from "@/lib/payment-utils"
 import { useToast } from "@/components/ui/use-toast"
@@ -382,6 +383,8 @@ function CartSummaryBody() {
   // Retry a few times so transient backend/network failures do not leave seller phone empty.
   const profileFetchInFlightRef = useRef<Set<string>>(new Set())
   const profileFetchAttemptsRef = useRef<Record<string, number>>({})
+  const checkoutGenRef = useRef<Record<string, number>>({})
+  const paymentPollGenRef = useRef<Record<string, number>>({})
   const PROFILE_FETCH_MAX_ATTEMPTS = 3
   const PROFILE_FETCH_RETRY_MS = 1200
   useEffect(() => {
@@ -490,10 +493,14 @@ function CartSummaryBody() {
     return true
   }
 
-  // MoMo payment auto-poll
+  // MoMo payment auto-poll (cancelled when the same seller starts a new checkout)
   async function pollPayment(orderId: string, supplierId: string) {
+    const sid = (supplierId ?? "").trim()
+    if (!sid) return
+    const pollGen = (paymentPollGenRef.current[sid] = (paymentPollGenRef.current[sid] ?? 0) + 1)
     const deadline = Date.now() + 60_000
     while (Date.now() < deadline) {
+      if (paymentPollGenRef.current[sid] !== pollGen) return
       try {
         const r = await fetch("/api/orders/payment-status", {
           method: "POST",
@@ -502,11 +509,35 @@ function CartSummaryBody() {
           cache: "no-store",
         })
         const j = await r.json()
-        if (j?.ok && j.status === "paid") { setPaymentStatus(supplierId, "paid"); return }
-        if (j?.ok && j.status === "failed") { setPaymentStatus(supplierId, "failed"); return }
+        if (paymentPollGenRef.current[sid] !== pollGen) return
+        const status = String(j?.status ?? j?.paymentStatus ?? "").toLowerCase()
+        if (j?.ok && status === "paid") {
+          setPaymentStatus(sid, "paid")
+          return
+        }
+        if (j?.ok && status === "failed") {
+          setPaymentStatus(sid, "failed")
+          return
+        }
       } catch {}
       await new Promise(res => setTimeout(res, 2000))
     }
+  }
+
+  function markCheckoutSuccess(
+    supplierId: string,
+    paymentName: string,
+    paymentStatus?: "pending" | "paid",
+  ) {
+    if (paymentName === "PAY_ON_DELIVERY") {
+      setPaymentStatus(supplierId, "unpaid")
+      return
+    }
+    if (paymentStatus === "paid") {
+      setPaymentStatus(supplierId, "paid")
+      return
+    }
+    setPaymentStatus(supplierId, "pending")
   }
 
   // WhatsApp prefill per seller
@@ -653,6 +684,30 @@ function CartSummaryBody() {
     }
   }
 
+  function buildOrderSuccessParams(
+    orderId: string,
+    g: ReturnType<typeof getGroupsBySeller>[number],
+    sellerTel: string | null,
+    paymentName: string,
+    trackToken?: string,
+  ): URLSearchParams {
+    const params = new URLSearchParams({
+      orderId,
+      sellerName: g.supplierName,
+      sellerPhone: sellerTel || getSellerTelForOrder(g) || "",
+      buyerPhone:
+        checkoutMode === "anonymous"
+          ? isInTableCommand()
+            ? anonymousPhone
+            : ""
+          : user?.phone || "",
+      total: String(g.subtotal),
+      paymentMethod: paymentName,
+    })
+    if (trackToken) params.set("trackToken", trackToken)
+    return params
+  }
+
   // Unified order creator for MoMo & COD
   const placeOrder = async (
     g: ReturnType<typeof getGroupsBySeller>[number],
@@ -666,6 +721,9 @@ function CartSummaryBody() {
     }
   ) => {
     if (!requireLogin()) return
+    const sid = (g.supplierId ?? "").trim()
+    const checkoutGen = (checkoutGenRef.current[sid] = (checkoutGenRef.current[sid] ?? 0) + 1)
+    paymentPollGenRef.current[sid] = (paymentPollGenRef.current[sid] ?? 0) + 1
     try {
       setBusy(g.supplierId)
       setPaymentStatus(g.supplierId, "pending")
@@ -753,14 +811,13 @@ function CartSummaryBody() {
       console.log("Order creation response:", json)
 
       if (res.ok && json?.ok) {
+        if (checkoutGenRef.current[sid] !== checkoutGen) return
         const orderId = json.orderId ? String(json.orderId) : null
         const sellerTel = json.sellerTel ? String(json.sellerTel) : null
 
         if (orderId) setOrderIds(m => ({ ...m, [g.supplierId]: orderId }))
         if (sellerTel) setOrderPhones(m => ({ ...m, [g.supplierId]: sellerTel }))
-        if (opts.paymentStatus === "paid") {
-          setPaymentStatus(g.supplierId, "paid")
-        }
+        markCheckoutSuccess(sid, opts.paymentName, opts.paymentStatus)
 
         // Track successful purchase for all items in this seller group (best-effort)
         try {
@@ -773,32 +830,21 @@ function CartSummaryBody() {
 
         console.log(`✅ Order created with payment method: ${opts.paymentName}`)
 
-        // Handle table command creation with share data
-        if (json.tableCommand && json.tableCommand.shareableLink) {
-          // If we're not already in a table command session, create one with share data
-          if (!isInTableCommand()) {
-            createTableCommand(
-              json.tableCommand.tableName,
-              g.supplierId,
-              json.tableCommand.tableLocation,
-              checkoutMode === "anonymous" ? anonymousName : user?.name || "Guest",
-              checkoutMode === "anonymous" ? GUEST_POOL_EMAIL : user?.email || "",
-              {
-                shareableLink: json.tableCommand.shareableLink,
-                shareableToken: json.tableCommand.shareableToken,
-                qrCodeUrl: json.tableCommand.qrCodeUrl,
-              }
-            )
-          } else if (activeSession && activeSession.isCreator) {
-            // Update existing session with share data
-            updateTableShareData({
+        // New table only — guests already at a table should not get the share modal again
+        if (json.tableCommand && json.tableCommand.shareableLink && !isInTableCommand()) {
+          createTableCommand(
+            json.tableCommand.tableName,
+            g.supplierId,
+            json.tableCommand.tableLocation,
+            checkoutMode === "anonymous" ? anonymousName : user?.name || "Guest",
+            checkoutMode === "anonymous" ? GUEST_POOL_EMAIL : user?.email || "",
+            {
               shareableLink: json.tableCommand.shareableLink,
               shareableToken: json.tableCommand.shareableToken,
               qrCodeUrl: json.tableCommand.qrCodeUrl,
-            })
-          }
+            }
+          )
 
-          // Show share modal
           setShareModalData({
             tableName: json.tableCommand.tableName,
             tableLocation: json.tableCommand.tableLocation,
@@ -835,11 +881,22 @@ function CartSummaryBody() {
           })
         }
 
-        // Lock table command if in table mode for bar/resto flow:
-        // clear cart but stay on page so user can add more items.
-        if (isInTableCommand() && activeSession?.isCreator && currentOrderIsBarTable) {
+        // Bar/resto table: every guest goes to order-success (track link), cart cleared for this seller.
+        if (isInTableCommand() && currentOrderIsBarTable) {
           await clearSubmittedSupplier(g.supplierId)
-          alert(`Order #${orderId} added to table "${activeSession.tableName}". Add more items or send the complete table order.`)
+          if (orderId) {
+            const params = buildOrderSuccessParams(
+              orderId,
+              g,
+              sellerTel,
+              opts.paymentName,
+              json.trackToken ? String(json.trackToken) : undefined,
+            )
+            params.set("fromTable", "1")
+            router.push(`/order-success?${params.toString()}`)
+          } else {
+            alert(`Order added to table "${activeSession?.tableName ?? "table"}". Add more items or send the complete table order.`)
+          }
           return
         }
 
@@ -848,19 +905,13 @@ function CartSummaryBody() {
 
         // Redirect to order success page with WhatsApp details
         if (orderId) {
-          const params = new URLSearchParams({
+          const params = buildOrderSuccessParams(
             orderId,
-            sellerName: g.supplierName,
-            sellerPhone: sellerTel || "",
-            buyerPhone:
-              checkoutMode === "anonymous"
-                ? isInTableCommand()
-                  ? anonymousPhone
-                  : ""
-                : user?.phone || "",
-            total: String(g.subtotal),
-            paymentMethod: opts.paymentName
-          })
+            g,
+            sellerTel,
+            opts.paymentName,
+            json.trackToken ? String(json.trackToken) : undefined,
+          )
           router.push(`/order-success?${params.toString()}`)
         } else if (checkoutMode === "login" || isAuthenticated) {
           router.push("/orders")
@@ -869,7 +920,9 @@ function CartSummaryBody() {
         }
         router.refresh()
       } else {
-        setPaymentStatus(g.supplierId, "failed")
+        if (checkoutGenRef.current[sid] === checkoutGen) {
+          setPaymentStatus(g.supplierId, "failed")
+        }
         const errMsg = orderErrorMessageWithProductNames(
           json?.error || "Unknown error",
           g.items,
@@ -891,7 +944,9 @@ function CartSummaryBody() {
       }
     } catch (error) {
       console.error("Order creation error:", error)
-      setPaymentStatus(g.supplierId, "failed")
+      if (checkoutGenRef.current[sid] === checkoutGen) {
+        setPaymentStatus(g.supplierId, "failed")
+      }
       toast({
         variant: "destructive",
         title: "Failed to create order",
@@ -1338,42 +1393,21 @@ function CartSummaryBody() {
                 onValueChange={(v) => {
                   const mode = v as "login" | "anonymous"
                   setCheckoutMode(mode)
-                  // Plain guest checkout does not show a name field; clear any stale prefill so we
-                  // do not submit another user's saved guest name as buyerName.
                   if (mode === "anonymous" && !isInTableCommand()) {
                     setAnonymousName("")
                     hasPrefilledName.current = false
                   }
                 }}
+                className="gap-3"
               >
-                <div
-                  className="flex items-center space-x-3 border rounded-lg p-3 cursor-pointer hover:bg-accent"
-                  onClick={() => {
-                    setCheckoutMode("login")
-                  }}
-                >
-                  <RadioGroupItem value="login" id="checkout-login" />
-                  <Label htmlFor="checkout-login" className="cursor-pointer flex-1">
-                    <div className="font-medium">Sign in to checkout</div>
-                    <div className="text-xs text-muted-foreground">Track your orders easily</div>
-                  </Label>
-                </div>
-                <div
-                  className="flex items-center space-x-3 border rounded-lg p-3 cursor-pointer hover:bg-accent"
-                  onClick={() => {
-                    setCheckoutMode("anonymous")
-                    if (!isInTableCommand()) {
-                      setAnonymousName("")
-                      hasPrefilledName.current = false
-                    }
-                  }}
-                >
-                  <RadioGroupItem value="anonymous" id="checkout-anonymous" />
-                  <Label htmlFor="checkout-anonymous" className="cursor-pointer flex-1">
-                    <div className="font-medium">Continue as guest</div>
-                    <div className="text-xs text-muted-foreground">No account needed</div>
-                  </Label>
-                </div>
+                <RadioOptionCard value="login" id="checkout-login" selected={checkoutMode === "login"}>
+                  <div className="font-medium">Sign in to checkout</div>
+                  <div className="text-xs text-muted-foreground">Track your orders easily</div>
+                </RadioOptionCard>
+                <RadioOptionCard value="anonymous" id="checkout-anonymous" selected={checkoutMode === "anonymous"}>
+                  <div className="font-medium">Continue as guest</div>
+                  <div className="text-xs text-muted-foreground">No account needed</div>
+                </RadioOptionCard>
               </RadioGroup>
             </div>
           )}
@@ -1431,7 +1465,11 @@ function CartSummaryBody() {
           )}
 
           {/* Payment method selection */}
-          <RadioGroup value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as "momo" | "airtel" | "cod" | "urubuto")}>
+          <RadioGroup
+            value={paymentMethod}
+            onValueChange={(v) => setPaymentMethod(v as "momo" | "airtel" | "cod" | "urubuto")}
+            className="gap-3"
+          >
             <div className="space-y-3">
               {selectedSeller && (() => {
                 const g = groups.find(x => x.supplierId === selectedSeller)
@@ -1442,78 +1480,73 @@ function CartSummaryBody() {
                 return (
                   <>
                     {urubutoLive && (
-                      <div
-                        className="flex items-center space-x-3 border rounded-lg p-4 cursor-pointer hover:bg-accent border-violet-300 bg-violet-50/50"
-                        onClick={() => setPaymentMethod("urubuto")}
+                      <RadioOptionCard
+                        value="urubuto"
+                        id="urubuto"
+                        selected={paymentMethod === "urubuto"}
+                        accent="violet"
                       >
-                        <RadioGroupItem value="urubuto" id="urubuto" />
-                        <Label htmlFor="urubuto" className="flex items-center gap-2 cursor-pointer flex-1">
+                        <div className="flex items-center gap-2">
                           <CreditCard className="h-5 w-5 text-violet-700" />
                           <div>
-                            <div className="font-medium flex items-center gap-2 flex-wrap">
-                              UrubutoPay
-                              {/*
-                              {urubutoPreview && !urubutoEligibleBySeller[selectedSeller] && (
-                                <Badge variant="outline" className="text-[10px] border-amber-400 text-amber-800">
-                                  UI preview
-                                </Badge>
-                              )}
-                              */}
-                            </div>
+                            <div className="font-medium">UrubutoPay</div>
                             <div className="text-sm text-muted-foreground">
                               MoMo wallet or card via Urubuto — payment goes to this shop
                             </div>
                           </div>
-                        </Label>
-                      </div>
+                        </div>
+                      </RadioOptionCard>
                     )}
 
-                    <div
-                      className={`flex items-center space-x-3 border rounded-lg p-4 cursor-pointer hover:bg-accent ${!hasUssdTarget ? 'opacity-50' : ''}`}
-                      onClick={() => hasUssdTarget && setPaymentMethod("momo")}
+                    <RadioOptionCard
+                      value="momo"
+                      id="momo"
+                      selected={paymentMethod === "momo"}
+                      disabled={!hasUssdTarget}
                     >
-                      <RadioGroupItem value="momo" id="momo" disabled={!hasUssdTarget} />
-                      <Label htmlFor="momo" className={`flex items-center gap-2 flex-1 ${hasUssdTarget ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                      <div className="flex items-center gap-2">
                         <Wallet className="h-5 w-5 text-yellow-600" />
                         <div>
                           <div className="font-medium">MTN Mobile Money</div>
                           <div className="text-sm text-muted-foreground">
-                            {hasUssdTarget ? 'Pay instantly with MTN MoMo' : 'Not available for this seller'}
+                            {hasUssdTarget ? "Pay instantly with MTN MoMo" : "Not available for this seller"}
                           </div>
                         </div>
-                      </Label>
-                    </div>
+                      </div>
+                    </RadioOptionCard>
 
-                    <div
-                      className={`flex items-center space-x-3 border rounded-lg p-4 cursor-pointer hover:bg-accent ${!hasUssdTarget ? 'opacity-50' : ''}`}
-                      onClick={() => hasUssdTarget && setPaymentMethod("airtel")}
+                    <RadioOptionCard
+                      value="airtel"
+                      id="airtel"
+                      selected={paymentMethod === "airtel"}
+                      disabled={!hasUssdTarget}
                     >
-                      <RadioGroupItem value="airtel" id="airtel" disabled={!hasUssdTarget} />
-                      <Label htmlFor="airtel" className={`flex items-center gap-2 flex-1 ${hasUssdTarget ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                      <div className="flex items-center gap-2">
                         <Wallet className="h-5 w-5 text-red-600" />
                         <div>
                           <div className="font-medium">Airtel Money</div>
                           <div className="text-sm text-muted-foreground">
-                            {hasUssdTarget ? 'Pay with Airtel Money' : 'Not available for this seller'}
+                            {hasUssdTarget ? "Pay with Airtel Money" : "Not available for this seller"}
                           </div>
                         </div>
-                      </Label>
-                    </div>
+                      </div>
+                    </RadioOptionCard>
 
-                    <div className="flex items-center space-x-3 border rounded-lg p-4 cursor-pointer hover:bg-accent" onClick={() => setPaymentMethod("cod")}>
-                      <RadioGroupItem value="cod" id="cod" />
-                      <Label htmlFor="cod" className="flex items-center gap-2 cursor-pointer flex-1">
+                    <RadioOptionCard value="cod" id="cod" selected={paymentMethod === "cod"}>
+                      <div className="flex items-center gap-2">
                         <Truck className="h-5 w-5 text-blue-600" />
                         <div>
                           <div className="font-medium">
                             {isInTableCommand() ? "Pay at Table" : "Cash on Delivery"}
                           </div>
                           <div className="text-sm text-muted-foreground">
-                            {isInTableCommand() ? "Pay when order arrives at your table" : "Pay when you receive your order"}
+                            {isInTableCommand()
+                              ? "Pay when order arrives at your table"
+                              : "Pay when you receive your order"}
                           </div>
                         </div>
-                      </Label>
-                    </div>
+                      </div>
+                    </RadioOptionCard>
                   </>
                 )
               })()}
@@ -1805,26 +1838,18 @@ function CartSummaryBody() {
                   }}
                   className="grid grid-cols-2 gap-2"
                 >
-                  <div
-                    className={`flex items-center gap-2 rounded-lg border p-3 cursor-pointer ${urubutoChannel === "wallet" ? "border-violet-500 bg-violet-50" : "border-border"}`}
-                    onClick={() => setUrubutoChannel("wallet")}
-                  >
-                    <RadioGroupItem value="wallet" id="urubuto-wallet" />
-                    <Label htmlFor="urubuto-wallet" className="cursor-pointer flex items-center gap-1.5 text-sm font-medium">
+                  <RadioOptionCard value="wallet" id="urubuto-wallet" selected={urubutoChannel === "wallet"} className="p-3">
+                    <span className="flex items-center gap-1.5 text-sm font-medium">
                       <Wallet className="h-4 w-4 text-yellow-600" />
                       MoMo wallet
-                    </Label>
-                  </div>
-                  <div
-                    className={`flex items-center gap-2 rounded-lg border p-3 cursor-pointer ${urubutoChannel === "card" ? "border-violet-500 bg-violet-50" : "border-border"}`}
-                    onClick={() => setUrubutoChannel("card")}
-                  >
-                    <RadioGroupItem value="card" id="urubuto-card-channel" />
-                    <Label htmlFor="urubuto-card-channel" className="cursor-pointer flex items-center gap-1.5 text-sm font-medium">
+                    </span>
+                  </RadioOptionCard>
+                  <RadioOptionCard value="card" id="urubuto-card-channel" selected={urubutoChannel === "card"} className="p-3">
+                    <span className="flex items-center gap-1.5 text-sm font-medium">
                       <CreditCard className="h-4 w-4 text-blue-600" />
                       Card
-                    </Label>
-                  </div>
+                    </span>
+                  </RadioOptionCard>
                 </RadioGroup>
                 {urubutoChannel === "wallet" ? (
                   <div className="space-y-2">

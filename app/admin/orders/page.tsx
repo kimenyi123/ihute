@@ -66,11 +66,23 @@ export default function OrdersPage() {
     status: '',
   })
   const [sectors, setSectors] = useState<string[]>([])
+  const [page, setPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+  const [totalPages, setTotalPages] = useState(1)
+  const pageSize = 20
 
   useEffect(() => {
     loadSectors()
+  }, [])
+
+  useEffect(() => {
     loadOrders()
-  }, [filters])
+  }, [filters, page])
+
+  const updateFilters = (nextFilters: Partial<typeof filters>) => {
+    setFilters((current) => ({ ...current, ...nextFilters }))
+    setPage(1)
+  }
 
   const loadSectors = async () => {
     try {
@@ -91,12 +103,16 @@ export default function OrdersPage() {
       const res = await postAdminApi({
         action: 'getAllOrders',
         ...filters,
-        limit: 100,
+        limit: pageSize,
+        page,
       })
       const data = await res.json()
       
       if (data.ok) {
         setOrders(data.orders || [])
+        const count = Number(data.totalCount ?? data.totalOrders ?? 0) || 0
+        setTotalCount(count)
+        setTotalPages(count > 0 ? Math.max(1, Math.ceil(count / pageSize)) : 1)
       }
     } catch (error) {
       console.error('Error loading orders:', error)
@@ -131,7 +147,7 @@ export default function OrdersPage() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Sector</label>
             <select
               value={filters.sector}
-              onChange={(e) => setFilters({ ...filters, sector: e.target.value })}
+              onChange={(e) => updateFilters({ sector: e.target.value })}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg"
             >
               <option value="">All Sectors</option>
@@ -145,7 +161,7 @@ export default function OrdersPage() {
             <input
               type="text"
               value={filters.sellerAccount}
-              onChange={(e) => setFilters({ ...filters, sellerAccount: e.target.value })}
+              onChange={(e) => updateFilters({ sellerAccount: e.target.value })}
               placeholder="Enter seller account"
               className="w-full px-3 py-2 border border-gray-300 rounded-lg"
             />
@@ -154,7 +170,7 @@ export default function OrdersPage() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
             <select
               value={filters.status}
-              onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+              onChange={(e) => updateFilters({ status: e.target.value })}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg"
             >
               <option value="">All Statuses</option>
@@ -243,6 +259,29 @@ export default function OrdersPage() {
                 ))}
               </tbody>
             </table>
+            <div className="flex flex-col gap-3 border-t border-gray-200 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-sm text-gray-600">
+                Showing {orders.length} orders of {totalCount.toLocaleString()} · Page {page} of {totalPages}
+              </div>
+              <div className="inline-flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={page <= 1 || loading}
+                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                  className="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  disabled={page >= totalPages || loading}
+                  onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                  className="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

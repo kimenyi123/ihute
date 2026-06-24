@@ -12,7 +12,8 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { RadioGroup } from "@/components/ui/radio-group"
+import { RadioOptionCard } from "@/components/ui/radio-option-card"
 import { Users, Plus, LogIn, Beer, Utensils, User, Search, Loader2, AlertTriangle } from "lucide-react"
 import { useTableCommandStore, getOrCreateGuestEmail, setGuestName } from "@/lib/table-command-store"
 import { useAuthStore } from "@/lib/auth-store"
@@ -286,54 +287,42 @@ export function TableCommandDialog({
 
           <div className="space-y-2 sm:space-y-3">
             <Label className="text-xs sm:text-sm font-medium">What would you like to do?</Label>
-            <RadioGroup value={mode} onValueChange={(v) => setMode(v as "create" | "join" | "individual")}>
-              <div
-                className="flex items-center space-x-2 sm:space-x-3 border rounded-lg p-2 sm:p-3 cursor-pointer hover:bg-accent"
-                onClick={() => setMode("create")}
-              >
-                <RadioGroupItem value="create" id="create-table" className="flex-shrink-0" />
-                <Label htmlFor="create-table" className="cursor-pointer flex items-center gap-1.5 sm:gap-2 flex-1 min-w-0">
-                  <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-green-600 flex-shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <div className="font-medium text-xs sm:text-sm">Create New Table</div>
-                    <div className="text-[10px] sm:text-xs text-muted-foreground">
+            <RadioGroup value={mode} onValueChange={(v) => setMode(v as "create" | "join" | "individual")} className="gap-2 sm:gap-3">
+              <RadioOptionCard value="create" id="create-table" selected={mode === "create"}>
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0 text-green-600" />
+                  <div className="min-w-0">
+                    <div className="text-xs font-medium sm:text-sm">Create New Table</div>
+                    <div className="text-[10px] text-muted-foreground sm:text-xs">
                       Start a new table command for your group
                     </div>
                   </div>
-                </Label>
-              </div>
+                </div>
+              </RadioOptionCard>
 
-              <div
-                className="flex items-center space-x-2 sm:space-x-3 border rounded-lg p-2 sm:p-3 cursor-pointer hover:bg-accent"
-                onClick={() => setMode("join")}
-              >
-                <RadioGroupItem value="join" id="join-table" className="flex-shrink-0" />
-                <Label htmlFor="join-table" className="cursor-pointer flex items-center gap-1.5 sm:gap-2 flex-1 min-w-0">
-                  <LogIn className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-blue-600 flex-shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <div className="font-medium text-xs sm:text-sm">Join Existing Table</div>
-                    <div className="text-[10px] sm:text-xs text-muted-foreground">
+              <RadioOptionCard value="join" id="join-table" selected={mode === "join"}>
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  <LogIn className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0 text-blue-600" />
+                  <div className="min-w-0">
+                    <div className="text-xs font-medium sm:text-sm">Join Existing Table</div>
+                    <div className="text-[10px] text-muted-foreground sm:text-xs">
                       Join a table that someone else created
                     </div>
                   </div>
-                </Label>
-              </div>
+                </div>
+              </RadioOptionCard>
 
-              <div
-                className="flex items-center space-x-2 sm:space-x-3 border rounded-lg p-2 sm:p-3 cursor-pointer hover:bg-accent"
-                onClick={() => setMode("individual")}
-              >
-                <RadioGroupItem value="individual" id="order-individual" className="flex-shrink-0" />
-                <Label htmlFor="order-individual" className="cursor-pointer flex items-center gap-1.5 sm:gap-2 flex-1 min-w-0">
-                  <User className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-purple-600 flex-shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <div className="font-medium text-xs sm:text-sm">Order Individually</div>
-                    <div className="text-[10px] sm:text-xs text-muted-foreground">
+              <RadioOptionCard value="individual" id="order-individual" selected={mode === "individual"}>
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  <User className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0 text-purple-600" />
+                  <div className="min-w-0">
+                    <div className="text-xs font-medium sm:text-sm">Order Individually</div>
+                    <div className="text-[10px] text-muted-foreground sm:text-xs">
                       Place your own order without joining a table
                     </div>
                   </div>
-                </Label>
-              </div>
+                </div>
+              </RadioOptionCard>
             </RadioGroup>
           </div>
 
