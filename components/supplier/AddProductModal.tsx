@@ -40,6 +40,8 @@ const PRODUCT_MODAL_UI: Record<Language, {
   saving: string;
   updateProduct: string;
   addProduct: string;
+  errDuplicateCode: string;
+  warnPriceBelowCost: (loss: string) => string;
 }> = {
   en: {
     alertImageType: "Please choose an image file (JPEG, PNG, WebP, …).",
@@ -77,6 +79,8 @@ const PRODUCT_MODAL_UI: Record<Language, {
     saving: "Saving...",
     updateProduct: "Update Product",
     addProduct: "Add Product",
+    errDuplicateCode: "This product code already exists. Please enter a unique code.",
+    warnPriceBelowCost: (loss) => `⚠️ Sale price is ${loss} RWF below cost price — you will sell at a loss.`,
   },
   rw: {
     alertImageType: "Hitamo dosiye y'ishusho (JPEG, PNG, WebP, …).",
@@ -114,6 +118,8 @@ const PRODUCT_MODAL_UI: Record<Language, {
     saving: "Birimo kubikwa...",
     updateProduct: "Vugurura Igicuruzwa",
     addProduct: "Ongeraho Igicuruzwa",
+    errDuplicateCode: "Iyi kode y'igicuruzwa isanzwe ihari. Shyiramo kode yihariye.",
+    warnPriceBelowCost: (loss) => `⚠️ Igiciro cyo kugurisha kiri munsi y'igiciro cy'igurisha kuri ${loss} RWF — uzagurisha ku gihombo.`,
   },
   fr: {
     alertImageType: "Veuillez choisir un fichier image (JPEG, PNG, WebP, …).",
@@ -151,6 +157,8 @@ const PRODUCT_MODAL_UI: Record<Language, {
     saving: "Enregistrement...",
     updateProduct: "Mettre à jour le produit",
     addProduct: "Ajouter le produit",
+    errDuplicateCode: "Ce code produit existe déjà. Veuillez saisir un code unique.",
+    warnPriceBelowCost: (loss) => `⚠️ Le prix de vente est inférieur de ${loss} Mo au prix de revient — vous vendrez à perte.`,
   },
 };
 
@@ -290,8 +298,7 @@ export default function AddProductModal({
         !isEditingSameCode &&
         existingCodes.some(c => c.toUpperCase() === codeToCheck)
       ) {
-        newErrors.itemCode =
-          "This product code already exists. Please enter a unique code.";
+        newErrors.itemCode = ui.errDuplicateCode;
       }
     }
 
@@ -315,9 +322,7 @@ export default function AddProductModal({
       formData.price < formData.cost
     ) {
       const loss = (formData.cost - formData.price).toFixed(0);
-      setPriceWarning(
-        `⚠️ Sale price is ${loss} RWF below cost price — you will sell at a loss.`
-      );
+      setPriceWarning(ui.warnPriceBelowCost(loss));
     }
 
     setErrors(newErrors);
