@@ -277,20 +277,29 @@ function formatInvoiceAmount(amount: number): string {
   return `${Number(amount || 0).toLocaleString()} RWF`
 }
 
+function orderFinancials(order: OrderDetail) {
+  const logisticsFeeValue = Number(order.deliveryAmount ?? (order as { DELIVERY_AMOUNT?: number }).DELIVERY_AMOUNT ?? 0)
+  const subtotalValue = order.items.reduce(
+    (sum, item) => sum + Number(item.qty || 0) * Number(item.unitPrice || 0),
+    0,
+  )
+  const dbTotal = Number(order.total || 0)
+  const computedTotal = subtotalValue + logisticsFeeValue
+  const displayTotal =
+    logisticsFeeValue > 0 && dbTotal > 0 && dbTotal < computedTotal ? computedTotal : dbTotal || computedTotal
+  const discountValue = Math.max(0, subtotalValue + logisticsFeeValue - displayTotal)
+  return { logisticsFeeValue, subtotalValue, displayTotal, discountValue }
+}
+
 function buildInvoiceText(order: OrderDetail): string {
   const lines = order.items.map((item, idx) => {
     const lineTotal = Number(item.qty || 0) * Number(item.unitPrice || 0)
     return `${idx + 1}. ${item.name} | Qty: ${item.qty} | Amount: ${Number(item.unitPrice || 0).toLocaleString()} RWF | Total: ${lineTotal.toLocaleString()} RWF`
   })
   const logisticsLabel = order.deliveryName || "Not specified"
-  const logisticsFeeValue = Number(order.deliveryAmount ?? 0)
-  const subtotalValue = order.items.reduce(
-    (sum, item) => sum + Number(item.qty || 0) * Number(item.unitPrice || 0),
-    0,
-  )
-  const discountValue = Math.max(0, subtotalValue + logisticsFeeValue - Number(order.total || 0))
+  const { logisticsFeeValue, subtotalValue, displayTotal, discountValue } = orderFinancials(order)
   const paidValue = String(order.paymentStatus || "").toLowerCase().includes("paid")
-    ? Number(order.total || 0)
+    ? displayTotal
     : 0
   const followUrl = `${process.env.NEXT_PUBLIC_SHOP_URL || process.env.NEXT_PUBLIC_SITE_URL || "https://shop.ihute.rw"}/track-order/${encodeURIComponent(order.orderId)}`
 
@@ -309,7 +318,7 @@ function buildInvoiceText(order: OrderDetail): string {
     "",
     `Subtotal: ${formatInvoiceAmount(subtotalValue)}`,
     `Discount: ${formatInvoiceAmount(discountValue)}`,
-    `Total: ${formatInvoiceAmount(Number(order.total || 0))}`,
+    `Total: ${formatInvoiceAmount(displayTotal)}`,
     `Paid: ${formatInvoiceAmount(paidValue)}`,
     `Paid at: ${formatPaymentMethod(order.paymentMethod)}`,
     "",
@@ -622,9 +631,11 @@ function TrackOrderPageInner() {
     return nm + qt + amt
   })
 
+  const { displayTotal } = orderFinancials(order)
+
   // Determine paid amount for the order
   const isPaid = order.paymentMethod && !order.paymentMethod.toLowerCase().includes('delivery')
-  const paidAmount = isPaid ? order.total : 0
+  const paidAmount = isPaid ? displayTotal : 0
 
   const shareTrackSlug = publicToken || orderId
   const internalOrderNo = String(order.orderId ?? orderId)
@@ -643,7 +654,7 @@ function TrackOrderPageInner() {
     ...lines,
     '```',
     '',
-    `Total: ${formatCurrency(order.total)}`,
+    `Total: ${formatCurrency(displayTotal)}`,
     `Discount: ${formatCurrency(0)}`,
     `Paid: ${formatCurrency(paidAmount)}`,
     '',
@@ -1128,7 +1139,7 @@ function TrackOrderPageInner() {
               <div className="mt-4 pt-4 border-t">
                 <div className="flex justify-between items-center">
                   <p className="text-lg font-bold">Total</p>
-                  <p className="text-lg font-bold">{order.total.toLocaleString()} RWF</p>
+                  <p className="text-lg font-bold">{displayTotal.toLocaleString()} RWF</p>
                 </div>
               </div>
             </CardContent>

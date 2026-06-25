@@ -112,7 +112,13 @@ function OrderSuccessPageInner() {
   )
 
   const fallbackGrandTotalAmount = subtotalAmount + logisticsAmount
-  const displayTotalAmount = fallbackGrandTotalAmount || totalAmount
+  const queryTotal = safeNumber(total, Number.NaN)
+  const computedGrandTotal =
+    fallbackGrandTotalAmount > 0
+      ? fallbackGrandTotalAmount
+      : Number.isFinite(queryTotal) && queryTotal > 0
+      ? queryTotal
+      : totalAmount
 
   const orderSubtotalFromDetails = safeNumber(orderDetails?.subtotal ?? orderDetails?.SUBTOTAL, Number.NaN)
   const effectiveSubtotal = Number.isFinite(orderSubtotalFromDetails) && orderSubtotalFromDetails > 0
@@ -120,9 +126,16 @@ function OrderSuccessPageInner() {
     : subtotalAmount
 
   const orderTotalFromDetails = safeNumber(orderDetails?.total ?? orderDetails?.AMOUNT, Number.NaN)
-  const effectiveTotalAmount = Number.isFinite(orderTotalFromDetails) && orderTotalFromDetails > 0
-    ? orderTotalFromDetails
-    : displayTotalAmount
+  const effectiveTotalAmount = (() => {
+    if (Number.isFinite(orderTotalFromDetails) && orderTotalFromDetails > 0) {
+      if (logisticsAmount > 0 && orderTotalFromDetails < effectiveSubtotal + logisticsAmount) {
+        return effectiveSubtotal + logisticsAmount
+      }
+      return orderTotalFromDetails
+    }
+    if (Number.isFinite(queryTotal) && queryTotal > 0) return queryTotal
+    return computedGrandTotal
+  })()
 
   const discountAmount = Math.max(
     0,
