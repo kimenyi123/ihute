@@ -75,3 +75,4 @@ android/local.properties
 
 # iOS (CocoaPods — regenerated with `pod install`)
 ios/App/Pods/
+/nbproject/private/

@@ -774,7 +774,7 @@ const GRANDMA_LABELS: Record<
     demoLocation: "Kacyiru, Gasabo — hindura aho uri mu bigenga.",
     titleHome: "Ishyiga Ihute",
     shopsPrefix: "Amaduka ·",
-    titleSummary: "Incamake y'itumiza",
+    titleSummary: "Incamake y'ibyi'nasabye",
     titlePayment: "Uburyo bwo kwishyura",
     settings: "Ibigenga",
     settingsSub: "Hindura ururimi, aho uri, amaduka n'uburyo bwo kwishyura.",
@@ -794,10 +794,10 @@ const GRANDMA_LABELS: Record<
     yourLocation: "Aho uri",
     yourPhone: "Telefoni yawe",
     yourPhoneHint: "Iduka rizaguhamagara kuri iyi nimero. Niba winjiye ku konti yawe, ntibikenewe.",
-    paymentGuestPhoneLabel: "Nimero ya MoMo n'amakuru y'itumiza",
+    paymentGuestPhoneLabel: "Nimero ya MoMo n'amakuru y'a Order",
     paymentGuestPhonePlaceholder: "07… · nimero yo kwishyuriraho",
     paymentGuestPhoneNote: "Ntibisabwa niba winjiye ku konti ifite nimero ya telefoni.",
-    orderSubmitNeedPhone: "Andika nimero ya telefoni yawe kugira ngo wishyure kandi ubone amakuru y'itumiza.",
+    orderSubmitNeedPhone: "Andika nimero ya telefoni yawe kugira ngo wishyure kandi ubone amakuru y'a Order.",
     eta: "Igihe ugereranyije cyo kugera",
     etaSub: "Km ~{km} · {mode}",
     etaSubNoMode: "Hitamo uburyo bwo kubigeza iwawe ku ncamake kugira ngo urebe igihe cyo kugera.",
@@ -817,7 +817,7 @@ const GRANDMA_LABELS: Record<
     logisticsNote: "Igiciro cy'okubikugezaho gishingiye ku ntera kugera ku iduka ({km} km) n'uburyo wahisemo.",
     logisticsNotePickup: "Ujya kwakira ku iduka ubwawe. Nta giciro cy'okubikugezaho — ni RWF 0.",
     logisticsNoteTakeaway: "Takeaway: kwakira ibyokurya byawe bivunjwe mu gipakeni (RWF 500).",
-    fulfillmentSectionTitle: "Ushaka kubona ibi bitumize gute?",
+    fulfillmentSectionTitle: "HITAMO UBURYO BWOKUBIKUGEZAHO?",
     fulfillmentDeliveryTitle: "Kubigezaho",
     fulfillmentDeliverySub: "Tubikugezaho ahuherereye hose M'Rwnanda",
     fulfillmentPickupTitle: "Kubifatira kwiduka",
@@ -826,7 +826,7 @@ const GRANDMA_LABELS: Record<
     fulfillmentTakeawaySub: "Tugufungira muri takeway ibiringombwa (RWF 500).",
     fulfillmentDeliveryModesHint: "Hitamo uburyo bwo kubigeza iwawe:",
     etaAtShop: "Ku iduka",
-    etaPickupSub: "Urakira ku iduka — nta gihe cy'umugendesheje. Vugana n'iduka nyuma yo gutumiza.",
+    etaPickupSub: "Urakira ku iduka — nta gihe cy'ubitwara. Vugana n'iduka nyuma yo gutumiza.",
     summaryLineItems: "Ibicuruzwa",
     summaryLineItemsTotal: "Igiciro cy'ibicuruzwa",
     summaryLineLogisticsRow: "Kubikugezaho",
@@ -840,16 +840,16 @@ const GRANDMA_LABELS: Record<
     taxes: "Imisoro",
     amountLogistics: "Amafaranga y'okubikugezaho",
     totalPay: "Igiciro cyose",
-    sendOrder: "Ohereza itumiza",
+    sendOrder: "Saba ",
     stockOnHandLabel: "Iboneka: {n}",
     stockExceededLine: "Wasabye {requested} — ariko muri sitoki hari {available} gusa.",
     stockExceededPayBlock: "Gabanya ingano uhujeje n'ibiri muri sitoki mbere yo kwishyura.",
     stockExceededSubmit: "Gabanya ingano uhujeje n'ibiri muri sitoki mbere yo kohereza.",
-    deliveryPerson: "Umugendesheje",
-    hobbies: "Ibyishimo",
+    deliveryPerson: "UTWARA IBICURUZWA",
+    hobbies: "Kubikugezaho bishimishije ",
     kmToShop: "Km kugera ku iduka",
     reviewers: "abasubirije",
-    tapCouriers: "Kanda urebe abagendesheje 5 bari hafi y'iduka",
+    tapCouriers: "Kanda urebe abatwara ibicururwa 5 bari hafi y'iduka",
     closestToShop: "Bari hafi y'iduka",
     top5Available: "5 bahari",
     myOrders: "Ibyo natumije",
@@ -866,7 +866,7 @@ const GRANDMA_LABELS: Record<
     settingsSellerIntro: "Hitamo aho ushaka kujya hepfo, umaze kanda Funga.",
     settingsApplyClose: "Funga",
     settingsOpenSellerHome: "Ikibaho",
-    settingsOpenSellerOrders: "Amatumiza",
+    settingsOpenSellerOrders: "Ibyatumijwe",
     settingsOpenSellerItems: "Ibicuruzwa na sitoki",
     settingsSellerNeedLogin: "Injira na konti y'iduka kugira ngo ukoreshe uburyo bw'umucuruzi.",
     settingsSellerTapDenied: "Injira na konti y'iduka kugira ngo ujye ku buryo bw'umucuruzi.",
@@ -890,7 +890,7 @@ const GRANDMA_LABELS: Record<
     payStepPanelTitle: "Rangiza kwishyura",
     payStepDemoNote: "",
     payStepCommissionNote:
-      "1% ya Ihute yandikwa ku makuru y'itumiza (komisio y'ikompanyi, ku iduka; ntiyongerwa ku wishyura wawe).",
+      "1% ya Ihute yandikwa ku makuru y'ibyowasabye (komisio y'akompanyi, ku iduka; ntiyongerwa ku wishyura wawe).",
     payStepMtnTitle: "MTN MoMo",
     payStepMtnPayer: "Nimero ya MoMo (07…)",
     payStepMtnDial: "USSD — koporora ukore",
@@ -922,11 +922,11 @@ const GRANDMA_LABELS: Record<
     payStepMomoPin: "PIN",
     payStepAutoPayHintMtn: "Kwishyura gutangira uko gusa PIN ya MTN irangiye (imibare 5).",
     payStepAutoPayHintAirtel: "Kwishyura gutangira uko gusa PIN ya Airtel irangiye (imibare 4).",
-    payStepProcessing: "Birimo gutunganywa…",
+    payStepProcessing: "Birigukorwa",
     payStepErrMtnPin: "Andika PIN ya MTN MoMo (imibare 5).",
     payStepErrAirtelPin: "Andika PIN ya Airtel Money (imibare 4).",
     payStepCardsAccepted: "Amakarita yemewe",
-    payStepAfterCheckoutHint: "Uhabwa nimero y'itumiza na link yo gukurikirana — ntusabwe kwinjira mbere.",
+    payStepAfterCheckoutHint: "Uhabwa nimero y'Order na link yo gukurikirana — ntusabwe kwinjira mbere.",
     payStepReadMoMoSmsTitle: "Shyiraho SMS ya MoMo (kwemeza kwishyura)",
     payStepReadMoMoSmsHint:
       "Nyuma yo kwishyura, koporora ubutumwa bwa MTN ubushyire hano. Tugereranya amafaranga y'ishyura n'igiciro ({total} RWF) kandi twemera SMS isa n'iminota 15 ishize gusa.",
@@ -939,7 +939,7 @@ const GRANDMA_LABELS: Record<
     payStepPaymentNoAmountInSms: "Nta mafaranga yabonetse — shyiraho SMS yose ya MoMo.",
     payStepSendOrderLocked:
       "Ishyura ukoresheje MoMo, shyiraho SMS y'ikimenyetso, noneho buto ya Ohereza izagaragara.",
-    payStepErrMomoSms: "Emeza kwishyura ukoresheje SMS ya MoMo mbere yo kohereza itumiza.",
+    payStepErrMomoSms: "Emeza kwishyura ukoresheje SMS ya MoMo mbere yo kohereza commandes.",
   },
   fr: {
     demoLocation: "Kacyiru, Gasabo — définition dans les réglages",
@@ -1118,6 +1118,16 @@ const GRANDMA_LABELS: Record<
 }
 
 type GrandmaSmsPayCheck = "paid" | "mismatch" | "no_amount" | null
+
+function isGrandmaSmsPaymentMethod(id: PaymentId): boolean {
+  return id === "momo" || id === "airtel"
+}
+
+function applyGrandmaSmsMatchToCheck(result: MoMoSmsMatchResult): GrandmaSmsPayCheck {
+  if (!result.candidates.length) return "no_amount"
+  if (result.matched) return "paid"
+  return "mismatch"
+}
 
 function humanizeGrandmaOrderBackendError(raw: string, lang: GrandmaLang): string {
   if (!raw?.trim()) return raw
@@ -3165,6 +3175,90 @@ export default function GrandmaPage() {
     return `tel:${grandmaAirtelUssd.replace(/#/g, "%23")}`
   }, [grandmaAirtelUssd])
 
+  const grandmaBuyerSession = useAuthStore((s) => s.user)
+
+  const grandmaPayerPhoneOk = useMemo(() => {
+    const payerRaw = grandmaBuyerSession?.phone || grandmaBuyerPhoneInput.trim()
+    return isGrandmaRwMobileDigits(payerRaw)
+  }, [grandmaBuyerSession?.phone, grandmaBuyerPhoneInput])
+
+  /** MoMo merchant digits from shop profile — optional SMS validation. */
+  const grandmaPaymentMerchantDigits = useMemo(() => {
+    const raw = selectedShop?.momo?.replace(/\D/g, "") ?? ""
+    return raw.length >= 3 ? raw : undefined
+  }, [selectedShop?.momo])
+
+  const runGrandmaSmsMatch = useCallback(
+    (text: string) => {
+      const trimmed = text.trim()
+      if (!trimmed || grandTotal < 1) {
+        setGrandmaSmsPayCheck(null)
+        setGrandmaSmsMatchResult(null)
+        return
+      }
+      const r = matchMoMoSmsToOrderTotal(
+        trimmed,
+        Math.round(grandTotal),
+        2,
+        grandmaPaymentMerchantDigits,
+      )
+      setGrandmaSmsMatchResult(r)
+      setGrandmaSmsPayCheck(applyGrandmaSmsMatchToCheck(r))
+    },
+    [grandTotal, grandmaPaymentMerchantDigits],
+  )
+
+  const verifyGrandmaPaymentSms = useCallback(() => {
+    if (!isGrandmaSmsPaymentMethod(selectedPayment) || grandTotal < 1) return
+    runGrandmaSmsMatch(grandmaMomoSmsPaste)
+  }, [selectedPayment, grandTotal, grandmaMomoSmsPaste, runGrandmaSmsMatch])
+
+  useEffect(() => {
+    setGrandmaSmsPayCheck(null)
+    setGrandmaSmsMatchResult(null)
+    if (!isGrandmaSmsPaymentMethod(selectedPayment)) {
+      setGrandmaMomoSmsPaste("")
+    }
+  }, [selectedPayment, grandTotal])
+
+  /** Auto-match pasted/typed MoMo or Airtel SMS → unlock Send Order when amount matches. */
+  useEffect(() => {
+    if (!isGrandmaSmsPaymentMethod(selectedPayment)) return
+    const text = grandmaMomoSmsPaste.trim()
+    if (text.length < 8) {
+      if (!text) {
+        setGrandmaSmsPayCheck(null)
+        setGrandmaSmsMatchResult(null)
+      }
+      return
+    }
+    const timer = window.setTimeout(() => {
+      runGrandmaSmsMatch(text)
+    }, 450)
+    return () => window.clearTimeout(timer)
+  }, [grandmaMomoSmsPaste, selectedPayment, runGrandmaSmsMatch])
+
+  const grandmaSmsPaymentReady = grandmaSmsPayCheck === "paid"
+
+  const grandmaCanSendOrder = useMemo(() => {
+    if (!selectedShop || selectedProducts.length === 0) return false
+    if (hasGrandmaStockBlock) return false
+    if (isGrandmaSmsPaymentMethod(selectedPayment)) {
+      return grandmaSmsPaymentReady && grandmaPayerPhoneOk
+    }
+    if (selectedPayment === "cash") return grandmaCashConfirm
+    if (selectedPayment === "bk") return grandmaPayerPhoneOk
+    return false
+  }, [
+    selectedShop,
+    selectedProducts.length,
+    hasGrandmaStockBlock,
+    selectedPayment,
+    grandmaSmsPaymentReady,
+    grandmaPayerPhoneOk,
+    grandmaCashConfirm,
+  ])
+
   const selectLogisticsMode = (id: LogisticsId) => {
     setSelectedLogistics(id)
   }
@@ -3189,75 +3283,9 @@ export default function GrandmaPage() {
     })
   }
 
-  const grandmaBuyerSession = useAuthStore((s) => s.user)
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
   /** Must be true before treating `user` as final — avoids seller mode snapping back to buyer on load. */
   const authHasHydrated = useAuthStore((s) => s.hasHydrated)
-
-  const grandmaPayerPhoneOk = useMemo(() => {
-    const payerRaw = grandmaBuyerSession?.phone || grandmaBuyerPhoneInput.trim()
-    return isGrandmaRwMobileDigits(payerRaw)
-  }, [grandmaBuyerSession?.phone, grandmaBuyerPhoneInput])
-
-  const verifyGrandmaMoMoSms = useCallback(() => {
-    setGrandmaSmsPayCheck(null)
-    setGrandmaSmsMatchResult(null)
-    if (selectedPayment !== "momo" || grandTotal < 1) return
-    const text = grandmaMomoSmsPaste.trim()
-    if (!text) return
-    const r = matchMoMoSmsToOrderTotal(text, Math.round(grandTotal))
-    setGrandmaSmsMatchResult(r)
-    if (!r.candidates.length) setGrandmaSmsPayCheck("no_amount")
-    else if (r.matched) setGrandmaSmsPayCheck("paid")
-    else setGrandmaSmsPayCheck("mismatch")
-  }, [selectedPayment, grandTotal, grandmaMomoSmsPaste])
-
-  useEffect(() => {
-    setGrandmaSmsPayCheck(null)
-    setGrandmaSmsMatchResult(null)
-    if (selectedPayment !== "momo") setGrandmaMomoSmsPaste("")
-  }, [selectedPayment, grandTotal])
-
-  useEffect(() => {
-    if (selectedPayment !== "momo") return
-    const text = grandmaMomoSmsPaste.trim()
-    if (text.length < 8) {
-      if (!text) {
-        setGrandmaSmsPayCheck(null)
-        setGrandmaSmsMatchResult(null)
-      }
-      return
-    }
-    const timer = window.setTimeout(() => {
-      const r = matchMoMoSmsToOrderTotal(text, Math.round(grandTotal))
-      setGrandmaSmsMatchResult(r)
-      if (!r.candidates.length) setGrandmaSmsPayCheck("no_amount")
-      else if (r.matched) setGrandmaSmsPayCheck("paid")
-      else setGrandmaSmsPayCheck("mismatch")
-    }, 450)
-    return () => window.clearTimeout(timer)
-  }, [grandmaMomoSmsPaste, grandTotal, selectedPayment])
-
-  const grandmaCanSendOrder = useMemo(() => {
-    if (!selectedShop || selectedProducts.length === 0) return false
-    if (hasGrandmaStockBlock) return false
-    if (selectedPayment === "momo") {
-      return grandmaSmsPayCheck === "paid" && grandmaPayerPhoneOk
-    }
-    if (selectedPayment === "airtel") {
-      return grandmaSmsPayCheck === "paid" && grandmaPayerPhoneOk
-    }
-    if (selectedPayment === "cash") return grandmaCashConfirm
-    return false
-  }, [
-    selectedShop,
-    selectedProducts.length,
-    hasGrandmaStockBlock,
-    selectedPayment,
-    grandmaSmsPayCheck,
-    grandmaPayerPhoneOk,
-    grandmaCashConfirm,
-  ])
 
   useEffect(() => {
     setStockQtyAttempts({})
@@ -4244,7 +4272,7 @@ export default function GrandmaPage() {
         setGrandmaOrderSubmitError(trSubmit.payStepErrCash)
         return
       }
-      if (selectedPayment === "momo" && grandmaSmsPayCheck !== "paid") {
+      if (isGrandmaSmsPaymentMethod(selectedPayment) && grandmaSmsPayCheck !== "paid") {
         setGrandmaOrderSubmitError(trSubmit.payStepErrMomoSms)
         return
       }
@@ -4324,12 +4352,20 @@ export default function GrandmaPage() {
         }
       })
 
+      const selectedLogisticsOption = LOGISTICS.find((opt) => opt.id === selectedLogistics)
+      const selectedLogisticsLabel = selectedLogisticsOption?.label || selectedLogistics.toUpperCase()
+      const deliveryName =
+        fulfillmentMode === "pickup"
+          ? trSubmit.fulfillmentPickupTitle
+          : fulfillmentMode === "takeaway"
+          ? trSubmit.fulfillmentTakeawayTitle
+          : selectedLogisticsLabel
       const referenceParts =
         fulfillmentMode === "pickup"
           ? ["SELF-PICKUP", orderNotes.trim()].filter(Boolean)
           : fulfillmentMode === "takeaway"
-          ? ["TAKEAWAY", orderNotes.trim()].filter(Boolean)
-          : [`DELIVERY-${selectedLogistics}`, orderNotes.trim()].filter(Boolean)
+          ? [trSubmit.fulfillmentTakeawayTitle, orderNotes.trim()].filter(Boolean)
+          : [`DELIVERY-${selectedLogisticsLabel}`, orderNotes.trim()].filter(Boolean)
       const baseRef = referenceParts.length ? referenceParts.join(" | ") : ""
       const reference = (baseRef + billingTail).slice(0, 500)
 
@@ -4350,6 +4386,10 @@ export default function GrandmaPage() {
           reference,
           orderNotes: orderNotes.trim(),
           subtotal: Math.round(itemsTotal),
+          deliveryName,
+          DELIVERY_NAME: deliveryName,
+          deliveryAmount: Math.round(logisticsTotal),
+          DELIVERY_AMOUNT: Math.round(logisticsTotal),
         }),
       })
       const data = (await res.json().catch(() => ({}))) as {
@@ -4409,10 +4449,7 @@ export default function GrandmaPage() {
       }
       useOrdersStore.getState().upsertOrder(placedOrder)
       saveGrandmaPendingOrder(placedOrder)
-
       notifyGrandmaOrderPlaced(String(oid))
-
-      setProducts((prev) => prev.map((x) => ({ ...x, qty: 0 })))
       setOrderNotes("")
       setPrescriptionSlots((prev) => {
         prev.forEach((s) => URL.revokeObjectURL(s.url))
@@ -4428,9 +4465,12 @@ export default function GrandmaPage() {
         from: "grandma",
         autoWhatsApp: "1",
       })
+      if (orderNotes.trim()) q.set("orderNotes", orderNotes.trim())
       if (data.trackToken) q.set("trackToken", String(data.trackToken))
       if (payLabel) q.set("payment", payLabel)
       if (grandmaSmsMatchResult?.txId) q.set("momoTxId", grandmaSmsMatchResult.txId)
+      if (deliveryName) q.set("logisticsType", deliveryName)
+      q.set("logisticsAmount", String(Math.round(logisticsTotal)))
       router.push(`/order-success?${q.toString()}`)
     } catch (e: unknown) {
       const raw = e instanceof Error ? e.message : "Order request failed"
@@ -6106,7 +6146,7 @@ export default function GrandmaPage() {
           ))}
         </div>
 
-        {selectedShop && selectedPayment !== "bk" ? (
+        {selectedShop ? (
           <div
             className="card pay-method-form"
             style={{ textAlign: "left", marginTop: 12, marginBottom: 12, padding: "14px 16px" }}
@@ -6231,24 +6271,9 @@ export default function GrandmaPage() {
                   </p>
                   <Textarea
                     value={grandmaMomoSmsPaste}
-                    onChange={(e) => {
-                      // Allow both typing and pasting
-                      setGrandmaMomoSmsPaste(e.target.value)
-                      setGrandmaSmsPayCheck(null)
-                      setGrandmaSmsMatchResult(null)
-                    }}
+                    onChange={(e) => setGrandmaMomoSmsPaste(e.target.value)}
                     onFocus={(e) => {
-                      // Ensure keyboard is visible on mobile
-                      e.currentTarget.scrollIntoView({ behavior: 'smooth', block: 'center' })
-                    }}
-                    onPaste={(e) => {
-                      // Allow paste events as well
-                      const pastedText = e.clipboardData?.getData('text/plain') || ''
-                      if (pastedText) {
-                        setGrandmaMomoSmsPaste(pastedText)
-                        setGrandmaSmsPayCheck(null)
-                        setGrandmaSmsMatchResult(null)
-                      }
+                      e.currentTarget.scrollIntoView({ behavior: "smooth", block: "center" })
                     }}
                     className="min-h-[88px] resize-y border-[#dbe7f3] text-sm"
                     placeholder="MTN MoMo… (type or paste SMS)"
@@ -6262,8 +6287,8 @@ export default function GrandmaPage() {
                       variant="secondary"
                       size="sm"
                       className="flex-1 border-[#dbe7f3] bg-[#f7fbff] text-[#17324d] hover:bg-[#eef6ff]"
-                      onClick={() => verifyGrandmaMoMoSms()}
-                      disabled={grandTotal < 1 || !grandmaMomoSmsPaste.trim() || grandmaSmsPayCheck === "paid"}
+                      onClick={() => verifyGrandmaPaymentSms()}
+                      disabled={grandTotal < 1 || !grandmaMomoSmsPaste.trim() || grandmaSmsPaymentReady}
                     >
                       {tPay.payStepVerifySms}
                     </Button>
@@ -6394,24 +6419,9 @@ export default function GrandmaPage() {
                   </p>
                   <Textarea
                     value={grandmaMomoSmsPaste}
-                    onChange={(e) => {
-                      // Allow both typing and pasting
-                      setGrandmaMomoSmsPaste(e.target.value)
-                      setGrandmaSmsPayCheck(null)
-                      setGrandmaSmsMatchResult(null)
-                    }}
+                    onChange={(e) => setGrandmaMomoSmsPaste(e.target.value)}
                     onFocus={(e) => {
-                      // Ensure keyboard is visible on mobile
-                      e.currentTarget.scrollIntoView({ behavior: 'smooth', block: 'center' })
-                    }}
-                    onPaste={(e) => {
-                      // Allow paste events as well
-                      const pastedText = e.clipboardData?.getData('text/plain') || ''
-                      if (pastedText) {
-                        setGrandmaMomoSmsPaste(pastedText)
-                        setGrandmaSmsPayCheck(null)
-                        setGrandmaSmsMatchResult(null)
-                      }
+                      e.currentTarget.scrollIntoView({ behavior: "smooth", block: "center" })
                     }}
                     className="min-h-[88px] resize-y border-[#dbe7f3] text-sm"
                     placeholder="Airtel Money… (type or paste SMS)"
@@ -6425,8 +6435,8 @@ export default function GrandmaPage() {
                       variant="secondary"
                       size="sm"
                       className="flex-1 border-[#dbe7f3] bg-[#f7fbff] text-[#17324d] hover:bg-[#eef6ff]"
-                      onClick={() => verifyGrandmaMoMoSms()}
-                      disabled={grandTotal < 1 || !grandmaMomoSmsPaste.trim() || grandmaSmsPayCheck === "paid"}
+                      onClick={() => verifyGrandmaPaymentSms()}
+                      disabled={grandTotal < 1 || !grandmaMomoSmsPaste.trim() || grandmaSmsPaymentReady}
                     >
                       {tPay.payStepVerifySms}
                     </Button>
@@ -6471,6 +6481,16 @@ export default function GrandmaPage() {
                     </div>
                   ) : null}
                 </div>
+              </div>
+            ) : selectedPayment === "bk" ? (
+              <div className="space-y-3">
+                <div style={{ fontWeight: 700, fontSize: 13 }}>{tPay.payStepBkTitle}</div>
+                <p style={{ fontSize: 12, color: "var(--muted)", margin: 0, lineHeight: 1.45 }}>
+                  {tPay.payStepBkHelp}
+                </p>
+                <p style={{ fontSize: 12, margin: 0, lineHeight: 1.45 }}>
+                  {tPay.payStepCardsAccepted}. {tPay.payStepAfterCheckoutHint}
+                </p>
               </div>
             ) : (
               <div className="space-y-3">
@@ -6671,11 +6691,11 @@ export default function GrandmaPage() {
           <p className="card note" style={{ marginBottom: 12, fontSize: 13, lineHeight: 1.45 }}>
             {hasGrandmaStockBlock
               ? tPay.stockExceededPayBlock
-              : selectedPayment === "momo"
+              : isGrandmaSmsPaymentMethod(selectedPayment)
                 ? tPay.payStepSendOrderLocked
                 : selectedPayment === "cash"
                   ? tPay.payStepErrCash
-                  : selectedPayment === "airtel"
+                  : selectedPayment === "bk"
                     ? tPay.payStepErrPhone
                     : tPay.payStepSendOrderLocked}
           </p>
