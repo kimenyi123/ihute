@@ -1,4 +1,5 @@
 import { getBackendBase } from "@/lib/backend-config"
+import { parseShopPhotoAccountFromWebPath, stableShopPhotoFileName } from "@/lib/shop-photo-stable"
 
 function siteAndBase(): { site: string; basePath: string } {
   const site = (process.env.NEXT_PUBLIC_SITE_URL || "").trim().replace(/\/+$/, "")
@@ -20,7 +21,15 @@ export function resolveSellerPhotoUrl(photo: string | null | undefined): string 
 
   // Tomcat /img/shops/… — proxy via Next so beta (/beta base path) and Trading_beta backend work in browser.
   if (p.startsWith("/img/shops/") || p.startsWith("img/shops/")) {
-    const normalized = p.startsWith("/") ? p : `/${p}`
+    let normalized = p.startsWith("/") ? p : `/${p}`
+    // Legacy timestamp filenames → stable /img/shops/{account}.ext (DB can stay until next upload).
+    if (/_\d+\.[a-z0-9]+$/i.test(normalized)) {
+      const account = parseShopPhotoAccountFromWebPath(normalized)
+      const ext = normalized.slice(normalized.lastIndexOf(".") + 1)
+      if (account) {
+        normalized = `/img/shops/${stableShopPhotoFileName(account, ext)}`
+      }
+    }
     const proxyRel = `${basePath}/api/images/seller-photo?path=${encodeURIComponent(normalized)}`
     return site ? `${site}${proxyRel}` : proxyRel
   }

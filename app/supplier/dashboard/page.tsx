@@ -1,6 +1,5 @@
 ﻿"use client";
 
-import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/auth-store";
@@ -60,6 +59,8 @@ import { cn } from "@/lib/utils";
 import {
   formatSupplierSyncTimestampOrNull,
 } from "@/lib/supplier-sync-datetime";
+import { resolveSellerPhotoUrl } from "@/lib/seller-photo-url";
+import { QrCodeWithLogo } from "@/components/supplier/qr-code-with-logo";
 
 /** Last bulk/excel/Redis upload — not per-row refresh stamps from catalog GET. */
 function formatLastStockUploadLabel(uploadAt: string | null | undefined): string | null {
@@ -77,8 +78,6 @@ const PRODUCT_TABLE_MIN_WIDTH = "1360px";
 const productTh =
   "px-2 py-2.5 text-left text-xs font-semibold text-slate-700 whitespace-nowrap align-bottom [hyphens:none]";
 const productThCenter = `${productTh} text-center`;
-
-const QRCode = dynamic(() => import("react-qr-code"), { ssr: false });
 
 /* ─── supplier-dashboard i18n ─── */
 const DASH_UI: Record<Language, {
@@ -466,6 +465,7 @@ function SupplierDashboard() {
   /** Only show Bar or Restaurant checkbox when PREFEREDCATEGORIES is resto-bar/restaurant/bar */
   const [showBarOrRestaurantOption, setShowBarOrRestaurantOption] = useState(false);
   const [tableNameOrNumber, setTableNameOrNumber] = useState("");
+  const [shopLogoUrl, setShopLogoUrl] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [analytics, setAnalytics] = useState<{
     dailySalesTotal: number;
@@ -481,21 +481,33 @@ function SupplierDashboard() {
     if (typeof window !== "undefined") setBaseUrl(window.location.origin);
   }, []);
 
-  // Only show Bar or Restaurant when PREFEREDCATEGORIES is resto-bar/restaurant/bar
+  // Bar/restaurant flag + shop logo (same photo as /account shop photo upload)
   useEffect(() => {
     if (!user?.ishyigaAccount || user?.role !== "supplier") return;
-    fetch(`/api/supplier/profile?account=${encodeURIComponent(user.ishyigaAccount)}`)
-      .then((res) => res.json())
-      .then(async (data) => {
-        const isRestoBar = isRestoBarPreferredCategories(data?.preferredCategories);
+    const account = user.ishyigaAccount;
+    const profileQs = new URLSearchParams({ account });
+    if (user.email) profileQs.set("email", user.email);
+
+    Promise.all([
+      fetch(`/api/supplier/profile?account=${encodeURIComponent(account)}`).then((res) => res.json()),
+      fetch(`/api/account/profile?${profileQs.toString()}`).then((res) => res.json()),
+    ])
+      .then(([supplierData, accountData]) => {
+        const isRestoBar = isRestoBarPreferredCategories(supplierData?.preferredCategories);
         if (isRestoBar) {
           setShowBarOrRestaurantOption(true);
           setIsBarOrRestaurant(true);
           setIsBarOrRestaurantFromAccount(true);
         }
+        const photo = accountData?.profile?.photo;
+        if (typeof photo === "string" && photo.trim()) {
+          setShopLogoUrl(resolveSellerPhotoUrl(photo));
+        } else {
+          setShopLogoUrl("");
+        }
       })
       .catch(() => {});
-  }, [user?.ishyigaAccount, user?.role]);
+  }, [user?.ishyigaAccount, user?.role, user?.email]);
 
   const shopWithMeLink = shopNickname.trim()
     ? `${baseUrl}/shop-with-me?nickname=${encodeURIComponent(shopNickname.trim().toLowerCase())}${isBarOrRestaurant && tableNameOrNumber.trim() ? `&table=${encodeURIComponent(tableNameOrNumber.trim())}` : ""}`
@@ -1391,7 +1403,7 @@ function SupplierDashboard() {
               {shopWithMeLink && (
                 <div className="flex flex-col items-start gap-4 border-t border-slate-200 pt-4  sm:flex-row">
                   <div className="rounded-lg bg-slate-50 p-4 ">
-                    <QRCode value={shopWithMeLink} size={180} />
+                    <QrCodeWithLogo value={shopWithMeLink} size={200} logoUrl={shopLogoUrl || undefined} />
                   </div>
                   <div className="min-w-0 flex-1 space-y-2">
                     <Label className="text-slate-600 ">{ui.linkForCustomers}</Label>
@@ -1408,7 +1420,7 @@ function SupplierDashboard() {
               {supplierOrdersLink && (
                 <div className="mt-6 flex flex-col items-start gap-4 border-t border-slate-200 pt-6  sm:flex-row">
                   <div className="rounded-lg bg-slate-50 p-4 ">
-                    <QRCode value={supplierOrdersLink} size={180} />
+                    <QrCodeWithLogo value={supplierOrdersLink} size={200} logoUrl={shopLogoUrl || undefined} />
                   </div>
                   <div className="min-w-0 flex-1 space-y-2">
                     <Label className="text-slate-600 ">{ui.scanToOpenOrders}</Label>
