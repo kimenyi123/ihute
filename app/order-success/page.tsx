@@ -18,6 +18,7 @@ import { formatPaymentMethod } from "@/lib/payment-utils"
 import { buildOrderWhatsAppMessage, isTableCommandOrder } from "@/lib/table-command-whatsapp"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { RatingModal } from "@/components/RatingModal"
+import { sellerAccountFromOrder } from "@/lib/order-seller-account"
 import { useTableCommandStore } from "@/lib/table-command-store"
 import { GRANDMA_PATHS } from "@/lib/grandma-urls"
 import { isValidRwandaMobileE164, normalizeRwandaMobileE164 } from "@/lib/rwanda-phone"
@@ -630,7 +631,7 @@ function OrderSuccessPageInner() {
       {orderDetails && showRatingModal && (
         <RatingModal
           orderId={String(displayOrderNo || orderId || trackToken || "")}
-          sellerId={orderDetails.sellerAccount || ""}
+          sellerId={sellerAccountFromOrder(orderDetails)}
           sellerName={sellerName || orderDetails.sellerName || ""}
           buyerPhone={buyerPhone || orderDetails.buyerPhone || ""}
           items={ratingItems}

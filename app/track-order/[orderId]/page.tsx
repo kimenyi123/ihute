@@ -22,6 +22,7 @@ import {
 } from "lucide-react"
 import { formatPaymentMethod } from "@/lib/payment-utils"
 import { RatingModal } from "@/components/RatingModal"
+import { sellerAccountFromOrder } from "@/lib/order-seller-account"
 import { useOrderTracking } from "@/hooks/useOrderTracking"
 import { DeliveryCountdown } from "@/components/delivery-countdown"
 import { unitMeaningfulForDisplay } from "@/lib/product-unit-display"
@@ -1256,7 +1257,7 @@ function TrackOrderPageInner() {
       {order && showRatingModal && (
         <RatingModal
           orderId={String(order.orderId)}
-          sellerId={order.sellerAccount || ""}
+          sellerId={sellerAccountFromOrder(order as Record<string, unknown>)}
           sellerName={order.sellerName}
           buyerPhone={order.buyerPhone || ""}
           items={ratingItems}
