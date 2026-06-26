@@ -289,7 +289,7 @@ export default function AddProductModal({
       newErrors.price = ui.errPrice;
     }
 
-    if (formData.cost < 0) {
+    if ((formData.cost ?? 0) < 0) {
       newErrors.cost = ui.errCost;
     } else if (formData.cost > formData.price) {
       newErrors.cost = ui.errCostAboveSale;
@@ -554,8 +554,8 @@ export default function AddProductModal({
                 type="number"
                 min="0"
                 step="0.01"
-                value={formData.cost === 0 ? "" : String(formData.cost)}
-                onChange={(e) => handleInputChange('cost', e.target.value === "" ? 0 : parseFloat(e.target.value))}
+                value={formData.cost === 0 ? "" : String(formData.cost ?? 0)}
+                onChange={(e) => handleInputChange('cost', e.target.value === "" ? 0 : parseFloat(e.target.value) || 0)}
                 className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                   errors.cost ? 'border-red-500' : 'border-gray-300'
                 }`}
