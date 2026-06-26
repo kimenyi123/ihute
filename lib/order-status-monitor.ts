@@ -6,6 +6,7 @@
  */
 
 import { mapBackendOrderStatusToTrack, statusIndicatesDelivered } from "@/lib/order-status-map"
+import { sellerAccountFromOrder, sellerNameFromOrder } from "@/lib/order-seller-account"
 
 interface OrderStatusUpdate {
   orderId: string
@@ -153,8 +154,8 @@ class OrderStatusMonitor {
       if (data.ok && data.shouldShow) {
         const ratingData: RatingTriggerData = {
           orderId,
-          sellerAccount: data.orderDetails?.sellerAccount || '',
-          sellerName: data.orderDetails?.sellerName || 'Unknown Seller',
+          sellerAccount: sellerAccountFromOrder(data.orderDetails as Record<string, unknown> | undefined),
+          sellerName: sellerNameFromOrder(data.orderDetails as Record<string, unknown> | undefined),
           items: data.orderDetails?.items || []
         }
         

@@ -164,14 +164,13 @@ export function CartSuggestionsPopup({
       ? `/search?supplier=${encodeURIComponent(primarySupplierId)}${primarySupplierName ? `&supplierName=${encodeURIComponent(primarySupplierName)}` : ""}`
       : `/search?q=${encodeURIComponent(cartItems.map((i) => i.name).filter(Boolean)[0] || "products")}`
 
+  const handleClose = () => {
+    onOpenChange(false)
+    onContinue()
+  }
+
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(v) => {
-        onOpenChange(v)
-        if (!v) onContinue()
-      }}
-    >
+    <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose() }}>
       <DialogContent className="max-w-md sm:max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle>Complete your order?</DialogTitle>
@@ -264,10 +263,10 @@ export function CartSuggestionsPopup({
         </div>
         {/* Primary dismiss: both buttons call onContinue so the host can advance to checkout or stay on cart. */}
         <DialogFooter className="flex-shrink-0 gap-2 sm:gap-0">
-          <Button variant="outline" onClick={() => onContinue()}>
+          <Button variant="outline" onClick={handleClose}>
             No thanks
           </Button>
-          <Button onClick={() => onContinue()}>
+          <Button onClick={handleClose}>
             Continue to checkout
           </Button>
         </DialogFooter>

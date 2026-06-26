@@ -204,6 +204,10 @@ export async function POST(req: Request) {
         process.env.DEFAULT_GUEST_ISHYIGA_ACCOUNT ?? DEFAULT_GUEST_ISHYIGA_ACCOUNT,
       ).trim()
     }
+    // Always ensure buyerAccount is set — Java requires it to find the buyer row
+    if (!buyerAccount) {
+      buyerAccount = String(process.env.DEFAULT_GUEST_ISHYIGA_ACCOUNT ?? DEFAULT_GUEST_ISHYIGA_ACCOUNT).trim()
+    }
 
     /* -------- shared payload -------- */
     const shared = {

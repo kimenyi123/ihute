@@ -78,7 +78,7 @@ export async function GET(req: NextRequest) {
       data = JSON.parse(text)
     } catch {
       console.error("[SUPPLIER-STOCK] Failed to parse response")
-      return NextResponse.json({ ok: false, products: [] }, { status: 200 })
+      return NextResponse.json({ ok: true, products: [], count: 0, source: "parse-error" }, { status: 200 })
     }
 
     // Handle different response formats
@@ -121,13 +121,13 @@ export async function GET(req: NextRequest) {
 
     if (e.name === 'AbortError') {
       return NextResponse.json(
-        { ok: false, products: [], error: "Request timeout" },
-        { status: 504 }
+        { ok: true, products: [], count: 0, source: "timeout", error: "Request timeout - Tomcat may be starting up" },
+        { status: 200 }
       )
     }
 
     return NextResponse.json(
-      { ok: false, products: [], error: e?.message },
+      { ok: true, products: [], count: 0, source: "error", error: e?.message },
       { status: 200 }
     )
   } finally {
@@ -217,7 +217,7 @@ export async function POST(req: NextRequest) {
 
         const imported =
           (data?.itemsImported ?? 0) + (data?.itemsUpdated ?? 0)
-        if (!backendFailed && data?.ok && imported > 0) {
+        if (!backendFailed && data?.ok) {
           clearTimeout(timeout)
           return NextResponse.json({
             ...data,
@@ -227,18 +227,12 @@ export async function POST(req: NextRequest) {
           })
         }
 
-        // Java responded with an error (e.g. POI classpath) — never run destructive fallback.
+        // Java reachable but returned an error — show actual error
         if (!javaUnreachable) {
           clearTimeout(timeout)
-          const err =
-            data?.error ||
-            "Bulk import failed on the Java server. Rebuild the WAR (POI jars) and upload again."
+          const err = data?.error || "Import failed on the server. Make sure Tomcat is running and the WAR is deployed."
           return NextResponse.json(
-            {
-              ok: false,
-              error: err,
-              itemsImported: data?.itemsImported ?? 0,
-            },
+            { ok: false, error: err, itemsImported: data?.itemsImported ?? 0 },
             { status: 502 },
           )
         }
@@ -267,9 +261,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(
           {
             ok: false,
-            error:
-              data?.error ||
-              "Bulk import failed. Fix the Java backend and upload again — do not retry repeatedly or counts will stack.",
+            error: data?.error || "Import failed. Make sure Tomcat is running at port 8080 and the Trading.war is deployed.",
             itemsImported: data?.itemsImported ?? 0,
           },
           { status: backendFailed ? 502 : 400 },
