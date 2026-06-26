@@ -170,7 +170,7 @@ export interface ProductFormData {
   itemCode: string;
   quantity: number;
   price: number;
-  cost?: number;
+  cost: number;
   description?: string;
   unit?: string;
   /** Set when user picks a new image; uploaded after product save via `/api/images/overrides`. */
