@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { LanguageSelector } from "@/components/language-selector";
 import { useAuthStore } from "@/lib/auth-store";
 import { useLanguageStore, type Language } from "@/lib/language-store";
 import { Button } from "@/components/ui/button";
@@ -565,7 +564,12 @@ function SupplierDashboard() {
         console.log("Source:", data.source);
 
         if (!data.ok) {
-          throw new Error(data.error || "API returned ok: false");
+          // Don't crash — show empty dashboard with a warning
+          console.warn("[Dashboard] Backend returned ok:false:", data.error)
+          setError(data.error || "Could not load products — Tomcat may be starting up")
+          setSupplierProducts([])
+          setLoading(false)
+          return
         }
 
         setError(null);
@@ -983,7 +987,7 @@ function SupplierDashboard() {
     );
   }
 
-  if (error) {
+  if (error && supplierProducts.length === 0 && loading === false) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100">
         <Card className="max-w-md">
@@ -992,7 +996,8 @@ function SupplierDashboard() {
           </CardHeader>
           <CardContent>
             <p className="text-slate-700">{error}</p>
-            <Button onClick={() => window.location.reload()} className="mt-4">
+            <p className="mt-2 text-xs text-slate-500">Make sure Tomcat is running at port 8080</p>
+            <Button onClick={() => { setError(null); setStockRefreshKey(k => k + 1); setLoading(true); }} className="mt-4">
               {ui.retry}
             </Button>
           </CardContent>
@@ -1016,7 +1021,39 @@ function SupplierDashboard() {
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <LanguageSelector />
+              {/* Fast language switcher — compact dropdown */}
+              {(() => {
+                const langs = [
+                  { code: "rw" as const, flag: "🇷🇼", label: "RW", native: "Kinyarwanda" },
+                  { code: "en" as const, flag: "🇬🇧", label: "EN", native: "English" },
+                  { code: "fr" as const, flag: "🇫🇷", label: "FR", native: "Français" },
+                ]
+                const current = langs.find((l) => l.code === language) ?? langs[1]
+                return (
+                  <div className="relative group">
+                    <button className="flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 transition-all">
+                      <span className="text-sm leading-none">{current.flag}</span>
+                      <span>{current.label}</span>
+                      <span className="ml-0.5 text-slate-400">▾</span>
+                    </button>
+                    <div className="absolute right-0 top-full z-50 mt-1 hidden min-w-[140px] rounded-lg border border-slate-200 bg-white shadow-lg group-focus-within:block group-hover:block">
+                      {langs.map((l) => (
+                        <button
+                          key={l.code}
+                          onClick={() => useLanguageStore.getState().setLanguage(l.code)}
+                          className={`flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-slate-50 transition-colors first:rounded-t-lg last:rounded-b-lg ${
+                            language === l.code ? "font-bold text-blue-600" : "text-slate-700"
+                          }`}
+                        >
+                          <span className="text-sm">{l.flag}</span>
+                          <span>{l.native}</span>
+                          {language === l.code && <span className="ml-auto text-blue-600">✓</span>}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })()}
               <Button variant="ghost" asChild className="gap-2">
                 <Link href="/account">
                   <User className="h-4 w-4" />

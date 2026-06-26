@@ -18,6 +18,7 @@ import { formatPaymentMethod } from "@/lib/payment-utils"
 import { buildOrderWhatsAppMessage, isTableCommandOrder } from "@/lib/table-command-whatsapp"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { RatingModal } from "@/components/RatingModal"
+import { sellerAccountFromOrder } from "@/lib/order-seller-account"
 import { useTableCommandStore } from "@/lib/table-command-store"
 import { GRANDMA_PATHS } from "@/lib/grandma-urls"
 import { isValidRwandaMobileE164, normalizeRwandaMobileE164 } from "@/lib/rwanda-phone"
@@ -112,7 +113,13 @@ function OrderSuccessPageInner() {
   )
 
   const fallbackGrandTotalAmount = subtotalAmount + logisticsAmount
-  const displayTotalAmount = fallbackGrandTotalAmount || totalAmount
+  const queryTotal = safeNumber(total, Number.NaN)
+  const computedGrandTotal =
+    fallbackGrandTotalAmount > 0
+      ? fallbackGrandTotalAmount
+      : Number.isFinite(queryTotal) && queryTotal > 0
+      ? queryTotal
+      : totalAmount
 
   const orderSubtotalFromDetails = safeNumber(orderDetails?.subtotal ?? orderDetails?.SUBTOTAL, Number.NaN)
   const effectiveSubtotal = Number.isFinite(orderSubtotalFromDetails) && orderSubtotalFromDetails > 0
@@ -120,9 +127,16 @@ function OrderSuccessPageInner() {
     : subtotalAmount
 
   const orderTotalFromDetails = safeNumber(orderDetails?.total ?? orderDetails?.AMOUNT, Number.NaN)
-  const effectiveTotalAmount = Number.isFinite(orderTotalFromDetails) && orderTotalFromDetails > 0
-    ? orderTotalFromDetails
-    : displayTotalAmount
+  const effectiveTotalAmount = (() => {
+    if (Number.isFinite(orderTotalFromDetails) && orderTotalFromDetails > 0) {
+      if (logisticsAmount > 0 && orderTotalFromDetails < effectiveSubtotal + logisticsAmount) {
+        return effectiveSubtotal + logisticsAmount
+      }
+      return orderTotalFromDetails
+    }
+    if (Number.isFinite(queryTotal) && queryTotal > 0) return queryTotal
+    return computedGrandTotal
+  })()
 
   const discountAmount = Math.max(
     0,
@@ -630,7 +644,7 @@ function OrderSuccessPageInner() {
       {orderDetails && showRatingModal && (
         <RatingModal
           orderId={String(displayOrderNo || orderId || trackToken || "")}
-          sellerId={orderDetails.sellerAccount || ""}
+          sellerId={sellerAccountFromOrder(orderDetails)}
           sellerName={sellerName || orderDetails.sellerName || ""}
           buyerPhone={buyerPhone || orderDetails.buyerPhone || ""}
           items={ratingItems}
