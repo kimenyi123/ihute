@@ -7,14 +7,13 @@ import {
   normalizeShopImagePublicUrl,
   shopImagePublicUrl,
 } from "@/lib/image-upload-paths"
+import {
+  normalizeShopAccountKey,
+  stableShopPhotoFileName,
+  stableShopPhotoWebPath,
+} from "@/lib/shop-photo-stable"
 
-export function normalizeShopAccountKey(account: string): string {
-  return account.replace(/\s+/g, " ").trim().toUpperCase()
-}
-
-function safeSegment(input: string): string {
-  return input.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120)
-}
+export { normalizeShopAccountKey }
 
 async function readJsonMap(filePath: string): Promise<Record<string, string>> {
   try {
@@ -53,7 +52,7 @@ export async function persistShopImageUpload(
   fileData: Buffer | File,
   contentType?: string,
   originalName?: string
-): Promise<{ fileName: string; imageUrl: string; storedPath: string }> {
+): Promise<{ fileName: string; imageUrl: string; storedPath: string; webPath: string }> {
   let mime = (contentType || "").trim()
   if (!mime && fileData instanceof File) {
     mime = fileData.type
@@ -65,8 +64,7 @@ export async function persistShopImageUpload(
     return "jpg"
   })()
 
-  const accountSafe = safeSegment(normalizeShopAccountKey(account))
-  const fileName = `${accountSafe}_${Date.now()}.${ext}`
+  const fileName = stableShopPhotoFileName(account, ext)
   const uploadDir = getShopUploadsDir()
   const absolutePath = path.join(uploadDir, fileName)
 
@@ -81,5 +79,10 @@ export async function persistShopImageUpload(
   map[normalizeShopAccountKey(account)] = imageUrl
   await writeShopOverrideMap(map)
 
-  return { fileName, imageUrl: shopImagePublicUrl(fileName), storedPath: absolutePath }
+  return {
+    fileName,
+    imageUrl: shopImagePublicUrl(fileName),
+    storedPath: absolutePath,
+    webPath: stableShopPhotoWebPath(account, ext),
+  }
 }
