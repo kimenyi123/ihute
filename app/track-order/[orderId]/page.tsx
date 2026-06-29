@@ -70,6 +70,9 @@ type OrderDetail = {
     ORDERED_BY?: string
     lineId?: number
     ID_LIST?: number
+    lineCreatedAt?: number | string | null
+    HEURE?: number | string | null
+    heure?: number | string | null
   }>
   total: number
   paymentMethod: string

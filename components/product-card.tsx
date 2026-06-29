@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { useCartStore } from "@/lib/cart-store"
 import { useFavoritesStore } from "@/lib/favorites-store"
 import { trackProductView, trackClick } from "@/lib/interaction-tracker"
-import { Heart, Eye, Store, ScanSearch, ShoppingCart } from "lucide-react"
+import { Heart, Store, ScanSearch, ShoppingCart } from "lucide-react"
 import { usePriceWatchStore } from "@/lib/price-watch-store"
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
@@ -29,7 +29,6 @@ import {
 import { unitMeaningfulForDisplay } from "@/lib/product-unit-display"
 import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price"
 import { itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
-import { isExpiryMeaningfulForCustomerDisplay } from "@/lib/item-state-display"
 
 /** Suffix after price: `N pcs` from `item_emballage` (pack size), not currency — default N=1 when omitted. */
 function formatPcsFromItemEmballage(raw: unknown): string | null {
