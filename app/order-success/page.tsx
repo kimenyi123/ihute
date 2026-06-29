@@ -309,6 +309,7 @@ function OrderSuccessPageInner() {
           unitPrice: item.unitPrice,
           orderedBy: item.orderedBy ?? item.ORDERED_BY,
           lineId: item.lineId ?? item.ID_LIST,
+          lineCreatedAt: item.lineCreatedAt ?? item.HEURE ?? item.heure,
         })),
         subtotal: effectiveSubtotal,
         total: effectiveTotalAmount,

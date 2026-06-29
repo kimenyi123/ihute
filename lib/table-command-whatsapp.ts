@@ -5,6 +5,8 @@ export type TableCommandLineItem = {
   unitPrice: number
   orderedBy?: string | null
   lineId?: number | null
+  /** `order_transaction_list.HEURE` — when this line was added (table round time). */
+  lineCreatedAt?: number | string | null
 }
 
 export function isTableCommandOrder(order: {
@@ -27,6 +29,41 @@ function lineTotalRwf(item: Pick<TableCommandLineItem, "qty" | "unitPrice">): nu
   const qty = Number(item.qty) || 0
   const unit = Number(item.unitPrice) || 0
   return Math.round(qty * unit)
+}
+
+function parseLineCreatedAtMs(raw: unknown): number | undefined {
+  if (raw == null || raw === "") return undefined
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return raw < 1e12 ? raw * 1000 : raw
+  }
+  const d = new Date(String(raw))
+  const ms = d.getTime()
+  return Number.isFinite(ms) ? ms : undefined
+}
+
+function earliestLineTimeMs(items: Array<{ lineCreatedAt?: number | string | null }>): number | undefined {
+  const times = items
+    .map((item) => parseLineCreatedAtMs(item.lineCreatedAt))
+    .filter((t): t is number => t != null)
+  return times.length ? Math.min(...times) : undefined
+}
+
+/** Compact banner label for when a guest placed a table round. */
+export function formatTableRoundTimestamp(value: number | string | undefined | null): string | undefined {
+  const ms = parseLineCreatedAtMs(value)
+  if (ms == null) return undefined
+  const d = new Date(ms)
+  const time = new Intl.DateTimeFormat("en-GB", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(d)
+  const date = new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    ...(d.getFullYear() !== new Date().getFullYear() ? { year: "numeric" as const } : {}),
+  }).format(d)
+  return `${time} · ${date}`
 }
 
 function formatItemLine(item: TableCommandLineItem): string {
@@ -115,11 +152,13 @@ export type TableCommandViewLine = {
   unitPrice: number
   total: number
   lineId?: number | null
+  lineCreatedAt?: number
 }
 
 export type TableCommandViewRound = {
   roundNumber: number
   items: TableCommandViewLine[]
+  roundStartedAt?: number
 }
 
 export type TableCommandViewPerson = {
@@ -143,7 +182,9 @@ export function buildTableCommandView(items: TableCommandLineItem[]): TableComma
           unitPrice: Number(item.unitPrice) || 0,
           total: lineTotalRwf(item),
           lineId: item.lineId,
+          lineCreatedAt: parseLineCreatedAtMs(item.lineCreatedAt),
         })),
+        roundStartedAt: earliestLineTimeMs(round.items),
       })),
     }
   })
@@ -183,6 +224,8 @@ export type OrderReceiptLine = {
 
 export type OrderReceiptGuestRound = {
   roundLabel?: string
+  /** e.g. "8:04 pm · 1 Jun" — earliest line time in this round */
+  startedAtLabel?: string
   lines: OrderReceiptLine[]
 }
 
@@ -275,6 +318,7 @@ export function buildOrderReceiptViewModel(args: {
         guest: person.person,
         rounds: person.rounds.map((round, roundIdx) => ({
           roundLabel: roundIdx > 0 ? `Round ${roundIdx + 1}` : undefined,
+          startedAtLabel: formatTableRoundTimestamp(round.roundStartedAt),
           lines: round.items.map((line) => ({
             name: line.name,
             qty: line.qty,
@@ -331,6 +375,7 @@ export function buildOrderWhatsAppMessageFromViewModel(vm: OrderReceiptViewModel
       lines.push(waSection(`Ordered by: ${group.guest}`))
       for (const round of group.rounds) {
         if (round.roundLabel) lines.push(`— ${round.roundLabel} —`)
+        if (round.startedAtLabel) lines.push(`_${round.startedAtLabel}_`)
         for (const item of round.lines) {
           lines.push(formatReceiptItemLine(item))
         }

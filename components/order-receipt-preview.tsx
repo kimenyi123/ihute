@@ -78,6 +78,11 @@ export function OrderReceiptPreview({ receipt }: { receipt: OrderReceiptViewMode
                           {round.roundLabel}
                         </div>
                       ) : null}
+                      {round.startedAtLabel ? (
+                        <div className="border-b border-slate-100 bg-slate-50/90 px-4 py-1 text-center text-[10px] font-medium tracking-wide text-slate-500">
+                          {round.startedAtLabel}
+                        </div>
+                      ) : null}
                       {round.lines.map((line, lineIdx) => (
                         <div
                           key={`${line.name}-${lineIdx}`}

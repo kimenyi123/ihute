@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Search,
   Store,
@@ -18,7 +19,6 @@ import {
   ChevronUp,
   ChevronLeft,
   ChevronRight,
-  User,
   LayoutGrid,
   SlidersHorizontal,
   Star,
@@ -71,6 +71,10 @@ import {
 } from "@/lib/package-price";
 import { itemEmballageDisplaySuffix } from "@/lib/cart-display-utils";
 import { buildCartImageFields } from "@/lib/cart-image-fields";
+import {
+  ProductSearchRankingBadges,
+  productSearchRankingFromApi,
+} from "@/components/product-card";
 import {
   getMoodOptionsForSeller,
   isSurpriseMoodId,
@@ -610,6 +614,24 @@ function categorizeProduct(product: ShopWithMeProduct): string {
   return "Other";
 }
 
+function ProductGridSearchSkeleton({ count = 12 }: { count?: number }) {
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5">
+      {Array.from({ length: count }, (_, i) => (
+        <div key={i} className="overflow-hidden rounded-lg border bg-card">
+          <Skeleton className="aspect-square w-full rounded-none" />
+          <div className="space-y-2 p-3">
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-3 w-2/3" />
+            <Skeleton className="h-4 w-1/2" />
+            <Skeleton className="h-8 w-full" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function ShopWithMePage({ embedInMainLayout = false }: { embedInMainLayout?: boolean }) {
   const params = useParams();
   const searchParams = useSearchParams();
@@ -627,9 +649,6 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
   const nicknameFromUrl = nicknameFromPath || nicknameFromQuery;
 
   const [nickname, setNickname] = useState("");
-  const [customerName, setCustomerName] = useState("");
-  const [customerAddress, setCustomerAddress] = useState("");
-  const [showCustomerDialog, setShowCustomerDialog] = useState(false);
   const [sellers, setSellers] = useState<ShopWithMeSeller[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -670,7 +689,7 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
     const normalizedNickname = nicknameFromUrl.trim().toLowerCase();
     const nicknameChanged = prevNicknameRef.current !== normalizedNickname;
     if (nicknameChanged) prevNicknameRef.current = normalizedNickname;
-    if (nicknameChanged) setLoading(true);
+    setLoading(true);
     setError(null);
     const params = new URLSearchParams({ nickname: normalizedNickname });
     if (debouncedProductSearch) params.set("productSearch", debouncedProductSearch);
@@ -778,13 +797,6 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
     }
   }, [currentSeller, sharedItems, addItem, nicknameFromUrl, searchParams, selectedSeller]);
 
-  // Pre-fill customer/address only from URL params (never use table name as buyer name)
-  useEffect(() => {
-    if (customerFromQuery?.trim()) setCustomerName(customerFromQuery.trim());
-    if (addressFromQuery?.trim()) setCustomerAddress(addressFromQuery.trim());
-    // Do NOT set customerName/customerAddress from tableFromQuery — table name is not the buyer
-  }, [customerFromQuery, addressFromQuery]);
-
   async function searchShop(searchNickname: string) {
     if (!searchNickname.trim()) {
       setError("Please enter a shop nickname");
@@ -835,36 +847,6 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
       setLoading(false);
     }
   }
-
-  const handleCustomerSubmit = () => {
-    if (!currentSeller) return;
-
-    const name = customerName.trim();
-    const address = customerAddress.trim();
-    if (!name) return;
-
-    // Encode "tableNumber" as "Name | Address" (works for delivery or table orders)
-    const tableNumber = address ? `${name} | ${address}` : name;
-
-    setTableInfo({
-      tableNumber,
-      customerName: name,
-      customerAddress: address,
-      shopName: currentSeller.OWNER || currentSeller.SELLER_NAMES || currentSeller.NICKNAME || "",
-      shopId: currentSeller.ISHYIGA_ACCOUNT || "",
-    });
-
-    setShowCustomerDialog(false);
-
-    // Update URL with nickname and customer info for deep links
-    const base = nickname || nicknameFromUrl || currentSeller.NICKNAME || "";
-    const safeNickname = encodeURIComponent(base.toString().toLowerCase());
-    const params = new URLSearchParams();
-    if (name) params.set("customer", name);
-    if (address) params.set("address", address);
-
-    router.push(`/shop-with-me/${safeNickname}${params.toString() ? `?${params.toString()}` : ""}`);
-  };
 
   const preferred = currentSeller?.PREFERRED_CATEGORIES?.toLowerCase() || "";
   const department = currentSeller?.DEPARTMENT?.toLowerCase() || "";
@@ -945,10 +927,6 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
     setSurpriseDialogOpen(true);
   };
 
-  const isDeliveryShop = preferred
-    ? ["shop", "store", "pharmacy", "grocery", "delivery"].some((cat) => preferred.includes(cat))
-    : true; // Default to true for generic shops
-
   useEffect(() => {
     if (!currentSeller) return;
 
@@ -973,7 +951,7 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
     });
   }, [customerFromQuery, addressFromQuery, tableFromQuery, currentSeller, setTableInfo, clearTableInfo]);
 
-  // QR share lands with ?table=… — do not auto-join here; checkout opens join-only dialog so guest enters their name.
+  // QR share lands with ?table=… — guest name is collected at checkout, not add-to-cart.
 
   useEffect(() => {
     if (!currentSeller?.products) {
@@ -1053,26 +1031,13 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
     setCategoryPages((prev) => ({ ...prev, [categoryName]: page }));
   };
 
-  // When we have a backend search (debouncedProductSearch), the API was called with productSearch — trust backend result (no client-side filter).
-  // When no backend search, filter on client for instant feedback. Also apply price range when set.
+  const isSearchDebouncing = productSearchQuery.trim() !== debouncedProductSearch;
+  const showProductGridSkeleton =
+    categories.length > 0 && (isSearchDebouncing || loading);
+
+  // Price range filter only — text search is server-side after debounce (no interim client filter).
   const getFilteredProducts = (products: ShopWithMeProduct[]) => {
     let list = products;
-
-    if (!debouncedProductSearch.trim() && productSearchQuery.trim()) {
-      const query = productSearchQuery.toLowerCase().trim();
-      const terms = query.split(/\s+/).filter(Boolean);
-      list = list.filter((product) => {
-        const name = (product.item_commercial_name || product.item_name || "").toLowerCase();
-        const keywords = (product.item_key_words || "").toLowerCase();
-        const famille = String((product as Record<string, unknown>).famille ?? (product as Record<string, unknown>).FAMILLE ?? "").toLowerCase();
-        const french = ((product as Record<string, unknown>).item_key_words_french as string || "").toLowerCase();
-        const kinyarwanda = ((product as Record<string, unknown>).item_key_words_kinyarwanda as string || "").toLowerCase();
-        const description = ((product as Record<string, unknown>).item_description as string || (product as Record<string, unknown>).description as string || "").toLowerCase();
-        const itemKeywords = ((product as Record<string, unknown>).item_keywords as string || "").toLowerCase();
-        const combined = `${name} ${keywords} ${famille} ${french} ${kinyarwanda} ${description} ${itemKeywords}`;
-        return terms.every((term) => combined.includes(term));
-      });
-    }
 
     const minNum = priceMin.trim() ? parseInt(priceMin.trim(), 10) : NaN;
     const maxNum = priceMax.trim() ? parseInt(priceMax.trim(), 10) : NaN;
@@ -1387,39 +1352,9 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
               </div>
 
               {hasTableContext && tableFromQuery?.trim() && (
-                <Badge variant="outline" className="text-xs bg-primary/5 border-primary/20">
-                  Table: <span className="font-mono font-medium">{tableFromQuery.trim()}</span>
-                </Badge>
-              )}
-              {hasTableContext && tableFromQuery?.trim() && (
                 <Badge variant="default" className="bg-[#1e3a5f] text-xs sm:text-sm py-1.5 sm:py-2 px-3 sm:px-4">
                   Table: <span className="font-mono font-medium">{tableFromQuery.trim()}</span>
                 </Badge>
-              )}
-              {hasTableContext && (isDeliveryShop || isBarOrRestaurant) && (
-                <div className="flex items-center gap-2 self-start sm:self-auto">
-                  {customerName && customerAddress ? (
-                    <Badge variant="secondary" className="text-xs sm:text-sm py-1.5 sm:py-2 px-3 sm:px-4 max-w-full truncate">
-                      <User className="h-4 w-4 mr-2 hidden xs:inline" />
-                      <span className="truncate">{customerName}</span>
-                    </Badge>
-                  ) : (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setShowCustomerDialog(true)}
-                      className="gap-2 whitespace-nowrap"
-                    >
-                      <User className="h-4 w-4" />
-                      {isBarOrRestaurant ? "Set Table" : "Add Info"}
-                    </Button>
-                  )}
-                  {customerName && customerAddress && (
-                    <Button variant="ghost" size="sm" onClick={() => setShowCustomerDialog(true)} className="px-2 sm:px-3">
-                      Change
-                    </Button>
-                  )}
-                </div>
               )}
             </div>
 
@@ -1596,6 +1531,12 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
               <div className="text-center py-6">
                 <Loader2 className="h-5 w-5 animate-spin mx-auto text-muted-foreground" />
               </div>
+            ) : showProductGridSkeleton ? (
+              <Card className="overflow-hidden border-l-4 border-l-primary/60 bg-card shadow-sm">
+                <CardContent className="p-4 sm:p-5">
+                  <ProductGridSearchSkeleton count={itemsPerPage} />
+                </CardContent>
+              </Card>
             ) : (
               <div className="space-y-8">
                 {categoriesToShow.map((category) => {
@@ -1697,13 +1638,9 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
                                 moodMetaType={currentMoodConfig?.metaType}
                                 ownerName={currentSeller.OWNER || currentSeller.SELLER_NAMES || currentSeller.NICKNAME}
                                 supplierId={currentSeller.ISHYIGA_ACCOUNT || ""}
-                                isDeliveryShop={isDeliveryShop}
                                 isBarOrRestaurant={isBarOrRestaurant}
                                 isPharmacy={isPharmacy}
-                                hasTableContext={hasTableContext}
-                                customerName={customerName}
-                                customerAddress={customerAddress}
-                                onCustomerInfoRequired={() => setShowCustomerDialog(true)}
+                                productSearchActive={!!debouncedProductSearch.trim()}
                               />
                             ))}
                           </div>
@@ -1767,10 +1704,11 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
                   );
                 })}
 
-                {categoriesToShow.every((cat) => getFilteredProducts(cat.products).length === 0) && (
+                {!showProductGridSkeleton &&
+                  categoriesToShow.every((cat) => getFilteredProducts(cat.products).length === 0) && (
                   <div className="text-center py-12">
                     <p className="text-muted-foreground">
-                      {productSearchQuery ? `No products found matching "${productSearchQuery}"` : "No products available"}
+                      {debouncedProductSearch ? `No products found matching "${debouncedProductSearch}"` : "No products available"}
                     </p>
                   </div>
                 )}
@@ -1791,58 +1729,6 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
           </Card>
         )}
       </div>
-
-      {/* Customer Info Dialog */}
-      <Dialog open={showCustomerDialog} onOpenChange={setShowCustomerDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {isBarOrRestaurant ? "Your name at this table" : "Customer Information"}
-            </DialogTitle>
-            <DialogDescription>
-              {isBarOrRestaurant
-                ? "Tell the bar/restaurant who you are so they can match orders to people at this table. The table name (e.g. Ishyiga Table) comes from the QR link."
-                : "Please provide your name and delivery address"}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-4 space-y-4">
-            <div>
-              <Label htmlFor="customer-name">
-                {isBarOrRestaurant ? "Your Name *" : "Full Name *"}
-              </Label>
-              <Input
-                id="customer-name"
-                placeholder={isBarOrRestaurant ? "e.g., John, Alice, Nelly" : "e.g., John Doe"}
-                value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
-                className="mt-2"
-              />
-            </div>
-            <div>
-              <Label htmlFor="customer-address">
-                {isBarOrRestaurant ? "Where are you sitting? (optional)" : "Delivery Address *"}
-              </Label>
-              <Input
-                id="customer-address"
-                placeholder={
-                  isBarOrRestaurant ? "e.g., Terrace, near the DJ" : "e.g., KN 5 Ave, Kigali"
-                }
-                value={customerAddress}
-                onChange={(e) => setCustomerAddress(e.target.value)}
-                className="mt-2"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCustomerDialog(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleCustomerSubmit} disabled={!customerName.trim()}>
-              Confirm
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Surprise me :) popup — fields depend on shop category (pharmacy, food, boutique, etc.) */}
       <Dialog open={surpriseDialogOpen} onOpenChange={setSurpriseDialogOpen}>
@@ -1939,27 +1825,18 @@ function ProductCard({
   moodMetaType,
   ownerName,
   supplierId,
-  isDeliveryShop,
   isBarOrRestaurant,
   isPharmacy,
-  hasTableContext,
-  customerName,
-  customerAddress,
-  onCustomerInfoRequired,
+  productSearchActive,
 }: {
   product: ShopWithMeProduct;
   /** When set, show contextual subtitle under product name (from MOOD_CONFIG.metaType). */
   moodMetaType?: MoodMetaType | null;
   ownerName?: string;
   supplierId: string;
-  isDeliveryShop: boolean;
   isBarOrRestaurant?: boolean;
   isPharmacy?: boolean;
-  /** When false (only nickname in URL), normal shop: add to cart and checkout without table info. */
-  hasTableContext?: boolean;
-  customerName: string;
-  customerAddress: string;
-  onCustomerInfoRequired: () => void;
+  productSearchActive?: boolean;
 }) {
   const router = useRouter();
   const { toast } = useToast();
@@ -2040,20 +1917,6 @@ function ProductCard({
   }, [itemCode, productName, supplierId]);
 
   const pushToCart = (qty = 1, erx?: ErxPrescription) => {
-    // Only require table/customer info when we're in table context (table/customer/address in URL).
-    const needsInfo = hasTableContext && (isDeliveryShop || isBarOrRestaurant);
-    if (needsInfo && (!customerName || !customerAddress)) {
-      onCustomerInfoRequired();
-      toast({
-        title: "Customer info required",
-        description: isBarOrRestaurant
-          ? "Please provide your table or guest name so staff can find you"
-          : "Please provide your name and address for delivery",
-        variant: "destructive",
-      });
-      return;
-    }
-
     trackClick("product", itemCode, productName);
 
     console.log("[shop-with-me] Add to cart:", {
@@ -2215,20 +2078,11 @@ function ProductCard({
               )}
             </p>
           )}
-          {/* IHUTE: ingredient-style search badges — direct match first, then "contains" */}
-          {((p.search_priority as string) === "direct" || (p.contains_ingredient as string)) && (
-            <div className="mt-1 flex flex-wrap gap-1">
-              {(p.search_priority as string) === "direct" && (
-                <span className="inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
-                  {/* Main Ingredient */}
-                </span>
-              )}
-              {(p.contains_ingredient as string) && (p.search_priority as string) !== "direct" && (
-                <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-700">
-                  Contains: {String(p.contains_ingredient)}
-                </span>
-              )}
-            </div>
+          {/* IHUTE: same search ranking badges as main search ProductCard */}
+          {productSearchActive && (
+            <ProductSearchRankingBadges
+              {...productSearchRankingFromApi(p)}
+            />
           )}
         </div>
 
@@ -2257,11 +2111,7 @@ function ProductCard({
             }
           }}
         >
-          {hasTableContext && (isDeliveryShop || isBarOrRestaurant) && (!customerName || !customerAddress)
-            ? isBarOrRestaurant
-              ? "Set Table Info"
-              : "Add Info to Order"
-            : "Buy Now"}
+          Buy Now
         </Button>
       </CardContent>
 

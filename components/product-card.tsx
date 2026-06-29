@@ -90,6 +90,71 @@ type Product = {
   distanceLabel?: string
 }
 
+export type ProductSearchRankingBadgeProps = {
+  searchPriority?: "direct" | "contains" | null
+  /** Search term or `true` when backend only signals a contains-ingredient match. */
+  containsIngredient?: string | boolean | null
+  className?: string
+}
+
+/** Map API snake_case fields to badge props (same as search page `toCardProduct`). */
+export function productSearchRankingFromApi(source: {
+  search_priority?: unknown
+  contains_ingredient?: unknown
+}): Pick<ProductSearchRankingBadgeProps, "searchPriority" | "containsIngredient"> {
+  const searchPriority =
+    source.search_priority === "direct" || source.search_priority === "contains"
+      ? source.search_priority
+      : undefined
+  const raw = source.contains_ingredient
+  const containsIngredient =
+    typeof raw === "string" && raw.trim()
+      ? raw.trim()
+      : raw === true
+        ? true
+        : undefined
+  return { searchPriority, containsIngredient }
+}
+
+/** IHUTE search ranking badges — direct match, contains, and ingredient pill (main search + shop-with-me). */
+export function ProductSearchRankingBadges({
+  searchPriority,
+  containsIngredient,
+  className,
+}: ProductSearchRankingBadgeProps) {
+  const showDirect = searchPriority === "direct"
+  const showContains = searchPriority === "contains"
+  const ingredientText =
+    typeof containsIngredient === "string" && containsIngredient.trim()
+      ? containsIngredient.trim()
+      : containsIngredient === true
+        ? ""
+        : null
+  const showIngredientPill = ingredientText !== null && searchPriority !== "direct"
+
+  if (!showDirect && !showContains && !showIngredientPill) return null
+
+  return (
+    <div className={cn("mt-1 flex flex-wrap gap-1", className)}>
+      {showDirect && (
+        <span className="inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
+          Direct match
+        </span>
+      )}
+      {showContains && (
+        <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-700">
+          Contains
+        </span>
+      )}
+      {showIngredientPill && (
+        <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-700">
+          {ingredientText ? `Contains: ${ingredientText}` : "Contains"}
+        </span>
+      )}
+    </div>
+  )
+}
+
 export function ProductCard({
   product,
   navigateAfterAdd = false,
@@ -455,13 +520,10 @@ export function ProductCard({
       <CardContent className={cn("flex min-w-0 flex-col gap-2", compact ? "p-2" : "p-3")}>
         <div className={compact ? "min-h-[32px]" : "min-h-[38px]"}>
           <h3 className={cn("font-semibold leading-tight line-clamp-2", compact ? "text-xs" : "text-sm")}>{name}</h3>
-          {containsIngredient && searchPriority !== "direct" && (
-            <div className="mt-1 flex flex-wrap gap-1">
-              <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-700">
-                Contains: {containsIngredient}
-              </span>
-            </div>
-          )}
+          <ProductSearchRankingBadges
+            searchPriority={searchPriority}
+            containsIngredient={containsIngredient}
+          />
         </div>
 
         {description && description !== id && (
