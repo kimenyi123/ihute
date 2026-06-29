@@ -298,7 +298,8 @@ export async function POST(req: NextRequest) {
 
     log(requestId, "Generated status history with", statusHistory.length, "entries")
 
-    const createdAt = data.CREATED_AT || data.createdAt || new Date().toISOString()
+    const createdAt =
+      data.ORDER_PLACED_AT || data.createdAt || data.CREATED_AT || new Date().toISOString()
     const createdTime = typeof createdAt === "number" ? createdAt : new Date(createdAt).getTime()
     const estimatedHours = Number(process.env.ORDER_ESTIMATED_DELIVERY_HOURS) || 2
     const estimatedDeliveryAt =
@@ -364,6 +365,7 @@ export async function POST(req: NextRequest) {
       paymentStatus: effectivePaymentStatus,
       status: mappedStatus,
       createdAt,
+      ORDER_PLACED_AT: data.ORDER_PLACED_AT ?? data.orderPlacedAt,
       updatedAt: data.UPDATED_AT || data.updatedAt || undefined,
       statusHistory: statusHistory,
       estimatedDeliveryAt,

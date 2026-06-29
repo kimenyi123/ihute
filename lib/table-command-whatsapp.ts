@@ -171,6 +171,7 @@ export function buildOrderWhatsAppMessage(args: {
   orderDescription?: string
   logisticsType?: string
   logisticsFee?: number
+  placedAt?: string
 }): string {
   const formatCurrency = (amount: number) => `${amount.toLocaleString()} RWF`
   const discount = args.discount ?? 0
@@ -213,6 +214,7 @@ export function buildOrderWhatsAppMessage(args: {
 
   const parts = [
       "Order",
+      args.placedAt?.trim() ? args.placedAt.trim() : null,
       "",
       `Shop: ${args.shop}`,
       args.location?.trim() ? `Location: ${args.location.trim()}` : "",
