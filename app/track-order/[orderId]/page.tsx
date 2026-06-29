@@ -20,7 +20,12 @@ import {
   Eye,
   XCircle,
 } from "lucide-react"
-import { formatPaymentMethod } from "@/lib/payment-utils"
+import { formatPaymentMethod, isCashOnDelivery } from "@/lib/payment-utils"
+import {
+  buildOrderReceiptViewModel,
+  buildOrderWhatsAppMessageFromViewModel,
+  isTableCommandOrder,
+} from "@/lib/table-command-whatsapp"
 import { RatingModal } from "@/components/RatingModal"
 import { sellerAccountFromOrder } from "@/lib/order-seller-account"
 import { useOrderTracking } from "@/hooks/useOrderTracking"
@@ -61,6 +66,10 @@ type OrderDetail = {
     qty: number
     unitPrice: number
     unit?: string
+    orderedBy?: string
+    ORDERED_BY?: string
+    lineId?: number
+    ID_LIST?: number
   }>
   total: number
   paymentMethod: string
@@ -68,6 +77,9 @@ type OrderDetail = {
   status: OrderStatus
   /** Raw DB / servlet value (e.g. INVOICE>>LOADED) — shown verbatim when present */
   ORDER_STATUS?: string
+  IS_TABLE_COMMAND?: boolean
+  TABLE_NAME?: string
+  TABLE_LOCATION?: string
   createdAt: string
   estimatedDeliveryAt?: string
   driverPhone?: string
@@ -613,58 +625,47 @@ function TrackOrderPageInner() {
     buyerAddressOverride !== undefined ? buyerAddressOverride : (order.buyerLocation ?? "")
   const canEditDeliveryAddress = order.status !== "delivered" && order.status !== "cancelled"
 
-  // Format items for WhatsApp message
-  const formatCurrency = (amount: number) => `${amount.toLocaleString()} RWF`
+  const { logisticsFeeValue, subtotalValue, displayTotal, discountValue } = orderFinancials(order)
 
-  // Build styled WhatsApp message
-  const padRight = (s: string, w: number) => (s.length >= w ? s : s + ' '.repeat(w - s.length))
-  const padLeft = (s: string, w: number) => (s.length >= w ? s : ' '.repeat(w - s.length) + s)
-  const trunc = (s: string, w: number) => (s.length > w ? s.slice(0, w - 1) + '…' : s)
-
-  const NAME_W = 44, QTY_W = 5, AMT_W = 14
-  const header = padRight('Product name', NAME_W) + padLeft('Qty', QTY_W) + padLeft('Amount', AMT_W)
-  const sep = '-'.repeat(NAME_W + QTY_W + AMT_W)
-
-  const lines = order.items.map((item) => {
-    const nm = padRight(trunc(item.name.replace(/\s+/g, ' ').trim(), NAME_W), NAME_W)
-    const qt = padLeft(String(item.qty), QTY_W)
-    const amt = padLeft(formatCurrency(item.qty * item.unitPrice), AMT_W)
-    return nm + qt + amt
-  })
-
-  const { displayTotal } = orderFinancials(order)
-
-  // Determine paid amount for the order
-  const isPaid = order.paymentMethod && !order.paymentMethod.toLowerCase().includes('delivery')
+  const isPaid =
+    !isCashOnDelivery(order.paymentMethod) &&
+    (String(order.paymentStatus ?? "").toLowerCase().includes("paid") ||
+      order.paymentMethod.toUpperCase().includes("PAID_"))
   const paidAmount = isPaid ? displayTotal : 0
 
   const shareTrackSlug = publicToken || orderId
   const internalOrderNo = String(order.orderId ?? orderId)
   const publicShopBase = (process.env.NEXT_PUBLIC_SHOP_URL || process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://shop.ihute.rw").replace(/\/$/, "")
+  const trackLink = `${publicShopBase}/track-order/${encodeURIComponent(shareTrackSlug)}${fromGrandma ? "?from=grandma" : ""}`
 
-  const whatsappMessage = [
-    'Order',
-    '',
-    `Shop: ${order.sellerName}`,
-    displayBuyerLocation.trim() ? `Location: ${displayBuyerLocation.trim()}` : "",
-    `Order ID: ${internalOrderNo}`,
-    '',
-    '```',
-    header,
-    sep,
-    ...lines,
-    '```',
-    '',
-    `Total: ${formatCurrency(displayTotal)}`,
-    `Discount: ${formatCurrency(0)}`,
-    `Paid: ${formatCurrency(paidAmount)}`,
-    '',
-    `Paid at: ${formatPaymentMethod(order.paymentMethod)}`,
-    `Message: ${internalOrderNo ? `ORDER ${internalOrderNo}` : '-'}`,
-    `My phone: ${order.buyerPhone || ''}`,
-    '',
-    `Follow: ${publicShopBase}/track-order/${encodeURIComponent(shareTrackSlug)}${fromGrandma ? "?from=grandma" : ""}`
-  ].filter(Boolean).join("\n")
+  const whatsappMessage = buildOrderWhatsAppMessageFromViewModel(
+    buildOrderReceiptViewModel({
+      shop: order.sellerName,
+      location: displayBuyerLocation,
+      orderId: internalOrderNo,
+      items: order.items.map((item) => ({
+        name: item.name,
+        qty: item.qty,
+        unitPrice: item.unitPrice,
+        orderedBy: item.orderedBy ?? item.ORDERED_BY,
+        lineId: item.lineId ?? item.ID_LIST,
+      })),
+      subtotal: subtotalValue,
+      total: displayTotal,
+      discount: discountValue,
+      paid: paidAmount,
+      paidAt: formatPaymentMethod(order.paymentMethod),
+      reference: internalOrderNo ? `ORDER ${internalOrderNo}` : undefined,
+      myPhone: order.buyerPhone,
+      link: trackLink,
+      isTableCommand: isTableCommandOrder({
+        IS_TABLE_COMMAND: order.IS_TABLE_COMMAND,
+        TABLE_NAME: order.TABLE_NAME,
+        buyerLocation: displayBuyerLocation,
+      }),
+      logisticsFee: logisticsFeeValue,
+    }),
+  )
 
   const whatsappHref = sellerPhoneNormalized ? waHrefFor(sellerPhoneNormalized, whatsappMessage) : ""
 

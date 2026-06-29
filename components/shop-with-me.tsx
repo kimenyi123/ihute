@@ -54,7 +54,6 @@ import { Slider } from "@/components/ui/slider";
 import { useCartStore } from "@/lib/cart-store";
 import { useAuthStore } from "@/lib/auth-store";
 import { useFavoritesStore } from "@/lib/favorites-store";
-import { useTableCommandStore, getOrCreateGuestEmail } from "@/lib/table-command-store";
 import { trackProductView, trackClick } from "@/lib/interaction-tracker";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/use-toast";
@@ -652,7 +651,6 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
   const addItem = useCartStore((s) => s.addItem);
   const setTableInfo = useCartStore((s) => s.setTableInfo);
   const clearTableInfo = useCartStore((s) => s.clearTableInfo);
-  const joinTableCommand = useTableCommandStore((s) => s.joinTableCommand);
   const { user, isAuthenticated } = useAuthStore();
 
   const [debouncedProductSearch, setDebouncedProductSearch] = useState("");
@@ -960,48 +958,22 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
       return;
     }
 
-    let name = customerFromQuery.trim();
-    let address = addressFromQuery.trim();
     const table = tableFromQuery.trim();
+    const guestName = customerFromQuery.trim();
+    const address = addressFromQuery.trim();
 
-    // If explicit customer fields are missing, fall back to "table" param
-    if (!name && table) name = table;
-    if (!address && table) address = table;
-
-    if (!name && !address) return;
-
-    setCustomerName(name);
-    setCustomerAddress(address);
-
-    const tableNumber = address ? `${name} | ${address}` : name;
+    if (!table && !guestName && !address) return;
 
     setTableInfo({
-      tableNumber,
-      customerName: name,
-      customerAddress: address || name,
+      tableNumber: table || undefined,
+      customerName: guestName || undefined,
+      customerAddress: address || undefined,
       shopName: currentSeller.OWNER || currentSeller.SELLER_NAMES || currentSeller.NICKNAME || "",
       shopId: currentSeller.ISHYIGA_ACCOUNT || "",
     });
   }, [customerFromQuery, addressFromQuery, tableFromQuery, currentSeller, setTableInfo, clearTableInfo]);
 
-  // Auto-join table when landing from supplier QR (e.g. ...?nickname=burrows&table=TEST ISHYIGA2)
-  const joinedTableRef = useRef<string | null>(null);
-  useEffect(() => {
-    const tableName = tableFromQuery?.trim();
-    if (!tableName) {
-      joinedTableRef.current = null;
-      return;
-    }
-    if (!currentSeller?.ISHYIGA_ACCOUNT) return;
-    const key = `${tableName}|${currentSeller.ISHYIGA_ACCOUNT}`;
-    if (joinedTableRef.current === key) return;
-    joinedTableRef.current = key;
-    const locationId = currentSeller.ISHYIGA_ACCOUNT;
-    const locationName = currentSeller.OWNER || currentSeller.SELLER_NAMES || currentSeller.NICKNAME || "Shop";
-    const userName = customerName?.trim() || tableName || "Guest";
-    const userEmail = isAuthenticated && user?.email ? user.email : getOrCreateGuestEmail();
-    joinTableCommand(tableName, locationId, locationName, userName, userEmail);
-  }, [tableFromQuery, currentSeller, joinTableCommand, customerName, isAuthenticated, user?.email]);
+  // QR share lands with ?table=… — do not auto-join here; checkout opens join-only dialog so guest enters their name.
 
   useEffect(() => {
     if (!currentSeller?.products) {

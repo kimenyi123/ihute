@@ -486,8 +486,6 @@ export default function SupplierOrderDetailsPage() {
                       const servedPrice = servedPriceOf(it)
                       const totalRequested = totalRequestedOf(it)
                       const totalServed = servedQty * servedPrice
-                      // ✅ Remove ORDERED_BY field - use buyer info from account_signup instead
-                      // const orderedBy = (it.ORDERED_BY ?? buyer?.OWNER ?? "").toString().trim()
 
                       return (
                         <tr key={`${code}-${name}-${buyer?.OWNER || "anon"}`}>
