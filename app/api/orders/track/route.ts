@@ -341,6 +341,8 @@ export async function POST(req: NextRequest) {
           orderedBy: normalizeTableCommandPerson(item.ORDERED_BY ?? item.orderedBy),
           ID_LIST: Number(item.ID_LIST ?? item.lineId ?? item.id_list ?? 0) || undefined,
           lineId: Number(item.ID_LIST ?? item.lineId ?? item.id_list ?? 0) || undefined,
+          HEURE: item.HEURE ?? item.heure ?? item.lineCreatedAt,
+          lineCreatedAt: item.lineCreatedAt ?? item.HEURE ?? item.heure,
         }})
       : []
     const totalAmount = Number(data.AMOUNT ?? data.total ?? 0)

@@ -5,6 +5,8 @@ export type TableCommandLineItem = {
   unitPrice: number
   orderedBy?: string | null
   lineId?: number | null
+  /** `order_transaction_list.HEURE` — when this line was added (table round time). */
+  lineCreatedAt?: number | string | null
 }
 
 export function isTableCommandOrder(order: {
@@ -29,11 +31,46 @@ function lineTotalRwf(item: Pick<TableCommandLineItem, "qty" | "unitPrice">): nu
   return Math.round(qty * unit)
 }
 
+function parseLineCreatedAtMs(raw: unknown): number | undefined {
+  if (raw == null || raw === "") return undefined
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return raw < 1e12 ? raw * 1000 : raw
+  }
+  const d = new Date(String(raw))
+  const ms = d.getTime()
+  return Number.isFinite(ms) ? ms : undefined
+}
+
+function earliestLineTimeMs(items: Array<{ lineCreatedAt?: number | string | null }>): number | undefined {
+  const times = items
+    .map((item) => parseLineCreatedAtMs(item.lineCreatedAt))
+    .filter((t): t is number => t != null)
+  return times.length ? Math.min(...times) : undefined
+}
+
+/** Compact banner label for when a guest placed a table round. */
+export function formatTableRoundTimestamp(value: number | string | undefined | null): string | undefined {
+  const ms = parseLineCreatedAtMs(value)
+  if (ms == null) return undefined
+  const d = new Date(ms)
+  const time = new Intl.DateTimeFormat("en-GB", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(d)
+  const date = new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    ...(d.getFullYear() !== new Date().getFullYear() ? { year: "numeric" as const } : {}),
+  }).format(d)
+  return `${time} · ${date}`
+}
+
 function formatItemLine(item: TableCommandLineItem): string {
   const total = lineTotalRwf(item)
   const label = item.name.replace(/\s+/g, " ").trim()
   const qty = Number(item.qty) || 1
-  return `${label} ${qty} ${total.toLocaleString()}`
+  return `• ${label}\n  Qty ${qty} · ${total.toLocaleString()} RWF`
 }
 
 type PersonBatch = { person: string; items: TableCommandLineItem[] }
@@ -89,7 +126,7 @@ export function buildTableCommandWhatsAppLines(items: TableCommandLineItem[]): s
 
   for (const person of persons) {
     const rounds = batches.filter((b) => b.person === person)
-    out.push(person)
+    out.push(`*Ordered by: ${person}*`)
     rounds.forEach((round, roundIdx) => {
       if (roundIdx > 0) out.push(roundSeparatorLabel(roundIdx + 1))
       for (const item of round.items) {
@@ -115,11 +152,13 @@ export type TableCommandViewLine = {
   unitPrice: number
   total: number
   lineId?: number | null
+  lineCreatedAt?: number
 }
 
 export type TableCommandViewRound = {
   roundNumber: number
   items: TableCommandViewLine[]
+  roundStartedAt?: number
 }
 
 export type TableCommandViewPerson = {
@@ -143,14 +182,228 @@ export function buildTableCommandView(items: TableCommandLineItem[]): TableComma
           unitPrice: Number(item.unitPrice) || 0,
           total: lineTotalRwf(item),
           lineId: item.lineId,
+          lineCreatedAt: parseLineCreatedAtMs(item.lineCreatedAt),
         })),
+        roundStartedAt: earliestLineTimeMs(round.items),
       })),
     }
   })
 }
 
 export function formatTableCommandLineLabel(item: Pick<TableCommandViewLine, "name" | "qty" | "total">): string {
-  return `${item.name} ${item.qty} ${item.total.toLocaleString()}`
+  const qty = Number(item.qty) || 1
+  return `${item.name}   ×${qty}   ${item.total.toLocaleString()} RWF`
+}
+
+/** Clean duplicate table segments (e.g. "Table: ISHYIGA ONE | ISHYIGA ONE"). */
+export function normalizeReceiptLocation(raw?: string | null): string {
+  const s = (raw ?? "").trim()
+  if (!s) return ""
+
+  const tablePrefix = /^table:\s*/i
+  if (tablePrefix.test(s)) {
+    const after = s.replace(tablePrefix, "").trim()
+    const parts = after.split("|").map((p) => p.trim()).filter(Boolean)
+    if (parts.length >= 2) {
+      const key = parts[0].toLowerCase()
+      if (parts.every((p) => p.toLowerCase() === key)) {
+        return `Table: ${parts[0]}`
+      }
+    }
+    return parts.length === 1 ? `Table: ${parts[0]}` : `Table: ${after}`
+  }
+
+  return s
+}
+
+export type OrderReceiptLine = {
+  name: string
+  qty: number
+  total: number
+}
+
+export type OrderReceiptGuestRound = {
+  roundLabel?: string
+  /** e.g. "8:04 pm · 1 Jun" — earliest line time in this round */
+  startedAtLabel?: string
+  lines: OrderReceiptLine[]
+}
+
+export type OrderReceiptGuestGroup = {
+  guest: string
+  rounds: OrderReceiptGuestRound[]
+}
+
+export type OrderReceiptViewModel = {
+  shop: string
+  location: string
+  orderId: string
+  momoTxId?: string
+  description?: string
+  isTableCommand: boolean
+  flatItems: OrderReceiptLine[]
+  guestGroups: OrderReceiptGuestGroup[]
+  subtotal?: number
+  logisticsFee?: number
+  discount: number
+  total: number
+  paid: number
+  paidAt: string
+  reference?: string
+  myPhone?: string
+  followLink?: string
+}
+
+function formatReceiptMoney(amount: number): string {
+  return `${amount.toLocaleString()} RWF`
+}
+
+function formatReceiptItemLine(item: OrderReceiptLine): string {
+  const qty = Number(item.qty) || 1
+  const name = item.name.replace(/\s+/g, " ").trim()
+  return `• ${name}\n  Qty ${qty} · ${item.total.toLocaleString()} RWF`
+}
+
+function waSection(title: string): string {
+  return `*${title}*`
+}
+
+function waLabelValue(label: string, value: string): string {
+  return `${label}: ${value}`
+}
+
+function waMoneyLine(label: string, amount: number): string {
+  return `${label}: ${formatReceiptMoney(amount)}`
+}
+
+export function buildOrderReceiptViewModel(args: {
+  shop: string
+  location?: string
+  orderId: string | number
+  items: TableCommandLineItem[]
+  subtotal?: number
+  total: number
+  discount?: number
+  paid: number
+  paidAt?: string
+  reference?: string
+  myPhone?: string
+  link?: string
+  isTableCommand?: boolean
+  momoTxId?: string
+  orderDescription?: string
+  logisticsFee?: number
+}): OrderReceiptViewModel {
+  const discount = args.discount ?? 0
+  const description = args.orderDescription?.trim()
+  const subtotal = Number.isFinite(args.subtotal ?? NaN)
+    ? args.subtotal
+    : typeof args.logisticsFee === "number"
+      ? args.total - args.logisticsFee + discount
+      : undefined
+
+  const flatItems: OrderReceiptLine[] = args.items.map((item) => ({
+    name: item.name.replace(/\s+/g, " ").trim(),
+    qty: Number(item.qty) || 1,
+    total: lineTotalRwf(item),
+  }))
+
+  const guestGroups: OrderReceiptGuestGroup[] = args.isTableCommand
+    ? buildTableCommandView(
+        args.items.map((item) => ({
+          ...item,
+          orderedBy: normalizeTableCommandPerson(item.orderedBy),
+        })),
+      ).map((person) => ({
+        guest: person.person,
+        rounds: person.rounds.map((round, roundIdx) => ({
+          roundLabel: roundIdx > 0 ? `Round ${roundIdx + 1}` : undefined,
+          startedAtLabel: formatTableRoundTimestamp(round.roundStartedAt),
+          lines: round.items.map((line) => ({
+            name: line.name,
+            qty: line.qty,
+            total: line.total,
+          })),
+        })),
+      }))
+    : []
+
+  const phone = (args.myPhone ?? "").trim()
+  const normalizedPhone = phone && !/^n\/?a$/i.test(phone) ? phone : ""
+
+  return {
+    shop: args.shop,
+    location: normalizeReceiptLocation(args.location),
+    orderId: String(args.orderId),
+    momoTxId: args.momoTxId?.trim() || undefined,
+    description: description || undefined,
+    isTableCommand: Boolean(args.isTableCommand),
+    flatItems,
+    guestGroups,
+    subtotal,
+    logisticsFee: args.logisticsFee,
+    discount,
+    total: args.total,
+    paid: args.paid,
+    paidAt: args.paidAt?.trim() || "Unknown",
+    reference: args.reference?.trim() || undefined,
+    myPhone: normalizedPhone || undefined,
+    followLink: args.link?.trim() || undefined,
+  }
+}
+
+export function buildOrderWhatsAppMessageFromViewModel(vm: OrderReceiptViewModel): string {
+  const lines: string[] = []
+
+  lines.push(waSection("ORDER RECEIPT"), "")
+
+  lines.push(waSection("Order details"), "")
+  lines.push(waLabelValue("Shop", vm.shop))
+  if (vm.location) {
+    const isTable = vm.location.startsWith("Table:")
+    const value = isTable ? vm.location.replace(/^Table:\s*/i, "").trim() : vm.location
+    lines.push(waLabelValue(isTable ? "Table" : "Location", value))
+  }
+  lines.push(waLabelValue("Order ID", vm.orderId))
+  if (vm.momoTxId) lines.push(waLabelValue("MoMo TxId", vm.momoTxId))
+  if (vm.description) lines.push(waLabelValue("Order note", vm.description))
+
+  lines.push("", waSection("Items"), "")
+
+  if (vm.isTableCommand && vm.guestGroups.length > 0) {
+    for (const group of vm.guestGroups) {
+      lines.push(waSection(`Ordered by: ${group.guest}`))
+      for (const round of group.rounds) {
+        if (round.roundLabel) lines.push(`— ${round.roundLabel} —`)
+        if (round.startedAtLabel) lines.push(`_${round.startedAtLabel}_`)
+        for (const item of round.lines) {
+          lines.push(formatReceiptItemLine(item))
+        }
+      }
+      lines.push("")
+    }
+  } else {
+    for (const item of vm.flatItems) {
+      lines.push(formatReceiptItemLine(item))
+      lines.push("")
+    }
+  }
+
+  lines.push(waSection("Summary"), "")
+  if (typeof vm.subtotal === "number") lines.push(waMoneyLine("Subtotal", vm.subtotal))
+  if (typeof vm.logisticsFee === "number") lines.push(waMoneyLine("Logistics fee", vm.logisticsFee))
+  lines.push(waMoneyLine("Discount", vm.discount))
+  lines.push(`*Total: ${formatReceiptMoney(vm.total)}*`)
+  lines.push(waMoneyLine("Paid", vm.paid))
+  lines.push("")
+  lines.push(waLabelValue("Paid at", vm.paidAt))
+  if (vm.reference) lines.push(waLabelValue("Message", vm.reference))
+  if (vm.myPhone) lines.push(waLabelValue("My phone", vm.myPhone))
+  if (vm.followLink) {
+    lines.push("", waSection("Track order"), vm.followLink)
+  }
+
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim()
 }
 
 export function buildOrderWhatsAppMessage(args: {
@@ -172,70 +425,5 @@ export function buildOrderWhatsAppMessage(args: {
   logisticsType?: string
   logisticsFee?: number
 }): string {
-  const formatCurrency = (amount: number) => `${amount.toLocaleString()} RWF`
-  const discount = args.discount ?? 0
-  const description = args.orderDescription?.trim()
-  const paidAt = args.paidAt?.trim() || "Unknown"
-  const subtotal = Number.isFinite(args.subtotal ?? NaN)
-    ? args.subtotal
-    : typeof args.logisticsFee === "number"
-    ? args.total - args.logisticsFee + discount
-    : undefined
-  const showReference = args.reference?.trim()
-  const myPhone = args.myPhone?.trim() || ""
-  const followLink = args.link?.trim() || ""
-
-  let itemsSection: string
-  if (args.isTableCommand) {
-    itemsSection = buildTableCommandWhatsAppBlock(
-      args.items.map((item) => ({
-        ...item,
-        orderedBy: normalizeTableCommandPerson(item.orderedBy),
-      })),
-    )
-  } else {
-    const padRight = (s: string, w: number) => (s.length >= w ? s : s + " ".repeat(w - s.length))
-    const padLeft = (s: string, w: number) => (s.length >= w ? s : " ".repeat(w - s.length) + s)
-    const trunc = (s: string, w: number) => (s.length > w ? s.slice(0, w - 1) + "…" : s)
-    const NAME_W = 44
-    const QTY_W = 5
-    const AMT_W = 14
-    const header = padRight("Product name", NAME_W) + padLeft("Qty", QTY_W) + padLeft("Amount", AMT_W)
-    const sep = "-".repeat(NAME_W + QTY_W + AMT_W)
-    const lines = args.items.map((item) => {
-      const nm = padRight(trunc(item.name.replace(/\s+/g, " ").trim(), NAME_W), NAME_W)
-      const qt = padLeft(String(item.qty), QTY_W)
-      const amt = padLeft(formatCurrency(lineTotalRwf(item)), AMT_W)
-      return nm + qt + amt
-    })
-    itemsSection = ["```", header, sep, ...lines, "```"].join("\n")
-  }
-
-  const parts = [
-      "Order",
-      "",
-      `Shop: ${args.shop}`,
-      args.location?.trim() ? `Location: ${args.location.trim()}` : "",
-      `Order ID: ${args.orderId}`,
-      args.momoTxId ? `MoMo TxId: ${args.momoTxId}` : "",
-      description ? "" : null,
-      description ? "Order Description:" : null,
-      description || null,
-      "",
-      itemsSection,
-      "",
-      typeof subtotal === "number" ? `Subtotal: ${formatCurrency(subtotal)}` : null,
-      typeof args.logisticsFee === "number" ? `Logistics fee: ${formatCurrency(args.logisticsFee)}` : null,
-      `Discount: ${formatCurrency(discount)}`,
-      `Total: ${formatCurrency(args.total)}`,
-      `Paid: ${formatCurrency(args.paid)}`,
-      "",
-      `Paid at: ${paidAt}`,
-      showReference ? `Message: ${args.reference}` : null,
-      myPhone ? `My phone: ${myPhone}` : null,
-      "",
-      followLink ? `Follow: ${followLink}` : null,
-    ]
-
-  return parts.filter(Boolean).join("\n")
+  return buildOrderWhatsAppMessageFromViewModel(buildOrderReceiptViewModel(args))
 }
