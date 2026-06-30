@@ -22,6 +22,11 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 export function OrderReceiptPreview({ receipt }: { receipt: OrderReceiptViewModel }) {
   return (
     <div className="space-y-5 text-sm text-slate-800">
+      {receipt.placedAtLabel ? (
+        <p className="text-center text-xs font-medium tracking-wide text-slate-500">
+          {receipt.placedAtLabel}
+        </p>
+      ) : null}
       <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
         <SectionTitle>Order details</SectionTitle>
         <div className="space-y-2">

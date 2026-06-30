@@ -108,7 +108,20 @@ function buildPersonBatches(items: TableCommandLineItem[]): PersonBatch[] {
   for (const item of sorted) {
     const person = normalizeTableCommandPerson(item.orderedBy)
     const last = batches[batches.length - 1]
-    if (last && last.person === person) {
+    const lastItem = last?.items[last.items.length - 1]
+    const lineId = Number(item.lineId ?? 0)
+    const lastLineId = Number(lastItem?.lineId ?? 0)
+    const lineMs = parseLineCreatedAtMs(item.lineCreatedAt)
+    const lastLineMs = parseLineCreatedAtMs(lastItem?.lineCreatedAt)
+    const idGap = lineId > 0 && lastLineId > 0 ? lineId - lastLineId : 0
+    const timeGapMs =
+      lineMs != null && lastLineMs != null ? Math.abs(lineMs - lastLineMs) : 0
+    const newRoundSameGuest =
+      last &&
+      last.person === person &&
+      (idGap > 1 || timeGapMs > 3 * 60 * 1000)
+
+    if (last && last.person === person && !newRoundSameGuest) {
       last.items.push(item)
     } else {
       batches.push({ person, items: [item] })
@@ -256,6 +269,8 @@ export type OrderReceiptViewModel = {
   orderId: string
   momoTxId?: string
   description?: string
+  /** Order placed / receipt generated time banner */
+  placedAtLabel?: string
   isTableCommand: boolean
   flatItems: OrderReceiptLine[]
   guestGroups: OrderReceiptGuestGroup[]
@@ -311,6 +326,8 @@ export function buildOrderReceiptViewModel(args: {
   logisticsFee?: number
   /** When line ORDERED_BY is blank/GUEST, use this (order buyer name). */
   defaultOrderedBy?: string
+  /** Shown above items — order placed time */
+  placedAt?: number | string | null
 }): OrderReceiptViewModel {
   const discount = args.discount ?? 0
   const description = args.orderDescription?.trim()
@@ -355,6 +372,7 @@ export function buildOrderReceiptViewModel(args: {
     orderId: String(args.orderId),
     momoTxId: args.momoTxId?.trim() || undefined,
     description: description || undefined,
+    placedAtLabel: formatTableRoundTimestamp(args.placedAt),
     isTableCommand: Boolean(args.isTableCommand),
     flatItems,
     guestGroups,

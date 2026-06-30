@@ -68,6 +68,7 @@ function OrderSuccessPageInner() {
   const sellerName = searchParams.get("sellerName")
   const sellerPhone = searchParams.get("sellerPhone")
   const buyerPhone = searchParams.get("buyerPhone")
+  const buyerNameQuery = searchParams.get("buyerName")?.trim() || ""
   const orderNotesQuery = searchParams.get("orderNotes")?.trim() || ""
   const total = searchParams.get("total")
   const logisticsTypeQuery = searchParams.get("logisticsType")?.trim() || ""
@@ -306,17 +307,20 @@ function OrderSuccessPageInner() {
         (orderDetails.TABLE_NAME ? `Table: ${orderDetails.TABLE_NAME}` : undefined)
       const orderCreatedAt = orderDetails.createdAt ?? orderDetails.CREATED_AT
 
-      const orderBuyerName =
-        orderDetails.BUYER_OWNER ??
-        orderDetails.BUYER_NAME ??
-        orderDetails.buyerName ??
+      const orderBuyerName = (
+        buyerNameQuery ||
+        orderDetails.BUYER_OWNER ||
+        orderDetails.BUYER_NAME ||
+        orderDetails.buyerName ||
         ""
+      ).trim()
 
       const receiptArgs = {
         shop: sellerName || orderDetails.sellerName,
         location: receiptLocation,
         orderId: displayOrderNo,
         defaultOrderedBy: String(orderBuyerName ?? "").trim() || undefined,
+        placedAt: orderCreatedAt,
         items: orderDetails.items.map((item: any) => ({
           name: item.name,
           qty: item.qty,
@@ -402,6 +406,7 @@ function OrderSuccessPageInner() {
     logisticsAmount,
     logisticsType,
     orderNotesQuery,
+    buyerNameQuery,
   ])
 
   useEffect(() => {

@@ -763,19 +763,21 @@ function CartSummaryBody() {
     paymentName: string,
     trackToken?: string,
   ): URLSearchParams {
+    const tableGuestName = isTableCheckout ? guestNameForTable() : ""
     const params = new URLSearchParams({
       orderId,
       sellerName: g.supplierName,
       sellerPhone: sellerTel || getSellerTelForOrder(g) || "",
       buyerPhone:
         checkoutMode === "anonymous"
-          ? isInTableCommand()
+          ? isTableCheckout
             ? anonymousPhone
             : ""
           : user?.phone || "",
       total: String(g.subtotal),
       paymentMethod: paymentName,
     })
+    if (tableGuestName) params.set("buyerName", tableGuestName)
     if (trackToken) params.set("trackToken", trackToken)
     return params
   }
@@ -962,7 +964,7 @@ function CartSummaryBody() {
         }
 
         // Bar/resto table: every guest goes to order-success (track link), cart cleared for this seller.
-        if (isInTableCommand() && currentOrderIsBarTable) {
+        if (isTableCheckout && currentOrderIsBarTable) {
           await clearSubmittedSupplier(g.supplierId)
           if (orderId) {
             const params = buildOrderSuccessParams(
