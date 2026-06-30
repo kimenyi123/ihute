@@ -283,6 +283,8 @@ export type OrderReceiptViewModel = {
   reference?: string
   myPhone?: string
   followLink?: string
+  placedAt?: string
+  logisticsType?: string
 }
 
 function formatReceiptMoney(amount: number): string {
@@ -324,9 +326,10 @@ export function buildOrderReceiptViewModel(args: {
   momoTxId?: string
   orderDescription?: string
   logisticsFee?: number
+  logisticsType?: string
   /** When line ORDERED_BY is blank/GUEST, use this (order buyer name). */
   defaultOrderedBy?: string
-  /** Shown above items — order placed time */
+  /** Order placed time — raw timestamp or pre-formatted label */
   placedAt?: number | string | null
 }): OrderReceiptViewModel {
   const discount = args.discount ?? 0
@@ -385,6 +388,11 @@ export function buildOrderReceiptViewModel(args: {
     reference: args.reference?.trim() || undefined,
     myPhone: normalizedPhone || undefined,
     followLink: args.link?.trim() || undefined,
+    placedAt:
+      typeof args.placedAt === "string"
+        ? args.placedAt.trim() || undefined
+        : formatTableRoundTimestamp(args.placedAt),
+    logisticsType: args.logisticsType?.trim() || undefined,
   }
 }
 
@@ -392,6 +400,9 @@ export function buildOrderWhatsAppMessageFromViewModel(vm: OrderReceiptViewModel
   const lines: string[] = []
 
   lines.push(waSection("ORDER RECEIPT"), "")
+  if (vm.placedAt) {
+    lines.push(vm.placedAt, "")
+  }
 
   lines.push(waSection("Order details"), "")
   lines.push(waLabelValue("Shop", vm.shop))
@@ -427,6 +438,7 @@ export function buildOrderWhatsAppMessageFromViewModel(vm: OrderReceiptViewModel
 
   lines.push(waSection("Summary"), "")
   if (typeof vm.subtotal === "number") lines.push(waMoneyLine("Subtotal", vm.subtotal))
+  if (vm.logisticsType) lines.push(waLabelValue("Logistics", vm.logisticsType))
   if (typeof vm.logisticsFee === "number") lines.push(waMoneyLine("Logistics fee", vm.logisticsFee))
   lines.push(waMoneyLine("Discount", vm.discount))
   lines.push(`*Total: ${formatReceiptMoney(vm.total)}*`)
@@ -460,6 +472,7 @@ export function buildOrderWhatsAppMessage(args: {
   orderDescription?: string
   logisticsType?: string
   logisticsFee?: number
+  placedAt?: string
 }): string {
   return buildOrderWhatsAppMessageFromViewModel(buildOrderReceiptViewModel(args))
 }
