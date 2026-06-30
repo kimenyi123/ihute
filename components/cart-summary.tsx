@@ -17,6 +17,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { RadioOptionCard } from "@/components/ui/radio-option-card"
 import { Label } from "@/components/ui/label"
 import { formatPaymentMethod } from "@/lib/payment-utils"
+import { buildOrderWhatsAppMessage } from "@/lib/table-command-whatsapp"
 import { useToast } from "@/components/ui/use-toast"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
@@ -292,9 +293,17 @@ function CartSummaryBody() {
     if (!hasPrefilledName.current && checkoutMode === "anonymous" && isInTableCommand()) {
       const guestName = getOrCreateGuestName()
       const tableUserName = activeSession?.userName
-      const finalName = tableUserName && tableUserName !== "Guest" ? tableUserName : guestName
+      const isTableNameAsUser =
+        Boolean(tableUserName && activeSession?.tableName) &&
+        tableUserName!.trim().toLowerCase() === activeSession!.tableName.trim().toLowerCase()
+      const finalName =
+        tableUserName && tableUserName !== "Guest" && !isTableNameAsUser
+          ? tableUserName
+          : guestName !== "Guest"
+            ? guestName
+            : ""
 
-      if (finalName && finalName !== "Guest") {
+      if (finalName) {
         setAnonymousName(finalName)
         hasPrefilledName.current = true
       }
@@ -314,6 +323,7 @@ function CartSummaryBody() {
   }, [checkoutMode, tableInfo, isInTableCommand])
 
   const [tableCommandDialogOpen, setTableCommandDialogOpen] = useState(false)
+  const [tableCommandJoinOnly, setTableCommandJoinOnly] = useState(false)
   const [tableCommandSeller, setTableCommandSeller] = useState<{ id: string; name: string } | null>(null)
   const [showCloseTableDialog, setShowCloseTableDialog] = useState(false)
   const [shareModalOpen, setShareModalOpen] = useState(false)
@@ -529,7 +539,7 @@ function CartSummaryBody() {
     paymentName: string,
     paymentStatus?: "pending" | "paid",
   ) {
-    if (paymentName === "PAY_ON_DELIVERY") {
+    if (paymentName === "PAY_ON_DELIVERY" || paymentName === "PAY_AT_TABLE") {
       setPaymentStatus(supplierId, "unpaid")
       return
     }
@@ -553,24 +563,58 @@ function CartSummaryBody() {
       })
       const orderId = orderIds[g.supplierId]
       const hasUssdTarget = Boolean(getMomoForGroup(g))
-      const isPaid = getPaymentStatus(g.supplierId) === "paid"
-      const message = buildWhatsAppMessageStyled({
-        shop: g.supplierName,
-        location: g.supplierLocation,
-        orderId,
-        items,
-        total: g.subtotal,
-        discount: 0,
-        paid: isPaid ? g.subtotal : 0,
-        paidAt: isPaid ? "MTN MoMo" : (hasUssdTarget ? "Pending (MoMo)" : "Pay on delivery"),
-        reference: orderId ? `ORDER ${orderId}` : undefined,
-        myPhone,
-        link: orderId ? `${(process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw").replace(/\/Trading\/?$/, "")}/orders/${orderId}` : undefined,
-      })
+      const paymentState = getPaymentStatus(g.supplierId)
+      const isPaid = paymentState === "paid"
+      const inTableForSeller =
+        isInTableCommand() && activeSession?.locationId === g.supplierId
+      const siteBase = (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw").replace(/\/Trading\/?$/, "")
+      const trackLink = orderId ? `${siteBase}/track-order/${encodeURIComponent(orderId)}` : undefined
+      const guestName = (anonymousName || activeSession?.userName || "").trim()
+      const message = orderId
+        ? buildOrderWhatsAppMessage({
+            shop: g.supplierName,
+            location: inTableForSeller
+              ? `Table: ${activeSession?.tableName || ""}`
+              : g.supplierLocation,
+            orderId,
+            items: g.items.map((it) => ({
+              name: stripTrailingPriceParen(it.name || "Product"),
+              qty: it.qty,
+              unitPrice: it.price || 0,
+              orderedBy: inTableForSeller ? guestName : undefined,
+            })),
+            total: g.subtotal,
+            discount: 0,
+            paid: isPaid ? g.subtotal : 0,
+            paidAt: isPaid
+              ? "MTN MoMo"
+              : inTableForSeller
+                ? formatPaymentMethod("PAY_AT_TABLE")
+                : hasUssdTarget
+                  ? "Pending (MoMo)"
+                  : formatPaymentMethod("PAY_ON_DELIVERY"),
+            reference: `ORDER ${orderId}`,
+            myPhone: myPhone,
+            link: trackLink,
+            isTableCommand: inTableForSeller,
+          })
+        : buildWhatsAppMessageStyled({
+            shop: g.supplierName,
+            location: g.supplierLocation,
+            orderId,
+            items,
+            total: g.subtotal,
+            discount: 0,
+            paid: isPaid ? g.subtotal : 0,
+            paidAt: isPaid ? "MTN MoMo" : (hasUssdTarget ? "Pending (MoMo)" : "Pay on delivery"),
+            reference: orderId ? `ORDER ${orderId}` : undefined,
+            myPhone,
+            link: trackLink,
+          })
       const href = phone ? waHrefFor(phone, message) : ""
       return { supplierId: g.supplierId, phone, message, href }
     })
-  }, [groups, orderIds, orderPhones, myPhone, getPaymentStatus])
+  }, [groups, orderIds, orderPhones, myPhone, getPaymentStatus, isInTableCommand, activeSession, anonymousName])
 
   const buildGroupShareLink = (g: ReturnType<typeof getGroupsBySeller>[number]) => {
     const shopSlug = slugifyShopName(g.supplierName || g.supplierId || "shop");
@@ -610,24 +654,9 @@ function CartSummaryBody() {
   }
 
   // Open payment method selection
-  const openPaymentMethod = (supplierId: string) => {
-    if (!requireLogin()) return
-    const g = groups.find(x => x.supplierId === supplierId)
+  const proceedToPaymentForSeller = (supplierId: string) => {
+    const g = groups.find((x) => x.supplierId === supplierId)
     if (!g) return
-
-    // Bar/resto: from name/location keywords OR from shop-with-me — always show create/join table option (whether already in a table or not)
-    const isBar =
-      g.isBarResto === true ||
-      isBarOrRestaurant(g.supplierName) ||
-      isBarOrRestaurant(g.supplierLocation || "")
-
-    if (isBar) {
-      setTableCommandSeller({ id: supplierId, name: g.supplierName })
-      setTableCommandDialogOpen(true)
-      return
-    }
-
-    // Otherwise proceed with regular checkout
     const hasUssdTarget = Boolean(getMomoForGroup(g))
     setSelectedSeller(supplierId)
     setUrubutoPhone(
@@ -641,9 +670,42 @@ function CartSummaryBody() {
       const preview = isUrubutoCheckoutPreviewForSeller(supplierId)
       const show = r.eligible || preview
       setUrubutoEligibleBySeller((prev) => ({ ...prev, [supplierId]: r.eligible }))
-      setPaymentMethod(show ? "urubuto" : hasUssdTarget ? "momo" : "cod")
+      setPaymentMethod(isInTableCommand() ? "cod" : show ? "urubuto" : hasUssdTarget ? "momo" : "cod")
     })
     setPaymentMethodOpen(true)
+  }
+
+  const openPaymentMethod = (supplierId: string) => {
+    if (!requireLogin()) return
+    const g = groups.find(x => x.supplierId === supplierId)
+    if (!g) return
+
+    // Bar/resto: from name/location keywords OR from shop-with-me
+    const isBar =
+      g.isBarResto === true ||
+      isBarOrRestaurant(g.supplierName) ||
+      isBarOrRestaurant(g.supplierLocation || "")
+
+    if (isBar) {
+      const sharedTableName = (tableInfo?.tableNumber || "").trim()
+      const alreadyInTable =
+        isInTableCommand() &&
+        activeSession?.locationId === supplierId &&
+        (!sharedTableName ||
+          activeSession.tableName.trim().toLowerCase() === sharedTableName.toLowerCase())
+
+      if (alreadyInTable) {
+        proceedToPaymentForSeller(supplierId)
+        return
+      }
+
+      setTableCommandSeller({ id: supplierId, name: g.supplierName })
+      setTableCommandJoinOnly(Boolean(sharedTableName))
+      setTableCommandDialogOpen(true)
+      return
+    }
+
+    proceedToPaymentForSeller(supplierId)
   }
 
   // Handle payment method selection
@@ -712,7 +774,7 @@ function CartSummaryBody() {
   const placeOrder = async (
     g: ReturnType<typeof getGroupsBySeller>[number],
     opts: {
-      paymentName: "PAID_MTN_MOMO" | "PAID_AIRTEL_MOMO" | "PAID_URUBUTO" | "PAY_ON_DELIVERY";
+      paymentName: "PAID_MTN_MOMO" | "PAID_AIRTEL_MOMO" | "PAID_URUBUTO" | "PAY_ON_DELIVERY" | "PAY_AT_TABLE";
       buyerPhone?: string;
       buyerLocation?: string;
       reference?: string;
@@ -977,7 +1039,7 @@ function CartSummaryBody() {
       : deliveryLocation
 
     await placeOrder(g, {
-      paymentName: "PAY_ON_DELIVERY",
+      paymentName: isInTableCommand() ? "PAY_AT_TABLE" : "PAY_ON_DELIVERY",
       buyerPhone: contactPhone,
       buyerLocation: location,
       reference: `COD_${Date.now()}`,
@@ -1342,15 +1404,29 @@ function CartSummaryBody() {
           </DialogHeader>
 
           <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-4">
-          {/* ✅ Customer Info Banner (from shop-with-me) */}
-          {tableInfo && tableInfo.customerName && (
-            <div className="rounded-lg bg-blue-50 border border-blue-200 p-3">
+          {/* Table from QR (no guest name yet) */}
+          {tableInfo?.tableNumber && !isInTableCommand() && (
+            <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 mb-3">
+              <div className="flex items-center gap-2">
+                <Users className="h-4 w-4 text-blue-600" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium">Table invite</p>
+                  <p className="text-xs text-muted-foreground font-mono">
+                    Table {tableInfo.tableNumber}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+          {tableInfo?.customerName && !tableInfo?.tableNumber && (
+            <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 mb-3">
               <div className="flex items-center gap-2">
                 <Users className="h-4 w-4 text-blue-600" />
                 <div className="flex-1">
                   <p className="text-sm font-medium">Delivery Info</p>
                   <p className="text-xs text-muted-foreground">
-                    {tableInfo.customerName} - {tableInfo.customerAddress}
+                    {tableInfo.customerName}
+                    {tableInfo.customerAddress ? ` — ${tableInfo.customerAddress}` : ""}
                   </p>
                 </div>
               </div>
@@ -2108,15 +2184,10 @@ function CartSummaryBody() {
           open={tableCommandDialogOpen}
           onOpenChange={(open) => {
             setTableCommandDialogOpen(open)
+            if (!open) setTableCommandJoinOnly(false)
             // If dialog closed after creating/joining table, proceed to payment method
             if (!open && isInTableCommand() && tableCommandSeller) {
-              const g = groups.find(x => x.supplierId === tableCommandSeller.id)
-              if (g) {
-                const hasUssdTarget = Boolean(getMomoForGroup(g))
-                setSelectedSeller(tableCommandSeller.id)
-                setPaymentMethod(hasUssdTarget ? "momo" : "cod")
-                setPaymentMethodOpen(true)
-              }
+              proceedToPaymentForSeller(tableCommandSeller.id)
             }
           }}
           onIndividualOrder={() => {
@@ -2142,8 +2213,9 @@ function CartSummaryBody() {
           }}
           locationId={tableCommandSeller.id}
           locationName={tableCommandSeller.name}
-          initialTableName={(tableInfo?.customerAddress || tableInfo?.tableNumber || "").trim()}
-          initialUserName={(tableInfo?.customerName || "").trim()}
+          initialTableName={(tableInfo?.tableNumber || "").trim()}
+          joinOnly={tableCommandJoinOnly}
+          lockTableName={tableCommandJoinOnly}
         />
       )}
 

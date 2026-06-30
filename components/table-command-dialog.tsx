@@ -32,9 +32,13 @@ type TableCommandDialogProps = {
   locationId: string
   locationName: string
   onIndividualOrder?: () => void
-  /** Pre-fill from Shop With Me QR / bar-resto flow (table + guest name) */
+  /** Pre-fill table from Shop With Me QR — join flow only */
   initialTableName?: string
   initialUserName?: string
+  /** From shared QR: hide create/individual, join the shared table */
+  joinOnly?: boolean
+  /** Lock table name field (QR share) */
+  lockTableName?: boolean
 }
 
 export function TableCommandDialog({
@@ -45,21 +49,41 @@ export function TableCommandDialog({
   onIndividualOrder,
   initialTableName = "",
   initialUserName = "",
+  joinOnly = false,
+  lockTableName = false,
 }: TableCommandDialogProps) {
   const { user, isAuthenticated } = useAuthStore()
   const { createTableCommand, joinTableCommand } = useTableCommandStore()
 
-  const [mode, setMode] = useState<"create" | "join" | "individual">("create")
+  const [mode, setMode] = useState<"create" | "join" | "individual">(joinOnly ? "join" : "create")
   const [tableName, setTableName] = useState("")
   const [userName, setUserName] = useState(user?.name || "")
 
-  // Autofill Table Name and Your Name when opened from Shop With Me QR (bar/resto)
   useEffect(() => {
-    if (open) {
-      if (initialTableName?.trim()) setTableName(initialTableName.trim())
-      if (initialUserName?.trim()) setUserName(initialUserName.trim())
+    if (!open) return
+    setMode(joinOnly ? "join" : "create")
+  }, [open, joinOnly])
+
+  // Table from QR is fixed; guest name is always entered by the user (never copy table name).
+  useEffect(() => {
+    if (!open) return
+    if (initialTableName?.trim() && (joinOnly || lockTableName)) {
+      setTableName(initialTableName.trim())
+    } else if (!lockTableName) {
+      setTableName("")
     }
-  }, [open, initialTableName, initialUserName])
+    if (isAuthenticated && user?.name?.trim()) {
+      setUserName(user.name.trim())
+    } else if (
+      initialUserName?.trim() &&
+      initialTableName?.trim() &&
+      initialUserName.trim().toLowerCase() !== initialTableName.trim().toLowerCase()
+    ) {
+      setUserName(initialUserName.trim())
+    } else {
+      setUserName("")
+    }
+  }, [open, initialTableName, initialUserName, joinOnly, lockTableName, isAuthenticated, user?.name])
   const [error, setError] = useState("")
   const [activeTables, setActiveTables] = useState<TableInfo[]>([])
   const [loadingTables, setLoadingTables] = useState(false)
@@ -141,7 +165,9 @@ export function TableCommandDialog({
   const handleSubmit = async () => {
     if (submitting) return
     
-    if (mode === "individual") {
+    const effectiveMode = joinOnly ? "join" : mode
+
+    if (effectiveMode === "individual") {
       onOpenChange(false)
       if (onIndividualOrder) {
         onIndividualOrder()
@@ -153,10 +179,13 @@ export function TableCommandDialog({
       setError("Please enter a table name")
       return
     }
-    if (!userName.trim() && !isAuthenticated) {
+    if ((joinOnly || !isAuthenticated) && !userName.trim()) {
       setError("Please enter your name")
       return
     }
+
+    const resolvedUserName =
+      userName.trim() || (isAuthenticated ? (user?.name || "Guest") : "Guest")
 
     setSubmitting(true)
     setError("")
@@ -168,36 +197,36 @@ export function TableCommandDialog({
         : getOrCreateGuestEmail() // Use persistent guest email
       
       // ✅ Save guest name to localStorage for checkout pre-fill
-      if (!isAuthenticated && userName.trim()) {
-        setGuestName(userName.trim())
-        console.log('💾 Saved guest name:', userName.trim())
+      if (!isAuthenticated && resolvedUserName && resolvedUserName !== "Guest") {
+        setGuestName(resolvedUserName)
+        console.log('💾 Saved guest name:', resolvedUserName)
       }
       
       console.log('🎫 Using user email:', userEmail)
 
       // ✅ Check table status before joining - DISABLED FOR NOW
       // Allow users to join any table, backend will handle validation
-      if (mode === "join") {
+      if (effectiveMode === "join") {
         // Skip status check - let backend handle it
         console.log('Joining table:', tableName.trim())
       }
 
       // Create or join table command with consistent email
-      if (mode === "create") {
+      if (effectiveMode === "create") {
         // Try to create table on backend first (so it exists before checkout; others can join via share link)
         const apiResult = await createTableCommandApi({
           tableName: tableName.trim(),
           locationId,
           locationName,
           userEmail,
-          userName: userName.trim() || "Guest",
+          userName: resolvedUserName,
         })
         if (apiResult.ok && apiResult.shareableLink) {
           createTableCommand(
             tableName.trim(),
             locationId,
             locationName,
-            userName.trim() || "Guest",
+            resolvedUserName,
             userEmail,
             {
               shareableLink: apiResult.shareableLink,
@@ -216,7 +245,7 @@ export function TableCommandDialog({
             tableName.trim(),
             locationId,
             locationName,
-            userName.trim() || "Guest",
+            resolvedUserName,
             userEmail
           )
         } else if (!apiResult.ok && apiResult.error) {
@@ -229,16 +258,16 @@ export function TableCommandDialog({
             tableName.trim(),
             locationId,
             locationName,
-            userName.trim() || "Guest",
+            resolvedUserName,
             userEmail
           )
         }
-      } else if (mode === "join") {
+      } else if (effectiveMode === "join") {
         joinTableCommand(
           tableName.trim(), 
           locationId, 
           locationName, 
-          userName.trim() || "Guest", 
+          resolvedUserName, 
           userEmail
         )
       }
@@ -286,6 +315,8 @@ export function TableCommandDialog({
           </div>
 
           <div className="space-y-2 sm:space-y-3">
+            {!joinOnly && (
+              <>
             <Label className="text-xs sm:text-sm font-medium">What would you like to do?</Label>
             <RadioGroup value={mode} onValueChange={(v) => setMode(v as "create" | "join" | "individual")} className="gap-2 sm:gap-3">
               <RadioOptionCard value="create" id="create-table" selected={mode === "create"}>
@@ -324,12 +355,28 @@ export function TableCommandDialog({
                 </div>
               </RadioOptionCard>
             </RadioGroup>
+              </>
+            )}
+            {joinOnly && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 sm:p-3">
+                <p className="text-xs sm:text-sm text-blue-900 font-medium">
+                  Join table &quot;{initialTableName || tableName}&quot;
+                </p>
+                <p className="text-[10px] sm:text-xs text-blue-800 mt-1">
+                  Enter your name below so the bar knows who ordered what.
+                </p>
+              </div>
+            )}
           </div>
 
           {mode !== "individual" && (
             <div className="space-y-1.5 sm:space-y-2">
               <Label htmlFor="tableName" className="text-xs sm:text-sm font-medium">
-                {mode === "create" ? "Table Name *" : "Search & Select Table *"}
+                {joinOnly || lockTableName
+                  ? "Table *"
+                  : mode === "create"
+                    ? "Table Name *"
+                    : "Search & Select Table *"}
               </Label>
               <div className="relative">
                 <div className="relative">
@@ -339,19 +386,22 @@ export function TableCommandDialog({
                     value={tableName}
                     onChange={(e) => handleTableNameChange(e.target.value)}
                     onFocus={() => {
-                      if (mode === "join" && activeTables.length > 0) {
+                      if (mode === "join" && !lockTableName && activeTables.length > 0) {
                         setShowSuggestions(true)
                       }
                     }}
                     placeholder={
-                      mode === "create"
-                        ? "e.g., Algorithm, VIP..."
-                        : "Search for active tables..."
+                      joinOnly || lockTableName
+                        ? "Table from invite link"
+                        : mode === "create"
+                          ? "e.g., Algorithm, VIP..."
+                          : "Search for active tables..."
                     }
                     className="font-mono pr-8 sm:pr-10 text-xs sm:text-sm"
-                    disabled={submitting}
+                    disabled={submitting || lockTableName || joinOnly}
+                    readOnly={lockTableName || joinOnly}
                   />
-                  {mode === "join" && (
+                  {mode === "join" && !lockTableName && !joinOnly && (
                     <div className="absolute right-2 sm:right-3 top-1/2 -translate-y-1/2 pointer-events-none">
                       {loadingTables ? (
                         <Loader2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 animate-spin text-muted-foreground" />
@@ -440,16 +490,18 @@ export function TableCommandDialog({
                   )}
               </div>
               <p className="text-[10px] sm:text-xs text-muted-foreground">
-                {mode === "create"
-                  ? "Choose a unique name your friends can use to join"
-                  : activeTables.length > 0
-                  ? "Select from active tables or type to search"
-                  : "Type the table name your group is using"}
+                {joinOnly || lockTableName
+                  ? "This table was shared with you — confirm and enter your name below"
+                  : mode === "create"
+                    ? "Choose a unique name your friends can use to join"
+                    : activeTables.length > 0
+                      ? "Select from active tables or type to search"
+                      : "Type the table name your group is using"}
               </p>
             </div>
           )}
 
-          {mode !== "individual" && !isAuthenticated && (
+          {(mode !== "individual" && !isAuthenticated) || (joinOnly && mode !== "individual") ? (
             <div className="space-y-1.5 sm:space-y-2">
               <Label htmlFor="userName" className="text-xs sm:text-sm font-medium">
                 Your Name *
@@ -469,7 +521,7 @@ export function TableCommandDialog({
                 So your group knows who ordered what
               </p>
             </div>
-          )}
+          ) : null}
 
           {mode === "individual" && (
             <div className="bg-purple-50 border border-purple-200 rounded-lg p-2 sm:p-4">
@@ -523,10 +575,15 @@ export function TableCommandDialog({
                 <User className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                 <span className="truncate">Continue to Checkout</span>
               </>
+            ) : joinOnly || mode === "join" ? (
+              <>
+                <Users className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                <span className="truncate">Join Table</span>
+              </>
             ) : (
               <>
                 <Users className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                <span className="truncate">{mode === "create" ? "Create Table" : "Join Table"}</span>
+                <span className="truncate">Create Table</span>
               </>
             )}
           </Button>

@@ -6,6 +6,7 @@
 export const PAYMENT_METHOD_NAMES: Record<string, string> = {
   // Cash on Delivery
   "PAY_ON_DELIVERY": "Cash on Delivery",
+  "PAY_AT_TABLE": "Pay at Table",
   "COD": "Cash on Delivery",
   
   // Mobile Money - Standardized names
@@ -43,6 +44,9 @@ export function formatPaymentMethod(method: string | null | undefined): string {
   // ✅ FIX: Check for partial matches for dynamic payment IDs
   if (normalized.startsWith("COD_")) {
     return "Cash on Delivery"
+  }
+  if (normalized.includes("PAY_AT_TABLE") || normalized.includes("AT_TABLE")) {
+    return "Pay at Table"
   }
   if (normalized.startsWith("MOMO_")) {
     return "Pay with MoMo"
@@ -279,7 +283,13 @@ export function requiresImmediatePayment(method: string): boolean {
  */
 export function isCashOnDelivery(method: string): boolean {
   const m = method.toUpperCase()
-  return m.includes("COD") || m.startsWith("COD_") || m.includes("PAY_ON_DELIVERY") || m.includes("DELIVERY")
+  return (
+    m.includes("COD") ||
+    m.startsWith("COD_") ||
+    m.includes("PAY_ON_DELIVERY") ||
+    m.includes("PAY_AT_TABLE") ||
+    m.includes("DELIVERY")
+  )
 }
 
 /**
