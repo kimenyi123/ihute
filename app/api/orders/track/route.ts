@@ -276,6 +276,8 @@ export async function POST(req: NextRequest) {
           UNIT: item.UNIT,
           ORDERED_BY: item.ORDERED_BY ?? item.orderedBy,
           ID_LIST: item.ID_LIST ?? item.lineId ?? item.id_list,
+          HEURE: item.HEURE ?? item.heure ?? item.lineCreatedAt,
+          lineCreatedAt: item.lineCreatedAt ?? item.HEURE ?? item.heure,
         })),
       }
 

@@ -644,7 +644,9 @@ function TrackOrderPageInner() {
   const whatsappMessage = buildOrderWhatsAppMessageFromViewModel(
     buildOrderReceiptViewModel({
       shop: order.sellerName,
-      location: displayBuyerLocation,
+      location:
+        displayBuyerLocation ||
+        (order.TABLE_NAME ? `Table: ${order.TABLE_NAME}` : undefined),
       orderId: internalOrderNo,
       items: order.items.map((item) => ({
         name: item.name,
@@ -652,7 +654,8 @@ function TrackOrderPageInner() {
         unitPrice: item.unitPrice,
         orderedBy: item.orderedBy ?? item.ORDERED_BY,
         lineId: item.lineId ?? item.ID_LIST,
-        lineCreatedAt: item.lineCreatedAt ?? item.HEURE ?? item.heure,
+        lineCreatedAt:
+          item.lineCreatedAt ?? item.HEURE ?? item.heure ?? order.createdAt,
       })),
       subtotal: subtotalValue,
       total: displayTotal,

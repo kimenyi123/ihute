@@ -299,9 +299,15 @@ function OrderSuccessPageInner() {
         orderNotesQuery ||
         ""
 
+      const receiptLocation =
+        orderDetails.buyerLocation ||
+        orderDetails.DELIVERY_LOCATION ||
+        (orderDetails.TABLE_NAME ? `Table: ${orderDetails.TABLE_NAME}` : undefined)
+      const orderCreatedAt = orderDetails.createdAt ?? orderDetails.CREATED_AT
+
       const receiptArgs = {
         shop: sellerName || orderDetails.sellerName,
-        location: orderDetails.buyerLocation,
+        location: receiptLocation,
         orderId: displayOrderNo,
         items: orderDetails.items.map((item: any) => ({
           name: item.name,
@@ -309,7 +315,8 @@ function OrderSuccessPageInner() {
           unitPrice: item.unitPrice,
           orderedBy: item.orderedBy ?? item.ORDERED_BY,
           lineId: item.lineId ?? item.ID_LIST,
-          lineCreatedAt: item.lineCreatedAt ?? item.HEURE ?? item.heure,
+          lineCreatedAt:
+            item.lineCreatedAt ?? item.HEURE ?? item.heure ?? orderCreatedAt,
         })),
         subtotal: effectiveSubtotal,
         total: effectiveTotalAmount,
