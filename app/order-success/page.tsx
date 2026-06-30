@@ -27,6 +27,7 @@ import { sellerAccountFromOrder } from "@/lib/order-seller-account"
 import { useTableCommandStore } from "@/lib/table-command-store"
 import { GRANDMA_PATHS } from "@/lib/grandma-urls"
 import { isValidRwandaMobileE164, normalizeRwandaMobileE164 } from "@/lib/rwanda-phone"
+import { formatOrderPlacedAtRwanda } from "@/lib/supplier-sync-datetime"
 
 function normalizePhone(raw?: string | null): string {
   const v = (raw || "").replace(/\s|-/g, "")
@@ -157,6 +158,18 @@ function OrderSuccessPageInner() {
       .includes("paid") ||
       paymentMethod.toUpperCase().includes("PAID_"))
   const paidAmount = isPaid ? effectiveTotalAmount : 0
+
+  const orderPlacedAtLabel = useMemo(() => {
+    const raw =
+      orderDetails?.ORDER_PLACED_AT ??
+      orderDetails?.createdAt ??
+      orderDetails?.CREATED_AT
+    if (raw != null && String(raw).trim() !== "") {
+      return formatOrderPlacedAtRwanda(raw)
+    }
+    if (!loadingDetails) return formatOrderPlacedAtRwanda()
+    return ""
+  }, [orderDetails, loadingDetails])
 
   const autoWhatsApp = searchParams.get("autoWhatsApp") === "1"
   const momoTxId = searchParams.get("momoTxId")?.trim() || ""
@@ -303,6 +316,7 @@ function OrderSuccessPageInner() {
         shop: sellerName || orderDetails.sellerName,
         location: orderDetails.buyerLocation,
         orderId: displayOrderNo,
+        placedAt: orderPlacedAtLabel || undefined,
         items: orderDetails.items.map((item: any) => ({
           name: item.name,
           qty: item.qty,
@@ -339,6 +353,7 @@ function OrderSuccessPageInner() {
 
       const fallbackLines = [
         "Order",
+        orderPlacedAtLabel || "",
         "",
         `Shop: ${sellerName}`,
         `Order ID: ${displayOrderNo}`,
@@ -378,6 +393,7 @@ function OrderSuccessPageInner() {
     trackingUrl,
     momoTxId,
     paymentQuery,
+    orderPlacedAtLabel,
     effectiveSubtotal,
     effectiveTotalAmount,
     discountAmount,
@@ -558,6 +574,9 @@ function OrderSuccessPageInner() {
           <Card className="border-0 shadow-xl rounded-2xl bg-white text-slate-900">
             <CardHeader>
               <CardTitle className="text-lg">Order receipt</CardTitle>
+              {orderPlacedAtLabel ? (
+                <p className="mt-1 text-sm tabular-nums text-muted-foreground">{orderPlacedAtLabel}</p>
+              ) : null}
             </CardHeader>
             <CardContent>
               <OrderReceiptPreview receipt={orderReceipt} />

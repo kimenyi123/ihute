@@ -252,6 +252,8 @@ export type OrderReceiptViewModel = {
   reference?: string
   myPhone?: string
   followLink?: string
+  placedAt?: string
+  logisticsType?: string
 }
 
 function formatReceiptMoney(amount: number): string {
@@ -293,6 +295,8 @@ export function buildOrderReceiptViewModel(args: {
   momoTxId?: string
   orderDescription?: string
   logisticsFee?: number
+  logisticsType?: string
+  placedAt?: string
 }): OrderReceiptViewModel {
   const discount = args.discount ?? 0
   const description = args.orderDescription?.trim()
@@ -349,6 +353,8 @@ export function buildOrderReceiptViewModel(args: {
     reference: args.reference?.trim() || undefined,
     myPhone: normalizedPhone || undefined,
     followLink: args.link?.trim() || undefined,
+    placedAt: args.placedAt?.trim() || undefined,
+    logisticsType: args.logisticsType?.trim() || undefined,
   }
 }
 
@@ -356,6 +362,9 @@ export function buildOrderWhatsAppMessageFromViewModel(vm: OrderReceiptViewModel
   const lines: string[] = []
 
   lines.push(waSection("ORDER RECEIPT"), "")
+  if (vm.placedAt) {
+    lines.push(vm.placedAt, "")
+  }
 
   lines.push(waSection("Order details"), "")
   lines.push(waLabelValue("Shop", vm.shop))
@@ -391,6 +400,7 @@ export function buildOrderWhatsAppMessageFromViewModel(vm: OrderReceiptViewModel
 
   lines.push(waSection("Summary"), "")
   if (typeof vm.subtotal === "number") lines.push(waMoneyLine("Subtotal", vm.subtotal))
+  if (vm.logisticsType) lines.push(waLabelValue("Logistics", vm.logisticsType))
   if (typeof vm.logisticsFee === "number") lines.push(waMoneyLine("Logistics fee", vm.logisticsFee))
   lines.push(waMoneyLine("Discount", vm.discount))
   lines.push(`*Total: ${formatReceiptMoney(vm.total)}*`)
@@ -424,6 +434,7 @@ export function buildOrderWhatsAppMessage(args: {
   orderDescription?: string
   logisticsType?: string
   logisticsFee?: number
+  placedAt?: string
 }): string {
   return buildOrderWhatsAppMessageFromViewModel(buildOrderReceiptViewModel(args))
 }
