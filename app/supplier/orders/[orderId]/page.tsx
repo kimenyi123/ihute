@@ -12,7 +12,7 @@ import { ArrowLeft, Phone, User2, RotateCw, CreditCard } from "lucide-react"
 import { useAuthStore } from "@/lib/auth-store"
 import dynamic from "next/dynamic"
 import { formatSupplierOrderPaymentDisplay, getPaymentMethodIcon } from "@/lib/payment-utils"
-import { isTableCommandOrder, normalizeTableCommandPerson, type TableCommandLineItem } from "@/lib/table-command-whatsapp"
+import { isTableCommandOrder, resolveTableCommandLinePerson, type TableCommandLineItem } from "@/lib/table-command-whatsapp"
 import { TableCommandOrderItems } from "@/components/supplier/table-command-order-items"
 
 type Detail = { order?: any; items?: any[]; seller?: any; buyer?: any }
@@ -166,6 +166,18 @@ export default function SupplierOrderDetailsPage() {
       buyerLocation: order?.DELIVERY_LOCATION,
     })
 
+    const orderBuyerForLines = (
+      order?.BUYER_OWNER ??
+      order?.BUYER_OWNER_NAME ??
+      order?.BUYER_NAMES ??
+      order?.BUYER_NAME ??
+      buyer?.OWNER ??
+      buyer?.NAMES ??
+      ""
+    )
+      .toString()
+      .trim()
+
     const lineMetaById = new Map<number, { servedQty: number; requestedPrice: number; servedPrice: number; code: string }>()
     rawItems.forEach((it: any, index: number) => {
       const lineId = Number(it.ID_LIST ?? it.lineId ?? 0)
@@ -185,8 +197,12 @@ export default function SupplierOrderDetailsPage() {
           name: String(it.ITEM_NAME ?? it.name ?? "-"),
           qty: qtyOf(it),
           unitPrice: requestedPriceOf(it),
-          orderedBy: normalizeTableCommandPerson(it.ORDERED_BY ?? it.orderedBy),
+          orderedBy: resolveTableCommandLinePerson(
+            it.ORDERED_BY ?? it.orderedBy,
+            orderBuyerForLines,
+          ),
           lineId: Number(it.ID_LIST ?? it.lineId ?? 0) || undefined,
+          lineCreatedAt: it.lineCreatedAt ?? it.HEURE ?? it.heure,
         }))
       : []
 
