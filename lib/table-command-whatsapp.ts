@@ -25,6 +25,22 @@ export function normalizeTableCommandPerson(name?: string | null): string {
   return n ? n.toLocaleUpperCase("en-US") : "GUEST"
 }
 
+/** Use line ORDERED_BY when set; otherwise fall back to order buyer name (legacy rows). */
+export function resolveTableCommandLinePerson(
+  lineOrderedBy?: string | null,
+  orderBuyerName?: string | null,
+): string {
+  const line = (lineOrderedBy ?? "").trim()
+  if (line && !/^guest$/i.test(line)) {
+    return normalizeTableCommandPerson(line)
+  }
+  const buyer = (orderBuyerName ?? "").trim()
+  if (buyer && !/^guest$/i.test(buyer)) {
+    return normalizeTableCommandPerson(buyer)
+  }
+  return normalizeTableCommandPerson(line || buyer)
+}
+
 function lineTotalRwf(item: Pick<TableCommandLineItem, "qty" | "unitPrice">): number {
   const qty = Number(item.qty) || 0
   const unit = Number(item.unitPrice) || 0
@@ -293,6 +309,8 @@ export function buildOrderReceiptViewModel(args: {
   momoTxId?: string
   orderDescription?: string
   logisticsFee?: number
+  /** When line ORDERED_BY is blank/GUEST, use this (order buyer name). */
+  defaultOrderedBy?: string
 }): OrderReceiptViewModel {
   const discount = args.discount ?? 0
   const description = args.orderDescription?.trim()
@@ -312,7 +330,7 @@ export function buildOrderReceiptViewModel(args: {
     ? buildTableCommandView(
         args.items.map((item) => ({
           ...item,
-          orderedBy: normalizeTableCommandPerson(item.orderedBy),
+          orderedBy: resolveTableCommandLinePerson(item.orderedBy, args.defaultOrderedBy),
         })),
       ).map((person) => ({
         guest: person.person,

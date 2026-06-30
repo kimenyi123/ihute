@@ -19,6 +19,7 @@ import {
   buildOrderReceiptViewModel,
   buildOrderWhatsAppMessage,
   isTableCommandOrder,
+  resolveTableCommandLinePerson,
 } from "@/lib/table-command-whatsapp"
 import { OrderReceiptPreview } from "@/components/order-receipt-preview"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -305,15 +306,25 @@ function OrderSuccessPageInner() {
         (orderDetails.TABLE_NAME ? `Table: ${orderDetails.TABLE_NAME}` : undefined)
       const orderCreatedAt = orderDetails.createdAt ?? orderDetails.CREATED_AT
 
+      const orderBuyerName =
+        orderDetails.BUYER_OWNER ??
+        orderDetails.BUYER_NAME ??
+        orderDetails.buyerName ??
+        buyerName
+
       const receiptArgs = {
         shop: sellerName || orderDetails.sellerName,
         location: receiptLocation,
         orderId: displayOrderNo,
+        defaultOrderedBy: String(orderBuyerName ?? "").trim() || undefined,
         items: orderDetails.items.map((item: any) => ({
           name: item.name,
           qty: item.qty,
           unitPrice: item.unitPrice,
-          orderedBy: item.orderedBy ?? item.ORDERED_BY,
+          orderedBy: resolveTableCommandLinePerson(
+            item.orderedBy ?? item.ORDERED_BY,
+            orderBuyerName,
+          ),
           lineId: item.lineId ?? item.ID_LIST,
           lineCreatedAt:
             item.lineCreatedAt ?? item.HEURE ?? item.heure ?? orderCreatedAt,

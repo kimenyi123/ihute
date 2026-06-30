@@ -25,6 +25,7 @@ import {
   buildOrderReceiptViewModel,
   buildOrderWhatsAppMessageFromViewModel,
   isTableCommandOrder,
+  resolveTableCommandLinePerson,
 } from "@/lib/table-command-whatsapp"
 import { RatingModal } from "@/components/RatingModal"
 import { sellerAccountFromOrder } from "@/lib/order-seller-account"
@@ -648,11 +649,15 @@ function TrackOrderPageInner() {
         displayBuyerLocation ||
         (order.TABLE_NAME ? `Table: ${order.TABLE_NAME}` : undefined),
       orderId: internalOrderNo,
+      defaultOrderedBy: (order.buyerName ?? "").trim() || undefined,
       items: order.items.map((item) => ({
         name: item.name,
         qty: item.qty,
         unitPrice: item.unitPrice,
-        orderedBy: item.orderedBy ?? item.ORDERED_BY,
+        orderedBy: resolveTableCommandLinePerson(
+          item.orderedBy ?? item.ORDERED_BY,
+          order.buyerName,
+        ),
         lineId: item.lineId ?? item.ID_LIST,
         lineCreatedAt:
           item.lineCreatedAt ?? item.HEURE ?? item.heure ?? order.createdAt,
