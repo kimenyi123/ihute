@@ -310,7 +310,7 @@ function OrderSuccessPageInner() {
         orderDetails.BUYER_OWNER ??
         orderDetails.BUYER_NAME ??
         orderDetails.buyerName ??
-        buyerName
+        ""
 
       const receiptArgs = {
         shop: sellerName || orderDetails.sellerName,
