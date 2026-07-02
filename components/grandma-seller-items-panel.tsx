@@ -14,6 +14,7 @@ import {
   saveCachedLines,
 } from "@/lib/grandma-offline-stock"
 import { shopCategoryToSectorSlug } from "@/lib/seller-category-sector"
+import { downloadExcel, grandmaStockToExcelRows } from "@/lib/grandma-excel-export"
 import { cn } from "@/lib/utils"
 import { useLanguageStore, type Language } from "@/lib/language-store"
 
@@ -26,6 +27,7 @@ const ITEMS_UI: Record<Language, {
   refresh: string; syncNow: string; offlineQueued: string
   offlineQtyNote: string; offlineNewItem: string; offlineShow: string
   offlineNoCache: string; enterItemName: string
+  exportExcel: string; exportExcelEmpty: string
 }> = {
   en: {
     signInSeller: "Sign in as a seller and ensure your account has an Ishyiga ID to manage stock.",
@@ -55,6 +57,8 @@ const ITEMS_UI: Record<Language, {
     offlineShow: "You\u2019re offline \u2014 showing saved stock. Quantity changes are queued to sync when you\u2019re back online.",
     offlineNoCache: "You\u2019re offline and have no cached stock yet. Open Items once while online to save a copy.",
     enterItemName: "Enter an item name",
+    exportExcel: "Export Excel",
+    exportExcelEmpty: "No stock rows to export yet.",
   },
   rw: {
     signInSeller: "Injira nk\u2019umucuruzi kandi wishimikize ko konti yawe ifite Ishyiga ID yo gucunga sitoki.",
@@ -84,6 +88,8 @@ const ITEMS_UI: Record<Language, {
     offlineShow: "Ntuzuri kuri interineti \u2014 turerekana sitoki yabitswe. Impinduka z\u2019ingano zitegereje guhuzwa.",
     offlineNoCache: "Ntuzuri kuri interineti kandi nta sitoki yabitswe. Fungura Ibicuruzwa rimwe uri kuri interineti kugira ngo ubike kopi.",
     enterItemName: "Andika izina ry\u2019igicuruzwa",
+    exportExcel: "Kohereza Excel",
+    exportExcelEmpty: "Nta micuruzwa yo kohereza.",
   },
   fr: {
     signInSeller: "Connectez-vous en tant que vendeur et v\u00e9rifiez que votre compte dispose d\u2019un ID Ishyiga pour g\u00e9rer le stock.",
@@ -113,6 +119,8 @@ const ITEMS_UI: Record<Language, {
     offlineShow: "Hors ligne \u2014 stock enregistr\u00e9 affich\u00e9. Les modifications de quantit\u00e9 seront synchronis\u00e9es.",
     offlineNoCache: "Hors ligne et aucun stock en cache. Ouvrez Articles une fois en ligne pour enregistrer une copie.",
     enterItemName: "Saisissez un nom d\u2019article",
+    exportExcel: "Exporter Excel",
+    exportExcelEmpty: "Aucune ligne de stock \u00e0 exporter.",
   },
 }
 
@@ -479,9 +487,28 @@ export function GrandmaSellerItemsPanel(props: {
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-extrabold uppercase tracking-wide text-[#6f8399]">{ui.yourStock}</h2>
-        <Button type="button" size="sm" className="bg-[#1897e0] text-white" onClick={() => setAddOpen((v) => !v)}>
-          {addOpen ? ui.close : ui.addItYourself}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="border-[#1897e0] text-[#127fc0] hover:bg-[#f0f8ff]"
+            disabled={lines.length === 0}
+            onClick={() => {
+              const ok = downloadExcel(
+                grandmaStockToExcelRows(lines),
+                "Stock",
+                `grandma_stock_${sellerAccount.trim()}`,
+              )
+              if (!ok) window.alert(ui.exportExcelEmpty)
+            }}
+          >
+            📥 {ui.exportExcel}
+          </Button>
+          <Button type="button" size="sm" className="bg-[#1897e0] text-white" onClick={() => setAddOpen((v) => !v)}>
+            {addOpen ? ui.close : ui.addItYourself}
+          </Button>
+        </div>
       </div>
 
       {addOpen ? (

@@ -52,6 +52,7 @@ import { grandmaUserCanUseSellerWorkspace } from "@/lib/auth-login-client"
 import { useLanguageStore } from "@/lib/language-store"
 import { GrandmaSellerDashboard } from "@/components/grandma-seller-dashboard"
 import { GrandmaSellerItemsPanel } from "@/components/grandma-seller-items-panel"
+import { downloadExcel, grandmaOrdersToExcelRows } from "@/lib/grandma-excel-export"
 import { digitsOnly, normalizePhoneDigitsForAuth, normalizeRwandaMobileE164 } from "@/lib/rwanda-phone"
 import { lineSellingPriceFromProductRow } from "@/lib/package-price"
 import { Input } from "@/components/ui/input"
@@ -546,6 +547,8 @@ const GRANDMA_LABELS: Record<
     sellerDashCtaNikiStock: string
     sellerDashCtaOrders: string
     sellerDashDeliveredTail: string
+    sellerExportExcel: string
+    sellerExportExcelEmpty: string
     payStepPanelTitle: string
     payStepDemoNote: string
     payStepCommissionNote: string
@@ -717,6 +720,8 @@ const GRANDMA_LABELS: Record<
     sellerDashCtaNikiStock: "Add stock (NIKI)",
     sellerDashCtaOrders: "Open orders",
     sellerDashDeliveredTail: "{{n}} delivered",
+    sellerExportExcel: "Export Excel",
+    sellerExportExcelEmpty: "No rows to export yet.",
     payStepPanelTitle: "Complete this payment method",
     payStepDemoNote: "",
     payStepCommissionNote:
@@ -887,6 +892,8 @@ const GRANDMA_LABELS: Record<
     sellerDashCtaNikiStock: "Ongeraho sitoki (NIKI)",
     sellerDashCtaOrders: "Ibitumijwe",
     sellerDashDeliveredTail: "{{n}} yageze",
+    sellerExportExcel: "Kohereza Excel",
+    sellerExportExcelEmpty: "Nta makuru yo kohereza.",
     payStepPanelTitle: "Rangiza kwishyura",
     payStepDemoNote: "",
     payStepCommissionNote:
@@ -1061,6 +1068,8 @@ const GRANDMA_LABELS: Record<
     sellerDashCtaNikiStock: "Ajouter stock (NIKI)",
     sellerDashCtaOrders: "Commandes ouvertes",
     sellerDashDeliveredTail: "{{n}} livrée(s)",
+    sellerExportExcel: "Exporter Excel",
+    sellerExportExcelEmpty: "Aucune ligne à exporter.",
     payStepPanelTitle: "Compléter ce mode de paiement",
     payStepDemoNote: "",
     payStepCommissionNote:
@@ -4163,6 +4172,31 @@ export default function GrandmaPage() {
     return { open, served, rejected }
   }, [sellerOrders])
 
+  const exportSellerOrdersExcel = useCallback(() => {
+    const rows = grandmaOrdersToExcelRows(
+      sellerOrders.map((o) => ({
+        id: o.id,
+        ref: o.ref,
+        status: o.status,
+        buyerName: o.buyerName,
+        buyerPhone: o.buyerPhone,
+        area: o.area,
+        amountRwf: o.amountRwf,
+        deliveryFeeRwf: o.deliveryFeeRwf,
+        paymentLabel: o.paymentLabel,
+        paymentStatus: o.paymentStatus,
+        paymentCode: o.paymentCode,
+        transactionId: o.transactionId,
+        placedAt: o.paymentTime,
+        logisticsIcon: o.logisticsIcon,
+        lines: o.lines,
+      })),
+    )
+    if (!downloadExcel(rows, "Orders", `grandma_orders_${sellerShopLabel || sellerIshyigaAccount}`)) {
+      window.alert(GRANDMA_LABELS[language].sellerExportExcelEmpty)
+    }
+  }, [sellerOrders, sellerShopLabel, sellerIshyigaAccount, language])
+
   const sellerHomeKpis = useMemo(() => {
     const served = sellerOrders.filter((o) => o.status === "sent")
     const deliverySum = served.reduce((s, o) => s + (o.deliveryFeeRwf ?? 0), 0)
@@ -4892,6 +4926,8 @@ export default function GrandmaPage() {
             router.push("/register/seller?step=2")
           }}
           onSales={() => setSellerView("orders")}
+          onExportExcel={exportSellerOrdersExcel}
+          exportExcelLabel={GRANDMA_LABELS[language].sellerExportExcel}
         />
       ) : null}
 
@@ -4974,6 +5010,16 @@ export default function GrandmaPage() {
               <div className="seller-dash-icon" aria-hidden>❌</div>
               <div className="seller-dash-title">Rejected</div>
               <div className="seller-dash-meta">{sellerDashboard.rejected.count} / {formatRwf(sellerDashboard.rejected.amount)}</div>
+            </button>
+          </div>
+
+          <div className="flex justify-end px-1">
+            <button
+              type="button"
+              className="rounded-xl border border-[#1897e0] bg-white px-4 py-2 text-sm font-bold text-[#127fc0] shadow-sm hover:bg-[#f0f8ff]"
+              onClick={exportSellerOrdersExcel}
+            >
+              📥 {GRANDMA_LABELS[language].sellerExportExcel}
             </button>
           </div>
 

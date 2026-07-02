@@ -56,6 +56,8 @@ export type GrandmaSellerDashboardProps = {
   /** Opens Shop with Me for the seller nickname (NIKI product source). */
   onNikiStock: () => void
   onSales: () => void
+  onExportExcel?: () => void
+  exportExcelLabel?: string
   formatRwf: (n: number) => string
 }
 
@@ -77,6 +79,8 @@ export function GrandmaSellerDashboard({
   onItems,
   onNikiStock,
   onSales,
+  onExportExcel,
+  exportExcelLabel = "Export Excel",
   formatRwf,
 }: GrandmaSellerDashboardProps) {
   const denom = Math.max(1, totalOrders)
@@ -100,8 +104,23 @@ export function GrandmaSellerDashboard({
   return (
     <section className="seller-screen space-y-3 px-3 pb-6 pt-2">
       <div className="rounded-2xl border border-[#dbe7f3] bg-white px-4 py-3 shadow-sm">
-        <div className="text-xs font-bold uppercase tracking-wide text-[#6f8399]">Shop</div>
-        <div className="mt-1 text-lg font-extrabold text-[#17324d]">{shopLabel}</div>
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-xs font-bold uppercase tracking-wide text-[#6f8399]">Shop</div>
+            <div className="mt-1 text-lg font-extrabold text-[#17324d]">{shopLabel}</div>
+          </div>
+          {onExportExcel ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-9 shrink-0 border-[#1897e0] text-[#127fc0] hover:bg-[#f0f8ff]"
+              onClick={onExportExcel}
+            >
+              📥 {exportExcelLabel}
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       <div className="grid gap-3 md:grid-cols-2">
