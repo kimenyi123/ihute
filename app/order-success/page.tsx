@@ -19,6 +19,7 @@ import {
   buildOrderReceiptViewModel,
   buildOrderWhatsAppMessage,
   isTableCommandOrder,
+  resolveTableCommandLinePerson,
 } from "@/lib/table-command-whatsapp"
 import { OrderReceiptPreview } from "@/components/order-receipt-preview"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -68,6 +69,7 @@ function OrderSuccessPageInner() {
   const sellerName = searchParams.get("sellerName")
   const sellerPhone = searchParams.get("sellerPhone")
   const buyerPhone = searchParams.get("buyerPhone")
+  const buyerNameQuery = searchParams.get("buyerName")?.trim() || ""
   const orderNotesQuery = searchParams.get("orderNotes")?.trim() || ""
   const total = searchParams.get("total")
   const logisticsTypeQuery = searchParams.get("logisticsType")?.trim() || ""
@@ -312,18 +314,37 @@ function OrderSuccessPageInner() {
         orderNotesQuery ||
         ""
 
+      const receiptLocation =
+        orderDetails.buyerLocation ||
+        orderDetails.DELIVERY_LOCATION ||
+        (orderDetails.TABLE_NAME ? `Table: ${orderDetails.TABLE_NAME}` : undefined)
+      const orderCreatedAt = orderDetails.createdAt ?? orderDetails.CREATED_AT
+
+      const orderBuyerName = (
+        buyerNameQuery ||
+        orderDetails.BUYER_OWNER ||
+        orderDetails.BUYER_NAME ||
+        orderDetails.buyerName ||
+        ""
+      ).trim()
+
       const receiptArgs = {
         shop: sellerName || orderDetails.sellerName,
-        location: orderDetails.buyerLocation,
+        location: receiptLocation,
         orderId: displayOrderNo,
-        placedAt: orderPlacedAtLabel || undefined,
+        defaultOrderedBy: String(orderBuyerName ?? "").trim() || undefined,
+        placedAt: orderPlacedAtLabel || orderCreatedAt || undefined,
         items: orderDetails.items.map((item: any) => ({
           name: item.name,
           qty: item.qty,
           unitPrice: item.unitPrice,
-          orderedBy: item.orderedBy ?? item.ORDERED_BY,
+          orderedBy: resolveTableCommandLinePerson(
+            item.orderedBy ?? item.ORDERED_BY,
+            orderBuyerName,
+          ),
           lineId: item.lineId ?? item.ID_LIST,
-          lineCreatedAt: item.lineCreatedAt ?? item.HEURE ?? item.heure,
+          lineCreatedAt:
+            item.lineCreatedAt ?? item.HEURE ?? item.heure ?? orderCreatedAt,
         })),
         subtotal: effectiveSubtotal,
         total: effectiveTotalAmount,
@@ -400,6 +421,7 @@ function OrderSuccessPageInner() {
     logisticsAmount,
     logisticsType,
     orderNotesQuery,
+    buyerNameQuery,
   ])
 
   useEffect(() => {

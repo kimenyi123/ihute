@@ -275,6 +275,14 @@ function CartSummaryBody() {
   // Table command mode
   const { isInTableCommand, activeSession, leaveTableCommand, lockTableCommand, canCloseTable, closeTableCommand, createTableCommand, updateTableShareData } = useTableCommandStore()
 
+  /** Active table session OR shop-with-me `?table=` QR (tableInfo in cart). */
+  const isTableCheckout =
+    isInTableCommand() || Boolean((tableInfo?.tableNumber ?? "").trim())
+  const tableNameFromContext =
+    activeSession?.tableName?.trim() || tableInfo?.tableNumber?.trim() || ""
+  const guestNameForTable = () =>
+    (anonymousName || activeSession?.userName || tableInfo?.customerName || "").trim()
+
   // ✅ Track if we've pre-filled the name (to avoid overwriting user edits)
   const hasPrefilledName = useRef(false)
   const lastTableSession = useRef<string | null>(null)
@@ -290,29 +298,31 @@ function CartSummaryBody() {
       lastTableSession.current = currentSessionId
     }
 
-    if (!hasPrefilledName.current && checkoutMode === "anonymous" && isInTableCommand()) {
+    if (!hasPrefilledName.current && checkoutMode === "anonymous" && isTableCheckout) {
       const guestName = getOrCreateGuestName()
       const tableUserName = activeSession?.userName
       const isTableNameAsUser =
         Boolean(tableUserName && activeSession?.tableName) &&
         tableUserName!.trim().toLowerCase() === activeSession!.tableName.trim().toLowerCase()
+      const fromTableInfo = (tableInfo?.customerName ?? "").trim()
       const finalName =
-        tableUserName && tableUserName !== "Guest" && !isTableNameAsUser
+        fromTableInfo ||
+        (tableUserName && tableUserName !== "Guest" && !isTableNameAsUser
           ? tableUserName
           : guestName !== "Guest"
             ? guestName
-            : ""
+            : "")
 
       if (finalName) {
         setAnonymousName(finalName)
         hasPrefilledName.current = true
       }
     }
-  }, [checkoutMode, activeSession])
+  }, [checkoutMode, activeSession, isTableCheckout, tableInfo?.customerName])
 
-  // Pre-fill from tableInfo only when NOT a table order (e.g. delivery from shop-with-me)
+  // Pre-fill address from tableInfo for non-table delivery (e.g. shop-with-me with address only)
   useEffect(() => {
-    if (checkoutMode === "anonymous" && tableInfo && !isInTableCommand()) {
+    if (checkoutMode === "anonymous" && tableInfo && !isTableCheckout) {
       if (tableInfo.customerName && !anonymousName) {
         setAnonymousName(tableInfo.customerName)
       }
@@ -320,7 +330,7 @@ function CartSummaryBody() {
         setDeliveryLocation(tableInfo.customerAddress)
       }
     }
-  }, [checkoutMode, tableInfo, isInTableCommand])
+  }, [checkoutMode, tableInfo, isTableCheckout])
 
   const [tableCommandDialogOpen, setTableCommandDialogOpen] = useState(false)
   const [tableCommandJoinOnly, setTableCommandJoinOnly] = useState(false)
@@ -566,10 +576,10 @@ function CartSummaryBody() {
       const paymentState = getPaymentStatus(g.supplierId)
       const isPaid = paymentState === "paid"
       const inTableForSeller =
-        isInTableCommand() && activeSession?.locationId === g.supplierId
+        isTableCheckout && (activeSession?.locationId === g.supplierId || tableInfo?.shopId === g.supplierId)
       const siteBase = (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw").replace(/\/Trading\/?$/, "")
       const trackLink = orderId ? `${siteBase}/track-order/${encodeURIComponent(orderId)}` : undefined
-      const guestName = (anonymousName || activeSession?.userName || "").trim()
+      const guestName = guestNameForTable()
       const message = orderId
         ? buildOrderWhatsAppMessage({
             shop: g.supplierName,
@@ -718,7 +728,7 @@ function CartSummaryBody() {
       return
     }
 
-    if (checkoutMode === "anonymous" && isInTableCommand() && !anonymousName.trim()) {
+    if (checkoutMode === "anonymous" && isTableCheckout && !guestNameForTable()) {
       alert("Please enter your name so the supplier knows who ordered")
       return
     }
@@ -753,19 +763,21 @@ function CartSummaryBody() {
     paymentName: string,
     trackToken?: string,
   ): URLSearchParams {
+    const tableGuestName = isTableCheckout ? guestNameForTable() : ""
     const params = new URLSearchParams({
       orderId,
       sellerName: g.supplierName,
       sellerPhone: sellerTel || getSellerTelForOrder(g) || "",
       buyerPhone:
         checkoutMode === "anonymous"
-          ? isInTableCommand()
+          ? isTableCheckout
             ? anonymousPhone
             : ""
           : user?.phone || "",
       total: String(g.subtotal),
       paymentMethod: paymentName,
     })
+    if (tableGuestName) params.set("buyerName", tableGuestName)
     if (trackToken) params.set("trackToken", trackToken)
     return params
   }
@@ -795,6 +807,7 @@ function CartSummaryBody() {
           String(it.itemCode ?? "").trim() ||
           String(it.item_key_words ?? "").trim() ||
           String(it.id ?? "").trim()
+        const lineOrderedBy = isTableCheckout ? guestNameForTable() : ""
         return {
           name: it.name,
           qty: it.qty,
@@ -802,6 +815,7 @@ function CartSummaryBody() {
           unitPrice: it.price,
           unit: it.unit ?? "",
           itemCode: code,
+          ...(lineOrderedBy ? { orderedBy: lineOrderedBy } : {}),
           ...(it.itemEmballage
             ? { item_emballage: it.itemEmballage, ITEM_EMBALLAGE: it.itemEmballage }
             : {}),
@@ -820,8 +834,8 @@ function CartSummaryBody() {
 
       // Buyer name: for table orders use user-entered name only (so "Ordered By" shows person, not table name)
       const isOrderingFromOwnShop = Boolean(user?.ishyigaAccount && g.supplierId && user.ishyigaAccount === g.supplierId);
-      const resolvedBuyerName = isInTableCommand()
-        ? (checkoutMode === "anonymous" ? (anonymousName?.trim() || "Guest") : (user?.name || "Guest"))
+      const resolvedBuyerName = isTableCheckout
+        ? (checkoutMode === "anonymous" ? guestNameForTable() || "Guest" : (user?.name || "Guest"))
         : checkoutMode === "anonymous"
           ? (anonymousName?.trim() || "Guest")
           : (tableInfo?.customerName && String(tableInfo.customerName).trim()) ||
@@ -829,6 +843,9 @@ function CartSummaryBody() {
             anonymousName ||
             user?.name ||
             "Guest"
+
+      const tableBuyerLocation =
+        isTableCheckout && tableNameFromContext ? `Table: ${tableNameFromContext}` : undefined
 
       let guestBuyerAccount = getGuestBuyerAccount()
       if (checkoutMode === "anonymous") {
@@ -846,11 +863,14 @@ function CartSummaryBody() {
           buyerPhone:
             opts.buyerPhone ??
             (checkoutMode === "anonymous"
-              ? isInTableCommand()
+              ? isTableCheckout
                 ? anonymousPhone
                 : ""
               : user?.phone || ""),
-          buyerLocation: opts.buyerLocation || (checkoutMode === "anonymous" ? deliveryLocation : user?.location || "NA"),
+          buyerLocation:
+            opts.buyerLocation ||
+            tableBuyerLocation ||
+            (checkoutMode === "anonymous" ? deliveryLocation : user?.location || "NA"),
           buyerName: String(resolvedBuyerName || "").trim() || "Guest",
           sellerAccount: g.supplierId,
           sellerName: g.supplierName,
@@ -862,9 +882,9 @@ function CartSummaryBody() {
           currency: "RWF",
           items,
           // Table command information
-          isTableCommand: isInTableCommand(),
-          tableName: activeSession?.tableName,
-          tableLocation: activeSession?.locationName,
+          isTableCommand: isTableCheckout,
+          tableName: tableNameFromContext || undefined,
+          tableLocation: activeSession?.locationName || tableInfo?.shopName || g.supplierName,
         }),
       })
 
@@ -944,7 +964,7 @@ function CartSummaryBody() {
         }
 
         // Bar/resto table: every guest goes to order-success (track link), cart cleared for this seller.
-        if (isInTableCommand() && currentOrderIsBarTable) {
+        if (isTableCheckout && currentOrderIsBarTable) {
           await clearSubmittedSupplier(g.supplierId)
           if (orderId) {
             const params = buildOrderSuccessParams(
@@ -1032,14 +1052,21 @@ function CartSummaryBody() {
     const g = groups.find(x => x.supplierId === codForSeller)
     if (!g) { setCodOpen(false); return }
 
+    if (isTableCheckout && checkoutMode === "anonymous" && !guestNameForTable()) {
+      alert("Please enter your name so the supplier knows who ordered")
+      return
+    }
+
     // Check if Pangolin's Burrows - use table/location instead of delivery input
     const isPangolins = g.supplierName?.toUpperCase().includes("PANGOLIN")
     const location = isPangolins
-      ? (isInTableCommand() ? `Table: ${activeSession?.tableName}` : g.supplierLocation || "In-person pickup")
+      ? (isTableCheckout && tableNameFromContext
+          ? `Table: ${tableNameFromContext}`
+          : g.supplierLocation || "In-person pickup")
       : deliveryLocation
 
     await placeOrder(g, {
-      paymentName: isInTableCommand() ? "PAY_AT_TABLE" : "PAY_ON_DELIVERY",
+      paymentName: isTableCheckout ? "PAY_AT_TABLE" : "PAY_ON_DELIVERY",
       buyerPhone: contactPhone,
       buyerLocation: location,
       reference: `COD_${Date.now()}`,
@@ -1491,7 +1518,7 @@ function CartSummaryBody() {
           {/* Guest: table orders still need a name for "Ordered By"; otherwise show seller phone for tracking */}
           {checkoutMode === "anonymous" && (
             <div className="space-y-3 pb-4 border-b">
-              {isInTableCommand() ? (
+              {isTableCheckout ? (
                 <div className="space-y-1">
                   <Label className="text-sm font-medium">Your Name *</Label>
                   <Input

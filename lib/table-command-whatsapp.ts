@@ -25,6 +25,22 @@ export function normalizeTableCommandPerson(name?: string | null): string {
   return n ? n.toLocaleUpperCase("en-US") : "GUEST"
 }
 
+/** Use line ORDERED_BY when set; otherwise fall back to order buyer name (legacy rows). */
+export function resolveTableCommandLinePerson(
+  lineOrderedBy?: string | null,
+  orderBuyerName?: string | null,
+): string {
+  const line = (lineOrderedBy ?? "").trim()
+  if (line && !/^guest$/i.test(line)) {
+    return normalizeTableCommandPerson(line)
+  }
+  const buyer = (orderBuyerName ?? "").trim()
+  if (buyer && !/^guest$/i.test(buyer)) {
+    return normalizeTableCommandPerson(buyer)
+  }
+  return normalizeTableCommandPerson(line || buyer)
+}
+
 function lineTotalRwf(item: Pick<TableCommandLineItem, "qty" | "unitPrice">): number {
   const qty = Number(item.qty) || 0
   const unit = Number(item.unitPrice) || 0
@@ -92,7 +108,20 @@ function buildPersonBatches(items: TableCommandLineItem[]): PersonBatch[] {
   for (const item of sorted) {
     const person = normalizeTableCommandPerson(item.orderedBy)
     const last = batches[batches.length - 1]
-    if (last && last.person === person) {
+    const lastItem = last?.items[last.items.length - 1]
+    const lineId = Number(item.lineId ?? 0)
+    const lastLineId = Number(lastItem?.lineId ?? 0)
+    const lineMs = parseLineCreatedAtMs(item.lineCreatedAt)
+    const lastLineMs = parseLineCreatedAtMs(lastItem?.lineCreatedAt)
+    const idGap = lineId > 0 && lastLineId > 0 ? lineId - lastLineId : 0
+    const timeGapMs =
+      lineMs != null && lastLineMs != null ? Math.abs(lineMs - lastLineMs) : 0
+    const newRoundSameGuest =
+      last &&
+      last.person === person &&
+      (idGap > 1 || timeGapMs > 3 * 60 * 1000)
+
+    if (last && last.person === person && !newRoundSameGuest) {
       last.items.push(item)
     } else {
       batches.push({ person, items: [item] })
@@ -240,6 +269,8 @@ export type OrderReceiptViewModel = {
   orderId: string
   momoTxId?: string
   description?: string
+  /** Order placed / receipt generated time banner */
+  placedAtLabel?: string
   isTableCommand: boolean
   flatItems: OrderReceiptLine[]
   guestGroups: OrderReceiptGuestGroup[]
@@ -296,7 +327,10 @@ export function buildOrderReceiptViewModel(args: {
   orderDescription?: string
   logisticsFee?: number
   logisticsType?: string
-  placedAt?: string
+  /** When line ORDERED_BY is blank/GUEST, use this (order buyer name). */
+  defaultOrderedBy?: string
+  /** Order placed time — raw timestamp or pre-formatted label */
+  placedAt?: number | string | null
 }): OrderReceiptViewModel {
   const discount = args.discount ?? 0
   const description = args.orderDescription?.trim()
@@ -316,7 +350,7 @@ export function buildOrderReceiptViewModel(args: {
     ? buildTableCommandView(
         args.items.map((item) => ({
           ...item,
-          orderedBy: normalizeTableCommandPerson(item.orderedBy),
+          orderedBy: resolveTableCommandLinePerson(item.orderedBy, args.defaultOrderedBy),
         })),
       ).map((person) => ({
         guest: person.person,
@@ -341,6 +375,7 @@ export function buildOrderReceiptViewModel(args: {
     orderId: String(args.orderId),
     momoTxId: args.momoTxId?.trim() || undefined,
     description: description || undefined,
+    placedAtLabel: formatTableRoundTimestamp(args.placedAt),
     isTableCommand: Boolean(args.isTableCommand),
     flatItems,
     guestGroups,
@@ -353,7 +388,10 @@ export function buildOrderReceiptViewModel(args: {
     reference: args.reference?.trim() || undefined,
     myPhone: normalizedPhone || undefined,
     followLink: args.link?.trim() || undefined,
-    placedAt: args.placedAt?.trim() || undefined,
+    placedAt:
+      typeof args.placedAt === "string"
+        ? args.placedAt.trim() || undefined
+        : formatTableRoundTimestamp(args.placedAt),
     logisticsType: args.logisticsType?.trim() || undefined,
   }
 }
