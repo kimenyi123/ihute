@@ -8,6 +8,12 @@ import { getAdminServletUrl, getBackendBase } from "@/lib/backend-config"
 
 const BACKEND_URL = getBackendBase()
 
+const HEAVY_ADMIN_ACTIONS = new Set(["getAllOrders", "getOrderMonitorStats", "getOrderDetails"])
+
+function adminFetchTimeoutMs(action: string): number {
+  return HEAVY_ADMIN_ACTIONS.has(action) ? 90_000 : 30_000
+}
+
 function getAdminServletCandidates(): string[] {
   return [getAdminServletUrl()]
 }
@@ -126,8 +132,9 @@ export async function POST(req: Request) {
 
     const urls = getAdminServletCandidates()
     console.log("[admin/route] POST - Candidate URLs:", urls.join(" | "))
-    console.log("[admin/route] Action:", actionStr)
+    console.log("[admin/route] POST - Action:", actionStr)
 
+    const timeoutMs = adminFetchTimeoutMs(actionStr)
     const inboundCookie = req.headers.get("cookie") || ""
     let res: Response | null = null
     let text = ""
@@ -137,7 +144,7 @@ export async function POST(req: Request) {
     for (const candidate of urls) {
       url = candidate
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 30000)
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
       try {
         const attemptRes = await fetch(candidate, {
           method: "POST",
@@ -215,7 +222,7 @@ export async function POST(req: Request) {
     
     if (e?.name === 'AbortError') {
       return NextResponse.json(
-        { ok: false, error: "Backend request timed out after 30 seconds" },
+        { ok: false, error: "Backend request timed out" },
         { status: 504 }
       )
     }
@@ -307,6 +314,7 @@ export async function GET(req: Request) {
     console.log("[admin/route] GET - Candidate URLs:", urls.join(" | "))
     console.log("[admin/route] GET - Action:", action)
 
+    const timeoutMs = adminFetchTimeoutMs(action)
     const inboundCookie = req.headers.get("cookie") || ""
     let res: Response | null = null
     let text = ""
@@ -316,7 +324,7 @@ export async function GET(req: Request) {
     for (const candidate of urls) {
       url = candidate
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 30000)
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
       try {
         const attemptRes = await fetch(candidate, {
           method: "GET",
@@ -391,7 +399,7 @@ export async function GET(req: Request) {
     
     if (e?.name === 'AbortError') {
       return NextResponse.json(
-        { ok: false, error: "Backend request timed out after 30 seconds" },
+        { ok: false, error: `Backend request timed out after ${Math.round(adminFetchTimeoutMs(action) / 1000)} seconds` },
         { status: 504 }
       )
     }
