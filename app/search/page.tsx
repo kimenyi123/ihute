@@ -327,7 +327,10 @@ function toCardProduct(p: Product & { search_priority?: string; contains_ingredi
   return {
     id: p.item_code || p.item_key_words || `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`,
     name: p.item_commercial_name || "Product",
-    description: undefined,
+    description:
+      String((p as { description?: string; item_description?: string }).description
+        ?? (p as { item_description?: string }).item_description
+        ?? "").trim() || undefined,
     price,
     currency: p.currency || "RWF",
     // Cart/display packs should follow item_emballage (pcs), not raw stock packet.

@@ -519,17 +519,16 @@ export function ProductCard({
       <CardContent className={cn("flex min-w-0 flex-col gap-2", compact ? "p-2" : "p-3")}>
         <div className={compact ? "min-h-[32px]" : "min-h-[38px]"}>
           <h3 className={cn("font-semibold leading-tight line-clamp-2", compact ? "text-xs" : "text-sm")}>{name}</h3>
+          {description && description !== id && description !== name && (
+            <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground line-clamp-2">
+              {description}
+            </p>
+          )}
           <ProductSearchRankingBadges
             searchPriority={searchPriority}
             containsIngredient={containsIngredient}
           />
         </div>
-
-        {description && description !== id && (
-          <p className="text-xs text-muted-foreground line-clamp-2">
-            {description}
-          </p>
-        )}
 
         <div className={compact ? "text-xs" : "text-sm"}>
           <div className="flex items-baseline gap-2">

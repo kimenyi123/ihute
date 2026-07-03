@@ -1850,6 +1850,7 @@ function ProductCard({
   const categoryVal = p.category ?? p.famille ?? p.FAMILLE ?? p.item_department;
   const categoryLabel = categoryVal && String(categoryVal).trim() ? String(categoryVal).trim() : "n";
   const displayName = `${productName} - ${categoryLabel}`;
+  const itemDescription = String(p.description ?? p.DESCRIPTION ?? "").trim();
   const priceRaw = p.selling_price ?? p.price ?? p.UNITY_PRICE ?? p.SALE_PRICE_INCLUSIVE;
   const baseUnit = extractNumericPrice(priceRaw);
   const embRaw = resolveItemEmballageRaw(p);
@@ -2084,6 +2085,10 @@ function ProductCard({
             />
           )}
         </div>
+
+        {itemDescription ? (
+          <p className="text-[10px] leading-snug text-muted-foreground line-clamp-2">{itemDescription}</p>
+        ) : null}
 
         <div className="flex items-center gap-0.5 text-amber-500" aria-label="Quality rating">
           {[1, 2, 3, 4, 5].map((i) => (
