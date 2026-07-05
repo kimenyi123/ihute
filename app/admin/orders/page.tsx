@@ -5,6 +5,7 @@ import { Filter, Eye } from 'lucide-react'
 import { postAdminApi } from '@/lib/admin-client'
 import Link from 'next/link'
 import { mapBackendOrderStatusToTrack, type TrackOrderStatus } from '@/lib/order-status-map'
+import { downloadExcel } from '@/lib/grandma-excel-export'
 
 interface Order {
   id: number
@@ -129,6 +130,25 @@ export default function OrdersPage() {
     }).format(amount)
   }
 
+  const exportToExcel = () => {
+    const rows = orders.map((order) => {
+      const normalizedStatus = mapBackendOrderStatusToTrack(order.status, order.paymentStatus)
+      return {
+        'Order #': order.orderNumber || `#${order.id}`,
+        Seller: order.sellerName,
+        Buyer: order.buyerName,
+        Amount: order.amount,
+        Status: getStatusLabel(normalizedStatus),
+        'Payment status': order.paymentStatus || 'OPEN',
+        Payment: order.paymentName,
+        Time: new Date(order.timestamp).toLocaleString(),
+        'Delivery location': order.deliveryLocation,
+      }
+    })
+    const ok = downloadExcel(rows, 'Orders', 'admin_order_monitor')
+    if (!ok) window.alert('No orders to export.')
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -142,7 +162,8 @@ export default function OrdersPage() {
           <Filter size={20} />
           <h2 className="text-lg font-semibold text-gray-900">Filters</h2>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="flex flex-col gap-4 md:flex-row md:items-end">
+          <div className="grid flex-1 grid-cols-1 gap-4 md:grid-cols-3">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Sector</label>
             <select
@@ -183,6 +204,15 @@ export default function OrdersPage() {
               <option value="CANCELLED">Cancelled</option>
             </select>
           </div>
+          </div>
+          <button
+            type="button"
+            disabled={loading || orders.length === 0}
+            onClick={exportToExcel}
+            className="inline-flex shrink-0 items-center justify-center rounded-lg bg-green-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Export to Excel
+          </button>
         </div>
       </div>
 

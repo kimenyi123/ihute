@@ -23,6 +23,15 @@ function normalizeBrandAndCategory(data: { sellers?: Array<{ products?: any[] }>
         null;
       (p as any).brand = brand != null && String(brand).trim() ? String(brand).trim() : null;
       (p as any).category = category != null && String(category).trim() ? String(category).trim() : null;
+      (p as any).search_priority = (p as any).search_priority ?? null;
+      (p as any).contains_ingredient = (p as any).contains_ingredient ?? false;
+      const nested = (p as any).items;
+      if (Array.isArray(nested)) {
+        for (const item of nested) {
+          item.search_priority = item.search_priority ?? null;
+          item.contains_ingredient = item.contains_ingredient ?? false;
+        }
+      }
     }
   }
 }

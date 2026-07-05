@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { Bell, CheckCircle, XCircle, Eye, AlertCircle, Search, Trash2 } from 'lucide-react'
 import { postAdminApi } from '@/lib/admin-client'
+import { downloadExcel } from '@/lib/grandma-excel-export'
 import { CredentialSellersPanel } from '@/app/admin/sellers/CredentialSellersPanel'
 import { UrubutoKpiStrip } from '@/components/admin/urubuto-kpi-strip'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -440,6 +441,71 @@ export default function SellersPage() {
   const currentPage = activeTab === 'applications' ? pageApps : activeTab === 'urubuto' ? pageUrubuto : activeTab === 'active' ? pageActive : pageSuspended
   const currentTotal = activeTab === 'applications' ? totalApps : activeTab === 'urubuto' ? totalUrubuto : activeTab === 'active' ? totalActive : totalSuspended
 
+  const exportRowCount =
+    activeTab === 'urubuto' ? filteredUrubutoRows.length : currentSellers.length
+
+  const exportToExcel = () => {
+    let rows: Record<string, string | number>[] = []
+    let filePrefix = 'admin_sellers'
+
+    if (activeTab === 'applications') {
+      rows = applications.map((seller) => ({
+        'Seller name': `${seller.firstName} ${seller.lastName}`.trim(),
+        Account: seller.ishyigaAccount,
+        Email: seller.email,
+        Phone: seller.tel,
+        Location: seller.location || '',
+        Certificate:
+          seller.certificate && seller.certificate !== 'NA' ? 'Has Certificate' : 'Missing',
+        Status: seller.status,
+      }))
+      filePrefix = 'admin_sellers_live_registrations'
+    } else if (activeTab === 'active') {
+      rows = filteredActiveSellers.map((seller) => ({
+        'Seller name': `${seller.firstName} ${seller.lastName}`.trim(),
+        Account: seller.ishyigaAccount,
+        Email: seller.email,
+        Phone: seller.tel,
+        Location: seller.location || '',
+        Products: seller.productCount || 0,
+        'Total sales (RWF)': seller.totalSales || 0,
+        Status: seller.status,
+      }))
+      filePrefix = 'admin_sellers_active'
+    } else if (activeTab === 'suspended') {
+      rows = suspendedSellers.map((seller) => ({
+        'Seller name': `${seller.firstName} ${seller.lastName}`.trim(),
+        Account: seller.ishyigaAccount,
+        Email: seller.email,
+        Phone: seller.tel,
+        Location: seller.location || '',
+        Status: seller.status,
+      }))
+      filePrefix = 'admin_sellers_suspended'
+    } else if (activeTab === 'urubuto') {
+      rows = filteredUrubutoRows.map((row) => ({
+        'Seller payer (ALG)': row.sellerPayerCode,
+        'Display name': row.displayName || '',
+        'First name': row.firstName,
+        'Last name': row.lastName,
+        Email: row.email || '',
+        Phone: row.tel || '',
+        'Review status': row.adminReviewStatus || 'pending',
+        'Merchant status': row.merchantStatus || '',
+        'Seller status': row.sellerAccountStatus || '',
+        'Docs verified': row.verifiedDocCount ?? 0,
+        'Docs uploaded': row.docCount,
+        'Urubuto merchant code': row.urubutoMerchantCode || '',
+        'Urubuto service code': row.urubutoServiceCode || '',
+        Applied: row.createdAt ? new Date(row.createdAt).toLocaleString() : '',
+      }))
+      filePrefix = 'admin_sellers_urubuto'
+    }
+
+    const ok = downloadExcel(rows, 'Sellers', filePrefix)
+    if (!ok) window.alert('No sellers to export.')
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -549,8 +615,8 @@ export default function SellersPage() {
       </div>
 
       {/* Tabs */}
-      <div className="border-b border-gray-200">
-        <nav className="-mb-px flex space-x-8">
+      <div className="flex flex-col gap-3 border-b border-gray-200 sm:flex-row sm:items-end sm:justify-between">
+        <nav className="-mb-px flex space-x-8 overflow-x-auto">
           {[
             { id: 'applications' as const, label: 'LIVE registrations', count: totalApps },
             { id: 'urubuto' as const, label: 'UrubutoPay applications', count: totalUrubuto },
@@ -562,7 +628,7 @@ export default function SellersPage() {
               key={tab.id}
               onClick={() => setActiveTab(tab.id as SellersTab)}
               className={`
-                py-4 px-1 border-b-2 font-medium text-sm
+                py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap
                 ${activeTab === tab.id
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -578,6 +644,16 @@ export default function SellersPage() {
             </button>
           ))}
         </nav>
+        {activeTab !== 'credentials' && (
+          <button
+            type="button"
+            disabled={loading || exportRowCount === 0}
+            onClick={exportToExcel}
+            className="mb-3 inline-flex shrink-0 items-center justify-center self-end rounded-lg bg-green-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50 sm:mb-2"
+          >
+            Export to Excel
+          </button>
+        )}
       </div>
 
       {activeTab === 'credentials' && (

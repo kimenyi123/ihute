@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { useCartStore } from "@/lib/cart-store"
 import { useFavoritesStore } from "@/lib/favorites-store"
 import { trackProductView, trackClick } from "@/lib/interaction-tracker"
-import { Heart, Eye, Store, ScanSearch, ShoppingCart } from "lucide-react"
+import { Heart, Store, ScanSearch, ShoppingCart } from "lucide-react"
 import { usePriceWatchStore } from "@/lib/price-watch-store"
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
@@ -29,7 +29,6 @@ import {
 import { unitMeaningfulForDisplay } from "@/lib/product-unit-display"
 import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price"
 import { itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
-import { isExpiryMeaningfulForCustomerDisplay } from "@/lib/item-state-display"
 
 /** Suffix after price: `N pcs` from `item_emballage` (pack size), not currency — default N=1 when omitted. */
 function formatPcsFromItemEmballage(raw: unknown): string | null {
@@ -88,6 +87,71 @@ type Product = {
   marginPercent?: number
   /** e.g. "1.2km away" */
   distanceLabel?: string
+}
+
+export type ProductSearchRankingBadgeProps = {
+  searchPriority?: "direct" | "contains" | null
+  /** Search term or `true` when backend only signals a contains-ingredient match. */
+  containsIngredient?: string | boolean | null
+  className?: string
+}
+
+/** Map API snake_case fields to badge props (same as search page `toCardProduct`). */
+export function productSearchRankingFromApi(source: {
+  search_priority?: unknown
+  contains_ingredient?: unknown
+}): Pick<ProductSearchRankingBadgeProps, "searchPriority" | "containsIngredient"> {
+  const searchPriority =
+    source.search_priority === "direct" || source.search_priority === "contains"
+      ? source.search_priority
+      : undefined
+  const raw = source.contains_ingredient
+  const containsIngredient =
+    typeof raw === "string" && raw.trim()
+      ? raw.trim()
+      : raw === true
+        ? true
+        : undefined
+  return { searchPriority, containsIngredient }
+}
+
+/** IHUTE search ranking badges — direct match, contains, and ingredient pill (main search + shop-with-me). */
+export function ProductSearchRankingBadges({
+  searchPriority,
+  containsIngredient,
+  className,
+}: ProductSearchRankingBadgeProps) {
+  const showDirect = searchPriority === "direct"
+  const showContains = searchPriority === "contains"
+  const ingredientText =
+    typeof containsIngredient === "string" && containsIngredient.trim()
+      ? containsIngredient.trim()
+      : containsIngredient === true
+        ? ""
+        : null
+  const showIngredientPill = ingredientText !== null && searchPriority !== "direct"
+
+  if (!showDirect && !showContains && !showIngredientPill) return null
+
+  return (
+    <div className={cn("mt-1 flex flex-wrap gap-1", className)}>
+      {showDirect && (
+        <span className="inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
+          Direct match
+        </span>
+      )}
+      {showContains && (
+        <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-700">
+          Contains
+        </span>
+      )}
+      {showIngredientPill && (
+        <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-700">
+          {ingredientText ? `Contains: ${ingredientText}` : "Contains"}
+        </span>
+      )}
+    </div>
+  )
 }
 
 export function ProductCard({
@@ -455,13 +519,10 @@ export function ProductCard({
       <CardContent className={cn("flex min-w-0 flex-col gap-2", compact ? "p-2" : "p-3")}>
         <div className={compact ? "min-h-[32px]" : "min-h-[38px]"}>
           <h3 className={cn("font-semibold leading-tight line-clamp-2", compact ? "text-xs" : "text-sm")}>{name}</h3>
-          {containsIngredient && searchPriority !== "direct" && (
-            <div className="mt-1 flex flex-wrap gap-1">
-              <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-700">
-                Contains: {containsIngredient}
-              </span>
-            </div>
-          )}
+          <ProductSearchRankingBadges
+            searchPriority={searchPriority}
+            containsIngredient={containsIngredient}
+          />
         </div>
 
         {description && description !== id && (

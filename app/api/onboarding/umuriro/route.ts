@@ -1,40 +1,24 @@
 import { NextResponse } from "next/server"
-import mysql from "mysql2/promise"
 import { isValidRwandaMobileE164, normalizeRwandaMobileE164 } from "@/lib/rwanda-phone"
+import {
+  isOnboardingMysqlConfigured,
+  logUmuriroSmsOutbound,
+  persistShopOnboardingDraft,
+} from "@/lib/onboarding-draft-persist"
 import { sendSms } from "@/lib/sms/send-sms"
 import { buildUmuriroSellerSmsBodyFromLines } from "@/lib/umuriro-seller-sms"
 
 /**
  * Umuriro: minimal “shop contact + purchase line + MoMo USSD” payload.
- * Persists to `shop_onboarding_draft` when ONBOARDING_MYSQL_* is set (same as crazy-shopping).
- * When `shop.shopPhoneOptional` is a valid Rwandan mobile, sends SMS to that seller (Twilio or SMS_WEBHOOK_URL).
+ * Persists to `shop_onboarding_draft` when ONBOARDING_MYSQL_* is set (Quick + Advanced).
+ * SMS audit → `umuriro_sms_outbound` (best-effort; does not block save).
  */
-
-async function persistPayload(body: unknown): Promise<boolean> {
-  const host = process.env.ONBOARDING_MYSQL_HOST
-  const user = process.env.ONBOARDING_MYSQL_USER
-  const password = process.env.ONBOARDING_MYSQL_PASSWORD
-  const database = process.env.ONBOARDING_MYSQL_DATABASE
-  if (!host || !user || password === undefined || !database) return false
-
-  const conn = await mysql.createConnection({ host, user, password, database })
-  try {
-    await conn.query("INSERT INTO shop_onboarding_draft (payload_json) VALUES (?)", [
-      JSON.stringify(body),
-    ])
-    return true
-  } finally {
-    await conn.end()
-  }
-}
 
 export type UmuriroPayload = {
   kind: "umuriro"
-  /** `quick` = minimal line; `advanced` = category + catalog search + track dialog. */
   umuriroMode?: "quick" | "advanced"
   incompleteSeller: true
   savedBy: { email: string; name: string; phone: string }
-  /** Creator + reserved 100 RWF ledger line (discount or fee — product rules). */
   policy?: {
     createdBy: { email: string; name: string; phone: string }
     adjustmentRwf: number
@@ -53,7 +37,6 @@ export type UmuriroPayload = {
     quantity: number
     totalRwf: number
   }
-  /** Multi-item cart (Quick + Advanced). When set, `line` mirrors first row for older readers. */
   lines?: Array<{
     itemName: string
     itemCode?: string
@@ -67,7 +50,25 @@ export type UmuriroPayload = {
   payment?: {
     channel: "momo" | "cash"
     momoSmsMatched: boolean | null
+    momoTxId?: string | null
   }
+}
+
+function friendlyDbError(raw: string, shopName: string): string {
+  const shop = shopName.trim() || "order"
+  if (/ER_NO_SUCH_TABLE|doesn't exist/i.test(raw)) {
+    return `Quick Shop: could not save "${shop}" — database table missing (contact admin).`
+  }
+  if (/Invalid JSON|JSON/i.test(raw)) {
+    return `Quick Shop: could not save "${shop}" — invalid order data.`
+  }
+  if (/ECONNREFUSED|ENOTFOUND|ETIMEDOUT|connect/i.test(raw)) {
+    return `Quick Shop: could not save "${shop}" — database unreachable.`
+  }
+  if (/ONBOARDING_MYSQL/i.test(raw)) {
+    return `Quick Shop: database not configured on server.`
+  }
+  return `Quick Shop: could not save "${shop}". Try again or contact support.`
 }
 
 export async function POST(req: Request) {
@@ -83,20 +84,31 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Expected kind: umuriro", rid }, { status: 400 })
     }
 
-    const enriched = { ...record, rid }
-
-    let persisted = false
-    try {
-      persisted = await persistPayload(enriched)
-    } catch (e: unknown) {
-      console.warn(`[umuriro ${rid}] draft insert:`, (e as Error)?.message || e)
-    }
-
-    if (!process.env.ONBOARDING_MYSQL_HOST) {
-      console.log(`[umuriro ${rid}] No ONBOARDING_MYSQL_* — echo only`)
-    }
-
     const shop = record.shop as Record<string, unknown> | undefined
+    const shopName = typeof shop?.companyName === "string" ? shop.companyName : ""
+    const enriched = { ...record, rid }
+    const mysqlConfigured = isOnboardingMysqlConfigured()
+
+    if (mysqlConfigured) {
+      try {
+        await persistShopOnboardingDraft(enriched)
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e)
+        console.error(`[umuriro ${rid}] draft insert failed:`, msg)
+        return NextResponse.json(
+          {
+            ok: false,
+            error: friendlyDbError(msg, shopName),
+            rid,
+            persisted: false,
+          },
+          { status: 503 },
+        )
+      }
+    } else {
+      console.log(`[umuriro ${rid}] No ONBOARDING_MYSQL_* — echo only (set env to persist)`)
+    }
+
     const line = record.line as Record<string, unknown> | undefined
     const linesRaw = record.lines
     const lineNames: string[] = []
@@ -123,7 +135,6 @@ export async function POST(req: Request) {
       reason?: string
       to?: string
     } = { attempted: false, sent: false }
-    /** Exact text sent (or that would be sent) — returned for team training / QA. */
     let smsPreview: string | undefined
 
     if (rawPhone) {
@@ -142,11 +153,21 @@ export async function POST(req: Request) {
           sms.reason = out.error || "send failed"
           console.warn(`[umuriro ${rid}] SMS not sent:`, out.error)
         }
+        void logUmuriroSmsOutbound({
+          requestId: rid,
+          toE164: e164,
+          sentOk: out.ok,
+          provider: out.provider,
+          errorMessage: out.error,
+          smsBody: text,
+        })
       } else {
         sms.attempted = false
         sms.reason = "invalid_rwanda_phone"
       }
     }
+
+    const persisted = mysqlConfigured
 
     return NextResponse.json({
       ok: true,
@@ -155,8 +176,8 @@ export async function POST(req: Request) {
       sms,
       smsPreview,
       message: persisted
-        ? "Stored draft (if table exists)."
-        : "Received. Add ONBOARDING_MYSQL_* + shop_onboarding_draft to persist.",
+        ? "Order saved to shop_onboarding_draft."
+        : "Received (echo). Set ONBOARDING_MYSQL_* + shop_onboarding_draft to persist.",
     })
   } catch (e: unknown) {
     console.error(`[umuriro ${rid}]`, e)

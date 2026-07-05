@@ -321,38 +321,106 @@ export async function POST(req: Request) {
       )
     }
 
+    if (!JAVA_AUTH_URL) {
+      return NextResponse.json(
+        { ok: false, error: "Auth backend not configured (JAVA_AUTH_URL)", rid, code: "AUTH_NOT_CONFIGURED" },
+        { status: 503 }
+      )
+    }
+
     const form = new URLSearchParams()
     form.set("action", "forgot_password")
     form.set("email", emailTrimmed)
 
-    const javaUrl = new URL(JAVA_AUTH_URL)
-    javaUrl.searchParams.set("action", "forgot_password")
+    const candidates = await resolveJavaAuthEndpointForReset()
+    let lastJson: AuthJson = {}
+    let lastStatus = 502
+    let lastRaw = ""
 
-    const res = await fetch(javaUrl.toString(), {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: form.toString(),
-      cache: "no-store",
-    })
+    for (const candidate of candidates) {
+      const javaUrl = new URL(candidate)
+      javaUrl.searchParams.set("action", "forgot_password")
+      try {
+        const res = await fetch(javaUrl.toString(), {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: form.toString(),
+          cache: "no-store",
+          signal: AbortSignal.timeout(javaResetFetchTimeoutMs()),
+        })
+        const text = await res.text()
+        lastStatus = res.status
+        lastRaw = text
+        if (isInvalidAuthEndpointResponse(res.status, res.headers.get("content-type"), text)) {
+          continue
+        }
+        let json: AuthJson
+        try {
+          json = text ? JSON.parse(text) : {}
+        } catch {
+          continue
+        }
+        lastJson = json
+        if (isUnknownAction(json)) {
+          console.warn(`[api/auth/forgot-password][${rid}] forgot_password unknown action at ${candidate}`)
+          continue
+        }
+        if (json?.ok === false) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error: json.error || "Could not send reset email",
+              code: json.code,
+              rid,
+            },
+            { status: res.status >= 400 ? res.status : 400 }
+          )
+        }
+        return NextResponse.json({
+          ok: true,
+          message:
+            json?.message ||
+            "If an account exists for that email, you will receive reset instructions shortly.",
+          rid,
+        })
+      } catch (e: unknown) {
+        console.warn(
+          `[api/auth/forgot-password][${rid}] forgot_password fetch failed candidate=${candidate}: ${
+            e instanceof Error ? e.message : String(e)
+          }`
+        )
+      }
+    }
 
-    const text = await res.text()
-    let json: AuthJson
-    try {
-      json = text ? JSON.parse(text) : {}
-    } catch {
+    if (isUnknownAction(lastJson)) {
       return NextResponse.json(
-        { ok: false, error: "Bad response from auth server", raw: text.slice(0, 400), rid },
+        {
+          ok: false,
+          error:
+            "Password reset email is not enabled on the auth server (forgot_password action missing). Redeploy UserAuthServlet.",
+          code: "AUTH_UNKNOWN_ACTION",
+          rid,
+        },
+        { status: 503 }
+      )
+    }
+
+    if (lastRaw && Object.keys(lastJson).length === 0) {
+      return NextResponse.json(
+        { ok: false, error: "Bad response from auth server", raw: lastRaw.slice(0, 400), rid },
         { status: 502 }
       )
     }
 
-    return NextResponse.json({
-      ok: json?.ok !== false,
-      message:
-        json?.message ||
-        "If an account exists for that email, you will receive reset instructions shortly.",
-      rid,
-    })
+    return NextResponse.json(
+      {
+        ok: false,
+        error: lastJson?.error || "Could not reach auth server for password reset email",
+        code: lastJson?.code ?? "AUTH_RESET_EMAIL_FAIL",
+        rid,
+      },
+      { status: lastStatus >= 400 ? lastStatus : 503 }
+    )
   } catch (e: unknown) {
     console.error(`[api/auth/forgot-password][${rid}]`, e)
     return NextResponse.json(

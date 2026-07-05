@@ -57,6 +57,37 @@ export function middleware(req: NextRequest) {
     return NextResponse.rewrite(url)
   }
 
+  if (pathname === "/forgot-password") {
+    const url = req.nextUrl.clone()
+    const grandmaHost = host === "shop.ihute.rw" || host.startsWith("grandma.ihute.rw")
+    const surfaceOverride = url.searchParams.get("surface")
+    const isGrandma =
+      grandmaHost ||
+      (process.env.NODE_ENV === "development" && surfaceOverride === "grandma")
+
+    if (isGrandma) {
+      url.pathname = "/forgot-password/grandma"
+      url.searchParams.delete("surface")
+    } else {
+      url.pathname = "/forgot-password/web-form"
+    }
+    return NextResponse.rewrite(url)
+  }
+
+  if (pathname === "/reset-password") {
+    const grandmaHost = host === "shop.ihute.rw" || host.startsWith("grandma.ihute.rw")
+    const surfaceOverride = req.nextUrl.searchParams.get("surface")
+    const isGrandma =
+      grandmaHost ||
+      (process.env.NODE_ENV === "development" && surfaceOverride === "grandma")
+    if (isGrandma) {
+      const url = req.nextUrl.clone()
+      url.pathname = "/forgot-password"
+      url.searchParams.delete("surface")
+      return NextResponse.redirect(url, 307)
+    }
+  }
+
   // Grandma UI is served on shop.ihute.rw; apex /grandma was 404 for some deployments — send users to shop.
   if (host === "ihute.rw" || host === "www.ihute.rw") {
     if (pathname === "/grandma" || pathname.startsWith("/grandma/")) {

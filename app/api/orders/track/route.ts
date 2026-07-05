@@ -10,7 +10,7 @@ import {
   resolvePublicTokenToOrderId,
 } from "@/lib/order-tracking-token"
 import { mapBackendOrderStatusToTrack, type TrackOrderStatus } from "@/lib/order-status-map"
-import { normalizeTableCommandPerson } from "@/lib/table-command-whatsapp"
+import { resolveTableCommandLinePerson } from "@/lib/table-command-whatsapp"
 
 function rid() {
   return Math.random().toString(36).slice(2, 12)
@@ -276,6 +276,8 @@ export async function POST(req: NextRequest) {
           UNIT: item.UNIT,
           ORDERED_BY: item.ORDERED_BY ?? item.orderedBy,
           ID_LIST: item.ID_LIST ?? item.lineId ?? item.id_list,
+          HEURE: item.HEURE ?? item.heure ?? item.lineCreatedAt,
+          lineCreatedAt: item.lineCreatedAt ?? item.HEURE ?? item.heure,
         })),
       }
 
@@ -298,7 +300,8 @@ export async function POST(req: NextRequest) {
 
     log(requestId, "Generated status history with", statusHistory.length, "entries")
 
-    const createdAt = data.CREATED_AT || data.createdAt || new Date().toISOString()
+    const createdAt =
+      data.ORDER_PLACED_AT || data.createdAt || data.CREATED_AT || new Date().toISOString()
     const createdTime = typeof createdAt === "number" ? createdAt : new Date(createdAt).getTime()
     const estimatedHours = Number(process.env.ORDER_ESTIMATED_DELIVERY_HOURS) || 2
     const estimatedDeliveryAt =
@@ -315,6 +318,9 @@ export async function POST(req: NextRequest) {
     const effectivePaymentStatus = rawPaymentStatus
 
     const orderNote = String(data.CONDITIONS ?? data.ORDER_NOTE ?? data.orderNote ?? "").trim()
+    const orderBuyerName = String(
+      data.BUYER_OWNER ?? data.BUYER_NAME ?? data.buyerName ?? "",
+    ).trim()
 
     const itemsArray = Array.isArray(data.items)
       ? data.items.map((item: any) => {
@@ -322,6 +328,10 @@ export async function POST(req: NextRequest) {
           const unity = Number(item.UNITY_PRICE ?? item.unity_price ?? item.UNIT_PRICE ?? item.unitPrice ?? 0)
           const request = Number(item.REQUEST_PRICE ?? item.request_price ?? item.REQUESTED_PRICE ?? 0)
           const unitPrice = unity > 0 ? unity : request > 0 ? request : 0
+          const linePerson = resolveTableCommandLinePerson(
+            item.ORDERED_BY ?? item.orderedBy,
+            orderBuyerName,
+          )
           return {
           ITEM_CODE: item.ITEM_CODE || item.item_code,
           ITEM_NAME: item.ITEM_NAME || item.name || "Product",
@@ -337,10 +347,12 @@ export async function POST(req: NextRequest) {
           unitPrice,
           UNIT: item.UNIT || item.unit,
           unit: item.UNIT || item.unit,
-          ORDERED_BY: normalizeTableCommandPerson(item.ORDERED_BY ?? item.orderedBy),
-          orderedBy: normalizeTableCommandPerson(item.ORDERED_BY ?? item.orderedBy),
+          ORDERED_BY: linePerson,
+          orderedBy: linePerson,
           ID_LIST: Number(item.ID_LIST ?? item.lineId ?? item.id_list ?? 0) || undefined,
           lineId: Number(item.ID_LIST ?? item.lineId ?? item.id_list ?? 0) || undefined,
+          HEURE: item.HEURE ?? item.heure ?? item.lineCreatedAt,
+          lineCreatedAt: item.lineCreatedAt ?? item.HEURE ?? item.heure,
         }})
       : []
     const totalAmount = Number(data.AMOUNT ?? data.total ?? 0)
@@ -355,6 +367,7 @@ export async function POST(req: NextRequest) {
       buyerPhone: data.BUYER_PHONE || data.BUYER_TEL || undefined,
       buyerLocation: data.DELIVERY_LOCATION || data.BUYER_LOCATION || undefined,
       deliveryName: data.DELIVERY_NAME || data.deliveryName,
+      deliveryAmount: Number(data.DELIVERY_AMOUNT ?? data.deliveryAmount ?? 0),
       DELIVERY_AMOUNT: Number(data.DELIVERY_AMOUNT ?? data.deliveryAmount ?? 0),
       SUBTOTAL: Number(data.SUBTOTAL ?? data.subtotal ?? (Number.isFinite(totalAmount) ? totalAmount - Number(data.DELIVERY_AMOUNT ?? data.deliveryAmount ?? 0) : 0)),
       items: itemsArray,
@@ -363,6 +376,7 @@ export async function POST(req: NextRequest) {
       paymentStatus: effectivePaymentStatus,
       status: mappedStatus,
       createdAt,
+      ORDER_PLACED_AT: data.ORDER_PLACED_AT ?? data.orderPlacedAt,
       updatedAt: data.UPDATED_AT || data.updatedAt || undefined,
       statusHistory: statusHistory,
       estimatedDeliveryAt,

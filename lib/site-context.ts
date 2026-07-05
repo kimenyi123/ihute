@@ -9,3 +9,8 @@ export function registerSurface(host: string): RegisterSurface {
   if (isGrandmaHost(host)) return "grandma"
   return "web"
 }
+
+/** Same host rules as registration — Grandma uses phone+street reset; web uses email link. */
+export function passwordResetSurface(host: string): RegisterSurface {
+  return registerSurface(host)
+}

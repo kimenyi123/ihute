@@ -12,6 +12,7 @@ const PRODUCT_MODAL_UI: Record<Language, {
   errQuantity: string;
   errPrice: string;
   errCost: string;
+  errCostAboveSale: string;
   editProduct: string;
   addNewProduct: string;
   productImage: string;
@@ -51,6 +52,7 @@ const PRODUCT_MODAL_UI: Record<Language, {
     errQuantity: "Quantity must be 0 or greater",
     errPrice: "Price must be greater than 0",
     errCost: "Cost must be 0 or greater",
+    errCostAboveSale: "Purchase price cannot be greater than selling price",
     editProduct: "Edit Product",
     addNewProduct: "Add New Product",
     productImage: "Product image",
@@ -71,8 +73,8 @@ const PRODUCT_MODAL_UI: Record<Language, {
     meters: "Meters",
     boxes: "Boxes",
     packs: "Packs",
-    salePrice: "Sale Price (RWF) *",
-    costPrice: "Cost Price (RWF)",
+    salePrice: "Selling price (RWF) *",
+    costPrice: "Purchase price (RWF)",
     description: "Description",
     optionalDescription: "Optional product description",
     cancel: "Cancel",
@@ -90,6 +92,7 @@ const PRODUCT_MODAL_UI: Record<Language, {
     errQuantity: "Ingano igomba kuba 0 cyangwa irenga",
     errPrice: "Igiciro kigomba kurenza 0",
     errCost: "Igiciro cy'igurisha kigomba kuba 0 cyangwa kirenga",
+    errCostAboveSale: "Igiciro cy'igurisha ntigishobora kurenza igiciro cyo kugurisha",
     editProduct: "Hindura Igicuruzwa",
     addNewProduct: "Ongeraho Igicuruzwa Gishya",
     productImage: "Ishusho y'igicuruzwa",
@@ -111,7 +114,7 @@ const PRODUCT_MODAL_UI: Record<Language, {
     boxes: "Amasanduku",
     packs: "Amapaki",
     salePrice: "Igiciro cyo kugurisha (RWF) *",
-    costPrice: "Igiciro cy'igurisha (RWF)",
+    costPrice: "Igiciro cy'ubuguzi (RWF)",
     description: "Ibisobanuro",
     optionalDescription: "Ibisobanuro by'igicuruzwa (ntibisabwa)",
     cancel: "Hagarika",
@@ -129,6 +132,7 @@ const PRODUCT_MODAL_UI: Record<Language, {
     errQuantity: "La quantité doit être 0 ou supérieure",
     errPrice: "Le prix doit être supérieur à 0",
     errCost: "Le coût doit être 0 ou supérieur",
+    errCostAboveSale: "Le coût ne peut pas être supérieur au prix de vente",
     editProduct: "Modifier le produit",
     addNewProduct: "Ajouter un nouveau produit",
     productImage: "Image du produit",
@@ -150,7 +154,7 @@ const PRODUCT_MODAL_UI: Record<Language, {
     boxes: "Boîtes",
     packs: "Paquets",
     salePrice: "Prix de vente (RWF) *",
-    costPrice: "Prix de revient (RWF)",
+    costPrice: "Prix d'achat (RWF)",
     description: "Description",
     optionalDescription: "Description du produit (facultatif)",
     cancel: "Annuler",
@@ -175,7 +179,7 @@ export interface ProductFormData {
   itemCode: string;
   quantity: number;
   price: number;
-  cost?: number;
+  cost: number;
   description?: string;
   unit?: string;
   /** Set when user picks a new image; uploaded after product save via `/api/images/overrides`. */
@@ -310,8 +314,10 @@ export default function AddProductModal({
       newErrors.price = ui.errPrice;
     }
 
-    if (formData.cost && formData.cost < 0) {
+    if ((formData.cost ?? 0) < 0) {
       newErrors.cost = ui.errCost;
+    } else if (formData.cost > formData.price) {
+      newErrors.cost = ui.errCostAboveSale;
     }
 
     // Warn when selling price is below cost price 
@@ -361,6 +367,14 @@ export default function AddProductModal({
     }
   };
 
+  const hasPurchasePriceValidationError =
+    formData.cost < 0 || formData.cost > formData.price;
+
+  const isSubmitDisabled =
+    saving ||
+    Object.keys(errors).length > 0 ||
+    hasPurchasePriceValidationError;
+
   /** Digits only, strip leading zeros; empty → 0 (field shows blank when stock is 0). */
   const parseQuantityInput = (raw: string): number => {
     const digits = raw.replace(/\D/g, "")
@@ -394,9 +408,7 @@ export default function AddProductModal({
           {/* Product image (optional) */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">{ui.productImage}</label>
-            <p className="mb-2 text-xs text-gray-500">
-              {ui.imageHint}
-            </p>
+            <p className="mb-2 text-xs text-gray-500">{ui.imageHint}</p>
             <input
               ref={fileInputRef}
               type="file"
@@ -443,9 +455,7 @@ export default function AddProductModal({
                   <span className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-100 text-blue-700">
                     <ImagePlus className="h-6 w-6" aria-hidden />
                   </span>
-                  <span className="text-center text-sm font-medium text-gray-800">
-                    {ui.tapToDrop}
-                  </span>
+                  <span className="text-center text-sm font-medium text-gray-800">{ui.tapToDrop}</span>
                   <span className="text-center text-xs text-gray-500">{ui.upTo}</span>
                 </>
               )}
@@ -476,9 +486,7 @@ export default function AddProductModal({
 
           {/* Product Name */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              {ui.productName}
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">{ui.productName}</label>
             <input
               type="text"
               required
@@ -497,9 +505,7 @@ export default function AddProductModal({
 
           {/* Product Code */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              {ui.productCode}
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">{ui.productCode}</label>
             <input
               type="text"
               required
@@ -519,9 +525,7 @@ export default function AddProductModal({
           {/* Quantity and Unit */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                {ui.quantity}
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{ui.quantity}</label>
               <input
                 type="text"
                 inputMode="numeric"
@@ -541,9 +545,7 @@ export default function AddProductModal({
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                {ui.unit}
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{ui.unit}</label>
               <select
                 value={formData.unit}
                 onChange={(e) => handleInputChange('unit', e.target.value)}
@@ -563,16 +565,14 @@ export default function AddProductModal({
           {/* Price and Cost */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                {ui.salePrice}
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{ui.salePrice}</label>
               <input
                 type="number"
                 required
                 min="0"
                 step="0.01"
-                value={formData.price}
-                onChange={(e) => handleInputChange('price', parseFloat(e.target.value) || 0)}
+                value={formData.price === 0 ? "" : String(formData.price)}
+                onChange={(e) => handleInputChange('price', e.target.value === "" ? 0 : parseFloat(e.target.value))}
                 className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                   errors.price ? 'border-red-500' : 'border-gray-300'
                 }`}
@@ -590,15 +590,13 @@ export default function AddProductModal({
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                {ui.costPrice}
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{ui.costPrice}</label>
               <input
                 type="number"
                 min="0"
                 step="0.01"
-                value={formData.cost}
-                onChange={(e) => handleInputChange('cost', parseFloat(e.target.value) || 0)}
+                value={formData.cost === 0 ? "" : String(formData.cost ?? 0)}
+                onChange={(e) => handleInputChange('cost', e.target.value === "" ? 0 : parseFloat(e.target.value) || 0)}
                 className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                   errors.cost ? 'border-red-500' : 'border-gray-300'
                 }`}
@@ -613,9 +611,7 @@ export default function AddProductModal({
 
           {/* Description */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              {ui.description}
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">{ui.description}</label>
             <textarea
               value={formData.description}
               onChange={(e) => handleInputChange('description', e.target.value)}
@@ -639,7 +635,7 @@ export default function AddProductModal({
             <button
               type="submit"
               className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400 transition"
-              disabled={saving}
+              disabled={isSubmitDisabled}
             >
               {saving ? (
                 <>

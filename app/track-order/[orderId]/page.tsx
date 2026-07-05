@@ -20,8 +20,15 @@ import {
   Eye,
   XCircle,
 } from "lucide-react"
-import { formatPaymentMethod } from "@/lib/payment-utils"
+import { formatPaymentMethod, isCashOnDelivery } from "@/lib/payment-utils"
+import {
+  buildOrderReceiptViewModel,
+  buildOrderWhatsAppMessageFromViewModel,
+  isTableCommandOrder,
+  resolveTableCommandLinePerson,
+} from "@/lib/table-command-whatsapp"
 import { RatingModal } from "@/components/RatingModal"
+import { sellerAccountFromOrder } from "@/lib/order-seller-account"
 import { useOrderTracking } from "@/hooks/useOrderTracking"
 import { DeliveryCountdown } from "@/components/delivery-countdown"
 import { unitMeaningfulForDisplay } from "@/lib/product-unit-display"
@@ -60,6 +67,13 @@ type OrderDetail = {
     qty: number
     unitPrice: number
     unit?: string
+    orderedBy?: string
+    ORDERED_BY?: string
+    lineId?: number
+    ID_LIST?: number
+    lineCreatedAt?: number | string | null
+    HEURE?: number | string | null
+    heure?: number | string | null
   }>
   total: number
   paymentMethod: string
@@ -67,6 +81,9 @@ type OrderDetail = {
   status: OrderStatus
   /** Raw DB / servlet value (e.g. INVOICE>>LOADED) — shown verbatim when present */
   ORDER_STATUS?: string
+  IS_TABLE_COMMAND?: boolean
+  TABLE_NAME?: string
+  TABLE_LOCATION?: string
   createdAt: string
   estimatedDeliveryAt?: string
   driverPhone?: string
@@ -277,20 +294,29 @@ function formatInvoiceAmount(amount: number): string {
   return `${Number(amount || 0).toLocaleString()} RWF`
 }
 
+function orderFinancials(order: OrderDetail) {
+  const logisticsFeeValue = Number(order.deliveryAmount ?? (order as { DELIVERY_AMOUNT?: number }).DELIVERY_AMOUNT ?? 0)
+  const subtotalValue = order.items.reduce(
+    (sum, item) => sum + Number(item.qty || 0) * Number(item.unitPrice || 0),
+    0,
+  )
+  const dbTotal = Number(order.total || 0)
+  const computedTotal = subtotalValue + logisticsFeeValue
+  const displayTotal =
+    logisticsFeeValue > 0 && dbTotal > 0 && dbTotal < computedTotal ? computedTotal : dbTotal || computedTotal
+  const discountValue = Math.max(0, subtotalValue + logisticsFeeValue - displayTotal)
+  return { logisticsFeeValue, subtotalValue, displayTotal, discountValue }
+}
+
 function buildInvoiceText(order: OrderDetail): string {
   const lines = order.items.map((item, idx) => {
     const lineTotal = Number(item.qty || 0) * Number(item.unitPrice || 0)
     return `${idx + 1}. ${item.name} | Qty: ${item.qty} | Amount: ${Number(item.unitPrice || 0).toLocaleString()} RWF | Total: ${lineTotal.toLocaleString()} RWF`
   })
   const logisticsLabel = order.deliveryName || "Not specified"
-  const logisticsFeeValue = Number(order.deliveryAmount ?? 0)
-  const subtotalValue = order.items.reduce(
-    (sum, item) => sum + Number(item.qty || 0) * Number(item.unitPrice || 0),
-    0,
-  )
-  const discountValue = Math.max(0, subtotalValue + logisticsFeeValue - Number(order.total || 0))
+  const { logisticsFeeValue, subtotalValue, displayTotal, discountValue } = orderFinancials(order)
   const paidValue = String(order.paymentStatus || "").toLowerCase().includes("paid")
-    ? Number(order.total || 0)
+    ? displayTotal
     : 0
   const followUrl = `${process.env.NEXT_PUBLIC_SHOP_URL || process.env.NEXT_PUBLIC_SITE_URL || "https://shop.ihute.rw"}/track-order/${encodeURIComponent(order.orderId)}`
 
@@ -309,7 +335,7 @@ function buildInvoiceText(order: OrderDetail): string {
     "",
     `Subtotal: ${formatInvoiceAmount(subtotalValue)}`,
     `Discount: ${formatInvoiceAmount(discountValue)}`,
-    `Total: ${formatInvoiceAmount(Number(order.total || 0))}`,
+    `Total: ${formatInvoiceAmount(displayTotal)}`,
     `Paid: ${formatInvoiceAmount(paidValue)}`,
     `Paid at: ${formatPaymentMethod(order.paymentMethod)}`,
     "",
@@ -603,56 +629,55 @@ function TrackOrderPageInner() {
     buyerAddressOverride !== undefined ? buyerAddressOverride : (order.buyerLocation ?? "")
   const canEditDeliveryAddress = order.status !== "delivered" && order.status !== "cancelled"
 
-  // Format items for WhatsApp message
-  const formatCurrency = (amount: number) => `${amount.toLocaleString()} RWF`
+  const { logisticsFeeValue, subtotalValue, displayTotal, discountValue } = orderFinancials(order)
 
-  // Build styled WhatsApp message
-  const padRight = (s: string, w: number) => (s.length >= w ? s : s + ' '.repeat(w - s.length))
-  const padLeft = (s: string, w: number) => (s.length >= w ? s : ' '.repeat(w - s.length) + s)
-  const trunc = (s: string, w: number) => (s.length > w ? s.slice(0, w - 1) + '…' : s)
-
-  const NAME_W = 44, QTY_W = 5, AMT_W = 14
-  const header = padRight('Product name', NAME_W) + padLeft('Qty', QTY_W) + padLeft('Amount', AMT_W)
-  const sep = '-'.repeat(NAME_W + QTY_W + AMT_W)
-
-  const lines = order.items.map((item) => {
-    const nm = padRight(trunc(item.name.replace(/\s+/g, ' ').trim(), NAME_W), NAME_W)
-    const qt = padLeft(String(item.qty), QTY_W)
-    const amt = padLeft(formatCurrency(item.qty * item.unitPrice), AMT_W)
-    return nm + qt + amt
-  })
-
-  // Determine paid amount for the order
-  const isPaid = order.paymentMethod && !order.paymentMethod.toLowerCase().includes('delivery')
-  const paidAmount = isPaid ? order.total : 0
+  const isPaid =
+    !isCashOnDelivery(order.paymentMethod) &&
+    (String(order.paymentStatus ?? "").toLowerCase().includes("paid") ||
+      order.paymentMethod.toUpperCase().includes("PAID_"))
+  const paidAmount = isPaid ? displayTotal : 0
 
   const shareTrackSlug = publicToken || orderId
   const internalOrderNo = String(order.orderId ?? orderId)
   const publicShopBase = (process.env.NEXT_PUBLIC_SHOP_URL || process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://shop.ihute.rw").replace(/\/$/, "")
+  const trackLink = `${publicShopBase}/track-order/${encodeURIComponent(shareTrackSlug)}${fromGrandma ? "?from=grandma" : ""}`
 
-  const whatsappMessage = [
-    'Order',
-    '',
-    `Shop: ${order.sellerName}`,
-    displayBuyerLocation.trim() ? `Location: ${displayBuyerLocation.trim()}` : "",
-    `Order ID: ${internalOrderNo}`,
-    '',
-    '```',
-    header,
-    sep,
-    ...lines,
-    '```',
-    '',
-    `Total: ${formatCurrency(order.total)}`,
-    `Discount: ${formatCurrency(0)}`,
-    `Paid: ${formatCurrency(paidAmount)}`,
-    '',
-    `Paid at: ${formatPaymentMethod(order.paymentMethod)}`,
-    `Message: ${internalOrderNo ? `ORDER ${internalOrderNo}` : '-'}`,
-    `My phone: ${order.buyerPhone || ''}`,
-    '',
-    `Follow: ${publicShopBase}/track-order/${encodeURIComponent(shareTrackSlug)}${fromGrandma ? "?from=grandma" : ""}`
-  ].filter(Boolean).join("\n")
+  const whatsappMessage = buildOrderWhatsAppMessageFromViewModel(
+    buildOrderReceiptViewModel({
+      shop: order.sellerName,
+      location:
+        displayBuyerLocation ||
+        (order.TABLE_NAME ? `Table: ${order.TABLE_NAME}` : undefined),
+      orderId: internalOrderNo,
+      defaultOrderedBy: (order.buyerName ?? "").trim() || undefined,
+      items: order.items.map((item) => ({
+        name: item.name,
+        qty: item.qty,
+        unitPrice: item.unitPrice,
+        orderedBy: resolveTableCommandLinePerson(
+          item.orderedBy ?? item.ORDERED_BY,
+          order.buyerName,
+        ),
+        lineId: item.lineId ?? item.ID_LIST,
+        lineCreatedAt:
+          item.lineCreatedAt ?? item.HEURE ?? item.heure ?? order.createdAt,
+      })),
+      subtotal: subtotalValue,
+      total: displayTotal,
+      discount: discountValue,
+      paid: paidAmount,
+      paidAt: formatPaymentMethod(order.paymentMethod),
+      reference: internalOrderNo ? `ORDER ${internalOrderNo}` : undefined,
+      myPhone: order.buyerPhone,
+      link: trackLink,
+      isTableCommand: isTableCommandOrder({
+        IS_TABLE_COMMAND: order.IS_TABLE_COMMAND,
+        TABLE_NAME: order.TABLE_NAME,
+        buyerLocation: displayBuyerLocation,
+      }),
+      logisticsFee: logisticsFeeValue,
+    }),
+  )
 
   const whatsappHref = sellerPhoneNormalized ? waHrefFor(sellerPhoneNormalized, whatsappMessage) : ""
 
@@ -1128,7 +1153,7 @@ function TrackOrderPageInner() {
               <div className="mt-4 pt-4 border-t">
                 <div className="flex justify-between items-center">
                   <p className="text-lg font-bold">Total</p>
-                  <p className="text-lg font-bold">{order.total.toLocaleString()} RWF</p>
+                  <p className="text-lg font-bold">{displayTotal.toLocaleString()} RWF</p>
                 </div>
               </div>
             </CardContent>
@@ -1256,7 +1281,7 @@ function TrackOrderPageInner() {
       {order && showRatingModal && (
         <RatingModal
           orderId={String(order.orderId)}
-          sellerId={order.sellerAccount || ""}
+          sellerId={sellerAccountFromOrder(order as Record<string, unknown>)}
           sellerName={order.sellerName}
           buyerPhone={order.buyerPhone || ""}
           items={ratingItems}

@@ -39,6 +39,9 @@ export async function POST(req: NextRequest) {
     ).trim()
     const deliveryName = String(body.deliveryName ?? body.DELIVERY_NAME ?? "").trim()
     const deliveryAmount = Number(body.deliveryAmount ?? body.DELIVERY_AMOUNT ?? 0)
+    const grandTotal =
+      (Number.isFinite(subtotal) ? subtotal : 0) +
+      (Number.isFinite(deliveryAmount) ? deliveryAmount : 0)
     const payload = {
       buyerEmail: String(body.buyerEmail ?? "").trim(),
       buyerName: String(body.buyerName ?? "").trim(),
@@ -57,6 +60,7 @@ export async function POST(req: NextRequest) {
       ...(deliveryName ? { deliveryName, DELIVERY_NAME: deliveryName } : {}),
       ...(Number.isFinite(deliveryAmount) ? { deliveryAmount, DELIVERY_AMOUNT: deliveryAmount } : {}),
       ...(Number.isFinite(subtotal) && subtotal > 0 ? { subtotal } : {}),
+      ...(grandTotal > 0 ? { amount: Math.round(grandTotal), total: Math.round(grandTotal) } : {}),
     }
 
     const resp = await fetch(ordersUrl.toString(), {

@@ -17,6 +17,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { RadioOptionCard } from "@/components/ui/radio-option-card"
 import { Label } from "@/components/ui/label"
 import { formatPaymentMethod } from "@/lib/payment-utils"
+import { buildOrderWhatsAppMessage } from "@/lib/table-command-whatsapp"
 import { useToast } from "@/components/ui/use-toast"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
@@ -274,6 +275,14 @@ function CartSummaryBody() {
   // Table command mode
   const { isInTableCommand, activeSession, leaveTableCommand, lockTableCommand, canCloseTable, closeTableCommand, createTableCommand, updateTableShareData } = useTableCommandStore()
 
+  /** Active table session OR shop-with-me `?table=` QR (tableInfo in cart). */
+  const isTableCheckout =
+    isInTableCommand() || Boolean((tableInfo?.tableNumber ?? "").trim())
+  const tableNameFromContext =
+    activeSession?.tableName?.trim() || tableInfo?.tableNumber?.trim() || ""
+  const guestNameForTable = () =>
+    (anonymousName || activeSession?.userName || tableInfo?.customerName || "").trim()
+
   // ✅ Track if we've pre-filled the name (to avoid overwriting user edits)
   const hasPrefilledName = useRef(false)
   const lastTableSession = useRef<string | null>(null)
@@ -289,21 +298,31 @@ function CartSummaryBody() {
       lastTableSession.current = currentSessionId
     }
 
-    if (!hasPrefilledName.current && checkoutMode === "anonymous" && isInTableCommand()) {
+    if (!hasPrefilledName.current && checkoutMode === "anonymous" && isTableCheckout) {
       const guestName = getOrCreateGuestName()
       const tableUserName = activeSession?.userName
-      const finalName = tableUserName && tableUserName !== "Guest" ? tableUserName : guestName
+      const isTableNameAsUser =
+        Boolean(tableUserName && activeSession?.tableName) &&
+        tableUserName!.trim().toLowerCase() === activeSession!.tableName.trim().toLowerCase()
+      const fromTableInfo = (tableInfo?.customerName ?? "").trim()
+      const finalName =
+        fromTableInfo ||
+        (tableUserName && tableUserName !== "Guest" && !isTableNameAsUser
+          ? tableUserName
+          : guestName !== "Guest"
+            ? guestName
+            : "")
 
-      if (finalName && finalName !== "Guest") {
+      if (finalName) {
         setAnonymousName(finalName)
         hasPrefilledName.current = true
       }
     }
-  }, [checkoutMode, activeSession])
+  }, [checkoutMode, activeSession, isTableCheckout, tableInfo?.customerName])
 
-  // Pre-fill from tableInfo only when NOT a table order (e.g. delivery from shop-with-me)
+  // Pre-fill address from tableInfo for non-table delivery (e.g. shop-with-me with address only)
   useEffect(() => {
-    if (checkoutMode === "anonymous" && tableInfo && !isInTableCommand()) {
+    if (checkoutMode === "anonymous" && tableInfo && !isTableCheckout) {
       if (tableInfo.customerName && !anonymousName) {
         setAnonymousName(tableInfo.customerName)
       }
@@ -311,9 +330,10 @@ function CartSummaryBody() {
         setDeliveryLocation(tableInfo.customerAddress)
       }
     }
-  }, [checkoutMode, tableInfo, isInTableCommand])
+  }, [checkoutMode, tableInfo, isTableCheckout])
 
   const [tableCommandDialogOpen, setTableCommandDialogOpen] = useState(false)
+  const [tableCommandJoinOnly, setTableCommandJoinOnly] = useState(false)
   const [tableCommandSeller, setTableCommandSeller] = useState<{ id: string; name: string } | null>(null)
   const [showCloseTableDialog, setShowCloseTableDialog] = useState(false)
   const [shareModalOpen, setShareModalOpen] = useState(false)
@@ -529,7 +549,7 @@ function CartSummaryBody() {
     paymentName: string,
     paymentStatus?: "pending" | "paid",
   ) {
-    if (paymentName === "PAY_ON_DELIVERY") {
+    if (paymentName === "PAY_ON_DELIVERY" || paymentName === "PAY_AT_TABLE") {
       setPaymentStatus(supplierId, "unpaid")
       return
     }
@@ -553,24 +573,58 @@ function CartSummaryBody() {
       })
       const orderId = orderIds[g.supplierId]
       const hasUssdTarget = Boolean(getMomoForGroup(g))
-      const isPaid = getPaymentStatus(g.supplierId) === "paid"
-      const message = buildWhatsAppMessageStyled({
-        shop: g.supplierName,
-        location: g.supplierLocation,
-        orderId,
-        items,
-        total: g.subtotal,
-        discount: 0,
-        paid: isPaid ? g.subtotal : 0,
-        paidAt: isPaid ? "MTN MoMo" : (hasUssdTarget ? "Pending (MoMo)" : "Pay on delivery"),
-        reference: orderId ? `ORDER ${orderId}` : undefined,
-        myPhone,
-        link: orderId ? `${(process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw").replace(/\/Trading\/?$/, "")}/orders/${orderId}` : undefined,
-      })
+      const paymentState = getPaymentStatus(g.supplierId)
+      const isPaid = paymentState === "paid"
+      const inTableForSeller =
+        isTableCheckout && (activeSession?.locationId === g.supplierId || tableInfo?.shopId === g.supplierId)
+      const siteBase = (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw").replace(/\/Trading\/?$/, "")
+      const trackLink = orderId ? `${siteBase}/track-order/${encodeURIComponent(orderId)}` : undefined
+      const guestName = guestNameForTable()
+      const message = orderId
+        ? buildOrderWhatsAppMessage({
+            shop: g.supplierName,
+            location: inTableForSeller
+              ? `Table: ${activeSession?.tableName || ""}`
+              : g.supplierLocation,
+            orderId,
+            items: g.items.map((it) => ({
+              name: stripTrailingPriceParen(it.name || "Product"),
+              qty: it.qty,
+              unitPrice: it.price || 0,
+              orderedBy: inTableForSeller ? guestName : undefined,
+            })),
+            total: g.subtotal,
+            discount: 0,
+            paid: isPaid ? g.subtotal : 0,
+            paidAt: isPaid
+              ? "MTN MoMo"
+              : inTableForSeller
+                ? formatPaymentMethod("PAY_AT_TABLE")
+                : hasUssdTarget
+                  ? "Pending (MoMo)"
+                  : formatPaymentMethod("PAY_ON_DELIVERY"),
+            reference: `ORDER ${orderId}`,
+            myPhone: myPhone,
+            link: trackLink,
+            isTableCommand: inTableForSeller,
+          })
+        : buildWhatsAppMessageStyled({
+            shop: g.supplierName,
+            location: g.supplierLocation,
+            orderId,
+            items,
+            total: g.subtotal,
+            discount: 0,
+            paid: isPaid ? g.subtotal : 0,
+            paidAt: isPaid ? "MTN MoMo" : (hasUssdTarget ? "Pending (MoMo)" : "Pay on delivery"),
+            reference: orderId ? `ORDER ${orderId}` : undefined,
+            myPhone,
+            link: trackLink,
+          })
       const href = phone ? waHrefFor(phone, message) : ""
       return { supplierId: g.supplierId, phone, message, href }
     })
-  }, [groups, orderIds, orderPhones, myPhone, getPaymentStatus])
+  }, [groups, orderIds, orderPhones, myPhone, getPaymentStatus, isInTableCommand, activeSession, anonymousName])
 
   const buildGroupShareLink = (g: ReturnType<typeof getGroupsBySeller>[number]) => {
     const shopSlug = slugifyShopName(g.supplierName || g.supplierId || "shop");
@@ -610,24 +664,9 @@ function CartSummaryBody() {
   }
 
   // Open payment method selection
-  const openPaymentMethod = (supplierId: string) => {
-    if (!requireLogin()) return
-    const g = groups.find(x => x.supplierId === supplierId)
+  const proceedToPaymentForSeller = (supplierId: string) => {
+    const g = groups.find((x) => x.supplierId === supplierId)
     if (!g) return
-
-    // Bar/resto: from name/location keywords OR from shop-with-me — always show create/join table option (whether already in a table or not)
-    const isBar =
-      g.isBarResto === true ||
-      isBarOrRestaurant(g.supplierName) ||
-      isBarOrRestaurant(g.supplierLocation || "")
-
-    if (isBar) {
-      setTableCommandSeller({ id: supplierId, name: g.supplierName })
-      setTableCommandDialogOpen(true)
-      return
-    }
-
-    // Otherwise proceed with regular checkout
     const hasUssdTarget = Boolean(getMomoForGroup(g))
     setSelectedSeller(supplierId)
     setUrubutoPhone(
@@ -641,9 +680,42 @@ function CartSummaryBody() {
       const preview = isUrubutoCheckoutPreviewForSeller(supplierId)
       const show = r.eligible || preview
       setUrubutoEligibleBySeller((prev) => ({ ...prev, [supplierId]: r.eligible }))
-      setPaymentMethod(show ? "urubuto" : hasUssdTarget ? "momo" : "cod")
+      setPaymentMethod(isInTableCommand() ? "cod" : show ? "urubuto" : hasUssdTarget ? "momo" : "cod")
     })
     setPaymentMethodOpen(true)
+  }
+
+  const openPaymentMethod = (supplierId: string) => {
+    if (!requireLogin()) return
+    const g = groups.find(x => x.supplierId === supplierId)
+    if (!g) return
+
+    // Bar/resto: from name/location keywords OR from shop-with-me
+    const isBar =
+      g.isBarResto === true ||
+      isBarOrRestaurant(g.supplierName) ||
+      isBarOrRestaurant(g.supplierLocation || "")
+
+    if (isBar) {
+      const sharedTableName = (tableInfo?.tableNumber || "").trim()
+      const alreadyInTable =
+        isInTableCommand() &&
+        activeSession?.locationId === supplierId &&
+        (!sharedTableName ||
+          activeSession.tableName.trim().toLowerCase() === sharedTableName.toLowerCase())
+
+      if (alreadyInTable) {
+        proceedToPaymentForSeller(supplierId)
+        return
+      }
+
+      setTableCommandSeller({ id: supplierId, name: g.supplierName })
+      setTableCommandJoinOnly(Boolean(sharedTableName))
+      setTableCommandDialogOpen(true)
+      return
+    }
+
+    proceedToPaymentForSeller(supplierId)
   }
 
   // Handle payment method selection
@@ -656,7 +728,7 @@ function CartSummaryBody() {
       return
     }
 
-    if (checkoutMode === "anonymous" && isInTableCommand() && !anonymousName.trim()) {
+    if (checkoutMode === "anonymous" && isTableCheckout && !guestNameForTable()) {
       alert("Please enter your name so the supplier knows who ordered")
       return
     }
@@ -691,19 +763,21 @@ function CartSummaryBody() {
     paymentName: string,
     trackToken?: string,
   ): URLSearchParams {
+    const tableGuestName = isTableCheckout ? guestNameForTable() : ""
     const params = new URLSearchParams({
       orderId,
       sellerName: g.supplierName,
       sellerPhone: sellerTel || getSellerTelForOrder(g) || "",
       buyerPhone:
         checkoutMode === "anonymous"
-          ? isInTableCommand()
+          ? isTableCheckout
             ? anonymousPhone
             : ""
           : user?.phone || "",
       total: String(g.subtotal),
       paymentMethod: paymentName,
     })
+    if (tableGuestName) params.set("buyerName", tableGuestName)
     if (trackToken) params.set("trackToken", trackToken)
     return params
   }
@@ -712,7 +786,7 @@ function CartSummaryBody() {
   const placeOrder = async (
     g: ReturnType<typeof getGroupsBySeller>[number],
     opts: {
-      paymentName: "PAID_MTN_MOMO" | "PAID_AIRTEL_MOMO" | "PAID_URUBUTO" | "PAY_ON_DELIVERY";
+      paymentName: "PAID_MTN_MOMO" | "PAID_AIRTEL_MOMO" | "PAID_URUBUTO" | "PAY_ON_DELIVERY" | "PAY_AT_TABLE";
       buyerPhone?: string;
       buyerLocation?: string;
       reference?: string;
@@ -733,6 +807,7 @@ function CartSummaryBody() {
           String(it.itemCode ?? "").trim() ||
           String(it.item_key_words ?? "").trim() ||
           String(it.id ?? "").trim()
+        const lineOrderedBy = isTableCheckout ? guestNameForTable() : ""
         return {
           name: it.name,
           qty: it.qty,
@@ -740,6 +815,7 @@ function CartSummaryBody() {
           unitPrice: it.price,
           unit: it.unit ?? "",
           itemCode: code,
+          ...(lineOrderedBy ? { orderedBy: lineOrderedBy } : {}),
           ...(it.itemEmballage
             ? { item_emballage: it.itemEmballage, ITEM_EMBALLAGE: it.itemEmballage }
             : {}),
@@ -758,8 +834,8 @@ function CartSummaryBody() {
 
       // Buyer name: for table orders use user-entered name only (so "Ordered By" shows person, not table name)
       const isOrderingFromOwnShop = Boolean(user?.ishyigaAccount && g.supplierId && user.ishyigaAccount === g.supplierId);
-      const resolvedBuyerName = isInTableCommand()
-        ? (checkoutMode === "anonymous" ? (anonymousName?.trim() || "Guest") : (user?.name || "Guest"))
+      const resolvedBuyerName = isTableCheckout
+        ? (checkoutMode === "anonymous" ? guestNameForTable() || "Guest" : (user?.name || "Guest"))
         : checkoutMode === "anonymous"
           ? (anonymousName?.trim() || "Guest")
           : (tableInfo?.customerName && String(tableInfo.customerName).trim()) ||
@@ -767,6 +843,9 @@ function CartSummaryBody() {
             anonymousName ||
             user?.name ||
             "Guest"
+
+      const tableBuyerLocation =
+        isTableCheckout && tableNameFromContext ? `Table: ${tableNameFromContext}` : undefined
 
       let guestBuyerAccount = getGuestBuyerAccount()
       if (checkoutMode === "anonymous") {
@@ -784,11 +863,14 @@ function CartSummaryBody() {
           buyerPhone:
             opts.buyerPhone ??
             (checkoutMode === "anonymous"
-              ? isInTableCommand()
+              ? isTableCheckout
                 ? anonymousPhone
                 : ""
               : user?.phone || ""),
-          buyerLocation: opts.buyerLocation || (checkoutMode === "anonymous" ? deliveryLocation : user?.location || "NA"),
+          buyerLocation:
+            opts.buyerLocation ||
+            tableBuyerLocation ||
+            (checkoutMode === "anonymous" ? deliveryLocation : user?.location || "NA"),
           buyerName: String(resolvedBuyerName || "").trim() || "Guest",
           sellerAccount: g.supplierId,
           sellerName: g.supplierName,
@@ -800,9 +882,9 @@ function CartSummaryBody() {
           currency: "RWF",
           items,
           // Table command information
-          isTableCommand: isInTableCommand(),
-          tableName: activeSession?.tableName,
-          tableLocation: activeSession?.locationName,
+          isTableCommand: isTableCheckout,
+          tableName: tableNameFromContext || undefined,
+          tableLocation: activeSession?.locationName || tableInfo?.shopName || g.supplierName,
         }),
       })
 
@@ -882,7 +964,7 @@ function CartSummaryBody() {
         }
 
         // Bar/resto table: every guest goes to order-success (track link), cart cleared for this seller.
-        if (isInTableCommand() && currentOrderIsBarTable) {
+        if (isTableCheckout && currentOrderIsBarTable) {
           await clearSubmittedSupplier(g.supplierId)
           if (orderId) {
             const params = buildOrderSuccessParams(
@@ -970,14 +1052,21 @@ function CartSummaryBody() {
     const g = groups.find(x => x.supplierId === codForSeller)
     if (!g) { setCodOpen(false); return }
 
+    if (isTableCheckout && checkoutMode === "anonymous" && !guestNameForTable()) {
+      alert("Please enter your name so the supplier knows who ordered")
+      return
+    }
+
     // Check if Pangolin's Burrows - use table/location instead of delivery input
     const isPangolins = g.supplierName?.toUpperCase().includes("PANGOLIN")
     const location = isPangolins
-      ? (isInTableCommand() ? `Table: ${activeSession?.tableName}` : g.supplierLocation || "In-person pickup")
+      ? (isTableCheckout && tableNameFromContext
+          ? `Table: ${tableNameFromContext}`
+          : g.supplierLocation || "In-person pickup")
       : deliveryLocation
 
     await placeOrder(g, {
-      paymentName: "PAY_ON_DELIVERY",
+      paymentName: isTableCheckout ? "PAY_AT_TABLE" : "PAY_ON_DELIVERY",
       buyerPhone: contactPhone,
       buyerLocation: location,
       reference: `COD_${Date.now()}`,
@@ -1342,15 +1431,29 @@ function CartSummaryBody() {
           </DialogHeader>
 
           <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-4">
-          {/* ✅ Customer Info Banner (from shop-with-me) */}
-          {tableInfo && tableInfo.customerName && (
-            <div className="rounded-lg bg-blue-50 border border-blue-200 p-3">
+          {/* Table from QR (no guest name yet) */}
+          {tableInfo?.tableNumber && !isInTableCommand() && (
+            <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 mb-3">
+              <div className="flex items-center gap-2">
+                <Users className="h-4 w-4 text-blue-600" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium">Table invite</p>
+                  <p className="text-xs text-muted-foreground font-mono">
+                    Table {tableInfo.tableNumber}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+          {tableInfo?.customerName && !tableInfo?.tableNumber && (
+            <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 mb-3">
               <div className="flex items-center gap-2">
                 <Users className="h-4 w-4 text-blue-600" />
                 <div className="flex-1">
                   <p className="text-sm font-medium">Delivery Info</p>
                   <p className="text-xs text-muted-foreground">
-                    {tableInfo.customerName} - {tableInfo.customerAddress}
+                    {tableInfo.customerName}
+                    {tableInfo.customerAddress ? ` — ${tableInfo.customerAddress}` : ""}
                   </p>
                 </div>
               </div>
@@ -1415,7 +1518,7 @@ function CartSummaryBody() {
           {/* Guest: table orders still need a name for "Ordered By"; otherwise show seller phone for tracking */}
           {checkoutMode === "anonymous" && (
             <div className="space-y-3 pb-4 border-b">
-              {isInTableCommand() ? (
+              {isTableCheckout ? (
                 <div className="space-y-1">
                   <Label className="text-sm font-medium">Your Name *</Label>
                   <Input
@@ -2108,15 +2211,10 @@ function CartSummaryBody() {
           open={tableCommandDialogOpen}
           onOpenChange={(open) => {
             setTableCommandDialogOpen(open)
+            if (!open) setTableCommandJoinOnly(false)
             // If dialog closed after creating/joining table, proceed to payment method
             if (!open && isInTableCommand() && tableCommandSeller) {
-              const g = groups.find(x => x.supplierId === tableCommandSeller.id)
-              if (g) {
-                const hasUssdTarget = Boolean(getMomoForGroup(g))
-                setSelectedSeller(tableCommandSeller.id)
-                setPaymentMethod(hasUssdTarget ? "momo" : "cod")
-                setPaymentMethodOpen(true)
-              }
+              proceedToPaymentForSeller(tableCommandSeller.id)
             }
           }}
           onIndividualOrder={() => {
@@ -2142,8 +2240,9 @@ function CartSummaryBody() {
           }}
           locationId={tableCommandSeller.id}
           locationName={tableCommandSeller.name}
-          initialTableName={(tableInfo?.customerAddress || tableInfo?.tableNumber || "").trim()}
-          initialUserName={(tableInfo?.customerName || "").trim()}
+          initialTableName={(tableInfo?.tableNumber || "").trim()}
+          joinOnly={tableCommandJoinOnly}
+          lockTableName={tableCommandJoinOnly}
         />
       )}
 

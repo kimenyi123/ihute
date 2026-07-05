@@ -156,6 +156,7 @@ export async function POST(req: Request) {
     const paymentName = String(bodyIn.paymentName ?? "PAY_ON_DELIVERY").toUpperCase()
     const validPaymentMethods = [
       "PAY_ON_DELIVERY",
+      "PAY_AT_TABLE",
       "PAID_MTN_MOMO",
       "PAID_AIRTEL_MOMO",
       "PAID_CARD",
@@ -203,6 +204,10 @@ export async function POST(req: Request) {
       buyerAccount = String(
         process.env.DEFAULT_GUEST_ISHYIGA_ACCOUNT ?? DEFAULT_GUEST_ISHYIGA_ACCOUNT,
       ).trim()
+    }
+    // Always ensure buyerAccount is set — Java requires it to find the buyer row
+    if (!buyerAccount) {
+      buyerAccount = String(process.env.DEFAULT_GUEST_ISHYIGA_ACCOUNT ?? DEFAULT_GUEST_ISHYIGA_ACCOUNT).trim()
     }
 
     /* -------- shared payload -------- */

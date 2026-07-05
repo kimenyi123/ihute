@@ -1,5 +1,6 @@
 import {
   buildTableCommandView,
+  formatTableRoundTimestamp,
   type TableCommandLineItem,
 } from "@/lib/table-command-whatsapp"
 
@@ -21,14 +22,29 @@ type Props = {
   formatAmount: (n: number) => string
 }
 
-function RoundDivider({ roundNumber }: { roundNumber: number }) {
+function RoundDivider({
+  roundNumber,
+  startedAtLabel,
+}: {
+  roundNumber: number
+  startedAtLabel?: string
+}) {
   return (
-    <div className="flex items-center gap-3 border-t border-dashed border-slate-200 bg-slate-50/80 px-4 py-2">
-      <div className="h-px flex-1 bg-slate-200" />
-      <span className="shrink-0 rounded-full bg-white px-3 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-slate-600 ring-1 ring-slate-200">
-        Round {roundNumber}
-      </span>
-      <div className="h-px flex-1 bg-slate-200" />
+    <div className="border-t border-dashed border-slate-200 bg-slate-50/80 px-4 py-2">
+      {roundNumber > 1 ? (
+        <div className="flex items-center gap-3">
+          <div className="h-px flex-1 bg-slate-200" />
+          <span className="shrink-0 rounded-full bg-white px-3 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-slate-600 ring-1 ring-slate-200">
+            Round {roundNumber}
+          </span>
+          <div className="h-px flex-1 bg-slate-200" />
+        </div>
+      ) : null}
+      {startedAtLabel ? (
+        <div className="mt-1 text-center text-[10px] font-medium tracking-wide text-slate-500">
+          {startedAtLabel}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -102,7 +118,12 @@ export function TableCommandOrderItems({ items, lineMetaById, currency, formatAm
 
             {guest.rounds.map((round) => (
               <div key={`${guest.person}-round-${round.roundNumber}`}>
-                {round.roundNumber > 1 ? <RoundDivider roundNumber={round.roundNumber} /> : null}
+                {round.roundNumber > 1 || round.roundStartedAt ? (
+                  <RoundDivider
+                    roundNumber={round.roundNumber}
+                    startedAtLabel={formatTableRoundTimestamp(round.roundStartedAt)}
+                  />
+                ) : null}
 
                 {round.items.map((line, lineIdx) => {
                   const meta = line.lineId != null ? lineMetaById.get(Number(line.lineId)) : undefined

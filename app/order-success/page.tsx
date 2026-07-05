@@ -14,13 +14,21 @@ import {
   Users,
   X,
 } from "lucide-react"
-import { formatPaymentMethod } from "@/lib/payment-utils"
-import { buildOrderWhatsAppMessage, isTableCommandOrder } from "@/lib/table-command-whatsapp"
+import { formatPaymentMethod, isCashOnDelivery } from "@/lib/payment-utils"
+import {
+  buildOrderReceiptViewModel,
+  buildOrderWhatsAppMessage,
+  isTableCommandOrder,
+  resolveTableCommandLinePerson,
+} from "@/lib/table-command-whatsapp"
+import { OrderReceiptPreview } from "@/components/order-receipt-preview"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { RatingModal } from "@/components/RatingModal"
+import { sellerAccountFromOrder } from "@/lib/order-seller-account"
 import { useTableCommandStore } from "@/lib/table-command-store"
 import { GRANDMA_PATHS } from "@/lib/grandma-urls"
 import { isValidRwandaMobileE164, normalizeRwandaMobileE164 } from "@/lib/rwanda-phone"
+import { formatOrderPlacedAtRwanda } from "@/lib/supplier-sync-datetime"
 
 function normalizePhone(raw?: string | null): string {
   const v = (raw || "").replace(/\s|-/g, "")
@@ -61,6 +69,7 @@ function OrderSuccessPageInner() {
   const sellerName = searchParams.get("sellerName")
   const sellerPhone = searchParams.get("sellerPhone")
   const buyerPhone = searchParams.get("buyerPhone")
+  const buyerNameQuery = searchParams.get("buyerName")?.trim() || ""
   const orderNotesQuery = searchParams.get("orderNotes")?.trim() || ""
   const total = searchParams.get("total")
   const logisticsTypeQuery = searchParams.get("logisticsType")?.trim() || ""
@@ -112,7 +121,13 @@ function OrderSuccessPageInner() {
   )
 
   const fallbackGrandTotalAmount = subtotalAmount + logisticsAmount
-  const displayTotalAmount = fallbackGrandTotalAmount || totalAmount
+  const queryTotal = safeNumber(total, Number.NaN)
+  const computedGrandTotal =
+    fallbackGrandTotalAmount > 0
+      ? fallbackGrandTotalAmount
+      : Number.isFinite(queryTotal) && queryTotal > 0
+      ? queryTotal
+      : totalAmount
 
   const orderSubtotalFromDetails = safeNumber(orderDetails?.subtotal ?? orderDetails?.SUBTOTAL, Number.NaN)
   const effectiveSubtotal = Number.isFinite(orderSubtotalFromDetails) && orderSubtotalFromDetails > 0
@@ -120,9 +135,16 @@ function OrderSuccessPageInner() {
     : subtotalAmount
 
   const orderTotalFromDetails = safeNumber(orderDetails?.total ?? orderDetails?.AMOUNT, Number.NaN)
-  const effectiveTotalAmount = Number.isFinite(orderTotalFromDetails) && orderTotalFromDetails > 0
-    ? orderTotalFromDetails
-    : displayTotalAmount
+  const effectiveTotalAmount = (() => {
+    if (Number.isFinite(orderTotalFromDetails) && orderTotalFromDetails > 0) {
+      if (logisticsAmount > 0 && orderTotalFromDetails < effectiveSubtotal + logisticsAmount) {
+        return effectiveSubtotal + logisticsAmount
+      }
+      return orderTotalFromDetails
+    }
+    if (Number.isFinite(queryTotal) && queryTotal > 0) return queryTotal
+    return computedGrandTotal
+  })()
 
   const discountAmount = Math.max(
     0,
@@ -131,11 +153,25 @@ function OrderSuccessPageInner() {
 
   const paymentQuery = searchParams.get("payment")?.trim() || ""
   const paymentMethod = orderDetails?.paymentMethod || orderDetails?.PAYMENT_NAME || paymentQuery || ""
-  const isPaid = Boolean(
-    String(orderDetails?.paymentStatus ?? orderDetails?.PAYMENT_STATUS ?? "").toLowerCase().includes("paid") ||
-      (paymentMethod && !paymentMethod.toLowerCase().includes("delivery"))
-  )
+  const isPaid =
+    !isCashOnDelivery(paymentMethod) &&
+    (String(orderDetails?.paymentStatus ?? orderDetails?.PAYMENT_STATUS ?? "")
+      .toLowerCase()
+      .includes("paid") ||
+      paymentMethod.toUpperCase().includes("PAID_"))
   const paidAmount = isPaid ? effectiveTotalAmount : 0
+
+  const orderPlacedAtLabel = useMemo(() => {
+    const raw =
+      orderDetails?.ORDER_PLACED_AT ??
+      orderDetails?.createdAt ??
+      orderDetails?.CREATED_AT
+    if (raw != null && String(raw).trim() !== "") {
+      return formatOrderPlacedAtRwanda(raw)
+    }
+    if (!loadingDetails) return formatOrderPlacedAtRwanda()
+    return ""
+  }, [orderDetails, loadingDetails])
 
   const autoWhatsApp = searchParams.get("autoWhatsApp") === "1"
   const momoTxId = searchParams.get("momoTxId")?.trim() || ""
@@ -256,14 +292,20 @@ function OrderSuccessPageInner() {
   const trackingUrl = `${publicShopBase}${trackPath}`
 
   // Build WhatsApp message with product details - memoized to recalculate when orderDetails changes
-  const { whatsappMessage, whatsappHref } = useMemo(() => {
+  const { whatsappMessage, whatsappHref, orderReceipt } = useMemo(() => {
     let message = ""
+    let receipt = null
 
     if (orderDetails?.items && orderDetails.items.length > 0) {
       const paymentMethod =
         orderDetails.paymentMethod || paymentQuery || "Unknown"
-      const isPaid = paymentMethod && !paymentMethod.toLowerCase().includes("delivery")
-      const paidAmount = isPaid ? orderDetails.total : 0
+      const isPaidNow =
+        !isCashOnDelivery(paymentMethod) &&
+        (String(orderDetails.paymentStatus ?? orderDetails.PAYMENT_STATUS ?? "")
+          .toLowerCase()
+          .includes("paid") ||
+          paymentMethod.toUpperCase().includes("PAID_"))
+      const paidAmountNow = isPaidNow ? orderDetails.total : 0
       const isTable = isTableCommandOrder(orderDetails)
       const descriptionText =
         orderDetails.CONDITIONS?.trim() ||
@@ -272,21 +314,42 @@ function OrderSuccessPageInner() {
         orderNotesQuery ||
         ""
 
-      message = buildOrderWhatsAppMessage({
+      const receiptLocation =
+        orderDetails.buyerLocation ||
+        orderDetails.DELIVERY_LOCATION ||
+        (orderDetails.TABLE_NAME ? `Table: ${orderDetails.TABLE_NAME}` : undefined)
+      const orderCreatedAt = orderDetails.createdAt ?? orderDetails.CREATED_AT
+
+      const orderBuyerName = (
+        buyerNameQuery ||
+        orderDetails.BUYER_OWNER ||
+        orderDetails.BUYER_NAME ||
+        orderDetails.buyerName ||
+        ""
+      ).trim()
+
+      const receiptArgs = {
         shop: sellerName || orderDetails.sellerName,
-        location: orderDetails.buyerLocation,
+        location: receiptLocation,
         orderId: displayOrderNo,
+        defaultOrderedBy: String(orderBuyerName ?? "").trim() || undefined,
+        placedAt: orderPlacedAtLabel || orderCreatedAt || undefined,
         items: orderDetails.items.map((item: any) => ({
           name: item.name,
           qty: item.qty,
           unitPrice: item.unitPrice,
-          orderedBy: item.orderedBy ?? item.ORDERED_BY,
+          orderedBy: resolveTableCommandLinePerson(
+            item.orderedBy ?? item.ORDERED_BY,
+            orderBuyerName,
+          ),
           lineId: item.lineId ?? item.ID_LIST,
+          lineCreatedAt:
+            item.lineCreatedAt ?? item.HEURE ?? item.heure ?? orderCreatedAt,
         })),
         subtotal: effectiveSubtotal,
         total: effectiveTotalAmount,
         discount: discountAmount,
-        paid: paidAmount,
+        paid: paidAmountNow,
         paidAt: formatPaymentMethod(paymentMethod),
         reference: displayOrderNo ? `ORDER ${displayOrderNo}` : undefined,
         myPhone: String(orderDetails?.buyerPhone || orderDetails?.BUYER_PHONE || buyerPhone || ""),
@@ -296,7 +359,10 @@ function OrderSuccessPageInner() {
         orderDescription: descriptionText || undefined,
         logisticsType: logisticsType,
         logisticsFee: logisticsAmount,
-      })
+      }
+
+      receipt = buildOrderReceiptViewModel(receiptArgs)
+      message = buildOrderWhatsAppMessage(receiptArgs)
     } else {
       // Fallback message without product details
       console.log("[Order Success] Using fallback message (no items)")
@@ -308,6 +374,7 @@ function OrderSuccessPageInner() {
 
       const fallbackLines = [
         "Order",
+        orderPlacedAtLabel || "",
         "",
         `Shop: ${sellerName}`,
         `Order ID: ${displayOrderNo}`,
@@ -335,7 +402,7 @@ function OrderSuccessPageInner() {
     const sellerPhoneNormalized = resolveSellerPhoneForWhatsApp(sellerPhone, orderDetails)
     const href = sellerPhoneNormalized ? waHrefFor(sellerPhoneNormalized, message) : ""
 
-    return { whatsappMessage: message, whatsappHref: href }
+    return { whatsappMessage: message, whatsappHref: href, orderReceipt: receipt }
   }, [
     orderDetails,
     orderId,
@@ -347,6 +414,14 @@ function OrderSuccessPageInner() {
     trackingUrl,
     momoTxId,
     paymentQuery,
+    orderPlacedAtLabel,
+    effectiveSubtotal,
+    effectiveTotalAmount,
+    discountAmount,
+    logisticsAmount,
+    logisticsType,
+    orderNotesQuery,
+    buyerNameQuery,
   ])
 
   useEffect(() => {
@@ -517,13 +592,16 @@ function OrderSuccessPageInner() {
           </CardContent>
         </Card>
 
-        {whatsappMessage ? (
+        {orderReceipt ? (
           <Card className="border-0 shadow-xl rounded-2xl bg-white text-slate-900">
             <CardHeader>
               <CardTitle className="text-lg">Order receipt</CardTitle>
+              {orderPlacedAtLabel ? (
+                <p className="mt-1 text-sm tabular-nums text-muted-foreground">{orderPlacedAtLabel}</p>
+              ) : null}
             </CardHeader>
             <CardContent>
-              <pre className="whitespace-pre-wrap font-mono text-sm text-slate-800">{whatsappMessage}</pre>
+              <OrderReceiptPreview receipt={orderReceipt} />
             </CardContent>
           </Card>
         ) : null}
@@ -630,7 +708,7 @@ function OrderSuccessPageInner() {
       {orderDetails && showRatingModal && (
         <RatingModal
           orderId={String(displayOrderNo || orderId || trackToken || "")}
-          sellerId={orderDetails.sellerAccount || ""}
+          sellerId={sellerAccountFromOrder(orderDetails)}
           sellerName={sellerName || orderDetails.sellerName || ""}
           buyerPhone={buyerPhone || orderDetails.buyerPhone || ""}
           items={ratingItems}
