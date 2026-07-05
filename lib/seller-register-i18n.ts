@@ -377,6 +377,11 @@ export const UMURIRO_UI = {
     rw: "Itumiza ntiyabitswe muri database. Saba admin gushyiraho ONBOARDING_MYSQL_* kuri server.",
     fr: "Commande non enregistr\u00e9e en base. Demandez \u00e0 l\u2019admin de configurer ONBOARDING_MYSQL_*.",
   },
+  saveOrderDbError: {
+    en: "Could not save your order to the database. Please try again in a moment.",
+    rw: "Ntitwashoboye kubika itumiza muri database. Ongera ugerageze.",
+    fr: "Impossible d\u2019enregistrer la commande. Veuillez r\u00e9essayer.",
+  },
   sellerSmsAfterSave: {
     en: "SMS to {phone} after save (if Twilio / SMS webhook is configured).",
     rw: "SMS kuri {phone} nyuma yo kubika (niba Twilio / webhook byashyizweho).",

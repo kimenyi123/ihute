@@ -782,7 +782,14 @@ export function UmuriroBoarding() {
         setCartLines([])
       }
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "Error")
+      const raw = e instanceof Error ? e.message : "Error"
+      if (raw.includes("Quick Shop:") || raw.includes("Database save failed")) {
+        setErr(pickLang(UMURIRO_UI.saveOrderDbError, lang))
+      } else if (raw.includes("not saved to the database") || raw.includes("ONBOARDING_MYSQL")) {
+        setErr(pickLang(UMURIRO_UI.saveOrderDbNotConfigured, lang))
+      } else {
+        setErr(raw)
+      }
     } finally {
       setLoading(false)
     }
