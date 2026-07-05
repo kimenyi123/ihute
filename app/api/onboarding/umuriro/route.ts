@@ -1,28 +1,59 @@
 import { NextResponse } from "next/server"
 import mysql from "mysql2/promise"
+import { getOnboardingMysqlConfig } from "@/lib/onboarding-mysql"
 import { isValidRwandaMobileE164, normalizeRwandaMobileE164 } from "@/lib/rwanda-phone"
 import { sendSms } from "@/lib/sms/send-sms"
 import { buildUmuriroSellerSmsBodyFromLines } from "@/lib/umuriro-seller-sms"
 
 /**
  * Umuriro: minimal “shop contact + purchase line + MoMo USSD” payload.
- * Persists to `shop_onboarding_draft` when ONBOARDING_MYSQL_* is set (same as crazy-shopping).
+ * Persists to `shop_onboarding_draft` when ONBOARDING_MYSQL_* is set (Quick + Advanced).
+ * SMS audit → `umuriro_sms_outbound` when table exists (optional; does not block save).
  * When `shop.shopPhoneOptional` is a valid Rwandan mobile, sends SMS to that seller (Twilio or SMS_WEBHOOK_URL).
  */
 
-async function persistPayload(body: unknown): Promise<boolean> {
-  const host = process.env.ONBOARDING_MYSQL_HOST
-  const user = process.env.ONBOARDING_MYSQL_USER
-  const password = process.env.ONBOARDING_MYSQL_PASSWORD
-  const database = process.env.ONBOARDING_MYSQL_DATABASE
-  if (!host || !user || password === undefined || !database) return false
+async function persistPayload(body: unknown): Promise<void> {
+  const cfg = getOnboardingMysqlConfig()
+  if (!cfg) {
+    throw new Error("ONBOARDING_MYSQL_* is not configured")
+  }
 
-  const conn = await mysql.createConnection({ host, user, password, database })
+  const conn = await mysql.createConnection(cfg)
   try {
     await conn.query("INSERT INTO shop_onboarding_draft (payload_json) VALUES (?)", [
       JSON.stringify(body),
     ])
-    return true
+  } finally {
+    await conn.end()
+  }
+}
+
+async function logSmsOutbound(params: {
+  requestId: string
+  toE164: string | null
+  sentOk: boolean
+  provider?: string
+  errorMessage?: string
+  smsBody?: string
+}): Promise<void> {
+  const cfg = getOnboardingMysqlConfig()
+  if (!cfg) return
+
+  const conn = await mysql.createConnection(cfg)
+  try {
+    await conn.query(
+      `INSERT INTO umuriro_sms_outbound
+         (request_id, to_e164, sent_ok, provider, error_message, sms_body)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        params.requestId,
+        params.toE164,
+        params.sentOk ? 1 : 0,
+        params.provider ?? null,
+        params.errorMessage?.slice(0, 512) ?? null,
+        params.smsBody ?? null,
+      ],
+    )
   } finally {
     await conn.end()
   }
@@ -84,16 +115,26 @@ export async function POST(req: Request) {
     }
 
     const enriched = { ...record, rid }
+    const mysqlConfigured = Boolean(getOnboardingMysqlConfig())
 
-    let persisted = false
-    try {
-      persisted = await persistPayload(enriched)
-    } catch (e: unknown) {
-      console.warn(`[umuriro ${rid}] draft insert:`, (e as Error)?.message || e)
-    }
-
-    if (!process.env.ONBOARDING_MYSQL_HOST) {
-      console.log(`[umuriro ${rid}] No ONBOARDING_MYSQL_* — echo only`)
+    if (mysqlConfigured) {
+      try {
+        await persistPayload(enriched)
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e)
+        console.error(`[umuriro ${rid}] draft insert failed:`, msg)
+        return NextResponse.json(
+          {
+            ok: false,
+            error: `Database save failed: ${msg}`,
+            rid,
+            persisted: false,
+          },
+          { status: 503 },
+        )
+      }
+    } else {
+      console.log(`[umuriro ${rid}] No ONBOARDING_MYSQL_* — echo only (set env to persist)`)
     }
 
     const shop = record.shop as Record<string, unknown> | undefined
@@ -123,7 +164,6 @@ export async function POST(req: Request) {
       reason?: string
       to?: string
     } = { attempted: false, sent: false }
-    /** Exact text sent (or that would be sent) — returned for team training / QA. */
     let smsPreview: string | undefined
 
     if (rawPhone) {
@@ -142,11 +182,25 @@ export async function POST(req: Request) {
           sms.reason = out.error || "send failed"
           console.warn(`[umuriro ${rid}] SMS not sent:`, out.error)
         }
+        try {
+          await logSmsOutbound({
+            requestId: rid,
+            toE164: e164,
+            sentOk: out.ok,
+            provider: out.provider,
+            errorMessage: out.error,
+            smsBody: text,
+          })
+        } catch (e: unknown) {
+          console.warn(`[umuriro ${rid}] sms audit insert:`, (e as Error)?.message || e)
+        }
       } else {
         sms.attempted = false
         sms.reason = "invalid_rwanda_phone"
       }
     }
+
+    const persisted = mysqlConfigured
 
     return NextResponse.json({
       ok: true,
@@ -155,8 +209,8 @@ export async function POST(req: Request) {
       sms,
       smsPreview,
       message: persisted
-        ? "Stored draft (if table exists)."
-        : "Received. Add ONBOARDING_MYSQL_* + shop_onboarding_draft to persist.",
+        ? "Order saved to shop_onboarding_draft."
+        : "Received (echo). Set ONBOARDING_MYSQL_* + shop_onboarding_draft to persist.",
     })
   } catch (e: unknown) {
     console.error(`[umuriro ${rid}]`, e)

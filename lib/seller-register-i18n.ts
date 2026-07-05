@@ -372,6 +372,11 @@ export const UMURIRO_UI = {
     rw: "Emeza kwishyura na SMS ya MoMo mbere yo kubika itumiza.",
     fr: "Confirmez le paiement MoMo avec le SMS avant d\u2019enregistrer.",
   },
+  saveOrderDbNotConfigured: {
+    en: "Order was not saved to the database. Ask admin to set ONBOARDING_MYSQL_* on the server.",
+    rw: "Itumiza ntiyabitswe muri database. Saba admin gushyiraho ONBOARDING_MYSQL_* kuri server.",
+    fr: "Commande non enregistr\u00e9e en base. Demandez \u00e0 l\u2019admin de configurer ONBOARDING_MYSQL_*.",
+  },
   sellerSmsAfterSave: {
     en: "SMS to {phone} after save (if Twilio / SMS webhook is configured).",
     rw: "SMS kuri {phone} nyuma yo kubika (niba Twilio / webhook byashyizweho).",
