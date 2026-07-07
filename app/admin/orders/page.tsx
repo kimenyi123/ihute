@@ -77,7 +77,7 @@ export default function OrdersPage() {
   }, [])
 
   useEffect(() => {
-    loadOrders()
+    void loadOrders(page)
   }, [filters, page])
 
   const updateFilters = (nextFilters: Partial<typeof filters>) => {
@@ -98,17 +98,17 @@ export default function OrdersPage() {
     }
   }
 
-  const loadOrders = async () => {
+  const loadOrders = async (pageArg: number = page) => {
     try {
       setLoading(true)
       const res = await postAdminApi({
         action: 'getAllOrders',
         ...filters,
         limit: pageSize,
-        page,
+        page: pageArg,
       })
       const data = await res.json()
-      
+
       if (data.ok) {
         setOrders(data.orders || [])
         const count = Number(data.totalCount ?? data.totalOrders ?? 0) || 0
@@ -123,11 +123,8 @@ export default function OrdersPage() {
   }
 
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-RW', {
-      style: 'currency',
-      currency: 'RWF',
-      minimumFractionDigits: 0,
-    }).format(amount)
+    const n = new Intl.NumberFormat('en-RW', { minimumFractionDigits: 0 }).format(amount)
+    return `RWF ${n}`
   }
 
   const exportToExcel = () => {
@@ -297,7 +294,11 @@ export default function OrdersPage() {
                 <button
                   type="button"
                   disabled={page <= 1 || loading}
-                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                  onClick={() => {
+                    const prevPage = Math.max(1, page - 1)
+                    setPage(prevPage)
+                    void loadOrders(prevPage)
+                  }}
                   className="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Previous
@@ -305,7 +306,11 @@ export default function OrdersPage() {
                 <button
                   type="button"
                   disabled={page >= totalPages || loading}
-                  onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                  onClick={() => {
+                    const nextPage = Math.min(totalPages, page + 1)
+                    setPage(nextPage)
+                    void loadOrders(nextPage)
+                  }}
                   className="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Next
