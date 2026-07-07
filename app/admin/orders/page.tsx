@@ -70,7 +70,7 @@ export default function OrdersPage() {
   const [page, setPage] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
   const [totalPages, setTotalPages] = useState(1)
-  const pageSize = 20
+  const pageSize = 100
 
   useEffect(() => {
     loadSectors()
