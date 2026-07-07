@@ -9,6 +9,7 @@ import { LanguageSyncProvider } from "@/components/language-sync-provider"
 import { ServiceWorkerRegister } from "@/components/service-worker-register"
 import { NotificationPrompt } from "@/components/notification-prompt"
 import { GlobalRatingManager } from "@/components/GlobalRatingManager"
+import { ActivityTracker } from "@/components/activity-tracker"
 import { Toaster } from "@/components/ui/toaster"
 import "./globals.css"
 
@@ -32,7 +33,10 @@ export default function RootLayout({
       <body className={`font-sans ${GeistSans.variable} ${GeistMono.variable} antialiased`} suppressHydrationWarning>
         <SessionProvider>
           <LanguageSyncProvider>
-            <Suspense fallback={null}>{children}</Suspense>
+            <Suspense fallback={null}>
+              <ActivityTracker />
+              {children}
+            </Suspense>
           </LanguageSyncProvider>
         </SessionProvider>
         <Toaster />
