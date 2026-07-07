@@ -229,6 +229,8 @@ export async function POST(req: Request) {
       isTableCommand: Boolean(bodyIn.isTableCommand),
       tableName: String(bodyIn.tableName ?? ""),
       tableLocation: String(bodyIn.tableLocation ?? ""),
+      orderSource: String(bodyIn.orderSource ?? ""),
+      shopNickname: String(bodyIn.shopNickname ?? ""),
       isGuestCheckout,
       buyerAccount,
     }
@@ -287,6 +289,8 @@ export async function POST(req: Request) {
           form.set("tableName", shared.tableName)
           form.set("tableLocation", shared.tableLocation)
         }
+        if (shared.orderSource) form.set("orderSource", shared.orderSource)
+        if (shared.shopNickname) form.set("shopNickname", shared.shopNickname)
         form.set("skipStockCheck", "true")
         if (shared.isGuestCheckout) form.set("isGuestCheckout", "true")
         if (shared.buyerAccount) form.set("buyerAccount", shared.buyerAccount)

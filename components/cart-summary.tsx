@@ -38,6 +38,8 @@ import { TableCommandDialog } from "@/components/table-command-dialog"
 import { TableCommandShareModal } from "@/components/table-command-share-modal"
 import { CartSuggestionsPopup } from "@/components/cart-suggestions-popup"
 import { orderErrorMessageWithProductNames } from "@/lib/order-error-display"
+import { readShopOrderContext } from "@/lib/ihute-shop-order-context"
+import { trackCheckoutSubmit } from "@/lib/activity-tracker"
 import { flushCartToServer } from "@/lib/flush-cart-server"
 import {
   fetchSellerUrubutoEligibility,
@@ -852,6 +854,10 @@ function CartSummaryBody() {
         guestBuyerAccount = await ensureGuestPoolBuyerAccount()
       }
 
+      const shopCtx = readShopOrderContext()
+      const orderSource =
+        isTableCheckout || shopCtx?.shopNickname ? ("shop_with_me" as const) : undefined
+
       const res = await fetch("/api/orders/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -885,6 +891,7 @@ function CartSummaryBody() {
           isTableCommand: isTableCheckout,
           tableName: tableNameFromContext || undefined,
           tableLocation: activeSession?.locationName || tableInfo?.shopName || g.supplierName,
+          ...(orderSource ? { orderSource, shopNickname: shopCtx?.shopNickname } : {}),
         }),
       })
 
@@ -893,6 +900,12 @@ function CartSummaryBody() {
       console.log("Order creation response:", json)
 
       if (res.ok && json?.ok) {
+        trackCheckoutSubmit("success", {
+          shopNickname: shopCtx?.shopNickname,
+          sellerAccount: g.supplierId,
+          itemCount: items.length,
+          paymentName: opts.paymentName,
+        })
         if (checkoutGenRef.current[sid] !== checkoutGen) return
         const orderId = json.orderId ? String(json.orderId) : null
         const sellerTel = json.sellerTel ? String(json.sellerTel) : null
@@ -1002,6 +1015,11 @@ function CartSummaryBody() {
         }
         router.refresh()
       } else {
+        trackCheckoutSubmit("failed", {
+          shopNickname: shopCtx?.shopNickname,
+          sellerAccount: g.supplierId,
+          error: String(json?.error || "unknown"),
+        })
         if (checkoutGenRef.current[sid] === checkoutGen) {
           setPaymentStatus(g.supplierId, "failed")
         }

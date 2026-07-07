@@ -56,6 +56,35 @@ export function postAdminApi(body: Record<string, unknown>): Promise<Response> {
   })
 }
 
+/** GET admin-protected Next.js routes (activity logs, commercial stats, …). */
+export function fetchAdminProtectedApi(path: string, init?: RequestInit): Promise<Response> {
+  const { user, hasHydrated, logout } = useAuthStore.getState()
+  let userEmail = (user?.email ?? "").trim()
+  if (userEmail && LEGACY_DISCARD_EMAILS.has(userEmail.toLowerCase())) {
+    logout()
+    return Promise.resolve(
+      new Response(JSON.stringify({ ok: false, error: "Stale session removed." }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      }),
+    )
+  }
+  if (!hasHydrated) {
+    console.warn("[fetchAdminProtectedApi] auth store not rehydrated yet")
+  }
+  const tok = user?.adminApiToken?.trim()
+  return fetch(path, {
+    method: init?.method || "GET",
+    credentials: "include",
+    headers: {
+      ...(userEmail ? { "x-admin-email": userEmail } : {}),
+      ...(tok ? { "x-admin-token": tok } : {}),
+      ...(init?.headers as Record<string, string> | undefined),
+    },
+    body: init?.body,
+  })
+}
+
 /** Proxies to `/api/admin/urubuto-merchant-document` for binary file responses (not JSON-only `/api/admin`). */
 export function postAdminUrubutoMerchantDocumentDownload(params: {
   sellerAccount: string
