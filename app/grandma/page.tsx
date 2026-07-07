@@ -2343,7 +2343,7 @@ export default function GrandmaPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [locationData])
 
   /** Debounced global product search so shop list can include stores that sell the query (e.g. “milk”), not only name/tagline matches. */
   useEffect(() => {
@@ -2736,6 +2736,11 @@ export default function GrandmaPage() {
               limit: "500",
               Currency: "RWF",
             })
+            // If we have a cached user location, include it so backend can rank by distance
+            if (locationData && locationData.latitude && locationData.longitude) {
+              qs.set("latitude", String(locationData.latitude))
+              qs.set("longitude", String(locationData.longitude))
+            }
             const sectorUrl = `/api/sector-list-suppliers?${qs.toString()}`
             console.log(`=== Fetching ${cat} ===`)
             console.log(`Sector list URL: ${sectorUrl}`)
@@ -2842,6 +2847,12 @@ export default function GrandmaPage() {
           const catTag = String(supplier.fetchedCategory ?? "Others").replace(/\s+/g, "_")
           const uniqueId = baseId ? `supplier_${baseId}__${catTag}` : `supplier_unknown_${Math.random()}`
           
+          // Prefer backend-provided distance if available (various possible field names),
+          // otherwise keep the demo/mock fallback.
+          const rawDistance =
+            supplier.distance ?? supplier.distance_km ?? supplier.supplier_distance ?? supplier.DISTANCE ?? supplier.LOCATION_DISTANCE
+          const parsedDistance = rawDistance != null ? parseFloat(String(rawDistance)) : NaN
+
           return {
             id: uniqueId,
             name: supplier.seller_name || supplier.seller_account || baseId,
@@ -2851,7 +2862,7 @@ export default function GrandmaPage() {
             orderedBefore: false,
             trending: false,
             onSale: supplierRowSuggestsOnSale(supplier as Record<string, unknown>),
-            distanceKm: Math.random() * 5 + 0.5, // Mock distance
+            distanceKm: Number.isFinite(parsedDistance) ? parsedDistance : Math.random() * 5 + 0.5,
             momo: `MTN MoMo: ${supplier.seller_momo || 'N/A'}`,
             rating: 4.0,
             reviewCount: 0,
@@ -5303,7 +5314,14 @@ export default function GrandmaPage() {
           <button
             type="button"
             className={`shop-trio-btn ${useLocationSort ? "on" : ""}`}
-            onClick={() => setUseLocationSort((v) => !v)}
+            onClick={() => {
+              const willEnable = !useLocationSort
+              // If enabling and we don't have a recent location, ask the user
+              if (willEnable && (!locationData || useLocationStoreEnhanced.getState().isLocationExpired())) {
+                setLocationDialogOpen(true)
+              }
+              setUseLocationSort(willEnable)
+            }}
           >
             {useLocationSort ? "📍 Near me on" : "📍 Near me off"}
           </button>
@@ -6820,7 +6838,13 @@ export default function GrandmaPage() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setUseLocationSort((v) => !v)}
+                  onClick={() => {
+                    const willEnable = !useLocationSort
+                    if (willEnable && (!locationData || useLocationStoreEnhanced.getState().isLocationExpired())) {
+                      setLocationDialogOpen(true)
+                    }
+                    setUseLocationSort(willEnable)
+                  }}
                   className={cn(
                     "mt-4 w-full rounded-xl border px-3 py-2.5 text-left text-sm font-bold transition-colors",
                     useLocationSort
