@@ -146,6 +146,9 @@ export default function OrdersPage() {
     if (!ok) window.alert('No orders to export.')
   }
 
+  const hasPreviousPage = page > 1
+  const hasNextPage = page < totalPages || orders.length === pageSize
+
   return (
     <div className="space-y-6">
       <div>
@@ -293,11 +296,10 @@ export default function OrdersPage() {
               <div className="inline-flex items-center gap-2">
                 <button
                   type="button"
-                  disabled={page <= 1 || loading}
+                  disabled={!hasPreviousPage || loading}
                   onClick={() => {
                     const prevPage = Math.max(1, page - 1)
                     setPage(prevPage)
-                    void loadOrders(prevPage)
                   }}
                   className="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -305,11 +307,10 @@ export default function OrdersPage() {
                 </button>
                 <button
                   type="button"
-                  disabled={page >= totalPages || loading}
+                  disabled={!hasNextPage || loading}
                   onClick={() => {
                     const nextPage = Math.min(totalPages, page + 1)
                     setPage(nextPage)
-                    void loadOrders(nextPage)
                   }}
                   className="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
