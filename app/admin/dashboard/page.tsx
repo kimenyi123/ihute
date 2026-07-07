@@ -198,11 +198,11 @@ export default function AdminDashboard() {
   }
 
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat("en-RW", {
-      style: "currency",
-      currency: "RWF",
-      minimumFractionDigits: 0,
-    }).format(amount)
+    // Force the ISO currency code prefix `RWF` and format the number with
+    // the locale-specific grouping. Intl with currency can sometimes render a
+    // short symbol; we want the full `RWF` label consistently.
+    const n = new Intl.NumberFormat("en-RW", { minimumFractionDigits: 0 }).format(amount)
+    return `RWF ${n}`
   }
 
   if (!hasHydrated || !isAuthenticated || !user || user.role !== "admin") {
@@ -348,58 +348,7 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      <div className="bg-white rounded-lg shadow p-6 border border-emerald-100">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="min-w-0">
-            <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-              <Smartphone className="text-emerald-600 shrink-0" size={22} />
-              Top-up sales (all clients)
-            </h2>
-            <p className="text-sm text-gray-600 mt-1">
-              Totals from the admin order feed (capped for speed). Requires the same admin session/token as the rest of
-              the dashboard.
-            </p>
-            <div className="flex flex-wrap gap-2 mt-3">
-              {([30, 90, "all"] as const).map((p) => (
-                <button
-                  key={String(p)}
-                  type="button"
-                  onClick={() => setTopupPeriod(p)}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
-                    topupPeriod === p
-                      ? "bg-emerald-600 text-white border-emerald-600"
-                      : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
-                  }`}
-                >
-                  {p === "all" ? "All" : `${p}d`}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="shrink-0 lg:text-right">
-            {topupLoading ? (
-              <p className="text-sm text-gray-500">Loading top-up summary…</p>
-            ) : topupErr ? (
-              <p className="text-sm text-red-600 max-w-md lg:ml-auto">{topupErr}</p>
-            ) : topup ? (
-              <div>
-                <p className="text-2xl font-bold text-emerald-700">{formatCurrency(topup.topupSalesTotal)}</p>
-                <p className="text-sm text-gray-600 mt-1">
-                  {topup.topupOrdersCount} order{topup.topupOrdersCount === 1 ? "" : "s"} with top-up lines ·{" "}
-                  {topup.topupLineCount} line{topup.topupLineCount === 1 ? "" : "s"}
-                </p>
-                <p className="text-xs text-gray-500 mt-1">
-                  {topup.ordersScanned} orders scanned
-                  {topup.ordersAvailable > topup.ordersScanned ? ` (of ${topup.ordersAvailable} in list)` : ""}
-                  {topup.period === "all" ? " · capped for speed" : topup.rangeDays != null ? ` · last ${topup.rangeDays} days` : ""}
-                </p>
-              </div>
-            ) : (
-              <p className="text-sm text-gray-500">No data</p>
-            )}
-          </div>
-        </div>
-      </div>
+      {/* Top-up sales panel removed per request */}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="min-w-0 rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
