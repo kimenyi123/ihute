@@ -2736,6 +2736,11 @@ export default function GrandmaPage() {
               limit: "500",
               Currency: "RWF",
             })
+            // If we have a cached user location, include it so backend can rank by distance
+            if (locationData && locationData.latitude && locationData.longitude) {
+              qs.set("latitude", String(locationData.latitude))
+              qs.set("longitude", String(locationData.longitude))
+            }
             const sectorUrl = `/api/sector-list-suppliers?${qs.toString()}`
             console.log(`=== Fetching ${cat} ===`)
             console.log(`Sector list URL: ${sectorUrl}`)
@@ -5303,7 +5308,14 @@ export default function GrandmaPage() {
           <button
             type="button"
             className={`shop-trio-btn ${useLocationSort ? "on" : ""}`}
-            onClick={() => setUseLocationSort((v) => !v)}
+            onClick={() => {
+              const willEnable = !useLocationSort
+              // If enabling and we don't have a recent location, ask the user
+              if (willEnable && (!locationData || useLocationStoreEnhanced.getState().isLocationExpired())) {
+                setLocationDialogOpen(true)
+              }
+              setUseLocationSort(willEnable)
+            }}
           >
             {useLocationSort ? "📍 Near me on" : "📍 Near me off"}
           </button>
@@ -6820,7 +6832,13 @@ export default function GrandmaPage() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setUseLocationSort((v) => !v)}
+                  onClick={() => {
+                    const willEnable = !useLocationSort
+                    if (willEnable && (!locationData || useLocationStoreEnhanced.getState().isLocationExpired())) {
+                      setLocationDialogOpen(true)
+                    }
+                    setUseLocationSort(willEnable)
+                  }}
                   className={cn(
                     "mt-4 w-full rounded-xl border px-3 py-2.5 text-left text-sm font-bold transition-colors",
                     useLocationSort
