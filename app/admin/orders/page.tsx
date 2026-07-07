@@ -70,7 +70,7 @@ export default function OrdersPage() {
   const [page, setPage] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
   const [totalPages, setTotalPages] = useState(1)
-  const pageSize = 20
+  const pageSize = 100
 
   useEffect(() => {
     loadSectors()
@@ -227,6 +227,7 @@ export default function OrdersPage() {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">#</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Order #</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Seller</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Buyer</th>
@@ -238,11 +239,15 @@ export default function OrdersPage() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {orders.map((order) => (
+                {orders.map((order, index) => (
                   (() => {
                     const normalizedStatus = mapBackendOrderStatusToTrack(order.status, order.paymentStatus)
+                    const rowNumber = (page - 1) * pageSize + index + 1
                     return (
                   <tr key={order.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                      {rowNumber}
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                       {order.orderNumber || `#${order.id}`}
                     </td>
