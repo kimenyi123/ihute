@@ -2343,7 +2343,7 @@ export default function GrandmaPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [locationData])
 
   /** Debounced global product search so shop list can include stores that sell the query (e.g. “milk”), not only name/tagline matches. */
   useEffect(() => {
@@ -2847,6 +2847,12 @@ export default function GrandmaPage() {
           const catTag = String(supplier.fetchedCategory ?? "Others").replace(/\s+/g, "_")
           const uniqueId = baseId ? `supplier_${baseId}__${catTag}` : `supplier_unknown_${Math.random()}`
           
+          // Prefer backend-provided distance if available (various possible field names),
+          // otherwise keep the demo/mock fallback.
+          const rawDistance =
+            supplier.distance ?? supplier.distance_km ?? supplier.supplier_distance ?? supplier.DISTANCE ?? supplier.LOCATION_DISTANCE
+          const parsedDistance = rawDistance != null ? parseFloat(String(rawDistance)) : NaN
+
           return {
             id: uniqueId,
             name: supplier.seller_name || supplier.seller_account || baseId,
@@ -2856,7 +2862,7 @@ export default function GrandmaPage() {
             orderedBefore: false,
             trending: false,
             onSale: supplierRowSuggestsOnSale(supplier as Record<string, unknown>),
-            distanceKm: Math.random() * 5 + 0.5, // Mock distance
+            distanceKm: Number.isFinite(parsedDistance) ? parsedDistance : Math.random() * 5 + 0.5,
             momo: `MTN MoMo: ${supplier.seller_momo || 'N/A'}`,
             rating: 4.0,
             reviewCount: 0,
