@@ -67,22 +67,17 @@ export default function OrdersPage() {
     status: '',
   })
   const [sectors, setSectors] = useState<string[]>([])
-  const [page, setPage] = useState(1)
-  const [totalCount, setTotalCount] = useState(0)
-  const [totalPages, setTotalPages] = useState(1)
-  const pageSize = 100
 
   useEffect(() => {
     loadSectors()
   }, [])
 
   useEffect(() => {
-    void loadOrders(page)
-  }, [filters, page])
+    void loadOrders()
+  }, [filters])
 
   const updateFilters = (nextFilters: Partial<typeof filters>) => {
     setFilters((current) => ({ ...current, ...nextFilters }))
-    setPage(1)
   }
 
   const loadSectors = async () => {
@@ -98,22 +93,18 @@ export default function OrdersPage() {
     }
   }
 
-  const loadOrders = async (pageArg: number = page) => {
+  const loadOrders = async () => {
     try {
       setLoading(true)
       const res = await postAdminApi({
         action: 'getAllOrders',
         ...filters,
-        limit: pageSize,
-        page: pageArg,
+        limit: 999999,
       })
       const data = await res.json()
 
       if (data.ok) {
         setOrders(data.orders || [])
-        const count = Number(data.totalCount ?? data.totalOrders ?? 0) || 0
-        setTotalCount(count)
-        setTotalPages(count > 0 ? Math.max(1, Math.ceil(count / pageSize)) : 1)
       }
     } catch (error) {
       console.error('Error loading orders:', error)
@@ -145,9 +136,6 @@ export default function OrdersPage() {
     const ok = downloadExcel(rows, 'Orders', 'admin_order_monitor')
     if (!ok) window.alert('No orders to export.')
   }
-
-  const hasPreviousPage = page > 1
-  const hasNextPage = page < totalPages || orders.length === pageSize
 
   return (
     <div className="space-y-6">
@@ -242,7 +230,7 @@ export default function OrdersPage() {
                 {orders.map((order, index) => (
                   (() => {
                     const normalizedStatus = mapBackendOrderStatusToTrack(order.status, order.paymentStatus)
-                    const rowNumber = (page - 1) * pageSize + index + 1
+                    const rowNumber = index + 1
                     return (
                   <tr key={order.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
@@ -294,34 +282,8 @@ export default function OrdersPage() {
                 ))}
               </tbody>
             </table>
-            <div className="flex flex-col gap-3 border-t border-gray-200 p-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-sm text-gray-600">
-                Showing {orders.length} orders of {totalCount.toLocaleString()} · Page {page} of {totalPages}
-              </div>
-              <div className="inline-flex items-center gap-2">
-                <button
-                  type="button"
-                  disabled={!hasPreviousPage || loading}
-                  onClick={() => {
-                    const prevPage = Math.max(1, page - 1)
-                    setPage(prevPage)
-                  }}
-                  className="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Previous
-                </button>
-                <button
-                  type="button"
-                  disabled={!hasNextPage || loading}
-                  onClick={() => {
-                    const nextPage = Math.min(totalPages, page + 1)
-                    setPage(nextPage)
-                  }}
-                  className="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Next
-                </button>
-              </div>
+            <div className="border-t border-gray-200 p-4 text-sm text-gray-600">
+              Showing {orders.length} orders
             </div>
           </div>
         )}
