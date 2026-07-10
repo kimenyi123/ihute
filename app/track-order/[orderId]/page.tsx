@@ -699,16 +699,17 @@ function TrackOrderPageInner() {
     setInvoiceBusy(true)
     setInvoiceMsg("")
     try {
-      const liv =
-        (deliveryNote?.livId || deliveryNote?.livid || "").trim() ||
-        (/^LIV/i.test(String(order.paymentMethod || "")) ? "" : "")
+      const liv = (deliveryNote?.livId || deliveryNote?.livid || "").trim()
       const body: Record<string, unknown> = {
         publicSiteUrl: typeof window !== "undefined" ? window.location.origin : undefined,
       }
       if (liv) {
         body.livid = liv
-      } else {
+      } else if (order?.orderId) {
         body.orderId = Number(order.orderId)
+      } else {
+        setInvoiceMsg("Missing order or liv id")
+        return
       }
       const res = await fetch("/api/orders/request-invoice", {
         method: "POST",
