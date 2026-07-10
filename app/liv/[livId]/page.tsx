@@ -78,21 +78,34 @@ export default function LivBonPage() {
   }, [load])
 
   async function askForInvoice() {
-    if (!bon?.orderId) return
+    const liv = (bon?.livId || livId || "").trim()
+    if (!liv && !bon?.orderId) return
     setInvoiceBusy(true)
     setInvoiceMsg(null)
     try {
       const origin = typeof window !== "undefined" ? window.location.origin : ""
+      const body: Record<string, unknown> = { publicSiteUrl: origin }
+      if (liv) body.livid = liv
+      else body.orderId = bon?.orderId
       const res = await fetch("/api/orders/request-invoice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId: bon.orderId, publicSiteUrl: origin }),
+        body: JSON.stringify(body),
       })
-      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; message?: string; error?: string }
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean
+        message?: string
+        error?: string
+        livId?: string
+        livid?: string
+      }
       if (!res.ok || json.ok === false) {
         throw new Error(json.error || "Request failed")
       }
-      setInvoiceMsg(json.message || "Invoice requested")
+      setInvoiceMsg(
+        json.message ||
+          `This person is asking for invoice for ${json.livId || json.livid || liv}`,
+      )
       await load()
     } catch (e) {
       setInvoiceMsg(e instanceof Error ? e.message : "Request failed")

@@ -49,6 +49,8 @@ type DocumentState = "DELIVERY_NOTE" | "INVOICE_REQUESTED" | "INVOICED"
 type DeliveryNotePayload = {
   ok?: boolean
   orderId?: number
+  livId?: string
+  livid?: string
   sellerName?: string
   sellerTin?: string
   sessionType?: "table" | "single"
@@ -63,6 +65,8 @@ type DeliveryNotePayload = {
   qrPayload?: string
   trackUrl?: string
   invoicePdfUrl?: string | null
+  askingForInvoice?: boolean
+  message?: string
   error?: string
 }
 
@@ -691,25 +695,38 @@ function TrackOrderPageInner() {
   const whatsappHref = sellerPhoneNormalized ? waHrefFor(sellerPhoneNormalized, whatsappMessage) : ""
 
   async function askForInvoice() {
-    if (!order?.orderId) return
+    if (!order?.orderId && !deliveryNote?.livId && !deliveryNote?.livid) return
     setInvoiceBusy(true)
     setInvoiceMsg("")
     try {
+      const liv =
+        (deliveryNote?.livId || deliveryNote?.livid || "").trim() ||
+        (/^LIV/i.test(String(order.paymentMethod || "")) ? "" : "")
+      const body: Record<string, unknown> = {
+        publicSiteUrl: typeof window !== "undefined" ? window.location.origin : undefined,
+      }
+      if (liv) {
+        body.livid = liv
+      } else {
+        body.orderId = Number(order.orderId)
+      }
       const res = await fetch("/api/orders/request-invoice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          orderId: Number(order.orderId),
-          publicSiteUrl: typeof window !== "undefined" ? window.location.origin : undefined,
-        }),
+        body: JSON.stringify(body),
       })
-      const json = (await res.json().catch(() => ({}))) as DeliveryNotePayload & { message?: string }
+      const json = (await res.json().catch(() => ({}))) as DeliveryNotePayload
       if (!res.ok || json.ok === false) {
         setInvoiceMsg(json.error || "Could not request invoice")
         return
       }
       setDeliveryNote(json)
-      setInvoiceMsg(json.message || "Invoice requested — waiting on seller")
+      setInvoiceMsg(
+        json.message ||
+          (json.livId || json.livid
+            ? `This person is asking for invoice for ${json.livId || json.livid}`
+            : "This person is asking for invoice"),
+      )
     } catch (e) {
       setInvoiceMsg(e instanceof Error ? e.message : "Could not request invoice")
     } finally {
@@ -784,12 +801,37 @@ function TrackOrderPageInner() {
                   </div>
                 </div>
 
-                {order.buyerName && (
-                  <div>
-                    <p className="text-sm text-muted-foreground">Buyer Name</p>
-                    <p className="font-medium">{order.buyerName}</p>
-                  </div>
-                )}
+                {(() => {
+                  const isCisBon = /CIS_BON/i.test(String(order.paymentMethod || ""))
+                  const servedBy = (deliveryNote?.servedBy || "").trim()
+                  const buyer = (order.buyerName || "").trim()
+                  // Never show CIS staff (servedBy) as the buyer
+                  if (isCisBon) {
+                    if (servedBy) {
+                      return (
+                        <div>
+                          <p className="text-sm text-muted-foreground">Served by</p>
+                          <p className="font-medium">{servedBy}</p>
+                        </div>
+                      )
+                    }
+                    return null
+                  }
+                  if (!buyer || (servedBy && buyer.toLowerCase() === servedBy.toLowerCase())) {
+                    return servedBy ? (
+                      <div>
+                        <p className="text-sm text-muted-foreground">Served by</p>
+                        <p className="font-medium">{servedBy}</p>
+                      </div>
+                    ) : null
+                  }
+                  return (
+                    <div>
+                      <p className="text-sm text-muted-foreground">Buyer Name</p>
+                      <p className="font-medium">{buyer}</p>
+                    </div>
+                  )
+                })()}
                 {order.buyerPhone && (
                   <div>
                     <p className="text-sm text-muted-foreground">Buyer Phone</p>

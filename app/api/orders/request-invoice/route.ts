@@ -4,6 +4,11 @@ import { getOrdersUrl } from "@/lib/backend-config"
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
+/**
+ * Ask for invoice — prefer CIS liv id:
+ *   POST { "livid": "LIV-898" }
+ * Sets DOCUMENT_STATE=INVOICE_REQUESTED (only when clicked).
+ */
 export async function POST(req: NextRequest) {
   let body: Record<string, unknown> = {}
   try {
@@ -11,9 +16,14 @@ export async function POST(req: NextRequest) {
   } catch {
     body = {}
   }
+
+  const livId = String(
+    body.livid ?? body.livId ?? req.nextUrl.searchParams.get("livid") ?? req.nextUrl.searchParams.get("livId") ?? "",
+  ).trim()
   const orderId = String(body.orderId ?? req.nextUrl.searchParams.get("orderId") ?? "").trim()
-  if (!orderId) {
-    return NextResponse.json({ ok: false, error: "orderId is required" }, { status: 400 })
+
+  if (!livId && !orderId) {
+    return NextResponse.json({ ok: false, error: "livid or orderId is required" }, { status: 400 })
   }
 
   const publicSiteUrl =
@@ -25,12 +35,21 @@ export async function POST(req: NextRequest) {
 
   const url = new URL(getOrdersUrl())
   url.searchParams.set("action", "requestInvoice")
+  if (livId) url.searchParams.set("livid", livId)
+
+  const payload: Record<string, unknown> = { requestedBy, publicSiteUrl }
+  if (livId) {
+    payload.livid = livId
+    payload.livId = livId
+  } else {
+    payload.orderId = Number(orderId) || orderId
+  }
 
   try {
     const res = await fetch(url.toString(), {
       method: "POST",
       headers: { Accept: "application/json", "Content-Type": "application/json" },
-      body: JSON.stringify({ orderId: Number(orderId) || orderId, requestedBy, publicSiteUrl }),
+      body: JSON.stringify(payload),
       cache: "no-store",
       signal: AbortSignal.timeout(30_000),
     })
