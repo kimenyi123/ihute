@@ -162,12 +162,29 @@ export function trackSessionStart() {
 
 export function trackPageView(path: string) {
   const metadata: Record<string, unknown> = {}
-  const shopMatch = path.match(/^\/shop-with-me\/([^/?#]+)/i)
+  const pathOnly = path.split("?")[0] || path
+  const shopMatch = pathOnly.match(/^\/shop-with-me\/([^/?#]+)/i)
   if (shopMatch) {
     try {
-      metadata.shopNickname = decodeURIComponent(shopMatch[1])
+      metadata.shopNickname = decodeURIComponent(shopMatch[1]).toLowerCase()
     } catch {
-      metadata.shopNickname = shopMatch[1]
+      metadata.shopNickname = String(shopMatch[1]).toLowerCase()
+    }
+  }
+  if (typeof window !== "undefined" && pathOnly.startsWith("/shop-with-me")) {
+    try {
+      const qs = new URL(path, window.location.origin).searchParams
+      if (!metadata.shopNickname) {
+        const nick = (qs.get("nickname") || "").trim().toLowerCase()
+        if (nick) metadata.shopNickname = nick
+      }
+      const src = (qs.get("src") || "").trim().toLowerCase()
+      if (src === "qr") {
+        metadata.acquisitionSource = "qr"
+        metadata.fromQr = true
+      }
+    } catch {
+      /* ignore */
     }
   }
   enqueue({
@@ -178,6 +195,39 @@ export function trackPageView(path: string) {
     entity: { type: "page", id: path },
     metadata: Object.keys(metadata).length ? metadata : undefined,
     message: `Page view ${path}`,
+  })
+}
+
+/** Seller copied or displayed their shop-with-me QR / link (for “most shared QR” admin stats). */
+export function trackQrShare(shopNickname: string, opts?: { sellerAccount?: string; table?: string }) {
+  const nick = shopNickname.trim().toLowerCase()
+  if (!nick) return
+  trackEvent("qr_share", {
+    entity: { type: "shop", id: nick, name: nick },
+    metadata: {
+      shopNickname: nick,
+      sellerAccount: opts?.sellerAccount,
+      table: opts?.table,
+      channel: "shop_with_me",
+    },
+    message: `QR share @${nick}`,
+  })
+}
+
+/** Buyer opened a shop via QR (`?src=qr`). */
+export function trackQrScan(shopNickname: string, opts?: { sellerAccount?: string; table?: string }) {
+  const nick = shopNickname.trim().toLowerCase()
+  if (!nick) return
+  trackEvent("qr_scan", {
+    entity: { type: "shop", id: nick, name: nick },
+    metadata: {
+      shopNickname: nick,
+      sellerAccount: opts?.sellerAccount,
+      table: opts?.table,
+      acquisitionSource: "qr",
+      fromQr: true,
+    },
+    message: `QR scan @${nick}`,
   })
 }
 

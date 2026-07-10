@@ -83,6 +83,10 @@ type ShopWithMe = {
   tableOrders?: number
   taggedOrders?: number
   shopPageViews?: number
+  qrShares?: number
+  qrScans?: number
+  qrOrders?: number
+  qrGmv?: number
 }
 
 type ShopWithMeOrder = {
@@ -99,6 +103,7 @@ type ShopWithMeOrder = {
   isTableCommand?: boolean
   tableName?: string
   shopNickname?: string
+  fromQr?: boolean
 }
 
 type TopShop = {
@@ -106,6 +111,15 @@ type TopShop = {
   sellerName?: string
   orderCount?: number
   gmv?: number
+}
+
+type TopQrShare = {
+  shopNickname?: string
+  sellerAccount?: string
+  sellerName?: string
+  shareCount?: number
+  scanCount?: number
+  qrOrderCount?: number
 }
 
 type DailyPoint = {
@@ -176,6 +190,7 @@ export default function AdminIhuteStatsPage() {
   const [shopWithMe, setShopWithMe] = useState<ShopWithMe>({})
   const [recentShopOrders, setRecentShopOrders] = useState<ShopWithMeOrder[]>([])
   const [topShops, setTopShops] = useState<TopShop[]>([])
+  const [topQrShares, setTopQrShares] = useState<TopQrShare[]>([])
   const [daily, setDaily] = useState<DailyPoint[]>([])
   const [pitchSummary, setPitchSummary] = useState("")
   const [currency, setCurrency] = useState("RWF")
@@ -197,6 +212,7 @@ export default function AdminIhuteStatsPage() {
         shopWithMe?: ShopWithMe
         recentShopWithMeOrders?: ShopWithMeOrder[]
         topShopWithMeShops?: TopShop[]
+        topQrShares?: TopQrShare[]
         sellerOptions?: SellerOption[]
         daily?: DailyPoint[]
         pitchSummary?: string
@@ -212,6 +228,7 @@ export default function AdminIhuteStatsPage() {
       setShopWithMe(json.shopWithMe ?? {})
       setRecentShopOrders(Array.isArray(json.recentShopWithMeOrders) ? json.recentShopWithMeOrders : [])
       setTopShops(Array.isArray(json.topShopWithMeShops) ? json.topShopWithMeShops : [])
+      setTopQrShares(Array.isArray(json.topQrShares) ? json.topQrShares : [])
       setSellerOptions(
         Array.isArray(json.sellerOptions)
           ? json.sellerOptions
@@ -492,7 +509,7 @@ export default function AdminIhuteStatsPage() {
 
           <div className="grid gap-4 lg:grid-cols-2">
             {!sellerMode ? (
-              <ChartPanel title="Top shop sellers" subtitle="Click a seller in the dropdown above to drill down">
+              <ChartPanel title="Top shop sellers" subtitle="Orders from shared shop-with-me / QR links — click a seller above to drill down">
                 <div className="h-[280px]">
                   {topShops.length === 0 ? (
                     <EmptyState title="No shop sales yet" description="Sales appear when buyers order from shop-with-me or table menus." />
@@ -522,21 +539,91 @@ export default function AdminIhuteStatsPage() {
                 <div className="grid gap-3 sm:grid-cols-2">
                   <MiniStat label="Table orders" value={fmtNum(shopWithMe.tableOrders ?? 0)} />
                   <MiniStat label="Tagged checkouts" value={fmtNum(shopWithMe.taggedOrders ?? 0)} />
+                  <MiniStat label="QR orders" value={fmtNum(shopWithMe.qrOrders ?? 0)} />
+                  <MiniStat label="QR GMV" value={fmtRwf(shopWithMe.qrGmv ?? 0)} />
                   <MiniStat label="Shop GMV share" value={`${shopShare}%`} />
                   <MiniStat label="Avg order" value={fmtRwf((shopWithMe.orderCount ?? 0) > 0 ? (shopWithMe.gmvTotal ?? 0) / (shopWithMe.orderCount ?? 1) : 0)} />
                 </div>
               </ChartPanel>
             )}
 
-            <div className="grid gap-3 sm:grid-cols-2">
+            <ChartPanel title="Most shared QR" subtitle="Seller copy-link shares, buyer QR scans, and QR-attributed orders">
+              <div className="h-[280px] overflow-auto">
+                {topQrShares.length === 0 ? (
+                  <EmptyState
+                    title="No QR activity yet"
+                    description="Stats appear when sellers copy their shop QR link or buyers open /shop-with-me/…?src=qr."
+                  />
+                ) : (
+                  <table className="min-w-full text-left text-sm">
+                    <thead className="sticky top-0 bg-white text-xs uppercase tracking-wide text-slate-500">
+                      <tr>
+                        <th className="px-2 py-2 font-medium">Shop</th>
+                        <th className="px-2 py-2 font-medium text-right">Shares</th>
+                        <th className="px-2 py-2 font-medium text-right">Scans</th>
+                        <th className="px-2 py-2 font-medium text-right">QR orders</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {topQrShares.map((q) => (
+                        <tr key={q.shopNickname || q.sellerAccount} className="hover:bg-slate-50">
+                          <td className="px-2 py-2">
+                            <div className="font-medium text-slate-900">@{q.shopNickname || "—"}</div>
+                            <div className="text-xs text-slate-500">{q.sellerName || q.sellerAccount || ""}</div>
+                          </td>
+                          <td className="px-2 py-2 text-right tabular-nums">{fmtNum(q.shareCount ?? 0)}</td>
+                          <td className="px-2 py-2 text-right tabular-nums">{fmtNum(q.scanCount ?? 0)}</td>
+                          <td className="px-2 py-2 text-right tabular-nums font-semibold">{fmtNum(q.qrOrderCount ?? 0)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </ChartPanel>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <ChartPanel title="Top products (shop-with-me)" subtitle="Best sellers from QR / shop menu orders — full list in Insights">
+              <div className="h-[280px] overflow-auto">
+                {(analytics.topProducts || []).length === 0 ? (
+                  <EmptyState title="No product lines yet" description="Products appear once shop-with-me orders include line items." />
+                ) : (
+                  <table className="min-w-full text-left text-sm">
+                    <thead className="sticky top-0 bg-white text-xs uppercase tracking-wide text-slate-500">
+                      <tr>
+                        <th className="px-2 py-2 font-medium">#</th>
+                        <th className="px-2 py-2 font-medium">Product</th>
+                        <th className="px-2 py-2 font-medium text-right">Qty</th>
+                        <th className="px-2 py-2 font-medium text-right">Revenue</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {(analytics.topProducts || []).slice(0, 12).map((p, i) => (
+                        <tr key={`${p.itemCode || p.itemName}-${i}`} className="hover:bg-slate-50">
+                          <td className="px-2 py-2 text-slate-400">{i + 1}</td>
+                          <td className="px-2 py-2 font-medium text-slate-900">{p.itemName || p.itemCode || "—"}</td>
+                          <td className="px-2 py-2 text-right tabular-nums">{fmtNum(p.quantitySold ?? 0)}</td>
+                          <td className="px-2 py-2 text-right tabular-nums font-semibold">{fmtRwf(p.revenue ?? 0)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </ChartPanel>
+
+            <div className="grid gap-3 sm:grid-cols-2 content-start">
               {!sellerMode ? (
                 <>
                   <MiniStat label="Table orders" value={fmtNum(shopWithMe.tableOrders ?? 0)} />
                   <MiniStat label="Tagged checkouts" value={fmtNum(shopWithMe.taggedOrders ?? 0)} />
+                  <MiniStat label="QR shares" value={fmtNum(shopWithMe.qrShares ?? 0)} />
+                  <MiniStat label="QR scans" value={fmtNum(shopWithMe.qrScans ?? 0)} />
+                  <MiniStat label="QR orders" value={fmtNum(shopWithMe.qrOrders ?? 0)} />
+                  <MiniStat label="QR GMV" value={fmtRwf(shopWithMe.qrGmv ?? 0)} />
                   <MiniStat label="All IHUTE orders" value={fmtNum(orders.orderCount ?? 0)} />
                   <MiniStat label="All GMV" value={fmtRwf(orders.gmvTotal ?? 0)} />
-                  <MiniStat label="Page views" value={fmtNum(engagement.pageViews ?? 0)} />
-                  <MiniStat label="Sessions" value={fmtNum(sessions)} />
                 </>
               ) : (
                 <>
@@ -544,6 +631,8 @@ export default function AdminIhuteStatsPage() {
                   <MiniStat label="Table orders" value={fmtNum(shopWithMe.tableOrders ?? 0)} />
                   <MiniStat label="Tagged checkouts" value={fmtNum(shopWithMe.taggedOrders ?? 0)} />
                   <MiniStat label="Shop visits" value={fmtNum(shopWithMe.shopPageViews ?? 0)} />
+                  <MiniStat label="QR shares" value={fmtNum(shopWithMe.qrShares ?? 0)} />
+                  <MiniStat label="QR scans" value={fmtNum(shopWithMe.qrScans ?? 0)} />
                 </>
               )}
             </div>
@@ -593,7 +682,14 @@ export default function AdminIhuteStatsPage() {
                       </td>
                       <td className="px-4 py-3">
                         {o.isTableCommand ? (
-                          <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800">Table {o.tableName || ""}</span>
+                          <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800">
+                            Table {o.tableName || ""}
+                            {o.fromQr ? " · QR" : ""}
+                          </span>
+                        ) : o.fromQr ? (
+                          <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-800">
+                            QR @{o.shopNickname || "shop"}
+                          </span>
                         ) : o.shopNickname ? (
                           <span className="rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-800">@{o.shopNickname}</span>
                         ) : (
@@ -667,6 +763,8 @@ export default function AdminIhuteStatsPage() {
             { term: "Conversion", def: "Shop orders divided by shop page views." },
             { term: "Table orders", def: "In-venue orders via table menu (IS_TABLE_COMMAND)." },
             { term: "Tagged checkouts", def: "Orders stamped [IHUTE:shop_with_me:nickname] at checkout." },
+            { term: "QR orders", def: "Orders from a shared supplier QR (?src=qr), stamped [IHUTE:shop_with_me:nick:qr]." },
+            { term: "Most shared QR", def: "Seller link copies (qr_share) + buyer scans (qr_scan) + QR-attributed orders." },
           ]}
         />
       </CollapsibleHelp>

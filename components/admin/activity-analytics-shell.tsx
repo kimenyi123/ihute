@@ -29,6 +29,11 @@ export function todayIso(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
+/** Earliest date used by the “All time” filter (covers IHUTE history). */
+export function allTimeFromIso(): string {
+  return "2018-01-01"
+}
+
 export function fmtRwf(n: number): string {
   return new Intl.NumberFormat("en-RW", { maximumFractionDigits: 0 }).format(Math.round(n)) + " RWF"
 }
@@ -43,11 +48,12 @@ export function fmtChartDate(iso: string): string {
   return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" })
 }
 
-const DATE_PRESETS = [
+const DATE_PRESETS: ReadonlyArray<{ label: string; days: number | null }> = [
   { label: "7 days", days: 7 },
   { label: "30 days", days: 30 },
   { label: "90 days", days: 90 },
-] as const
+  { label: "All time", days: null },
+]
 
 type AnalyticsNavProps = {
   active: "visitors" | "sales"
@@ -287,21 +293,26 @@ export function DateRangeControls({
         Date range & filters
       </div>
       <div className="flex flex-wrap gap-2">
-        {DATE_PRESETS.map((p) => (
-          <Button
-            key={p.days}
-            type="button"
-            size="sm"
-            variant="outline"
-            className="border-slate-200"
-            onClick={() => {
-              onFromChange(isoDateDaysAgo(p.days))
-              onToChange(todayIso())
-            }}
-          >
-            {p.label}
-          </Button>
-        ))}
+        {DATE_PRESETS.map((p) => {
+          const presetFrom = p.days == null ? allTimeFromIso() : isoDateDaysAgo(p.days)
+          const presetTo = todayIso()
+          const isActive = from === presetFrom && to === presetTo
+          return (
+            <Button
+              key={p.label}
+              type="button"
+              size="sm"
+              variant={isActive ? "default" : "outline"}
+              className={isActive ? undefined : "border-slate-200"}
+              onClick={() => {
+                onFromChange(presetFrom)
+                onToChange(presetTo)
+              }}
+            >
+              {p.label}
+            </Button>
+          )
+        })}
       </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <label className="text-sm">

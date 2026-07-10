@@ -101,6 +101,7 @@ export function ShopAnalyticsPanels({
     return [
       { name: "Table / in-venue", value: c.tableOrders ?? 0 },
       { name: "Online tagged", value: c.onlineTagged ?? 0 },
+      { name: "QR attributed", value: c.qrOrders ?? 0 },
       { name: "Other shop", value: c.otherShop ?? 0 },
     ].filter((x) => x.value > 0)
   }, [analytics.channelSplit])

@@ -54,6 +54,8 @@ import { useCartStore } from "@/lib/cart-store";
 import { useAuthStore } from "@/lib/auth-store";
 import { useFavoritesStore } from "@/lib/favorites-store";
 import { trackProductView, trackClick } from "@/lib/interaction-tracker";
+import { trackQrScan } from "@/lib/activity-tracker";
+import { writeShopOrderContext } from "@/lib/ihute-shop-order-context";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/use-toast";
 import {
@@ -868,6 +870,31 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
     currentSeller?.PREFERRED_CATEGORIES,
     currentSeller?.DEPARTMENT
   );
+
+  useEffect(() => {
+    if (!nicknameLower) return;
+    const src = (searchParams?.get("src") || "").trim().toLowerCase();
+    const acquisitionSource = src === "qr" ? ("qr" as const) : undefined;
+    writeShopOrderContext({
+      shopNickname: nicknameLower,
+      sellerAccount: currentSeller?.ISHYIGA_ACCOUNT,
+      acquisitionSource,
+    });
+  }, [nicknameLower, currentSeller?.ISHYIGA_ACCOUNT, searchParams]);
+
+  const qrScanLoggedRef = useRef<string>("");
+  useEffect(() => {
+    if (!nicknameLower) return;
+    const src = (searchParams?.get("src") || "").trim().toLowerCase();
+    if (src !== "qr") return;
+    const key = `${nicknameLower}|${searchParams?.get("table") || ""}`;
+    if (qrScanLoggedRef.current === key) return;
+    qrScanLoggedRef.current = key;
+    trackQrScan(nicknameLower, {
+      sellerAccount: currentSeller?.ISHYIGA_ACCOUNT,
+      table: searchParams?.get("table") || undefined,
+    });
+  }, [nicknameLower, currentSeller?.ISHYIGA_ACCOUNT, searchParams]);
 
   const moodOptions = useMemo(
     () =>

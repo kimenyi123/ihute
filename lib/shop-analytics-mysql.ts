@@ -151,10 +151,12 @@ export async function fetchShopAnalyticsFromMysql(
        SUM(CASE WHEN NOT (COALESCE(ot.IS_TABLE_COMMAND, 0) = 1 OR ot.DELIVERY_LOCATION LIKE 'Table:%'
                 OR ot.DELIVERY_LOCATION LIKE 'table:%')
                 AND COALESCE(ot.CONDITIONS, '') NOT LIKE '%IHUTE:shop_with_me%' THEN 1 ELSE 0 END) AS other_shop,
+       SUM(CASE WHEN COALESCE(ot.CONDITIONS, '') LIKE '%:qr]%' THEN 1 ELSE 0 END) AS qr_orders,
        SUM(CASE WHEN COALESCE(ot.IS_TABLE_COMMAND, 0) = 1 OR ot.DELIVERY_LOCATION LIKE 'Table:%'
                 OR ot.DELIVERY_LOCATION LIKE 'table:%' THEN ot.AMOUNT ELSE 0 END) AS table_gmv,
        SUM(CASE WHEN NOT (COALESCE(ot.IS_TABLE_COMMAND, 0) = 1 OR ot.DELIVERY_LOCATION LIKE 'Table:%'
-                OR ot.DELIVERY_LOCATION LIKE 'table:%') THEN ot.AMOUNT ELSE 0 END) AS online_gmv
+                OR ot.DELIVERY_LOCATION LIKE 'table:%') THEN ot.AMOUNT ELSE 0 END) AS online_gmv,
+       SUM(CASE WHEN COALESCE(ot.CONDITIONS, '') LIKE '%:qr]%' THEN ot.AMOUNT ELSE 0 END) AS qr_gmv
      FROM order_transaction ot
      WHERE ${SHOP_WITH_ME_ORDER_WHERE} AND ot.heure >= ? AND ot.heure <= ?${sellerSql}`,
     [fromTs, toTs, ...sellerParam],
@@ -250,8 +252,10 @@ export async function fetchShopAnalyticsFromMysql(
       tableOrders: num(channelRows[0]?.table_orders),
       onlineTagged: num(channelRows[0]?.online_tagged),
       otherShop: num(channelRows[0]?.other_shop),
+      qrOrders: num(channelRows[0]?.qr_orders),
       tableGmv: num(channelRows[0]?.table_gmv),
       onlineGmv: num(channelRows[0]?.online_gmv),
+      qrGmv: num(channelRows[0]?.qr_gmv),
     },
     compareSellers,
     commission: {

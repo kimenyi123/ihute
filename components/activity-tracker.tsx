@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef } from "react"
-import { usePathname } from "next/navigation"
+import { usePathname, useSearchParams } from "next/navigation"
 import {
   registerActivityFlushOnHide,
   trackPageView,
@@ -11,6 +11,7 @@ import {
 /** Root layout client hook: session start + page views + flush on tab hide. */
 export function ActivityTracker() {
   const pathname = usePathname()
+  const searchParams = useSearchParams()
   const lastPath = useRef<string | null>(null)
 
   useEffect(() => {
@@ -19,10 +20,13 @@ export function ActivityTracker() {
   }, [])
 
   useEffect(() => {
-    if (!pathname || pathname === lastPath.current) return
-    lastPath.current = pathname
-    trackPageView(pathname)
-  }, [pathname])
+    if (!pathname) return
+    const qs = searchParams?.toString() || ""
+    const fullPath = qs ? `${pathname}?${qs}` : pathname
+    if (fullPath === lastPath.current) return
+    lastPath.current = fullPath
+    trackPageView(fullPath)
+  }, [pathname, searchParams])
 
   return null
 }

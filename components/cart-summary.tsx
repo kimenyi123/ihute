@@ -891,7 +891,13 @@ function CartSummaryBody() {
           isTableCommand: isTableCheckout,
           tableName: tableNameFromContext || undefined,
           tableLocation: activeSession?.locationName || tableInfo?.shopName || g.supplierName,
-          ...(orderSource ? { orderSource, shopNickname: shopCtx?.shopNickname } : {}),
+          ...(orderSource
+            ? {
+                orderSource,
+                shopNickname: shopCtx?.shopNickname,
+                acquisitionSource: shopCtx?.acquisitionSource,
+              }
+            : {}),
         }),
       })
 

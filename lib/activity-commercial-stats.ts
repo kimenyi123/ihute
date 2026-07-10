@@ -24,7 +24,17 @@ function num(v: unknown): number {
 
 function shopNicknameFromConditions(conditions: string): string {
   const m = conditions.match(/\[IHUTE:shop_with_me:([^\]]+)\]/)
-  return m ? m[1].trim() : ""
+  if (!m) return ""
+  const raw = m[1].trim()
+  if (!raw || raw === "table" || raw === "qr") return ""
+  const head = raw.split(":")[0]?.trim() || ""
+  if (!head || head === "table") return ""
+  return head.toLowerCase()
+}
+
+function conditionsFromQr(conditions: string): boolean {
+  const c = conditions.toLowerCase()
+  return c.includes(":qr]") || c.includes('"fromqr":true') || c.includes('"acquisitionsource":"qr"')
 }
 
 function fmtRwf(n: number): string {
@@ -154,13 +164,14 @@ export async function fetchCommercialStatsFromMysql(
          FROM activity_events
          WHERE created_at >= ? AND created_at <= ?${envClause}
            AND stage = 'page_view'
-           AND (payload LIKE '%/shop-with-me/%' OR payload LIKE '%shopwithme%')
-           AND (payload LIKE ? OR payload LIKE ? OR payload LIKE ?)`,
+           AND (payload LIKE '%/shop-with-me/%' OR payload LIKE '%shopwithme%' OR payload LIKE '%shop-with-me?%')
+           AND (payload LIKE ? OR payload LIKE ? OR payload LIKE ? OR payload LIKE ?)`,
         [
           fromTs,
           toTs,
           ...envParams,
           `%/shop-with-me/${nickname}%`,
+          `%nickname=${nickname}%`,
           `%"shopNickname":"${nickname}"%`,
           `%"shopNickname": "${nickname}"%`,
         ],
@@ -173,11 +184,46 @@ export async function fetchCommercialStatsFromMysql(
        FROM activity_events
        WHERE created_at >= ? AND created_at <= ?${envClause}
          AND stage = 'page_view'
-         AND (payload LIKE '%/shop-with-me/%' OR payload LIKE '%shopwithme%')`,
+         AND (payload LIKE '%/shop-with-me/%' OR payload LIKE '%shopwithme%' OR payload LIKE '%shop-with-me?%')`,
       [fromTs, toTs, ...envParams],
     )
     shopPageViews = num(shopPageViewRows[0]?.c)
   }
+
+  const qrStageRows = await q<Row>(
+    seller
+      ? `SELECT ae.stage, COUNT(*) AS c
+         FROM activity_events ae
+         JOIN account_seller a ON a.ishyiga_account = ?
+         WHERE ae.created_at >= ? AND ae.created_at <= ?${envClause}
+           AND ae.stage IN ('qr_share','qr_scan')
+           AND (
+             ae.payload LIKE CONCAT('%"shopNickname":"', COALESCE(NULLIF(TRIM(a.nickname), ''), '__none__'), '"%')
+             OR ae.payload LIKE CONCAT('%/shop-with-me/', COALESCE(NULLIF(TRIM(a.nickname), ''), '__none__), '%')
+           )
+         GROUP BY ae.stage`
+      : `SELECT stage, COUNT(*) AS c
+         FROM activity_events
+         WHERE created_at >= ? AND created_at <= ?${envClause}
+           AND stage IN ('qr_share','qr_scan')
+         GROUP BY stage`,
+    seller ? [seller, fromTs, toTs, ...envParams] : [fromTs, toTs, ...envParams],
+  )
+  let qrShares = 0
+  let qrScans = 0
+  for (const row of qrStageRows) {
+    if (nz(row.stage) === "qr_share") qrShares = num(row.c)
+    if (nz(row.stage) === "qr_scan") qrScans = num(row.c)
+  }
+
+  const qrOrderRows = await q<Row>(
+    `SELECT COUNT(*) AS c, COALESCE(SUM(ot.AMOUNT), 0) AS gmv
+     FROM order_transaction ot
+     WHERE ${SHOP_WITH_ME_ORDER_WHERE}
+       AND ot.heure >= ? AND ot.heure <= ?${sellerSql}
+       AND COALESCE(ot.CONDITIONS, '') LIKE '%:qr]%'`,
+    [fromTs, toTs, ...sellerParam],
+  )
 
   const shopWithMe = {
     orderCount: num(s.order_count),
@@ -187,6 +233,10 @@ export async function fetchCommercialStatsFromMysql(
     tableOrders: num(s.table_orders),
     taggedOrders: num(s.tagged_orders),
     shopPageViews,
+    qrShares,
+    qrScans,
+    qrOrders: num(qrOrderRows[0]?.c),
+    qrGmv: num(qrOrderRows[0]?.gmv),
     ...(seller ? { sellerAccount: seller } : {}),
   }
 
@@ -316,9 +366,81 @@ export async function fetchCommercialStatsFromMysql(
       isTableCommand: num(row.IS_TABLE_COMMAND) === 1,
       tableName: nz(row.TABLE_NAME),
       shopNickname: shopNicknameFromConditions(conditions),
+      fromQr: conditionsFromQr(conditions),
       conditions,
     }
   })
+
+  // Most shared / scanned QRs (activity events + QR-attributed orders)
+  const qrEventRows = await q<Row>(
+    `SELECT payload, stage
+     FROM activity_events
+     WHERE created_at >= ? AND created_at <= ?${envClause}
+       AND stage IN ('qr_share','qr_scan')
+     ORDER BY created_at DESC
+     LIMIT 5000`,
+    [fromTs, toTs, ...envParams],
+  )
+  const qrByNick = new Map<string, { shareCount: number; scanCount: number; qrOrderCount: number }>()
+  for (const row of qrEventRows) {
+    const payload = nz(row.payload)
+    const nickMatch = payload.match(/"shopNickname"\s*:\s*"([^"]+)"/i)
+    const pathMatch = payload.match(/\/shop-with-me\/([^/? "'\\]+)/i)
+    const nick = (nickMatch?.[1] || pathMatch?.[1] || "").trim().toLowerCase()
+    if (!nick) continue
+    const cur = qrByNick.get(nick) || { shareCount: 0, scanCount: 0, qrOrderCount: 0 }
+    if (nz(row.stage) === "qr_share") cur.shareCount += 1
+    else cur.scanCount += 1
+    qrByNick.set(nick, cur)
+  }
+  for (const row of recentRows) {
+    const conditions = nz(row.CONDITIONS)
+    if (!conditionsFromQr(conditions)) continue
+    const nick = shopNicknameFromConditions(conditions)
+    if (!nick) continue
+    const cur = qrByNick.get(nick) || { shareCount: 0, scanCount: 0, qrOrderCount: 0 }
+    cur.qrOrderCount += 1
+    qrByNick.set(nick, cur)
+  }
+  const nickList = Array.from(qrByNick.keys())
+  const nickSellerRows =
+    nickList.length > 0
+      ? await q<Row>(
+          `SELECT LOWER(TRIM(nickname)) AS nick, ishyiga_account,
+                  COALESCE(NULLIF(TRIM(OWNER), ''),
+                    TRIM(CONCAT(COALESCE(FIRSTNAME, ''), ' ', COALESCE(LASTNAME, '')))) AS seller_name
+           FROM account_seller
+           WHERE LOWER(TRIM(nickname)) IN (${nickList.map(() => "?").join(",")})`,
+          nickList,
+        )
+      : []
+  const nickMeta = new Map(
+    nickSellerRows.map((r) => [
+      nz(r.nick),
+      { sellerAccount: nz(r.ishyiga_account), sellerName: nz(r.seller_name) },
+    ]),
+  )
+  let topQrShares = Array.from(qrByNick.entries())
+    .map(([shopNickname, counts]) => ({
+      shopNickname,
+      ...counts,
+      sellerAccount: nickMeta.get(shopNickname)?.sellerAccount || "",
+      sellerName: nickMeta.get(shopNickname)?.sellerName || "",
+    }))
+    .sort(
+      (a, b) =>
+        b.shareCount + b.scanCount * 2 + b.qrOrderCount * 3 - (a.shareCount + a.scanCount * 2 + a.qrOrderCount * 3),
+    )
+    .slice(0, seller ? 5 : 15)
+  if (seller) {
+    const sellerNickRows = await q<Row>(
+      `SELECT COALESCE(NULLIF(TRIM(nickname), ''), '') AS shop_nickname
+       FROM account_seller WHERE ishyiga_account = ? LIMIT 1`,
+      [seller],
+    )
+    const sn = nz(sellerNickRows[0]?.shop_nickname).toLowerCase()
+    if (sn) topQrShares = topQrShares.filter((r) => r.shopNickname === sn)
+  }
 
   const sellerOptionRows = await q<Row>(
     hasRange
@@ -374,6 +496,7 @@ export async function fetchCommercialStatsFromMysql(
     daily,
     recentShopWithMeOrders,
     topShopWithMeShops,
+    topQrShares,
     sellerOptions: sellerOptionRows.map((row) => ({
       sellerAccount: nz(row.seller_account),
       sellerName: nz(row.seller_name),

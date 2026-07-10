@@ -481,7 +481,7 @@ function SupplierDashboard() {
     if (typeof window !== "undefined") setBaseUrl(window.location.origin);
   }, []);
 
-  // Bar/restaurant flag + shop logo (same photo as /account shop photo upload)
+  // Bar/restaurant flag + shop logo + nickname (same photo as /account shop photo upload)
   useEffect(() => {
     if (!user?.ishyigaAccount || user?.role !== "supplier") return;
     const account = user.ishyigaAccount;
@@ -505,12 +505,18 @@ function SupplierDashboard() {
         } else {
           setShopLogoUrl("");
         }
+        const nick = String(accountData?.profile?.nickname ?? "").trim().toLowerCase();
+        if (nick) setShopNickname((prev) => prev || nick);
       })
       .catch(() => {});
   }, [user?.ishyigaAccount, user?.role, user?.email]);
 
   const shopWithMeLink = shopNickname.trim()
-    ? `${baseUrl}/shop-with-me?nickname=${encodeURIComponent(shopNickname.trim().toLowerCase())}${isBarOrRestaurant && tableNameOrNumber.trim() ? `&table=${encodeURIComponent(tableNameOrNumber.trim())}` : ""}`
+    ? `${baseUrl}/shop-with-me/${encodeURIComponent(shopNickname.trim().toLowerCase())}?src=qr${
+        isBarOrRestaurant && tableNameOrNumber.trim()
+          ? `&table=${encodeURIComponent(tableNameOrNumber.trim())}`
+          : ""
+      }`
     : "";
 
   // Link for this seller only (like shop-with-me: URL identifies the seller)
@@ -521,7 +527,15 @@ function SupplierDashboard() {
 
   const copyShopWithMeLink = () => {
     if (!shopWithMeLink) return;
-    navigator.clipboard.writeText(shopWithMeLink).then(() => alert("Link copied to clipboard"));
+    navigator.clipboard.writeText(shopWithMeLink).then(() => {
+      alert("Link copied to clipboard");
+      void import("@/lib/activity-tracker").then(({ trackQrShare }) => {
+        trackQrShare(shopNickname.trim().toLowerCase(), {
+          sellerAccount: user?.ishyigaAccount,
+          table: tableNameOrNumber.trim() || undefined,
+        });
+      });
+    });
   };
 
   useEffect(() => {

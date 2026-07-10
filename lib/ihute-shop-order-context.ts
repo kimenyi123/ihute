@@ -1,14 +1,20 @@
 /** Session context when buyer shops via /shop-with-me/{nickname} — used at checkout for order attribution. */
 const STORAGE_KEY = "ihute_shop_order_ctx"
 
+export type ShopAcquisitionSource = "qr" | "link" | "direct"
+
 export type ShopOrderContext = {
   source: "shop_with_me"
   shopNickname: string
   sellerAccount?: string
+  /** How the buyer arrived: QR scan from supplier dashboard, shared link, or typed URL. */
+  acquisitionSource?: ShopAcquisitionSource
   at: number
 }
 
-export function writeShopOrderContext(ctx: Omit<ShopOrderContext, "at" | "source"> & { source?: "shop_with_me" }): void {
+export function writeShopOrderContext(
+  ctx: Omit<ShopOrderContext, "at" | "source"> & { source?: "shop_with_me" },
+): void {
   if (typeof window === "undefined") return
   const nick = (ctx.shopNickname ?? "").trim().toLowerCase()
   if (!nick) return
@@ -16,6 +22,7 @@ export function writeShopOrderContext(ctx: Omit<ShopOrderContext, "at" | "source
     source: "shop_with_me",
     shopNickname: nick,
     sellerAccount: ctx.sellerAccount?.trim() || undefined,
+    acquisitionSource: ctx.acquisitionSource,
     at: Date.now(),
   }
   try {

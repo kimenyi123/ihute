@@ -35,8 +35,10 @@ export type ChannelSplit = {
   tableOrders?: number
   onlineTagged?: number
   otherShop?: number
+  qrOrders?: number
   tableGmv?: number
   onlineGmv?: number
+  qrGmv?: number
 }
 
 export type CompareSellerRow = {
