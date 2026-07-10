@@ -42,6 +42,7 @@ import {
 } from "@/lib/admin-order-monitor"
 import { fetchOrderMonitorStats, type OrderMonitorStats } from "@/lib/admin-order-stats"
 import { OrderMonitorCharts } from "@/components/admin/order-monitor-charts"
+import { downloadExcel } from "@/lib/grandma-excel-export"
 
 const PAGE_SIZE = 20
 const AUTO_REFRESH_MS = 30_000
@@ -241,6 +242,22 @@ export default function OrdersPage() {
     filters.fulfillment,
   ].filter(Boolean).length
 
+  const exportToExcel = () => {
+    const rows = orders.map((order) => ({
+      "Order #": order.orderNumber || `#${order.id}`,
+      Seller: order.sellerName || "",
+      Buyer: order.buyerName || "",
+      Amount: order.amount ?? 0,
+      Status: getStatusLabel(normalizeOrderStatus(order)),
+      "Payment status": order.paymentStatus || "OPEN",
+      Payment: order.paymentName || "",
+      Time: order.timestamp ? new Date(order.timestamp).toLocaleString() : "",
+      "Delivery location": order.deliveryLocation || "",
+    }))
+    const ok = downloadExcel(rows, "Orders", "admin_order_monitor")
+    if (!ok) window.alert("No orders to export.")
+  }
+
   return (
     <div className="mx-auto max-w-7xl">
       <header className="mb-8 border-b border-slate-200 pb-6">
@@ -283,6 +300,15 @@ export default function OrdersPage() {
             >
               <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
               Refresh
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={exportToExcel}
+              disabled={loading || orders.length === 0}
+              className="h-8 bg-emerald-600 text-white hover:bg-emerald-700"
+            >
+              Export to Excel
             </Button>
           </div>
         </div>

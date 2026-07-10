@@ -33,12 +33,18 @@ import { shopCategoryToSectorSlug } from "@/lib/seller-category-sector"
 import { isValidRwandaMobileE164, normalizeRwandaMobileE164 } from "@/lib/rwanda-phone"
 import { cn } from "@/lib/utils"
 import { GRANDMA_PATHS } from "@/lib/grandma-urls"
-import { extractMerchantMomoCodeForUssd } from "@/lib/grandma-order-billing"
+import { extractMerchantMomoCodeForUssd, stripShopMomoLabel } from "@/lib/grandma-order-billing"
 import { buildMoMoUssd } from "@/lib/momo-ussd"
 import { generalSellingPrice, lineSellingPriceFromProductRow, resolveItemEmballageRaw } from "@/lib/package-price"
-import { matchMoMoSmsToOrderTotal, type MoMoSmsMatchResult } from "@/lib/momo-payment-sms-match"
+import {
+  extractMoMoCodePaymentDetailsFromSms,
+  matchMoMoSmsToOrderTotal,
+  type MoMoSmsMatchResult,
+} from "@/lib/momo-payment-sms-match"
 
 const LS_KEY = "ihute:umuriro:lastShop"
+/** MTN merchant pay codes are usually 5–6 digits. */
+const MIN_MOMO_USSD_DIGITS = 5
 
 const SHOP_CATEGORIES = [
   "pharmacy",
@@ -69,6 +75,11 @@ function parseCatalogPriceRwf(v: unknown): number {
     .replace(/,/g, "")
   const p = parseFloat(n)
   return Number.isFinite(p) ? p : 0
+}
+
+function catalogHitMomo(p: CatalogHit): string {
+  const row = p as Record<string, unknown>
+  return String(row.momo ?? row.MOMO ?? row.seller_momo ?? "").trim()
 }
 
 function catalogHitSellerLabel(p: CatalogHit): string {
@@ -239,15 +250,38 @@ export function UmuriroBoarding() {
 
   const totalRwf = cartTotalRwf
 
-  const momoDigits = useMemo(() => extractMerchantMomoCodeForUssd(momoCode), [momoCode])
+  const tryApplyDiscoveredMomo = useCallback((raw: string) => {
+    const cleaned = stripShopMomoLabel(raw)
+    const digits = extractMerchantMomoCodeForUssd(cleaned)
+    if (digits.length < MIN_MOMO_USSD_DIGITS) return
+    setMomoCode((prev) => {
+      const prevDigits = extractMerchantMomoCodeForUssd(prev)
+      if (prevDigits.length >= MIN_MOMO_USSD_DIGITS) return prev
+      return cleaned || digits
+    })
+  }, [])
+
+  const momoDigits = useMemo(() => {
+    const fromForm = extractMerchantMomoCodeForUssd(momoCode)
+    if (fromForm.length >= MIN_MOMO_USSD_DIGITS) return fromForm
+    const fromSms = extractMoMoCodePaymentDetailsFromSms(momoSmsPaste)?.receiverCode
+    if (fromSms) {
+      const d = extractMerchantMomoCodeForUssd(fromSms)
+      if (d.length >= MIN_MOMO_USSD_DIGITS) return d
+    }
+    return fromForm
+  }, [momoCode, momoSmsPaste])
+
   const ussd = useMemo(() => buildUssd(momoDigits, totalRwf), [momoDigits, totalRwf])
 
   /** `tel:` href for USSD — `#` must be `%23` for many mobile dialers. */
   const ussdTelHref = useMemo(() => {
-    if (!momoDigits || momoDigits.length < 6 || totalRwf < 1) return ""
+    if (!momoDigits || momoDigits.length < MIN_MOMO_USSD_DIGITS || totalRwf < 1) return ""
     const s = buildUssd(momoDigits, totalRwf)
     return `tel:${s.replace(/#/g, "%23")}`
   }, [momoDigits, totalRwf])
+
+  const ussdReady = momoDigits.length >= MIN_MOMO_USSD_DIGITS && totalRwf > 0
 
   const shopPhoneE164 = useMemo(() => {
     const r = normalizeRwandaMobileE164(shopPhoneOptional)
@@ -302,6 +336,7 @@ export function UmuriroBoarding() {
           const snL = sn.toLowerCase()
           let bestAcc: string | null = null
           let bestScore = 0
+          let bestMomo = ""
           for (const s of suppliers) {
             const name = catalogHitSellerLabel(s) || String(s.supplier_name ?? "").trim()
             const acc = catalogHitSellerAccount(s) || String(s.supplier_account ?? "").trim()
@@ -314,9 +349,13 @@ export function UmuriroBoarding() {
             if (score > bestScore) {
               bestScore = score
               bestAcc = acc
+              bestMomo = catalogHitMomo(s) || String(s.momo ?? s.MOMO ?? "").trim()
             }
           }
-          if (!ac.signal.aborted) setResolvedSupplierAccount(bestAcc)
+          if (!ac.signal.aborted) {
+            setResolvedSupplierAccount(bestAcc)
+            if (bestMomo) tryApplyDiscoveredMomo(bestMomo)
+          }
         } catch (e) {
           if (e instanceof Error && e.name === "AbortError") return
           if (!ac.signal.aborted) setResolvedSupplierAccount(null)
@@ -327,7 +366,46 @@ export function UmuriroBoarding() {
       window.clearTimeout(timer)
       ac.abort()
     }
-  }, [shopName, shopCategory])
+  }, [shopName, shopCategory, tryApplyDiscoveredMomo])
+
+  useEffect(() => {
+    if (!resolvedSupplierAccount) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const sp = new URLSearchParams({
+          supplierProducts: resolvedSupplierAccount,
+          limit: "12",
+          Currency: "RWF",
+        })
+        const res = await fetch(`/api/fetchSuggestions?${sp}`, {
+          cache: "no-store",
+          headers: { Accept: "application/json" },
+        })
+        if (!res.ok || cancelled) return
+        const json = await res.json()
+        for (const p of parseSupplierProductsResponse(json)) {
+          const m = catalogHitMomo(p)
+          if (m) {
+            tryApplyDiscoveredMomo(m)
+            break
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [resolvedSupplierAccount, tryApplyDiscoveredMomo])
+
+  useEffect(() => {
+    const text = momoSmsPaste.trim()
+    if (text.length < 12) return
+    const fromSms = extractMoMoCodePaymentDetailsFromSms(text)?.receiverCode
+    if (fromSms) tryApplyDiscoveredMomo(fromSms)
+  }, [momoSmsPaste, tryApplyDiscoveredMomo])
 
   const runItemSearch = useCallback(
     async (q: string) => {
@@ -449,6 +527,8 @@ export function UmuriroBoarding() {
     setQuantity("1")
     setItemSuggestions([])
     setItemOpen(false)
+    const sellerMomo = catalogHitMomo(p)
+    if (sellerMomo) tryApplyDiscoveredMomo(sellerMomo)
   }
 
   const addCurrentLineToCart = () => {
@@ -524,7 +604,7 @@ export function UmuriroBoarding() {
       setErr("Enter shop name.")
       return false
     }
-    if (!momoDigits || momoDigits.length < 6) {
+    if (!momoDigits || momoDigits.length < MIN_MOMO_USSD_DIGITS) {
       setErr("Enter a valid MoMo code (digits).")
       return false
     }
@@ -676,6 +756,12 @@ export function UmuriroBoarding() {
       })
       const json = await res.json()
       if (!res.ok || !json?.ok) throw new Error(json?.error || "Save failed")
+      if (json.persisted !== true) {
+        throw new Error(
+          pickLang(UMURIRO_UI.saveOrderDbNotConfigured, lang) ||
+            "Order was not saved to the database. Check server ONBOARDING_MYSQL_* settings.",
+        )
+      }
 
       persistLocalShop()
 
@@ -696,7 +782,14 @@ export function UmuriroBoarding() {
         setCartLines([])
       }
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "Error")
+      const raw = e instanceof Error ? e.message : "Error"
+      if (raw.includes("Quick Shop:") || raw.includes("Database save failed")) {
+        setErr(pickLang(UMURIRO_UI.saveOrderDbError, lang))
+      } else if (raw.includes("not saved to the database") || raw.includes("ONBOARDING_MYSQL")) {
+        setErr(pickLang(UMURIRO_UI.saveOrderDbNotConfigured, lang))
+      } else {
+        setErr(raw)
+      }
     } finally {
       setLoading(false)
     }
@@ -1166,7 +1259,7 @@ export function UmuriroBoarding() {
                         <p className="text-xs text-[#6f8399]">{pickLang(UMURIRO_UI.ussdLabel, lang)}</p>
                         <div className="flex min-w-0 flex-wrap items-stretch gap-2 sm:items-center">
                           <code className="min-w-0 flex-1 break-all rounded-lg bg-[#17324d]/5 px-2 py-2 text-xs font-mono leading-relaxed text-[#17324d]">
-                            {momoDigits.length >= 6 && totalRwf > 0 ? ussd : "—"}
+                            {ussdReady ? ussd : "—"}
                           </code>
                           <div className="flex shrink-0 gap-2">
                             <Button
@@ -1175,7 +1268,7 @@ export function UmuriroBoarding() {
                               size="sm"
                               className="border-[#dbe7f3]"
                               onClick={copyUssd}
-                              disabled={momoDigits.length < 6 || totalRwf < 1}
+                              disabled={!ussdReady}
                             >
                               {copied ? <Check className="h-4 w-4" /> : <Copy className="mr-1 h-4 w-4" />}
                               {pickLang(UMURIRO_UI.copyUssd, lang)}
@@ -1201,7 +1294,7 @@ export function UmuriroBoarding() {
                         <Label className="text-[#17324d]">{pickLang(UMURIRO_UI.ussdLabel, lang)}</Label>
                         <div className="flex min-w-0 flex-wrap items-center gap-2">
                           <code className="min-w-0 flex-1 break-all rounded-lg bg-[#17324d]/5 px-2 py-2 text-xs font-mono text-[#17324d]">
-                            {momoDigits.length >= 1 && totalRwf > 0 ? ussd : "—"}
+                            {ussdReady ? ussd : "—"}
                           </code>
                           <div className="flex shrink-0 gap-2">
                             <Button
@@ -1210,7 +1303,7 @@ export function UmuriroBoarding() {
                               size="sm"
                               className="border-[#dbe7f3]"
                               onClick={copyUssd}
-                              disabled={momoDigits.length < 1 || totalRwf < 1}
+                              disabled={!ussdReady}
                             >
                               {copied ? <Check className="h-4 w-4" /> : <Copy className="mr-1 h-4 w-4" />}
                               {pickLang(UMURIRO_UI.copyUssd, lang)}

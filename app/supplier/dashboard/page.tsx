@@ -1998,6 +1998,9 @@ function SupplierDashboard() {
           onClose={() => setShowAddModal(false)}
           onSave={handleSaveProduct}
           editingProduct={editingProduct}
+          existingCodes={supplierProducts
+            .map(p => String(p.itemCode || p.ITEM_CODE || ""))
+            .filter(Boolean)}
         />
       </div>
     </div>

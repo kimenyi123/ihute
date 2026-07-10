@@ -41,6 +41,8 @@ const PRODUCT_MODAL_UI: Record<Language, {
   saving: string;
   updateProduct: string;
   addProduct: string;
+  errDuplicateCode: string;
+  warnPriceBelowCost: (loss: string) => string;
 }> = {
   en: {
     alertImageType: "Please choose an image file (JPEG, PNG, WebP, …).",
@@ -79,6 +81,8 @@ const PRODUCT_MODAL_UI: Record<Language, {
     saving: "Saving...",
     updateProduct: "Update Product",
     addProduct: "Add Product",
+    errDuplicateCode: "This product code already exists. Please enter a unique code.",
+    warnPriceBelowCost: (loss) => `⚠️ Sale price is ${loss} RWF below cost price — you will sell at a loss.`,
   },
   rw: {
     alertImageType: "Hitamo dosiye y'ishusho (JPEG, PNG, WebP, …).",
@@ -117,6 +121,8 @@ const PRODUCT_MODAL_UI: Record<Language, {
     saving: "Birimo kubikwa...",
     updateProduct: "Vugurura Igicuruzwa",
     addProduct: "Ongeraho Igicuruzwa",
+    errDuplicateCode: "Iyi kode y'igicuruzwa isanzwe ihari. Shyiramo kode yihariye.",
+    warnPriceBelowCost: (loss) => `⚠️ Igiciro cyo kugurisha kiri munsi y'igiciro cy'igurisha kuri ${loss} RWF — uzagurisha ku gihombo.`,
   },
   fr: {
     alertImageType: "Veuillez choisir un fichier image (JPEG, PNG, WebP, …).",
@@ -155,6 +161,8 @@ const PRODUCT_MODAL_UI: Record<Language, {
     saving: "Enregistrement...",
     updateProduct: "Mettre à jour le produit",
     addProduct: "Ajouter le produit",
+    errDuplicateCode: "Ce code produit existe déjà. Veuillez saisir un code unique.",
+    warnPriceBelowCost: (loss) => `⚠️ Le prix de vente est inférieur de ${loss} Mo au prix de revient — vous vendrez à perte.`,
   },
 };
 
@@ -163,6 +171,7 @@ interface AddProductModalProps {
   onClose: () => void;
   onSave: (product: ProductFormData) => void;
   editingProduct?: ProductFormData | null;
+  existingCodes?: string[];
 }
 
 export interface ProductFormData {
@@ -184,7 +193,8 @@ export default function AddProductModal({
   isOpen, 
   onClose, 
   onSave, 
-  editingProduct 
+  editingProduct, 
+  existingCodes = [],
 }: AddProductModalProps) {
   const language = useLanguageStore((s) => s.language);
   const ui = PRODUCT_MODAL_UI[language] ?? PRODUCT_MODAL_UI.en;
@@ -200,6 +210,7 @@ export default function AddProductModal({
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [priceWarning, setPriceWarning] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -237,6 +248,7 @@ export default function AddProductModal({
     }
     clearImage();
     setErrors({});
+    setPriceWarning(null);
   }, [editingProduct, isOpen, clearImage]);
 
   useEffect(() => {
@@ -272,6 +284,7 @@ export default function AddProductModal({
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
+    setPriceWarning(null);
 
     if (!formData.itemName.trim()) {
       newErrors.itemName = ui.errNameRequired;
@@ -279,6 +292,18 @@ export default function AddProductModal({
 
     if (!formData.itemCode.trim()) {
       newErrors.itemCode = ui.errCodeRequired;
+    } else {
+      // Prevent duplicate product codes 
+      const codeToCheck = formData.itemCode.trim().toUpperCase();
+      const isEditingSameCode =
+        editingProduct &&
+        editingProduct.itemCode.toUpperCase() === codeToCheck;
+      if (
+        !isEditingSameCode &&
+        existingCodes.some(c => c.toUpperCase() === codeToCheck)
+      ) {
+        newErrors.itemCode = ui.errDuplicateCode;
+      }
     }
 
     if (formData.quantity < 0) {
@@ -293,6 +318,17 @@ export default function AddProductModal({
       newErrors.cost = ui.errCost;
     } else if (formData.cost > formData.price) {
       newErrors.cost = ui.errCostAboveSale;
+    }
+
+    // Warn when selling price is below cost price 
+    if (
+      formData.price > 0 &&
+      formData.cost &&
+      formData.cost > 0 &&
+      formData.price < formData.cost
+    ) {
+      const loss = (formData.cost - formData.price).toFixed(0);
+      setPriceWarning(ui.warnPriceBelowCost(loss));
     }
 
     setErrors(newErrors);
@@ -545,6 +581,11 @@ export default function AddProductModal({
               />
               {errors.price && (
                 <p className="text-red-500 text-xs mt-1">{errors.price}</p>
+              )}
+              {priceWarning && (
+                <p className="text-orange-500 text-xs mt-1 font-medium">
+                  {priceWarning}
+                </p>
               )}
             </div>
 

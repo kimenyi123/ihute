@@ -25,6 +25,7 @@ type Product = {
   id: string
   name: string
   price: number
+  cost: number
   stock: number
   category?: string
   imageUrl?: string
@@ -44,6 +45,7 @@ export default function SupplierEditProductPage() {
   const [error, setError] = useState<string | null>(null)
 
   const [price, setPrice] = useState("")
+  const [cost, setCost] = useState("")
   const [stock, setStock] = useState("")
   const [imageUrl, setImageUrl] = useState("")
   const [imageFile, setImageFile] = useState<File | null>(null)
@@ -106,16 +108,28 @@ export default function SupplierEditProductPage() {
             const rawImage =
               foundProduct.item_image_url || foundProduct.image_url || foundProduct.IMAGE_URL || ""
             const productImageUrl = rawImage ? normalizeProductImagePublicUrl(String(rawImage)) : ""
+            const productCost =
+              parseFloat(
+                String(
+                  foundProduct.cost_price ??
+                  foundProduct.COST_PRICE ??
+                  foundProduct.item_cost ??
+                  0
+                )
+              ) || 0
+
             const mapped: Product = {
               id: productId,
               name: productName,
               price: productPrice,
+              cost: productCost,
               stock: productStock,
               category: foundProduct.category || "uncategorized",
               imageUrl: productImageUrl,
             }
             setProduct(mapped)
             setPrice(String(mapped.price))
+            setCost(String(mapped.cost))
             setStock(String(mapped.stock))
             setImageUrl(productImageUrl || "")
           } else {
@@ -149,6 +163,7 @@ export default function SupplierEditProductPage() {
           account: user.ishyigaAccount,
           itemCode: product.id,
           price: Number(price || 0),
+          cost: Number(cost || 0),
           stock: stockNum,
           quantity: stockNum,
           item_packet: String(stockNum),
@@ -297,6 +312,17 @@ export default function SupplierEditProductPage() {
               value={price} 
               onChange={(e) => setPrice(e.target.value)}
               disabled={saving || deleting}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Cost Price (RWF)</Label>
+            <Input
+              type="number"
+              value={cost}
+              onChange={(e) => setCost(e.target.value)}
+              disabled={saving || deleting}
+              placeholder="0"
             />
           </div>
 

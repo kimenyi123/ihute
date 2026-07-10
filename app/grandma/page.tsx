@@ -52,6 +52,7 @@ import { grandmaUserCanUseSellerWorkspace } from "@/lib/auth-login-client"
 import { useLanguageStore } from "@/lib/language-store"
 import { GrandmaSellerDashboard } from "@/components/grandma-seller-dashboard"
 import { GrandmaSellerItemsPanel } from "@/components/grandma-seller-items-panel"
+import { downloadExcel, grandmaOrdersToExcelRows } from "@/lib/grandma-excel-export"
 import { digitsOnly, normalizePhoneDigitsForAuth, normalizeRwandaMobileE164 } from "@/lib/rwanda-phone"
 import { lineSellingPriceFromProductRow } from "@/lib/package-price"
 import { Input } from "@/components/ui/input"
@@ -546,6 +547,8 @@ const GRANDMA_LABELS: Record<
     sellerDashCtaNikiStock: string
     sellerDashCtaOrders: string
     sellerDashDeliveredTail: string
+    sellerExportExcel: string
+    sellerExportExcelEmpty: string
     payStepPanelTitle: string
     payStepDemoNote: string
     payStepCommissionNote: string
@@ -717,6 +720,8 @@ const GRANDMA_LABELS: Record<
     sellerDashCtaNikiStock: "Add stock (NIKI)",
     sellerDashCtaOrders: "Open orders",
     sellerDashDeliveredTail: "{{n}} delivered",
+    sellerExportExcel: "Export Excel",
+    sellerExportExcelEmpty: "No rows to export yet.",
     payStepPanelTitle: "Complete this payment method",
     payStepDemoNote: "",
     payStepCommissionNote:
@@ -887,6 +892,8 @@ const GRANDMA_LABELS: Record<
     sellerDashCtaNikiStock: "Ongeraho sitoki (NIKI)",
     sellerDashCtaOrders: "Ibitumijwe",
     sellerDashDeliveredTail: "{{n}} yageze",
+    sellerExportExcel: "Kohereza Excel",
+    sellerExportExcelEmpty: "Nta makuru yo kohereza.",
     payStepPanelTitle: "Rangiza kwishyura",
     payStepDemoNote: "",
     payStepCommissionNote:
@@ -1061,6 +1068,8 @@ const GRANDMA_LABELS: Record<
     sellerDashCtaNikiStock: "Ajouter stock (NIKI)",
     sellerDashCtaOrders: "Commandes ouvertes",
     sellerDashDeliveredTail: "{{n}} livrée(s)",
+    sellerExportExcel: "Exporter Excel",
+    sellerExportExcelEmpty: "Aucune ligne à exporter.",
     payStepPanelTitle: "Compléter ce mode de paiement",
     payStepDemoNote: "",
     payStepCommissionNote:
@@ -2334,7 +2343,7 @@ export default function GrandmaPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [locationData])
 
   /** Debounced global product search so shop list can include stores that sell the query (e.g. “milk”), not only name/tagline matches. */
   useEffect(() => {
@@ -2727,6 +2736,11 @@ export default function GrandmaPage() {
               limit: "500",
               Currency: "RWF",
             })
+            // If we have a cached user location, include it so backend can rank by distance
+            if (locationData && locationData.latitude && locationData.longitude) {
+              qs.set("latitude", String(locationData.latitude))
+              qs.set("longitude", String(locationData.longitude))
+            }
             const sectorUrl = `/api/sector-list-suppliers?${qs.toString()}`
             console.log(`=== Fetching ${cat} ===`)
             console.log(`Sector list URL: ${sectorUrl}`)
@@ -2833,6 +2847,12 @@ export default function GrandmaPage() {
           const catTag = String(supplier.fetchedCategory ?? "Others").replace(/\s+/g, "_")
           const uniqueId = baseId ? `supplier_${baseId}__${catTag}` : `supplier_unknown_${Math.random()}`
           
+          // Prefer backend-provided distance if available (various possible field names),
+          // otherwise keep the demo/mock fallback.
+          const rawDistance =
+            supplier.distance ?? supplier.distance_km ?? supplier.supplier_distance ?? supplier.DISTANCE ?? supplier.LOCATION_DISTANCE
+          const parsedDistance = rawDistance != null ? parseFloat(String(rawDistance)) : NaN
+
           return {
             id: uniqueId,
             name: supplier.seller_name || supplier.seller_account || baseId,
@@ -2842,7 +2862,7 @@ export default function GrandmaPage() {
             orderedBefore: false,
             trending: false,
             onSale: supplierRowSuggestsOnSale(supplier as Record<string, unknown>),
-            distanceKm: Math.random() * 5 + 0.5, // Mock distance
+            distanceKm: Number.isFinite(parsedDistance) ? parsedDistance : Math.random() * 5 + 0.5,
             momo: `MTN MoMo: ${supplier.seller_momo || 'N/A'}`,
             rating: 4.0,
             reviewCount: 0,
@@ -4163,6 +4183,31 @@ export default function GrandmaPage() {
     return { open, served, rejected }
   }, [sellerOrders])
 
+  const exportSellerOrdersExcel = useCallback(() => {
+    const rows = grandmaOrdersToExcelRows(
+      sellerOrders.map((o) => ({
+        id: o.id,
+        ref: o.ref,
+        status: o.status,
+        buyerName: o.buyerName,
+        buyerPhone: o.buyerPhone,
+        area: o.area,
+        amountRwf: o.amountRwf,
+        deliveryFeeRwf: o.deliveryFeeRwf,
+        paymentLabel: o.paymentLabel,
+        paymentStatus: o.paymentStatus,
+        paymentCode: o.paymentCode,
+        transactionId: o.transactionId,
+        placedAt: o.paymentTime,
+        logisticsIcon: o.logisticsIcon,
+        lines: o.lines,
+      })),
+    )
+    if (!downloadExcel(rows, "Orders", `grandma_orders_${sellerShopLabel || sellerIshyigaAccount}`)) {
+      window.alert(GRANDMA_LABELS[language].sellerExportExcelEmpty)
+    }
+  }, [sellerOrders, sellerShopLabel, sellerIshyigaAccount, language])
+
   const sellerHomeKpis = useMemo(() => {
     const served = sellerOrders.filter((o) => o.status === "sent")
     const deliverySum = served.reduce((s, o) => s + (o.deliveryFeeRwf ?? 0), 0)
@@ -4892,6 +4937,8 @@ export default function GrandmaPage() {
             router.push("/register/seller?step=2")
           }}
           onSales={() => setSellerView("orders")}
+          onExportExcel={exportSellerOrdersExcel}
+          exportExcelLabel={GRANDMA_LABELS[language].sellerExportExcel}
         />
       ) : null}
 
@@ -4974,6 +5021,16 @@ export default function GrandmaPage() {
               <div className="seller-dash-icon" aria-hidden>❌</div>
               <div className="seller-dash-title">Rejected</div>
               <div className="seller-dash-meta">{sellerDashboard.rejected.count} / {formatRwf(sellerDashboard.rejected.amount)}</div>
+            </button>
+          </div>
+
+          <div className="flex justify-end px-1">
+            <button
+              type="button"
+              className="rounded-xl border border-[#1897e0] bg-white px-4 py-2 text-sm font-bold text-[#127fc0] shadow-sm hover:bg-[#f0f8ff]"
+              onClick={exportSellerOrdersExcel}
+            >
+              📥 {GRANDMA_LABELS[language].sellerExportExcel}
             </button>
           </div>
 
@@ -5257,7 +5314,14 @@ export default function GrandmaPage() {
           <button
             type="button"
             className={`shop-trio-btn ${useLocationSort ? "on" : ""}`}
-            onClick={() => setUseLocationSort((v) => !v)}
+            onClick={() => {
+              const willEnable = !useLocationSort
+              // If enabling and we don't have a recent location, ask the user
+              if (willEnable && (!locationData || useLocationStoreEnhanced.getState().isLocationExpired())) {
+                setLocationDialogOpen(true)
+              }
+              setUseLocationSort(willEnable)
+            }}
           >
             {useLocationSort ? "📍 Near me on" : "📍 Near me off"}
           </button>
@@ -6774,7 +6838,13 @@ export default function GrandmaPage() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setUseLocationSort((v) => !v)}
+                  onClick={() => {
+                    const willEnable = !useLocationSort
+                    if (willEnable && (!locationData || useLocationStoreEnhanced.getState().isLocationExpired())) {
+                      setLocationDialogOpen(true)
+                    }
+                    setUseLocationSort(willEnable)
+                  }}
                   className={cn(
                     "mt-4 w-full rounded-xl border px-3 py-2.5 text-left text-sm font-bold transition-colors",
                     useLocationSort
