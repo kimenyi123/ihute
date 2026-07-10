@@ -44,7 +44,6 @@ import { useTranslation } from "@/hooks/use-translation"
 import { TableCommandBanner } from "@/components/table-command-banner"
 import { LocationBadge } from "@/components/location-badge"
 import { BarcodeAddToCart } from "@/components/barcode-add-to-cart"
-import { cn } from "@/lib/utils"
 
 export function Header() {
   const router = useRouter()
@@ -52,9 +51,12 @@ export function Header() {
   const searchParams = useSearchParams()
   const { t } = useTranslation()
 
-  /** Hide top "Search products…" when already scoped to a supplier on /search (catalog or item deep link). */
+  /** Hide top global search when browsing one supplier's stock (not IHUTE-wide search). */
+  const shopNicknameFromPath = pathname.match(/^\/(?:shop-with-me|shopwithme__ai)\/([^/?#]+)/)?.[1]?.trim()
+  const shopNicknameFromQuery = searchParams.get("nickname")?.trim()
   const hideHeaderGlobalSearch =
-    pathname === "/search" && Boolean(searchParams.get("supplier")?.trim())
+    (pathname === "/search" && Boolean(searchParams.get("supplier")?.trim())) ||
+    Boolean(shopNicknameFromPath || shopNicknameFromQuery)
 
   const totalItems = useCartStore((s) => s.getTotalItems())
   const favoritesCount = useFavoritesStore((s) => s.favorites.length)
@@ -109,6 +111,22 @@ export function Header() {
     }, 0)
   }
 
+  const locationAndFilters = (
+    <>
+      <LocationBadge compact />
+      <Button
+        variant="outline"
+        size="icon"
+        className="h-9 w-9 shrink-0"
+        onClick={() => setFiltersOpen(true)}
+        title="Filters"
+        aria-label="Open filters"
+      >
+        <SlidersHorizontal className="h-4 w-4" />
+      </Button>
+    </>
+  )
+
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-white shadow-sm">
       <div className="container mx-auto px-4">
@@ -126,24 +144,19 @@ export function Header() {
             />
           </Link>
 
-          {/* Global Search + Location filter + Filters - same line */}
-          <div className="hidden lg:flex flex-1 max-w-xl relative items-center gap-2">
-            <GlobalSearch placeholder={t("searchPlaceholder")} className="min-w-0 flex-1" />
-            <LocationBadge compact />
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-9 w-9 shrink-0"
-              onClick={() => setFiltersOpen(true)}
-              title="Filters"
-              aria-label="Open filters"
-            >
-              <SlidersHorizontal className="h-4 w-4" />
-            </Button>
-          </div>
+          {/* Global Search + Location filter + Filters - same line (hidden when browsing one shop) */}
+          {!hideHeaderGlobalSearch ? (
+            <div className="hidden lg:flex flex-1 max-w-xl relative items-center gap-2">
+              <GlobalSearch placeholder={t("searchPlaceholder")} className="min-w-0 flex-1" />
+              {locationAndFilters}
+            </div>
+          ) : null}
 
           {/* Actions — below md, toolbar only shows items also in the sheet + cart + menu so ~320px fits */}
           <div className="flex min-w-0 flex-1 items-center justify-end gap-0.5 sm:gap-1 md:min-w-0 md:flex-none md:gap-2 lg:flex-initial">
+            {hideHeaderGlobalSearch ? (
+              <div className="flex items-center gap-1 sm:gap-2 shrink-0">{locationAndFilters}</div>
+            ) : null}
             <div className="shrink-0">
               <LanguageSelector />
             </div>
@@ -606,23 +619,15 @@ export function Header() {
           </div>
         </div>
 
-        {/* Mobile: Search + Location + Filters on one row */}
-        <div className="pb-3 flex flex-col gap-2 lg:hidden">
-          <div className="flex items-center gap-2 w-full">
-            <GlobalSearch placeholder={t("searchPlaceholder")} className="flex-1 min-w-0" />
-            <LocationBadge compact />
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-9 w-9 shrink-0"
-              onClick={() => setFiltersOpen(true)}
-              title="Filters"
-              aria-label="Open filters"
-            >
-              <SlidersHorizontal className="h-4 w-4" />
-            </Button>
+        {/* Mobile: Search + Location + Filters on one row (omit when browsing one shop — no void gap) */}
+        {!hideHeaderGlobalSearch ? (
+          <div className="pb-3 flex flex-col gap-2 lg:hidden">
+            <div className="flex items-center gap-2 w-full">
+              <GlobalSearch placeholder={t("searchPlaceholder")} className="flex-1 min-w-0" />
+              {locationAndFilters}
+            </div>
           </div>
-        </div>
+        ) : null}
       </div>
       <TableCommandBanner />
       <BarcodeAddToCart open={barcodeOpen} onOpenChange={setBarcodeOpen} />
