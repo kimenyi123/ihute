@@ -43,7 +43,7 @@ export type IshyigaLoginCardProps = {
   forgotHref?: string
   showLogo?: boolean
   className?: string
-  loginMode?: "phoneOnly" | "phoneOrEmail"
+  loginMode?: "phoneOnly" | "emailOnly" | "phoneOrEmail"
   uiVariant?: "ihute" | "grandma"
   /** When set, overrides the default tie between `uiVariant` and submit button look. */
   primaryButtonStyle?: "navy" | "gradient"
@@ -83,7 +83,8 @@ export function IshyigaLoginCard({
 
   const isGrandmaUi = uiVariant === "grandma"
   const isPhoneOnly = loginMode === "phoneOnly"
-  const isIhuteEmailUi = !isPhoneOnly && !isGrandmaUi
+  const isEmailOnly = loginMode === "emailOnly"
+  const isIhuteEmailUi = isEmailOnly || (loginMode === "phoneOrEmail" && uiVariant === "ihute" && !isPhoneOnly)
   const loginFieldLabel = isPhoneOnly ? "Phone number" : isIhuteEmailUi ? "Email" : "Phone number or email"
   const loginFieldPlaceholder = isPhoneOnly
     ? "e.g. 0788123456"
@@ -122,7 +123,15 @@ export function IshyigaLoginCard({
           return
         }
       }
-      const result = await loginWithCredentialsResult(id, password)
+      if (loginMode === "emailOnly") {
+        if (!id.includes("@")) {
+          setError("Sign in with the email address you used when registering.")
+          setLoading(false)
+          return
+        }
+      }
+      const channel = isEmailOnly ? "email" : isPhoneOnly ? "phone" : "auto"
+      const result = await loginWithCredentialsResult(id, password, channel)
       if (result.outcome === "must_change") {
         if (onMustChangePassword) {
           await onMustChangePassword(result.payload, password)

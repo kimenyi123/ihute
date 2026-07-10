@@ -3,7 +3,7 @@
  * Proxies to `POST /api/auth/login` (Java auth).
  */
 import type { User, UserRole } from "@/lib/auth-store"
-import { normalizePhoneDigitsForAuth } from "@/lib/rwanda-phone"
+import { buildLoginCandidates, normalizeLoginIdentifierForJava, normalizePhoneDigitsForAuth, type LoginChannel } from "@/lib/rwanda-phone"
 
 export type ApiLoginOK = {
   ok: true
@@ -120,24 +120,35 @@ export function humanizeAuthLoginError(json: Record<string, unknown> | null | un
 export async function loginWithCredentialsResult(
   phoneOrEmail: string,
   password: string,
+  channel: LoginChannel = "auto",
 ): Promise<LoginWithCredentialsResult> {
   const trimmed = phoneOrEmail.trim()
-  /** Phone field is sent as `email` to Java; canonicalize 07…/8… so it matches `tel` in DB (`250…`). */
-  const emailForJava = trimmed.includes("@")
-    ? trimmed
-    : (normalizePhoneDigitsForAuth(trimmed) || trimmed)
-  const doLogin = (email: string) =>
+  const emailForJava =
+    channel === "email"
+      ? trimmed
+      : channel === "phone"
+        ? normalizePhoneDigitsForAuth(trimmed) || trimmed
+        : normalizeLoginIdentifierForJava(trimmed)
+
+  const resolveChannel = (): LoginChannel => {
+    if (channel === "email" || channel === "phone") return channel
+    return trimmed.includes("@") ? "email" : "phone"
+  }
+
+  const doLogin = (loginId: string, loginChannel: LoginChannel) =>
     fetch("/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email: loginId, password, channel: loginChannel }),
       credentials: "include",
     })
 
-  let res = await doLogin(emailForJava)
+  const activeChannel = resolveChannel()
+  let res = await doLogin(emailForJava, activeChannel)
   let json = (await res.json().catch(() => null)) as Record<string, unknown> | null
-  if ((!res.ok || !json || !(json as { ok?: boolean }).ok) && emailForJava !== trimmed && !trimmed.includes("@")) {
-    res = await doLogin(trimmed)
+  const loginFailed = () => !res.ok || !json || !(json as { ok?: boolean }).ok
+  if (loginFailed() && activeChannel === "phone" && emailForJava !== trimmed && !trimmed.includes("@")) {
+    res = await doLogin(trimmed, "phone")
     json = (await res.json().catch(() => null)) as Record<string, unknown> | null
   }
   if (!res.ok || !json || !(json as { ok?: boolean }).ok) {

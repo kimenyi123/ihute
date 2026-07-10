@@ -214,16 +214,16 @@ function LoginPageInner() {
           title="Welcome back"
           description={
             adminLoginIntent
-              ? "Admin sign-in: use the email stored in account_signup (TYPE = ADMIN). Phone works only if TEL matches that row."
-              : "Sign in with your phone number or email"
+              ? "Admin sign-in: use the email stored in account_signup (TYPE = ADMIN)."
+              : "Sign in with your email address"
           }
           onSuccess={handleSuccess}
           onMustChangePassword={handleMustChangePassword}
           defaultPhone={phonePrefill}
-          loginMode="phoneOrEmail"
-          uiVariant="grandma"
-          primaryButtonStyle="navy"
-          registerHref="/register/buyer"
+          loginMode="emailOnly"
+          uiVariant="ihute"
+          forgotHref="/forgot-password/web-form"
+          registerHref="/register/web-form"
         />
 
         <Dialog open={!!pendingLoginPayload} onOpenChange={() => {}}>

@@ -20,6 +20,35 @@ export function normalizePhoneDigitsForAuth(raw: string): string {
   return d
 }
 
+/** Login id sent to Java: keep real emails intact; only normalize bare phone numbers. */
+export function normalizeLoginIdentifierForJava(raw: string): string {
+  const t = raw.trim()
+  if (!t) return ""
+  if (t.includes("@")) return t
+  return normalizePhoneDigitsForAuth(t) || t
+}
+
+export type LoginChannel = "email" | "phone" | "auto"
+
+/** Build Java login identifiers — channel keeps Grandma (phone) separate from ihute web (email). */
+export function buildLoginCandidates(raw: string, channel: LoginChannel = "auto"): string[] {
+  const t = raw.trim()
+  if (!t) return []
+
+  if (channel === "email") {
+    return t.includes("@") ? [t] : []
+  }
+
+  if (channel === "phone") {
+    if (t.includes("@")) return []
+    const normalized = normalizePhoneDigitsForAuth(t) || t
+    return Array.from(new Set(rwJavaLoginIdentifiers(normalized).filter(Boolean)))
+  }
+
+  const normalizedLogin = normalizeLoginIdentifierForJava(t)
+  return Array.from(new Set(rwJavaLoginIdentifiers(normalizedLogin).filter(Boolean)))
+}
+
 /** Grandma buyer vs seller synthetic emails (see CreateBuyerServlet / CreateSellerServlet). */
 const PLACEHOLDER_PHONE_EMAIL_SUFFIXES = ["@buyer.phone.ihute.rw", "@phone.ishyiga.local"] as const
 
