@@ -2,8 +2,8 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
+import dynamic from "next/dynamic"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
-import { jsPDF } from "jspdf"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -41,6 +41,30 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
+
+const QRCode = dynamic(() => import("react-qr-code"), { ssr: false })
+
+type DocumentState = "DELIVERY_NOTE" | "INVOICE_REQUESTED" | "INVOICED"
+
+type DeliveryNotePayload = {
+  ok?: boolean
+  orderId?: number
+  sellerName?: string
+  sellerTin?: string
+  sessionType?: "table" | "single"
+  tableName?: string | null
+  date?: string
+  servedBy?: string | null
+  orderStatus?: string
+  documentState?: DocumentState | string
+  items?: Array<{ name?: string; qty?: number; unitPrice?: number; amount?: number; orderedBy?: string | null }>
+  totals?: { subtotal?: number; total?: number; currency?: string }
+  paymentStatus?: string
+  qrPayload?: string
+  trackUrl?: string
+  invoicePdfUrl?: string | null
+  error?: string
+}
 
 // Updated to match supplier statuses + cancelled (reject / cancel from seller or system)
 type OrderStatus =
@@ -285,15 +309,6 @@ function waHrefFor(phone: string, text: string) {
   return `https://wa.me/${p}?text=${encoded}`
 }
 
-function canShowInvoiceActions(rawStatus?: string): boolean {
-  const s = (rawStatus || "").trim().toUpperCase()
-  return s !== "" && s !== "OPEN"
-}
-
-function formatInvoiceAmount(amount: number): string {
-  return `${Number(amount || 0).toLocaleString()} RWF`
-}
-
 function orderFinancials(order: OrderDetail) {
   const logisticsFeeValue = Number(order.deliveryAmount ?? (order as { DELIVERY_AMOUNT?: number }).DELIVERY_AMOUNT ?? 0)
   const subtotalValue = order.items.reduce(
@@ -306,43 +321,6 @@ function orderFinancials(order: OrderDetail) {
     logisticsFeeValue > 0 && dbTotal > 0 && dbTotal < computedTotal ? computedTotal : dbTotal || computedTotal
   const discountValue = Math.max(0, subtotalValue + logisticsFeeValue - displayTotal)
   return { logisticsFeeValue, subtotalValue, displayTotal, discountValue }
-}
-
-function buildInvoiceText(order: OrderDetail): string {
-  const lines = order.items.map((item, idx) => {
-    const lineTotal = Number(item.qty || 0) * Number(item.unitPrice || 0)
-    return `${idx + 1}. ${item.name} | Qty: ${item.qty} | Amount: ${Number(item.unitPrice || 0).toLocaleString()} RWF | Total: ${lineTotal.toLocaleString()} RWF`
-  })
-  const logisticsLabel = order.deliveryName || "Not specified"
-  const { logisticsFeeValue, subtotalValue, displayTotal, discountValue } = orderFinancials(order)
-  const paidValue = String(order.paymentStatus || "").toLowerCase().includes("paid")
-    ? displayTotal
-    : 0
-  const followUrl = `${process.env.NEXT_PUBLIC_SHOP_URL || process.env.NEXT_PUBLIC_SITE_URL || "https://shop.ihute.rw"}/track-order/${encodeURIComponent(order.orderId)}`
-
-  return [
-    `INVOICE - ORDER #${order.orderId}`,
-    `Date: ${new Date(order.createdAt).toLocaleDateString()}`,
-    `Seller: ${order.sellerName || "—"}`,
-    `Buyer: ${order.buyerName || "—"}`,
-    `Buyer phone: ${order.buyerPhone || "—"}`,
-    `Delivery location: ${order.buyerLocation || "—"}`,
-    `Logistics: ${logisticsLabel}`,
-    `Logistics fee: ${formatInvoiceAmount(logisticsFeeValue)}`,
-    "",
-    "Items:",
-    ...lines,
-    "",
-    `Subtotal: ${formatInvoiceAmount(subtotalValue)}`,
-    `Discount: ${formatInvoiceAmount(discountValue)}`,
-    `Total: ${formatInvoiceAmount(displayTotal)}`,
-    `Paid: ${formatInvoiceAmount(paidValue)}`,
-    `Paid at: ${formatPaymentMethod(order.paymentMethod)}`,
-    "",
-    `Follow: ${followUrl}`,
-    "",
-    `Status: ${order.ORDER_STATUS || order.status || "—"}`,
-  ].join("\n")
 }
 
 const trackShell =
@@ -367,9 +345,11 @@ function TrackOrderPageInner() {
   const [addressDraft, setAddressDraft] = useState("")
   const [addressBusy, setAddressBusy] = useState(false)
   const [editingAddress, setEditingAddress] = useState(false)
-  const [invoiceOpen, setInvoiceOpen] = useState(false)
   /** Opaque 5-char code for share links (from API). */
   const [publicToken, setPublicToken] = useState<string | null>(null)
+  const [deliveryNote, setDeliveryNote] = useState<DeliveryNotePayload | null>(null)
+  const [invoiceBusy, setInvoiceBusy] = useState(false)
+  const [invoiceMsg, setInvoiceMsg] = useState("")
 
   // Rating modal state
   const [showRatingModal, setShowRatingModal] = useState(false)
@@ -475,6 +455,19 @@ function TrackOrderPageInner() {
     setPublicToken(typeof json.publicToken === "string" ? json.publicToken : null)
   }, [orderId])
 
+  const loadDeliveryNote = useCallback(async (explicitId?: string) => {
+    const id = (explicitId || (/^\d+$/.test(orderId) ? orderId : "")).trim()
+    if (!id || !/^\d+$/.test(id)) return
+    const origin = typeof window !== "undefined" ? window.location.origin : ""
+    const p = new URLSearchParams({ orderId: id })
+    if (origin) p.set("publicSiteUrl", origin)
+    const res = await fetch(`/api/orders/delivery-note?${p}`, { cache: "no-store" })
+    const json = (await res.json().catch(() => ({}))) as DeliveryNotePayload
+    if (res.ok && json.ok !== false) {
+      setDeliveryNote(json)
+    }
+  }, [orderId])
+
   useEffect(() => {
     let cancelled = false
     void (async () => {
@@ -482,6 +475,10 @@ function TrackOrderPageInner() {
       setError(null)
       try {
         await loadOrderFromServer()
+        if (!cancelled) {
+          const id = /^\d+$/.test(orderId) ? orderId : ""
+          await loadDeliveryNote(id)
+        }
       } catch (err: unknown) {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load order")
       } finally {
@@ -491,7 +488,14 @@ function TrackOrderPageInner() {
     return () => {
       cancelled = true
     }
-  }, [orderId, loadOrderFromServer])
+  }, [orderId, loadOrderFromServer, loadDeliveryNote])
+
+  // After track resolves token → numeric id, load delivery note
+  useEffect(() => {
+    if (order?.orderId != null && /^\d+$/.test(String(order.orderId))) {
+      void loadDeliveryNote(String(order.orderId))
+    }
+  }, [order?.orderId, loadDeliveryNote])
 
   // Sync currentStatus from useOrderTracking to order state
   useEffect(() => {
@@ -624,7 +628,6 @@ function TrackOrderPageInner() {
 
   const steps = buildTracking(order.status)
   const sellerPhoneNormalized = normalizePhone(order.sellerPhone)
-  const canShowInvoice = canShowInvoiceActions(order.ORDER_STATUS)
   const displayBuyerLocation =
     buyerAddressOverride !== undefined ? buyerAddressOverride : (order.buyerLocation ?? "")
   const canEditDeliveryAddress = order.status !== "delivered" && order.status !== "cancelled"
@@ -641,6 +644,12 @@ function TrackOrderPageInner() {
   const internalOrderNo = String(order.orderId ?? orderId)
   const publicShopBase = (process.env.NEXT_PUBLIC_SHOP_URL || process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://shop.ihute.rw").replace(/\/$/, "")
   const trackLink = `${publicShopBase}/track-order/${encodeURIComponent(shareTrackSlug)}${fromGrandma ? "?from=grandma" : ""}`
+
+  const documentState = String(deliveryNote?.documentState || "DELIVERY_NOTE").toUpperCase()
+  const invoicePdfHref =
+    (deliveryNote?.invoicePdfUrl && String(deliveryNote.invoicePdfUrl)) ||
+    (order.orderId != null ? `/api/orders/invoice-pdf?orderId=${encodeURIComponent(String(order.orderId))}` : "")
+  const qrValue = deliveryNote?.qrPayload || deliveryNote?.trackUrl || trackLink
 
   const whatsappMessage = buildOrderWhatsAppMessageFromViewModel(
     buildOrderReceiptViewModel({
@@ -681,31 +690,31 @@ function TrackOrderPageInner() {
 
   const whatsappHref = sellerPhoneNormalized ? waHrefFor(sellerPhoneNormalized, whatsappMessage) : ""
 
-  const downloadInvoice = () => {
-    const content = buildInvoiceText(order)
-    const doc = new jsPDF({ unit: "pt", format: "a4" })
-    const pageWidth = doc.internal.pageSize.getWidth()
-    const pageHeight = doc.internal.pageSize.getHeight()
-    const margin = 40
-    const maxTextWidth = pageWidth - margin * 2
-
-    doc.setFont("helvetica", "normal")
-    doc.setFontSize(11)
-
-    const wrappedLines = doc.splitTextToSize(content, maxTextWidth) as string[]
-    const lineHeight = 16
-    let y = margin
-
-    for (const line of wrappedLines) {
-      if (y > pageHeight - margin) {
-        doc.addPage()
-        y = margin
+  async function askForInvoice() {
+    if (!order?.orderId) return
+    setInvoiceBusy(true)
+    setInvoiceMsg("")
+    try {
+      const res = await fetch("/api/orders/request-invoice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderId: Number(order.orderId),
+          publicSiteUrl: typeof window !== "undefined" ? window.location.origin : undefined,
+        }),
+      })
+      const json = (await res.json().catch(() => ({}))) as DeliveryNotePayload & { message?: string }
+      if (!res.ok || json.ok === false) {
+        setInvoiceMsg(json.error || "Could not request invoice")
+        return
       }
-      doc.text(line, margin, y)
-      y += lineHeight
+      setDeliveryNote(json)
+      setInvoiceMsg(json.message || "Invoice requested — waiting on seller")
+    } catch (e) {
+      setInvoiceMsg(e instanceof Error ? e.message : "Could not request invoice")
+    } finally {
+      setInvoiceBusy(false)
     }
-
-    doc.save(`invoice-order-${String(order.orderId)}.pdf`)
   }
 
   return (
@@ -995,29 +1004,78 @@ function TrackOrderPageInner() {
             </Card>
           )}
 
-          {canShowInvoice && (
-            <Card className="border-0 shadow-xl rounded-2xl border-indigo-100 bg-white text-slate-900">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <FileText className="h-5 w-5 text-indigo-600" />
-                  Invoice
-                </CardTitle>
-                <CardDescription>
-                  Your order reached invoice stage ({order.ORDER_STATUS || "INVOICE"}). You can view or download it.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="flex flex-wrap gap-2">
-                <Button type="button" variant="outline" onClick={() => setInvoiceOpen(true)}>
-                  <Eye className="h-4 w-4 mr-2" />
-                  View invoice
+          <Card className="border-0 shadow-xl rounded-2xl border-indigo-100 bg-white text-slate-900">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5 text-indigo-600" />
+                Delivery note
+              </CardTitle>
+              <CardDescription>
+                {deliveryNote?.sellerName || order.sellerName}
+                {deliveryNote?.sessionType === "table" && deliveryNote?.tableName
+                  ? ` · Table ${deliveryNote.tableName}`
+                  : ""}
+                {deliveryNote?.servedBy ? ` · Served by ${deliveryNote.servedBy}` : ""}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                {orderStatusBadge(order)}
+                <Badge variant="outline" className="font-mono text-xs">
+                  {documentState.replace(/_/g, " ")}
+                </Badge>
+                {deliveryNote?.date ? (
+                  <span className="text-slate-500">{deliveryNote.date}</span>
+                ) : null}
+              </div>
+
+              {qrValue ? (
+                <div className="flex flex-col items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="rounded-lg bg-white p-3">
+                    <QRCode value={qrValue} size={128} />
+                  </div>
+                  <p className="text-center text-xs text-slate-500">Scan to open this delivery note</p>
+                </div>
+              ) : null}
+
+              {documentState === "DELIVERY_NOTE" ? (
+                <Button
+                  type="button"
+                  className="w-full bg-indigo-600 hover:bg-indigo-700"
+                  disabled={invoiceBusy}
+                  onClick={() => void askForInvoice()}
+                >
+                  <FileText className="mr-2 h-4 w-4" />
+                  {invoiceBusy ? "Requesting…" : "Ask for invoice"}
                 </Button>
-                <Button type="button" onClick={downloadInvoice} className="bg-indigo-600 hover:bg-indigo-700">
-                  <Download className="h-4 w-4 mr-2" />
-                  Download invoice
-                </Button>
-              </CardContent>
-            </Card>
-          )}
+              ) : null}
+
+              {documentState === "INVOICE_REQUESTED" ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  Invoice requested — waiting on seller
+                </div>
+              ) : null}
+
+              {documentState === "INVOICED" ? (
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" asChild>
+                    <a href={invoicePdfHref} target="_blank" rel="noopener noreferrer">
+                      <Eye className="mr-2 h-4 w-4" />
+                      View invoice
+                    </a>
+                  </Button>
+                  <Button type="button" className="bg-indigo-600 hover:bg-indigo-700" asChild>
+                    <a href={invoicePdfHref} download={`invoice-${order.orderId}.pdf`}>
+                      <Download className="mr-2 h-4 w-4" />
+                      Download invoice
+                    </a>
+                  </Button>
+                </div>
+              ) : null}
+
+              {invoiceMsg ? <p className="text-sm text-slate-600">{invoiceMsg}</p> : null}
+            </CardContent>
+          </Card>
 
           {/* Driver contact (when in transit) */}
           {(order.status === "in-transit" && (order.driverPhone || order.sellerPhone)) && (
@@ -1251,27 +1309,6 @@ function TrackOrderPageInner() {
               }}
             >
               Not yet / still pending
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={invoiceOpen} onOpenChange={setInvoiceOpen}>
-        <DialogContent className="max-w-[min(100vw,720px)] border-0 bg-white text-slate-900 sm:rounded-2xl">
-          <DialogHeader>
-            <DialogTitle>Invoice — Order #{order.orderId}</DialogTitle>
-            <DialogDescription>Preview invoice details for this order.</DialogDescription>
-          </DialogHeader>
-          <div className="max-h-[60vh] overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-4">
-            <pre className="whitespace-pre-wrap text-sm text-slate-800">{buildInvoiceText(order)}</pre>
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setInvoiceOpen(false)}>
-              Close
-            </Button>
-            <Button type="button" onClick={downloadInvoice} className="bg-indigo-600 hover:bg-indigo-700">
-              <Download className="h-4 w-4 mr-2" />
-              Download
             </Button>
           </DialogFooter>
         </DialogContent>

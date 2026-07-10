@@ -10,6 +10,7 @@ import {
   Calendar,
   ChevronDown,
   ChevronUp,
+  Package,
   Search,
   ScrollText,
   Store,
@@ -56,7 +57,7 @@ const DATE_PRESETS: ReadonlyArray<{ label: string; days: number | null }> = [
 ]
 
 type AnalyticsNavProps = {
-  active: "visitors" | "sales"
+  active: "visitors" | "sales" | "stock"
   from: string
   to: string
   environment?: string
@@ -69,6 +70,7 @@ export function ActivityAnalyticsNav({ active, from, to, environment = "" }: Ana
   const tabs = [
     { id: "visitors" as const, href: `/admin/activity-logs?${q}`, label: "Visitor tracking", icon: ScrollText },
     { id: "sales" as const, href: `/admin/ihute-stats?${q}`, label: "Shop-with-me sales", icon: Store },
+    { id: "stock" as const, href: `/admin/sellers-stock?${q}`, label: "Sellers with stock", icon: Package },
   ]
 
   return (

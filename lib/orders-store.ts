@@ -61,6 +61,10 @@ export type Order = {
   sellerCategoryHint?: string
   /** Opaque tracking token from `/api/orders/track` when available (preferred for `/track-order/...` links). */
   publicToken?: string
+  /** Delivery-note document lifecycle */
+  documentState?: string
+  servedBy?: string
+  invoicePdfUrl?: string
 }
 
 type OrdersState = {

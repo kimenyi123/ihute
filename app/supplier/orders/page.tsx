@@ -308,6 +308,90 @@ function pickAnyNum(row: Record<string, unknown>, ...keys: string[]): number | n
   return null
 }
 
+function IssueInvoiceButton({
+  order,
+  orders,
+  setOrders,
+  defaultServedBy,
+}: {
+  order: Order
+  orders: Order[]
+  setOrders: (orders: Order[]) => void
+  defaultServedBy: string
+}) {
+  const [busy, setBusy] = useState(false)
+  const [servedBy, setServedBy] = useState(order.servedBy || defaultServedBy)
+  const doc = String(order.documentState || "DELIVERY_NOTE").toUpperCase()
+  if (doc === "INVOICED") {
+    return (
+      <Button type="button" size="sm" variant="outline" asChild>
+        <a
+          href={order.invoicePdfUrl || `/api/orders/invoice-pdf?orderId=${encodeURIComponent(order.id)}`}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          PDF
+        </a>
+      </Button>
+    )
+  }
+
+  async function issue() {
+    const name = window.prompt("Served by (staff name)", servedBy || defaultServedBy || "")
+    if (name == null) return
+    setServedBy(name.trim())
+    setBusy(true)
+    try {
+      const res = await fetch("/api/orders/issue-invoice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderId: Number(order.id),
+          servedBy: name.trim() || defaultServedBy,
+          publicSiteUrl: typeof window !== "undefined" ? window.location.origin : undefined,
+          force: true,
+        }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || json?.ok === false) {
+        throw new Error(json?.error || "Issue invoice failed")
+      }
+      setOrders(
+        orders.map((o) =>
+          o.id === order.id
+            ? {
+                ...o,
+                documentState: "INVOICED",
+                status: "invoice",
+                supplierStatus: "invoice",
+                servedBy: name.trim() || defaultServedBy,
+                invoicePdfUrl: json.invoicePdfUrl || `/api/orders/invoice-pdf?orderId=${order.id}`,
+              }
+            : o,
+        ),
+      )
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "Issue invoice failed")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const highlight = doc === "INVOICE_REQUESTED"
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant={highlight ? "default" : "outline"}
+      className={highlight ? "bg-indigo-600 hover:bg-indigo-700" : undefined}
+      disabled={busy}
+      onClick={() => void issue()}
+    >
+      {busy ? "…" : highlight ? "Issue invoice" : "Issue invoice"}
+    </Button>
+  )
+}
+
 // ===========================================
 // Inline Status Picker Component
 // ===========================================
@@ -526,6 +610,9 @@ export default function SupplierOrdersPage() {
           subtotal: Number(t.AMOUNT ?? t.amount ?? 0),
           status: (t.ORDER_STATUS ?? t.order_status ?? "open")?.toLowerCase() || "open",
           supplierStatus: (t.ORDER_STATUS ?? t.order_status ?? "open")?.toLowerCase() || "open",
+          documentState: String(t.DOCUMENT_STATE ?? t.document_state ?? "DELIVERY_NOTE").toUpperCase(),
+          servedBy: String(t.SERVED_BY ?? t.served_by ?? "").trim() || undefined,
+          invoicePdfUrl: String(t.INVOICE_PDF_URL ?? t.invoice_pdf_url ?? "").trim() || undefined,
           // DB: chaos_beta.order_transaction.heure — list API may send heure / HEURE / CREATED_AT
           createdAt: (() => {
             const raw =
@@ -950,6 +1037,14 @@ export default function SupplierOrdersPage() {
                         <Button variant="outline" size="sm" onClick={() => router.push(supplierOrderLink(order.id))}>
                           View
                         </Button>
+                        <IssueInvoiceButton
+                          order={order}
+                          orders={orders}
+                          setOrders={setOrders}
+                          defaultServedBy={
+                            (user?.name || user?.email || user?.ishyigaAccount || "").trim()
+                          }
+                        />
                         <Button variant="outline" size="sm" onClick={() => exportOrderRowCsv(order)}>
                           Export
                         </Button>
