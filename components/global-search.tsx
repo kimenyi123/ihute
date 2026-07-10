@@ -16,6 +16,7 @@ import { useGeolocation } from "@/hooks/use-geolocation"
 import { searchNearbyProducts, NearbyProduct } from "@/lib/location-search-api"
 import { DistanceBadge } from "@/components/distance-badge"
 import { Badge } from "@/components/ui/badge"
+import { lineSellingPriceFromProductRow } from "@/lib/package-price"
 
 export interface GlobalResult {
   type?: "product" | "supplier"
@@ -24,6 +25,7 @@ export interface GlobalResult {
   item_packet?: string
   item_emballage?: string
   selling_price?: number | string
+  final_selling_price?: number | string
   cost_price?: number | string
   /** Currency from account_signup for this supplier. */
   currency?: string
@@ -67,6 +69,20 @@ type GlobalSearchResponse = {
 
 function productMatchScore(p: GlobalResult): number {
   return p.relevance_score ?? p.finalScore ?? 0
+}
+
+function formatDropdownPrice(p: GlobalResult): string {
+  const row = p as Record<string, unknown>
+  const fromFinal =
+    typeof p.final_selling_price === "number"
+      ? p.final_selling_price
+      : parseFloat(String(p.final_selling_price ?? "").replace(/[^\d.,-]/g, "").replace(",", "."))
+  const line =
+    Number.isFinite(fromFinal) && fromFinal > 0
+      ? fromFinal
+      : lineSellingPriceFromProductRow(row)
+  if (!Number.isFinite(line) || line <= 0) return ""
+  return `${line.toLocaleString()} ${p.currency || "RWF"}`
 }
 
 /** Within each supplier: best relevance first, then nearest distance. */
@@ -1047,7 +1063,9 @@ export function GlobalSearch({
 
                           {/* Products from this supplier */}
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            {supplierProducts.map((p, i) => (
+                            {supplierProducts.map((p, i) => {
+                              const priceLabel = formatDropdownPrice(p)
+                              return (
                               <button
                                 key={`${supplierId}-${p.item_code}-${i}`}
                                 className="w-full text-left rounded-lg border p-3 hover:border-blue-300 hover:bg-accent transition-colors group"
@@ -1057,17 +1075,21 @@ export function GlobalSearch({
                                 <div className="font-medium text-gray-900 group-hover:text-blue-700 text-sm">
                                   {p.item_commercial_name}
                                 </div>
-                                <div className="text-xs text-gray-600 mt-0.5">
-                                  {p.item_packet || ""}
-                                </div>
-                                <div className="mt-1 text-sm font-semibold text-green-600">
-                                  {p.item_emballage ?? ""}
-                                </div>
+                                {p.item_packet ? (
+                                  <div className="text-xs text-gray-600 mt-0.5">
+                                    {p.item_packet} in stock
+                                  </div>
+                                ) : null}
+                                {priceLabel ? (
+                                  <div className="mt-1 text-sm font-semibold text-green-600">
+                                    {priceLabel}
+                                  </div>
+                                ) : null}
                                 <div className="mt-1 text-[11px] text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
                                   View product →
                                 </div>
                               </button>
-                            ))}
+                            )})}
                           </div>
                         </div>
                       )

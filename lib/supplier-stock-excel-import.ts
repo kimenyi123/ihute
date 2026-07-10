@@ -59,7 +59,10 @@ async function postAddProduct(
     quantity: row.quantity,
     price: row.price,
     cost: row.cost || undefined,
-    description: [row.category, row.subcategory].filter(Boolean).join(" / ") || undefined,
+    description:
+      row.description ||
+      [row.category, row.subcategory].filter(Boolean).join(" / ") ||
+      undefined,
     unit: "PCS",
     item_key_words: row.itemCode,
     item_commercial_name: row.itemName,

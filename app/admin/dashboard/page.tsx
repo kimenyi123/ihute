@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
   DollarSign,
@@ -390,7 +391,10 @@ export default function AdminDashboard() {
           <div>
             <h2 className="text-lg font-semibold text-gray-900">Active orders — seller view</h2>
             <p className="text-sm text-gray-500 mt-0.5">
-              Logistics / fulfilment side (seller name & account context)
+              Logistics / fulfilment side (seller name & account context).{" "}
+              <Link href="/admin/orders?attentionOnly=1" className="font-medium text-blue-600 hover:underline">
+                Open Order Monitor →
+              </Link>
             </p>
           </div>
           <Package className="shrink-0 text-blue-500" size={20} />

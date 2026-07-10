@@ -10,7 +10,7 @@ import {
   shouldReturnControlledResetError,
 } from '../app/api/auth/forgot-password/route'
 import { resetPasswordViaMysql } from '../lib/forgot-password-mysql'
-import { rwJavaLoginIdentifiers } from '../lib/rwanda-phone'
+import { normalizeLoginIdentifierForJava, rwJavaLoginIdentifiers, buildLoginCandidates } from '../lib/rwanda-phone'
 
 test('reports a controlled failure instead of fake success when the servlet returns bad JSON', () => {
   assert.equal(shouldReturnControlledResetError(null, true, 'no_db'), true)
@@ -57,6 +57,24 @@ test('login identifiers normalize Rwanda phone input consistently', () => {
   assert.ok(ids.includes('250788123456'))
   assert.ok(ids.includes('0788123456'))
   assert.equal(new Set(ids).size, ids.length)
+})
+
+test('real emails with digits in local part are not stripped to phone digits', () => {
+  const email = 'muhiregilbert27@gmail.com'
+  assert.equal(normalizeLoginIdentifierForJava(email), email)
+  assert.deepEqual(rwJavaLoginIdentifiers(email), [email])
+})
+
+test('login channel email rejects phone-only input', () => {
+  assert.deepEqual(buildLoginCandidates('0788123456', 'email'), [])
+  assert.deepEqual(buildLoginCandidates('muhiregilbert27@gmail.com', 'email'), ['muhiregilbert27@gmail.com'])
+})
+
+test('login channel phone rejects email input', () => {
+  assert.deepEqual(buildLoginCandidates('muhiregilbert27@gmail.com', 'phone'), [])
+  const ids = buildLoginCandidates('0788123456', 'phone')
+  assert.ok(ids.includes('250788123456'))
+  assert.ok(ids.includes('0788123456'))
 })
 
 test('resetPasswordViaMysql reports success only when the DB update affects rows', async () => {

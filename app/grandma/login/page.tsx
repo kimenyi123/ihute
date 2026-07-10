@@ -17,7 +17,7 @@ const LOGIN_UI = {
     headerTitle: "Sign in",
     backToHome: "Back to Home",
     welcome: "Welcome back",
-    description: "Sign in with your phone number or email",
+    description: "Sign in with your phone number",
     submitLabel: "Sign in",
     registerSeller: "Register as seller",
     registerBuyer: "Register as buyer",
@@ -27,7 +27,7 @@ const LOGIN_UI = {
     headerTitle: "Injira",
     backToHome: "Subira ahabanza",
     welcome: "Murakaza neza",
-    description: "Injira ukoresheje nimero ya telefoni cyangwa imeyili",
+    description: "Injira ukoresheje nimero ya telefoni",
     submitLabel: "Injira",
     registerSeller: "Iyandikishe nk\u2019umucuruzi",
     registerBuyer: "Iyandikishe nk\u2019umuguzi",
@@ -37,7 +37,7 @@ const LOGIN_UI = {
     headerTitle: "Connexion",
     backToHome: "Retour \u00e0 l\u2019accueil",
     welcome: "Bienvenue",
-    description: "Connectez-vous avec votre t\u00e9l\u00e9phone ou e-mail",
+    description: "Connectez-vous avec votre num\u00e9ro de t\u00e9l\u00e9phone",
     submitLabel: "Se connecter",
     registerSeller: "S\u2019inscrire comme vendeur",
     registerBuyer: "S\u2019inscrire comme acheteur",
@@ -136,8 +136,8 @@ function GrandmaLoginInner() {
           registerLinkText={
             registerHref === "/register/seller" ? ui.registerSeller : ui.registerBuyer
           }
-          forgotHref="/forgot-password"
-          loginMode="phoneOrEmail"
+          forgotHref="/forgot-password/grandma"
+          loginMode="phoneOnly"
           uiVariant="grandma"
           onSuccess={handleSuccess}
         />
