@@ -3,7 +3,6 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
-import { jsPDF } from "jspdf"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -19,6 +18,7 @@ import {
   Download,
   Eye,
   XCircle,
+  Loader2,
 } from "lucide-react"
 import { formatPaymentMethod, isCashOnDelivery } from "@/lib/payment-utils"
 import {
@@ -41,6 +41,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
+import { TaxInvoice } from "@/components/invoice/TaxInvoice"
+import { InvoiceQRCode } from "@/components/invoice/InvoiceQRCode"
+import type { BuyerEbmFiscalInfo } from "@/lib/ebm/ebm-buyer-request"
+import { buildTaxInvoiceViewModel } from "@/lib/invoice/tax-invoice-view-model"
+import { downloadTaxInvoicePdf } from "@/lib/invoice/tax-invoice-pdf"
+import type { TaxInvoiceOrderInput } from "@/lib/invoice/tax-invoice-types"
 
 // Updated to match supplier statuses + cancelled (reject / cancel from seller or system)
 type OrderStatus =
@@ -90,6 +96,12 @@ type OrderDetail = {
   /** Seller marked payment (shared server meta; gateway may still be pending). */
   sellerPaymentAck?: "paid" | "pending"
   clientMetaUpdatedAt?: string
+  SELLER_TIN?: string
+  BUYER_TIN?: string
+  SELLER_EMAIL?: string
+  BUYER_EMAIL?: string
+  SELLER_ADDRESS?: string
+  CURRENCY?: string
 }
 
 function statusIcon(status: OrderStatus) {
@@ -290,10 +302,6 @@ function canShowInvoiceActions(rawStatus?: string): boolean {
   return s !== "" && s !== "OPEN"
 }
 
-function formatInvoiceAmount(amount: number): string {
-  return `${Number(amount || 0).toLocaleString()} RWF`
-}
-
 function orderFinancials(order: OrderDetail) {
   const logisticsFeeValue = Number(order.deliveryAmount ?? (order as { DELIVERY_AMOUNT?: number }).DELIVERY_AMOUNT ?? 0)
   const subtotalValue = order.items.reduce(
@@ -306,43 +314,6 @@ function orderFinancials(order: OrderDetail) {
     logisticsFeeValue > 0 && dbTotal > 0 && dbTotal < computedTotal ? computedTotal : dbTotal || computedTotal
   const discountValue = Math.max(0, subtotalValue + logisticsFeeValue - displayTotal)
   return { logisticsFeeValue, subtotalValue, displayTotal, discountValue }
-}
-
-function buildInvoiceText(order: OrderDetail): string {
-  const lines = order.items.map((item, idx) => {
-    const lineTotal = Number(item.qty || 0) * Number(item.unitPrice || 0)
-    return `${idx + 1}. ${item.name} | Qty: ${item.qty} | Amount: ${Number(item.unitPrice || 0).toLocaleString()} RWF | Total: ${lineTotal.toLocaleString()} RWF`
-  })
-  const logisticsLabel = order.deliveryName || "Not specified"
-  const { logisticsFeeValue, subtotalValue, displayTotal, discountValue } = orderFinancials(order)
-  const paidValue = String(order.paymentStatus || "").toLowerCase().includes("paid")
-    ? displayTotal
-    : 0
-  const followUrl = `${process.env.NEXT_PUBLIC_SHOP_URL || process.env.NEXT_PUBLIC_SITE_URL || "https://shop.ihute.rw"}/track-order/${encodeURIComponent(order.orderId)}`
-
-  return [
-    `INVOICE - ORDER #${order.orderId}`,
-    `Date: ${new Date(order.createdAt).toLocaleDateString()}`,
-    `Seller: ${order.sellerName || "—"}`,
-    `Buyer: ${order.buyerName || "—"}`,
-    `Buyer phone: ${order.buyerPhone || "—"}`,
-    `Delivery location: ${order.buyerLocation || "—"}`,
-    `Logistics: ${logisticsLabel}`,
-    `Logistics fee: ${formatInvoiceAmount(logisticsFeeValue)}`,
-    "",
-    "Items:",
-    ...lines,
-    "",
-    `Subtotal: ${formatInvoiceAmount(subtotalValue)}`,
-    `Discount: ${formatInvoiceAmount(discountValue)}`,
-    `Total: ${formatInvoiceAmount(displayTotal)}`,
-    `Paid: ${formatInvoiceAmount(paidValue)}`,
-    `Paid at: ${formatPaymentMethod(order.paymentMethod)}`,
-    "",
-    `Follow: ${followUrl}`,
-    "",
-    `Status: ${order.ORDER_STATUS || order.status || "—"}`,
-  ].join("\n")
 }
 
 const trackShell =
@@ -368,6 +339,12 @@ function TrackOrderPageInner() {
   const [addressBusy, setAddressBusy] = useState(false)
   const [editingAddress, setEditingAddress] = useState(false)
   const [invoiceOpen, setInvoiceOpen] = useState(false)
+  const [ebmLoading, setEbmLoading] = useState(false)
+  const [ebmStatus, setEbmStatus] = useState<
+    "not_requested" | "pending" | "success" | "failed" | "retry" | "rejected"
+  >("not_requested")
+  const [ebmMessage, setEbmMessage] = useState<string | null>(null)
+  const [ebmFiscal, setEbmFiscal] = useState<BuyerEbmFiscalInfo | null>(null)
   /** Opaque 5-char code for share links (from API). */
   const [publicToken, setPublicToken] = useState<string | null>(null)
 
@@ -493,6 +470,76 @@ function TrackOrderPageInner() {
     }
   }, [orderId, loadOrderFromServer])
 
+  const loadEbmStatus = useCallback(async (numericOrderId: number) => {
+    try {
+      const res = await fetch(`/api/orders/ebm-request?orderId=${numericOrderId}`, { cache: "no-store" })
+      const data = (await res.json()) as {
+        ok?: boolean
+        ebmStatus?: string
+        message?: string
+        fiscal?: BuyerEbmFiscalInfo
+      }
+      if (data.ok && data.ebmStatus) {
+        const st = data.ebmStatus as typeof ebmStatus
+        if (["not_requested", "pending", "success", "failed", "retry", "rejected"].includes(st)) {
+          setEbmStatus(st)
+        }
+        if (data.message) setEbmMessage(data.message)
+        setEbmFiscal(data.fiscal ?? null)
+      }
+    } catch {
+      /* non-blocking */
+    }
+  }, [])
+
+  useEffect(() => {
+    const id = Number(order?.orderId ?? orderId)
+    if (!Number.isFinite(id) || id < 1) return
+    if (!canShowInvoiceActions(order?.ORDER_STATUS)) return
+    void loadEbmStatus(id)
+  }, [order?.orderId, order?.ORDER_STATUS, orderId, loadEbmStatus])
+
+  const requestEbmFromBuyer = async () => {
+    const id = Number(order?.orderId ?? orderId)
+    if (!Number.isFinite(id) || id < 1) return
+    setEbmLoading(true)
+    setEbmMessage(null)
+    try {
+      const res = await fetch("/api/orders/ebm-request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId: id }),
+      })
+      const data = (await res.json()) as {
+        ok?: boolean
+        error?: string
+        message?: string
+        ebmStatus?: string
+        alreadyFiscalized?: boolean
+        awaitingApproval?: boolean
+      }
+      if (!res.ok || !data.ok) {
+        setEbmMessage(data.error || "Could not request EBM invoice")
+        return
+      }
+      const st = (data.ebmStatus || "pending") as typeof ebmStatus
+      if (["pending", "success", "failed", "retry", "rejected"].includes(st)) setEbmStatus(st)
+      if (data.alreadyFiscalized) {
+        void loadEbmStatus(id)
+      }
+      setEbmMessage(
+        data.message ||
+          (data.alreadyFiscalized
+            ? "Invoice already fiscalized"
+            : "Seller notified — they will approve your EBM invoice"),
+      )
+    } catch (e: unknown) {
+      setEbmMessage(e instanceof Error ? e.message : "EBM request failed")
+    } finally {
+      setEbmLoading(false)
+    }
+  }
+
   // Sync currentStatus from useOrderTracking to order state
   useEffect(() => {
     if (currentStatus && order && currentStatus !== order.status) {
@@ -560,6 +607,44 @@ function TrackOrderPageInner() {
     setShowRatingModal(false)
     // No need to show again since rating was successful
   }
+
+  const displayBuyerLocationForInvoice =
+    buyerAddressOverride !== undefined ? buyerAddressOverride : (order?.buyerLocation ?? "")
+
+  const taxInvoiceViewModel = useMemo(() => {
+    if (!order) return null
+    const { displayTotal } = orderFinancials(order)
+    const orderInput: TaxInvoiceOrderInput = {
+      orderId: String(order.orderId),
+      sellerName: order.sellerName,
+      sellerPhone: order.sellerPhone,
+      sellerAccount: order.sellerAccount,
+      buyerName: order.buyerName,
+      buyerPhone: order.buyerPhone,
+      buyerLocation: displayBuyerLocationForInvoice,
+      buyerEmail: order.BUYER_EMAIL,
+      createdAt: order.createdAt,
+      total: displayTotal,
+      items: order.items.map((item) => ({
+        name: item.name,
+        qty: item.qty,
+        unitPrice: item.unitPrice,
+        ITEM_CODE: (item as { ITEM_CODE?: string }).ITEM_CODE,
+      })),
+      SELLER_TIN: order.SELLER_TIN,
+      BUYER_TIN: order.BUYER_TIN,
+      SELLER_EMAIL: order.SELLER_EMAIL,
+      BUYER_EMAIL: order.BUYER_EMAIL,
+      SELLER_ADDRESS: order.SELLER_ADDRESS,
+      CURRENCY: order.CURRENCY,
+    }
+    return buildTaxInvoiceViewModel({ order: orderInput, fiscal: ebmFiscal })
+  }, [order, displayBuyerLocationForInvoice, ebmFiscal])
+
+  const downloadInvoice = useCallback(async () => {
+    if (!taxInvoiceViewModel) return
+    await downloadTaxInvoicePdf(taxInvoiceViewModel, `invoice-order-${String(order?.orderId ?? orderId)}.pdf`)
+  }, [taxInvoiceViewModel, order?.orderId, orderId])
 
   if (loading) {
     return (
@@ -680,33 +765,6 @@ function TrackOrderPageInner() {
   )
 
   const whatsappHref = sellerPhoneNormalized ? waHrefFor(sellerPhoneNormalized, whatsappMessage) : ""
-
-  const downloadInvoice = () => {
-    const content = buildInvoiceText(order)
-    const doc = new jsPDF({ unit: "pt", format: "a4" })
-    const pageWidth = doc.internal.pageSize.getWidth()
-    const pageHeight = doc.internal.pageSize.getHeight()
-    const margin = 40
-    const maxTextWidth = pageWidth - margin * 2
-
-    doc.setFont("helvetica", "normal")
-    doc.setFontSize(11)
-
-    const wrappedLines = doc.splitTextToSize(content, maxTextWidth) as string[]
-    const lineHeight = 16
-    let y = margin
-
-    for (const line of wrappedLines) {
-      if (y > pageHeight - margin) {
-        doc.addPage()
-        y = margin
-      }
-      doc.text(line, margin, y)
-      y += lineHeight
-    }
-
-    doc.save(`invoice-order-${String(order.orderId)}.pdf`)
-  }
 
   return (
     <div className={trackShell}>
@@ -1006,16 +1064,54 @@ function TrackOrderPageInner() {
                   Your order reached invoice stage ({order.ORDER_STATUS || "INVOICE"}). You can view or download it.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="flex flex-wrap gap-2">
-                <Button type="button" variant="outline" onClick={() => setInvoiceOpen(true)}>
-                  <Eye className="h-4 w-4 mr-2" />
-                  View invoice
+              <CardContent className="flex flex-nowrap items-center gap-1.5 overflow-x-auto pb-1">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setInvoiceOpen(true)}
+                  className="h-7 shrink-0 px-2 text-[11px]"
+                >
+                  <Eye className="h-3 w-3 mr-1" />
+                  View
                 </Button>
-                <Button type="button" onClick={downloadInvoice} className="bg-indigo-600 hover:bg-indigo-700">
-                  <Download className="h-4 w-4 mr-2" />
-                  Download invoice
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => void downloadInvoice()}
+                  className="h-7 shrink-0 px-2 text-[11px] bg-indigo-600 hover:bg-indigo-700"
+                >
+                  <Download className="h-3 w-3 mr-1" />
+                  Download
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={ebmLoading || ebmStatus === "success" || ebmStatus === "pending"}
+                  onClick={() => void requestEbmFromBuyer()}
+                  className="h-7 shrink-0 px-2 text-[11px] bg-green-600 hover:bg-green-700 text-white disabled:opacity-60"
+                >
+                  {ebmLoading ? (
+                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                  ) : (
+                    <FileText className="h-3 w-3 mr-1" />
+                  )}
+                  {ebmStatus === "success" ? "EBM OK" : "Request EBM"}
                 </Button>
               </CardContent>
+              {ebmMessage ? (
+                <p className="px-6 pb-4 text-sm text-green-800 bg-green-50 border-t border-green-100">
+                  {ebmMessage}
+                </p>
+              ) : ebmStatus === "pending" ? (
+                <p className="px-6 pb-4 text-sm text-amber-800 bg-amber-50 border-t border-amber-100">
+                  Awaiting seller approval for RRA EBM fiscal invoice.
+                </p>
+              ) : ebmStatus === "rejected" ? (
+                <p className="px-6 pb-4 text-sm text-red-800 bg-red-50 border-t border-red-100">
+                  Seller rejected this EBM request. You can tap Request EBM again if needed.
+                </p>
+              ) : null}
             </Card>
           )}
 
@@ -1257,25 +1353,28 @@ function TrackOrderPageInner() {
       </Dialog>
 
       <Dialog open={invoiceOpen} onOpenChange={setInvoiceOpen}>
-        <DialogContent className="max-w-[min(100vw,720px)] border-0 bg-white text-slate-900 sm:rounded-2xl">
-          <DialogHeader>
-            <DialogTitle>Invoice — Order #{order.orderId}</DialogTitle>
-            <DialogDescription>Preview invoice details for this order.</DialogDescription>
-          </DialogHeader>
-          <div className="max-h-[60vh] overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-4">
-            <pre className="whitespace-pre-wrap text-sm text-slate-800">{buildInvoiceText(order)}</pre>
+        <DialogContent className="max-w-[min(100vw,820px)] border-0 bg-white text-slate-900 sm:rounded-2xl print:max-w-none">
+          <DialogTitle className="sr-only">Invoice</DialogTitle>
+          <div className="max-h-[70vh] overflow-auto rounded-lg border border-slate-200 bg-white p-2 print:max-h-none print:overflow-visible print:border-0">
+            {taxInvoiceViewModel ? <TaxInvoice invoice={taxInvoiceViewModel} /> : null}
           </div>
-          <DialogFooter>
+          <DialogFooter className="print:hidden">
             <Button type="button" variant="outline" onClick={() => setInvoiceOpen(false)}>
               Close
             </Button>
-            <Button type="button" onClick={downloadInvoice} className="bg-indigo-600 hover:bg-indigo-700">
+            <Button type="button" onClick={() => void downloadInvoice()} className="bg-indigo-600 hover:bg-indigo-700">
               <Download className="h-4 w-4 mr-2" />
-              Download
+              Download PDF
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {taxInvoiceViewModel?.sdc.showQr ? (
+        <div className="fixed -left-[9999px] top-0 opacity-0 pointer-events-none" aria-hidden>
+          <InvoiceQRCode value={taxInvoiceViewModel.sdc.qrContent} show />
+        </div>
+      ) : null}
       
       {/* Rating Modal */}
       {order && showRatingModal && (

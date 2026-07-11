@@ -1,8 +1,8 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { Filter, Eye } from 'lucide-react'
-import { postAdminApi } from '@/lib/admin-client'
+import { Filter, Eye, FileText, Loader2 } from 'lucide-react'
+import { postAdminApi, postAdminEbmRequest } from '@/lib/admin-client'
 import Link from 'next/link'
 import { mapBackendOrderStatusToTrack, type TrackOrderStatus } from '@/lib/order-status-map'
 import { downloadExcel } from '@/lib/grandma-excel-export'
@@ -58,6 +58,8 @@ function getStatusBadgeClass(status: TrackOrderStatus): string {
   }
 }
 
+const PAGE_SIZE = 20
+
 export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
@@ -67,6 +69,11 @@ export default function OrdersPage() {
     status: '',
   })
   const [sectors, setSectors] = useState<string[]>([])
+  const [page, setPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+  const [totalPages, setTotalPages] = useState(1)
+  const [ebmLoadingId, setEbmLoadingId] = useState<number | null>(null)
+  const [ebmMessage, setEbmMessage] = useState<string | null>(null)
 
   useEffect(() => {
     loadSectors()
@@ -74,10 +81,11 @@ export default function OrdersPage() {
 
   useEffect(() => {
     void loadOrders()
-  }, [filters])
+  }, [filters, page])
 
   const updateFilters = (nextFilters: Partial<typeof filters>) => {
     setFilters((current) => ({ ...current, ...nextFilters }))
+    setPage(1)
   }
 
   const loadSectors = async () => {
@@ -86,7 +94,7 @@ export default function OrdersPage() {
       const data = await res.json()
       
       if (data.ok) {
-        setSectors((data.sectors || []).map((s: any) => s.name))
+        setSectors((data.sectors || []).map((s: { name: string }) => s.name))
       }
     } catch (error) {
       console.error('Error loading sectors:', error)
@@ -99,17 +107,44 @@ export default function OrdersPage() {
       const res = await postAdminApi({
         action: 'getAllOrders',
         ...filters,
-        limit: 999999,
+        limit: PAGE_SIZE,
+        page,
       })
       const data = await res.json()
 
       if (data.ok) {
         setOrders(data.orders || [])
+        const count = Number(data.totalCount ?? data.totalOrders ?? 0) || 0
+        setTotalCount(count)
+        const pages = Number(data.totalPages) || (count > 0 ? Math.ceil(count / PAGE_SIZE) : 1)
+        setTotalPages(Math.max(1, pages))
       }
     } catch (error) {
       console.error('Error loading orders:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const requestEbm = async (orderId: number) => {
+    setEbmMessage(null)
+    setEbmLoadingId(orderId)
+    try {
+      const res = await postAdminEbmRequest(orderId)
+      const data = await res.json()
+      if (!res.ok || !data.ok) {
+        setEbmMessage(data.error || 'EBM request failed')
+        return
+      }
+      setEbmMessage(
+        data.duplicate
+          ? `Order #${orderId} already fiscalized (receipt ${data.receiptNumber || '—'})`
+          : `EBM OK for order #${orderId}${data.receiptNumber ? ` — receipt ${data.receiptNumber}` : ''}`,
+      )
+    } catch (e) {
+      setEbmMessage(e instanceof Error ? e.message : 'EBM request failed')
+    } finally {
+      setEbmLoadingId(null)
     }
   }
 
@@ -143,6 +178,15 @@ export default function OrdersPage() {
         <h1 className="text-3xl font-bold text-gray-900">Order Monitor</h1>
         <p className="text-gray-600 mt-1">Real-time order tracking and management</p>
       </div>
+
+      {ebmMessage ? (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+          {ebmMessage}
+          <button type="button" className="ml-3 underline" onClick={() => setEbmMessage(null)}>
+            Dismiss
+          </button>
+        </div>
+      ) : null}
 
       {/* Filters */}
       <div className="bg-white rounded-lg shadow p-6">
@@ -215,7 +259,6 @@ export default function OrdersPage() {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">#</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Order #</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Seller</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Buyer</th>
@@ -227,15 +270,11 @@ export default function OrdersPage() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {orders.map((order, index) => (
+                {orders.map((order) => (
                   (() => {
                     const normalizedStatus = mapBackendOrderStatusToTrack(order.status, order.paymentStatus)
-                    const rowNumber = index + 1
                     return (
                   <tr key={order.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                      {rowNumber}
-                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                       {order.orderNumber || `#${order.id}`}
                     </td>
@@ -268,13 +307,29 @@ export default function OrdersPage() {
                       {new Date(order.timestamp).toLocaleString()}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <Link
-                        href={`/admin/orders/${order.id}`}
-                        className="text-blue-600 hover:text-blue-900 inline-flex items-center gap-1"
-                      >
-                        <Eye size={16} />
-                        View
-                      </Link>
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          disabled={ebmLoadingId === order.id}
+                          onClick={() => void requestEbm(order.id)}
+                          className="inline-flex items-center gap-1 rounded-md border border-green-400 bg-green-600 px-2 py-1 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+                          title="Send invoice to RRA EBM"
+                        >
+                          {ebmLoadingId === order.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <FileText className="h-3.5 w-3.5" />
+                          )}
+                          Request EBM
+                        </button>
+                        <Link
+                          href={`/admin/orders/${order.id}`}
+                          className="text-blue-600 hover:text-blue-900 inline-flex items-center gap-1"
+                        >
+                          <Eye size={16} />
+                          View
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                     )
@@ -282,8 +337,28 @@ export default function OrdersPage() {
                 ))}
               </tbody>
             </table>
-            <div className="border-t border-gray-200 p-4 text-sm text-gray-600">
-              Showing {orders.length} orders
+            <div className="flex flex-col gap-3 border-t border-gray-200 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-sm text-gray-600">
+                Showing {orders.length} orders of {totalCount.toLocaleString()} · Page {page} of {totalPages}
+              </div>
+              <div className="inline-flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={page <= 1 || loading}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  className="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  disabled={page >= totalPages || loading}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  className="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+                >
+                  Next
+                </button>
+              </div>
             </div>
           </div>
         )}

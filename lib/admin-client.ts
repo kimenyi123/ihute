@@ -105,3 +105,20 @@ export function postAdminUrubutoMerchantDocumentDownload(params: {
     body: JSON.stringify(payload),
   })
 }
+
+/** POST /api/admin/ebm/request — fiscalize order via RRA EBM API. */
+export function postAdminEbmRequest(orderId: number, force = false): Promise<Response> {
+  const { user } = useAuthStore.getState()
+  const userEmail = (user?.email ?? "").trim()
+  const tok = user?.adminApiToken?.trim()
+  return fetch("/api/admin/ebm/request", {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...(userEmail ? { "x-admin-email": userEmail } : {}),
+      ...(tok ? { "x-admin-token": tok } : {}),
+    },
+    body: JSON.stringify({ orderId, force }),
+  })
+}

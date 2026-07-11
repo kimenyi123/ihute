@@ -20,7 +20,8 @@
     "cap:open:ios": "npx cap open ios",
     "generate:nep-cells": "node scripts/generate-rwanda-nep-from-csv.mjs",
     "mongo:stock-sync-indexes": "node scripts/ensure-stock-sync-log-indexes.mjs",
-    "mongo:stock-sync-test": "node scripts/test-stock-sync-mongo.mjs"
+    "mongo:stock-sync-test": "node scripts/test-stock-sync-mongo.mjs",
+    "test:ebm": "node --experimental-strip-types --test scripts/test-ebm-unit.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "3.9.1",
