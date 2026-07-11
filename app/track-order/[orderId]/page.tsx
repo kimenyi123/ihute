@@ -1101,18 +1101,29 @@ function TrackOrderPageInner() {
 
               {documentState === "INVOICED" ? (
                 <div className="flex flex-wrap gap-2">
-                  <Button type="button" variant="outline" asChild>
-                    <a href={invoicePdfHref} target="_blank" rel="noopener noreferrer">
-                      <Eye className="mr-2 h-4 w-4" />
-                      View invoice
-                    </a>
-                  </Button>
-                  <Button type="button" className="bg-indigo-600 hover:bg-indigo-700" asChild>
-                    <a href={invoicePdfHref} download={`invoice-${order.orderId}.pdf`}>
-                      <Download className="mr-2 h-4 w-4" />
-                      Download invoice
-                    </a>
-                  </Button>
+                  {(deliveryNote?.livId || deliveryNote?.livid) ? (
+                    <Button type="button" className="bg-sky-700 hover:bg-sky-800" asChild>
+                      <Link href={`/invoice/${encodeURIComponent(String(deliveryNote.livId || deliveryNote.livid))}`}>
+                        <Eye className="mr-2 h-4 w-4" />
+                        View / download invoice
+                      </Link>
+                    </Button>
+                  ) : (
+                    <>
+                      <Button type="button" variant="outline" asChild>
+                        <a href={invoicePdfHref} target="_blank" rel="noopener noreferrer">
+                          <Eye className="mr-2 h-4 w-4" />
+                          View invoice
+                        </a>
+                      </Button>
+                      <Button type="button" className="bg-indigo-600 hover:bg-indigo-700" asChild>
+                        <a href={invoicePdfHref} download={`invoice-${order.orderId}.pdf`}>
+                          <Download className="mr-2 h-4 w-4" />
+                          Download invoice
+                        </a>
+                      </Button>
+                    </>
+                  )}
                 </div>
               ) : null}
 

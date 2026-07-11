@@ -6,7 +6,7 @@ import dynamic from "next/dynamic"
 import { useParams } from "next/navigation"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Download, Eye, FileText, Loader2 } from "lucide-react"
+import { Eye, FileText, Loader2 } from "lucide-react"
 
 const QRCode = dynamic(() => import("react-qr-code"), { ssr: false })
 
@@ -117,9 +117,6 @@ export default function LivBonPage() {
   const currency = bon?.totals?.currency || "RWF"
   const documentState = String(bon?.documentState || "DELIVERY_NOTE").toUpperCase()
   const qrValue = bon?.qrPayload || bon?.trackUrl || bon?.livUrl || ""
-  const invoicePdfHref =
-    (bon?.invoicePdfUrl && String(bon.invoicePdfUrl)) ||
-    (bon?.orderId ? `/api/orders/invoice-pdf?orderId=${bon.orderId}` : "#")
 
   if (loading) {
     return (
@@ -209,17 +206,11 @@ export default function LivBonPage() {
 
           {documentState === "INVOICED" ? (
             <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" asChild>
-                <a href={invoicePdfHref} target="_blank" rel="noopener noreferrer">
+              <Button type="button" className="w-full bg-sky-700 hover:bg-sky-800" asChild>
+                <Link href={`/invoice/${encodeURIComponent(bon.livId || livId)}`}>
                   <Eye className="mr-2 h-4 w-4" />
-                  View invoice
-                </a>
-              </Button>
-              <Button type="button" className="bg-indigo-600 hover:bg-indigo-700" asChild>
-                <a href={invoicePdfHref} download={`invoice-${bon.orderId}.pdf`}>
-                  <Download className="mr-2 h-4 w-4" />
-                  Download invoice
-                </a>
+                  View / download invoice
+                </Link>
               </Button>
             </div>
           ) : null}

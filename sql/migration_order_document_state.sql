@@ -72,3 +72,13 @@ SET @sql := IF(@exists = 0,
   'ALTER TABLE order_transaction ADD COLUMN EXTERNAL_LIV_ID VARCHAR(64) NULL COMMENT ''CIS livraison id e.g. LIV-896''',
   'SELECT ''EXTERNAL_LIV_ID already exists'' AS info');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- CIS_INVOICE_META (JSON: MRC, invoice title/number, buyer TIN, etc. from CIS)
+SET @exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'order_transaction' AND COLUMN_NAME = 'CIS_INVOICE_META'
+);
+SET @sql := IF(@exists = 0,
+  'ALTER TABLE order_transaction ADD COLUMN CIS_INVOICE_META TEXT NULL COMMENT ''JSON meta from CIS when bon becomes invoice''',
+  'SELECT ''CIS_INVOICE_META already exists'' AS info');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
