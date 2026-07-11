@@ -92,48 +92,112 @@ async function loadImageDataUrl(path: string, origin?: string): Promise<string |
     const res = await fetch(url, { cache: "force-cache" })
     if (!res.ok) return null
     const blob = await res.blob()
-    return await new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(String(reader.result || ""))
-      reader.onerror = () => reject(new Error("read failed"))
-      reader.readAsDataURL(blob)
-    })
+    return await blobToDataUrl(blob)
   } catch {
     return null
   }
 }
 
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ""))
+    reader.onerror = () => reject(new Error("read failed"))
+    reader.readAsDataURL(blob)
+  })
+}
+
+/** Convert an on-page QR SVG (react-qr-code) into a PNG data URL for jsPDF. */
+export async function svgElementToPngDataUrl(svg: SVGElement, size = 256): Promise<string | null> {
+  try {
+    const clone = svg.cloneNode(true) as SVGElement
+    if (!clone.getAttribute("xmlns")) {
+      clone.setAttribute("xmlns", "http://www.w3.org/2000/svg")
+    }
+    clone.setAttribute("width", String(size))
+    clone.setAttribute("height", String(size))
+    const xml = new XMLSerializer().serializeToString(clone)
+    const svgUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(xml)}`
+    const img = await loadHtmlImage(svgUrl)
+    const canvas = document.createElement("canvas")
+    canvas.width = size
+    canvas.height = size
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return null
+    ctx.fillStyle = "#ffffff"
+    ctx.fillRect(0, 0, size, size)
+    ctx.drawImage(img, 0, 0, size, size)
+    return canvas.toDataURL("image/png")
+  } catch {
+    return null
+  }
+}
+
+function loadHtmlImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.onerror = () => reject(new Error("image load failed"))
+    img.src = src
+  })
+}
+
 async function qrCodeDataUrl(text: string): Promise<string | null> {
   if (!text) return null
+  // 1) Preferred: qrcode package (browser)
   try {
-    const QRCode = (await import("qrcode")).default
-    return await QRCode.toDataURL(text, {
-      width: 256,
-      margin: 1,
-      errorCorrectionLevel: "M",
-      color: { dark: "#000000", light: "#ffffff" },
-    })
+    const mod = (await import("qrcode")) as unknown as {
+      toDataURL?: (t: string, o?: object) => Promise<string>
+      default?: { toDataURL?: (t: string, o?: object) => Promise<string> }
+    }
+    const toDataURL = mod.toDataURL || mod.default?.toDataURL
+    if (typeof toDataURL === "function") {
+      return await toDataURL(text, {
+        width: 256,
+        margin: 1,
+        errorCorrectionLevel: "M",
+        color: { dark: "#000000", light: "#ffffff" },
+      })
+    }
+  } catch {
+    /* fall through */
+  }
+  // 2) Fallback: public QR image API (browser download only)
+  try {
+    const url = `https://api.qrserver.com/v1/create-qr-code/?size=256x256&margin=8&data=${encodeURIComponent(text)}`
+    const res = await fetch(url)
+    if (!res.ok) return null
+    return await blobToDataUrl(await res.blob())
   } catch {
     return null
   }
 }
 
 /** Build RRA-style invoice PDF (logos from /public). */
-export async function downloadCisInvoicePdf(data: CisInvoiceData, origin?: string) {
+export async function downloadCisInvoicePdf(
+  data: CisInvoiceData,
+  origin?: string,
+  qrDataUrlOverride?: string | null,
+) {
   const { jsPDF } = await import("jspdf")
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
   const pageW = doc.internal.pageSize.getWidth()
   const margin = 10
   let y = margin
 
-  const [logo1, logo2, qrImg] = await Promise.all([
+  const shareUrl =
+    data.invoiceUrl ||
+    absolutePublicUrl(
+      `/invoice/${encodeURIComponent(data.livId || data.livid || String(data.orderId || ""))}`,
+      origin,
+    )
+
+  const [logo1, logo2, qrGenerated] = await Promise.all([
     loadImageDataUrl(RRA_LOGO_PATH, origin),
     loadImageDataUrl(RRA_LOGO2_PATH, origin),
-    qrCodeDataUrl(
-      data.invoiceUrl ||
-        absolutePublicUrl(`/invoice/${encodeURIComponent(data.livId || data.livid || String(data.orderId || ""))}`, origin),
-    ),
+    qrDataUrlOverride ? Promise.resolve(null) : qrCodeDataUrl(shareUrl),
   ])
+  const qrImg = qrDataUrlOverride || qrGenerated
 
   const currency = data.totals?.currency || "RWF"
   const total = data.totals?.total ?? 0
@@ -169,10 +233,10 @@ export async function downloadCisInvoicePdf(data: CisInvoiceData, origin?: strin
   if (dateLabel) {
     doc.text(`Kigali, On ${dateLabel}`, pageW - margin, y, { align: "right" })
   }
-  const qrSize = 18
+  const qrSize = 20
   const qrX = pageW - margin - qrSize
   const logo2Size = 14
-  const logo2X = qrX - 4 - logo2Size
+  const logo2X = qrX - 5 - logo2Size
   const logo1W = 28
   const logo1X = logo2X - 4 - logo1W
   if (logo1) {
@@ -191,13 +255,18 @@ export async function downloadCisInvoicePdf(data: CisInvoiceData, origin?: strin
   }
   if (qrImg) {
     try {
-      doc.addImage(qrImg, "PNG", qrX, y + 3, qrSize, qrSize)
-    } catch {
-      /* ignore */
+      // qrcode / canvas may return PNG or JPEG data URL
+      const fmt = qrImg.includes("image/jpeg") ? "JPEG" : "PNG"
+      doc.setDrawColor(0)
+      doc.setFillColor(255, 255, 255)
+      doc.rect(qrX - 0.5, y + 2.5, qrSize + 1, qrSize + 1, "FD")
+      doc.addImage(qrImg, fmt, qrX, y + 3, qrSize, qrSize)
+    } catch (e) {
+      console.warn("[cis-invoice] addImage QR failed", e)
     }
   }
 
-  y = Math.max(yL, y + 22, y + (qrImg ? qrSize + 4 : 0))
+  y = Math.max(yL, y + 24, y + (qrImg ? qrSize + 5 : 0))
 
   // Buyer box
   const buyerName = data.cisBuyerName || data.buyerName || ""

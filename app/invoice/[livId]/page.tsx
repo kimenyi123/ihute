@@ -13,6 +13,7 @@ import {
   type CisInvoiceData,
   downloadCisInvoicePdf,
   formatInvoiceNumber,
+  svgElementToPngDataUrl,
   taxLetter,
 } from "@/lib/cis-invoice"
 
@@ -65,7 +66,11 @@ export default function CisInvoicePage() {
     if (!data) return
     setPdfBusy(true)
     try {
-      await downloadCisInvoicePdf(data, typeof window !== "undefined" ? window.location.origin : undefined)
+      const origin = typeof window !== "undefined" ? window.location.origin : undefined
+      // Prefer the QR already rendered on the page (same as what you see)
+      const svg = document.querySelector<SVGElement>("[data-invoice-qr] svg")
+      const fromPage = svg ? await svgElementToPngDataUrl(svg, 256) : null
+      await downloadCisInvoicePdf(data, origin, fromPage)
     } catch (e) {
       setError(e instanceof Error ? e.message : "PDF download failed")
     } finally {
@@ -141,7 +146,7 @@ export default function CisInvoicePage() {
               <Image src={RRA_LOGO_PATH} alt="RRA" width={100} height={40} className="h-10 w-auto" priority />
               <Image src={RRA_LOGO2_PATH} alt="Rwanda" width={48} height={48} className="h-12 w-12" priority />
               {shareUrl ? (
-                <div className="rounded border border-slate-200 bg-white p-1">
+                <div data-invoice-qr className="rounded border border-slate-200 bg-white p-1">
                   <QRCode value={shareUrl} size={64} />
                 </div>
               ) : null}
