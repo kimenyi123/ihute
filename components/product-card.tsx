@@ -10,6 +10,7 @@ import { trackProductView, trackClick } from "@/lib/interaction-tracker"
 import { Heart, Store, ScanSearch, ShoppingCart } from "lucide-react"
 import { usePriceWatchStore } from "@/lib/price-watch-store"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
 import { cn } from "@/lib/utils"
 import { useToast } from "@/components/ui/use-toast"
 import { useAuthStore } from "@/lib/auth-store"
@@ -87,6 +88,10 @@ type Product = {
   marginPercent?: number
   /** e.g. "1.2km away" */
   distanceLabel?: string
+  /** Cross-shop dedupe: available at N shops (main /search only, NIKI merge) */
+  shop_count?: number
+  cheapest_shop_nickname?: string
+  niki_merge?: boolean
 }
 
 export type ProductSearchRankingBadgeProps = {
@@ -519,17 +524,16 @@ export function ProductCard({
       <CardContent className={cn("flex min-w-0 flex-col gap-2", compact ? "p-2" : "p-3")}>
         <div className={compact ? "min-h-[32px]" : "min-h-[38px]"}>
           <h3 className={cn("font-semibold leading-tight line-clamp-2", compact ? "text-xs" : "text-sm")}>{name}</h3>
+          {description && description !== id && description !== name && (
+            <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground line-clamp-2">
+              {description}
+            </p>
+          )}
           <ProductSearchRankingBadges
             searchPriority={searchPriority}
             containsIngredient={containsIngredient}
           />
         </div>
-
-        {description && description !== id && (
-          <p className="text-xs text-muted-foreground line-clamp-2">
-            {description}
-          </p>
-        )}
 
         <div className={compact ? "text-xs" : "text-sm"}>
           <div className="flex items-baseline gap-2">
@@ -551,6 +555,19 @@ export function ProductCard({
             <p className={cn("mt-0.5 text-muted-foreground font-normal", compact ? "text-[10px]" : "text-xs")}>
               {supplierName.toUpperCase()} <span className="text-amber-500" aria-hidden>⭐⭐⭐</span>
             </p>
+          )}
+          {product.niki_merge === true &&
+            typeof product.shop_count === "number" &&
+            product.shop_count > 1 &&
+            product.cheapest_shop_nickname && (
+            <Link
+              href={`/shop-with-me/${encodeURIComponent(product.cheapest_shop_nickname)}`}
+              className={cn(
+                "mt-1 inline-flex rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-800 hover:bg-blue-100",
+              )}
+            >
+              Available at {product.shop_count} shops
+            </Link>
           )}
         </div>
 

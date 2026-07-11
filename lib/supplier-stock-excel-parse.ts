@@ -15,6 +15,7 @@ export type ParsedStockRow = {
   kinyarwanda: string
   imageUrl: string
   keywords: string
+  description: string
 }
 
 export type ParseStockExcelResult = {
@@ -67,6 +68,7 @@ function rowToParsed(
   if (qte < 0 || price < 1) return null
 
   const keywords = col.keywords ? String(cells[col.keywords] ?? "").trim() : ""
+  const description = col.description ? String(cells[col.description] ?? "").trim() : ""
   const codeCol = col.code ? String(cells[col.code] ?? "").trim() : ""
   const itemCode = (codeCol || stableProductCodeFromName(itemName)).slice(0, 64)
 
@@ -82,6 +84,7 @@ function rowToParsed(
     kinyarwanda: col.kinyarwanda ? String(cells[col.kinyarwanda] ?? "").trim() : "",
     imageUrl: col.image ? String(cells[col.image] ?? "").trim() : "",
     keywords,
+    description,
   }
 }
 
@@ -102,7 +105,6 @@ function detectColumns(headers: string[]): ColumnMap | null {
       n === "ARTICLE" ||
       n === "LIBELLE" ||
       n === "DESIGNATION" ||
-      n === "DESCRIPTION" ||
       n === "FOOD" ||
       n === "SERVICE" ||
       (n.includes("ITEM") && !n.includes("SUB") && !n.includes("CODE")) ||
@@ -156,6 +158,7 @@ function detectColumns(headers: string[]): ColumnMap | null {
     else if (n === "SUBCATEGORY" || n === "SUB CATEGORY") map.subcategory = h
     else if (n === "FRENCH") map.french = h
     else if (n === "KINYARWANDA" || n === "KIN") map.kinyarwanda = h
+    else if (n === "DESCRIPTION" || n === "DESC") map.description = h
     else if (n === "IMAGE LINK" || n === "IMAGE" || n === "IMAGE URL") map.image = h
   }
 

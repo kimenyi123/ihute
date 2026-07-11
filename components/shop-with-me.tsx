@@ -54,6 +54,8 @@ import { useCartStore } from "@/lib/cart-store";
 import { useAuthStore } from "@/lib/auth-store";
 import { useFavoritesStore } from "@/lib/favorites-store";
 import { trackProductView, trackClick } from "@/lib/interaction-tracker";
+import { trackQrScan } from "@/lib/activity-tracker";
+import { writeShopOrderContext } from "@/lib/ihute-shop-order-context";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/use-toast";
 import {
@@ -868,6 +870,31 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
     currentSeller?.PREFERRED_CATEGORIES,
     currentSeller?.DEPARTMENT
   );
+
+  useEffect(() => {
+    if (!nicknameLower) return;
+    const src = (searchParams?.get("src") || "").trim().toLowerCase();
+    const acquisitionSource = src === "qr" ? ("qr" as const) : undefined;
+    writeShopOrderContext({
+      shopNickname: nicknameLower,
+      sellerAccount: currentSeller?.ISHYIGA_ACCOUNT,
+      acquisitionSource,
+    });
+  }, [nicknameLower, currentSeller?.ISHYIGA_ACCOUNT, searchParams]);
+
+  const qrScanLoggedRef = useRef<string>("");
+  useEffect(() => {
+    if (!nicknameLower) return;
+    const src = (searchParams?.get("src") || "").trim().toLowerCase();
+    if (src !== "qr") return;
+    const key = `${nicknameLower}|${searchParams?.get("table") || ""}`;
+    if (qrScanLoggedRef.current === key) return;
+    qrScanLoggedRef.current = key;
+    trackQrScan(nicknameLower, {
+      sellerAccount: currentSeller?.ISHYIGA_ACCOUNT,
+      table: searchParams?.get("table") || undefined,
+    });
+  }, [nicknameLower, currentSeller?.ISHYIGA_ACCOUNT, searchParams]);
 
   const moodOptions = useMemo(
     () =>
@@ -1850,6 +1877,7 @@ function ProductCard({
   const categoryVal = p.category ?? p.famille ?? p.FAMILLE ?? p.item_department;
   const categoryLabel = categoryVal && String(categoryVal).trim() ? String(categoryVal).trim() : "n";
   const displayName = `${productName} - ${categoryLabel}`;
+  const itemDescription = String(p.description ?? p.DESCRIPTION ?? "").trim();
   const priceRaw = p.selling_price ?? p.price ?? p.UNITY_PRICE ?? p.SALE_PRICE_INCLUSIVE;
   const baseUnit = extractNumericPrice(priceRaw);
   const embRaw = resolveItemEmballageRaw(p);
@@ -2084,6 +2112,10 @@ function ProductCard({
             />
           )}
         </div>
+
+        {itemDescription ? (
+          <p className="text-[10px] leading-snug text-muted-foreground line-clamp-2">{itemDescription}</p>
+        ) : null}
 
         <div className="flex items-center gap-0.5 text-amber-500" aria-label="Quality rating">
           {[1, 2, 3, 4, 5].map((i) => (

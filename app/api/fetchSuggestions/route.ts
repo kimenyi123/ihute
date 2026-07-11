@@ -8,8 +8,11 @@ import {
   SUGGESTIONS_TTL_SEC,
 } from "@/lib/redis-cache"
 import { dedupeSearchProductsByItemCodeAndSellingPrice } from "@/lib/dedupe-search-products"
+import { dedupeCrossShopByItemCode, logCrossShopDedupeDetails } from "@/lib/cross-shop-dedupe"
 import { enrichFetchSuggestionsProducts } from "@/lib/fetch-suggestions-enrich"
 import { stripExpiredFromFetchSuggestionsBody } from "@/lib/catalog-expiry-filter"
+import { recordSearchEvent } from "@/lib/mysql-search-analytics"
+import { shouldRunTextSearch } from "@/lib/search-query-min"
 
 /**
  * Global search can spend ~8–15s on Redis (many supplier_* blobs) plus NIKI MySQL.
@@ -29,6 +32,43 @@ function paramsToRecord(searchParams: URLSearchParams): Record<string, string> {
 function isDebugSql(params: URLSearchParams): boolean {
   const v = params.get("debugSql")?.trim().toLowerCase()
   return v === "1" || v === "true" || v === "yes"
+}
+
+function applyGlobalSearchDedupe(
+  parsed: { products?: unknown[] },
+  globalSearchQ: string | undefined,
+  redisHit: boolean,
+): void {
+  if (!globalSearchQ || !parsed?.products) return
+  const safeTerm = globalSearchQ.trim().replace(/"/g, "'")
+  const rawResults = parsed.products.length
+  parsed.products = dedupeSearchProductsByItemCodeAndSellingPrice(parsed.products) as typeof parsed.products
+  const afterLot = parsed.products?.length ?? 0
+  parsed.products = dedupeCrossShopByItemCode(parsed.products ?? []) as typeof parsed.products
+  const afterCross = parsed.products?.length ?? 0
+  console.log(
+    `[cache][global] term="${safeTerm}" redis_hit=${redisHit} raw_results=${rawResults} after_lot_dedupe=${afterLot} after_crossshop_dedupe=${afterCross}`,
+  )
+  logCrossShopDedupeDetails(parsed.products ?? [], globalSearchQ)
+  if (rawResults !== afterCross) {
+    console.log(
+      "[fetchSuggestions] Cross-shop dedupe:",
+      rawResults,
+      "→",
+      afterCross,
+      "| globalSearch",
+    )
+  }
+}
+
+function fireMainSearchEvent(req: NextRequest, term: string, resultsCount: number): void {
+  void recordSearchEvent({
+    term,
+    source: "main_search",
+    shop_nickname: null,
+    results_count: resultsCount,
+    session_id: req.cookies.get("ihute_sid")?.value ?? null,
+  }).catch(() => {})
 }
 
 const SECTOR_STATS_DEBUG_HEADER_NAMES = [
@@ -52,6 +92,28 @@ function sectorStatsErrorBody(sectorSlug: string, warning: string): string {
 async function forward(req: NextRequest) {
   await warmJavaBackendBase()
   const incoming = new URL(req.url)
+  const globalSearchRaw = incoming.searchParams.get("globalSearch")?.trim() ?? ""
+  if (globalSearchRaw && !shouldRunTextSearch(globalSearchRaw)) {
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        suppliersByName: [],
+        suppliersByProduct: [],
+        products: [],
+        query: globalSearchRaw,
+      }),
+      {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization",
+          "X-Search-Skipped": "min-length",
+        },
+      },
+    )
+  }
   const sectorStatsParam = incoming.searchParams.get("sectorStats")
   const debugSql = isDebugSql(incoming.searchParams)
   const supplierProductsParamEarly = incoming.searchParams.get("supplierProducts")?.trim() || ""
@@ -79,14 +141,7 @@ async function forward(req: NextRequest) {
       const globalSearchQ = incoming.searchParams.get("globalSearch")?.trim()
       // Drop expired lots first so dedupe never picks an expired row as representative when a valid batch exists.
       stripExpiredFromFetchSuggestionsBody(parsed)
-      // Full-shop catalog (`supplierProducts` only): keep every stock line — do not collapse lots to one card.
-      const dedupeProducts =
-        Boolean(globalSearchQ) &&
-        Array.isArray(parsed.products) &&
-        parsed.products.length > 1
-      if (dedupeProducts && parsed.products) {
-        parsed.products = dedupeSearchProductsByItemCodeAndSellingPrice(parsed.products) as typeof parsed.products
-      }
+      applyGlobalSearchDedupe(parsed, globalSearchQ, true)
       enrichFetchSuggestionsProducts(parsed)
       return new Response(JSON.stringify(parsed), {
         status: 200,
@@ -277,31 +332,17 @@ async function forward(req: NextRequest) {
       console.log("[fetchSuggestions][sectorStats-DEBUG] JSON _debugSql:", JSON.stringify(parsed._debugSql, null, 2))
     }
 
-    // Remove strictly expired lots before dedupe so merged rows reflect sellable batches only (same idea Kaos validateStock should use).
     stripExpiredFromFetchSuggestionsBody(parsed ?? {})
 
-    // Collapse duplicate lots for keyword search only — not for `supplierProducts` shop catalog (Grandma page 3).
     const globalSearchQ = incoming.searchParams.get("globalSearch")?.trim()
-    if (
-      globalSearchQ &&
-      parsed &&
-      Array.isArray(parsed.products) &&
-      parsed.products.length > 1
-    ) {
-      const before = parsed.products.length
-      parsed.products = dedupeSearchProductsByItemCodeAndSellingPrice(parsed.products)
-      if (before !== parsed.products.length) {
-        console.log(
-          "[fetchSuggestions] Deduped products (code + price per supplier):",
-          before,
-          "→",
-          parsed.products.length,
-          "| globalSearch"
-        )
-      }
-    }
+    applyGlobalSearchDedupe(parsed ?? {}, globalSearchQ, false)
 
     enrichFetchSuggestionsProducts(parsed ?? {})
+
+    if (globalSearchQ) {
+      const count = Array.isArray(parsed?.products) ? parsed.products.length : 0
+      fireMainSearchEvent(req, globalSearchQ, count)
+    }
 
     // Store in Redis for next time (Redis first, then DB) — skip sectorStats (fresh counts) and debugSql
     if (!skipSuggestionsCache) {

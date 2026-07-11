@@ -9,13 +9,15 @@ import { useCartStore } from "@/lib/cart-store"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { filterSuppliersByRelevance } from "@/lib/search-utils"
+import { shouldRunTextSearch } from "@/lib/search-query-min"
 import { getTranslations } from "@/lib/keyword-mapping"
-import { MapPin, Search, Store } from "lucide-react"
+import { MapPin, Store } from "lucide-react"
 import { useTableCommandStore } from "@/lib/table-command-store"
 import { useLocationStoreEnhanced } from "@/lib/location-store-enhanced"
 import { LocationBadge } from "@/components/location-badge"
 import { ProductCard } from "@/components/product-card"
 import { ProductQuickView, type QuickViewProduct } from "@/components/product-quick-view"
+import { ShopScopedSearch } from "@/components/shop-scoped-search"
 import { fetchSearchSuggestions } from "@/lib/search-suggestions"
 import { usePriceDropToasts } from "@/lib/use-price-drop-toasts"
 import {
@@ -51,6 +53,7 @@ import {
 } from "@/components/ui/pagination"
 import Image from "next/image"
 import { cn } from "@/lib/utils"
+import { getCookieValue } from "@/lib/cookies"
 
 type Shop = {
   supplier_account: string
@@ -181,7 +184,7 @@ function getDataSourceLabel(data: {
 
 /** Infer sector from query so food/drink searches don't return pharmacy. Backend uses sector to filter. */
 function inferSectorFromQuery(q: string): string {
-  if (!q || q.length < 2) return ""
+  if (!shouldRunTextSearch(q)) return ""
   const lower = q.toLowerCase()
   const foodDrink =
     /\b(martini|chicken|chips|wine|beer|salad|coffee|tea|bread|rice|fish|meat|pork|beef|pizza|pasta|burger|breakfast|lunch|dinner|glass|bottle|drink|food|menu|restaurant|bar|cafe)\b/i.test(lower) ||
@@ -327,7 +330,10 @@ function toCardProduct(p: Product & { search_priority?: string; contains_ingredi
   return {
     id: p.item_code || p.item_key_words || `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`,
     name: p.item_commercial_name || "Product",
-    description: undefined,
+    description:
+      String((p as { description?: string; item_description?: string }).description
+        ?? (p as { item_description?: string }).item_description
+        ?? "").trim() || undefined,
     price,
     currency: p.currency || "RWF",
     // Cart/display packs should follow item_emballage (pcs), not raw stock packet.
@@ -352,6 +358,9 @@ function toCardProduct(p: Product & { search_priority?: string; contains_ingredi
     ...(itemStateRaw ? { item_state: itemStateRaw } : {}),
     ...(expiryLabel ? { expiryLabel } : {}),
     brand: (p as any).item_fabricant ?? (p as any).id_fabricant ?? (p as any).brand,
+    shop_count: (p as any).shop_count,
+    cheapest_shop_nickname: (p as any).cheapest_shop_nickname,
+    niki_merge: (p as any).niki_merge === true ? true : undefined,
   }
 }
 
@@ -637,6 +646,22 @@ export default function SearchPage() {
 
     // Show success message instead of redirecting
     alert(`Added "${p.item_commercial_name}" to your cart!`)
+
+    const activeTerm = debouncedQ.trim()
+    if (activeTerm) {
+      fetch("/api/internal/search-event-select", {
+        method: "POST",
+        headers: { "x-ihute-internal": "true", "Content-Type": "application/json" },
+        body: JSON.stringify({
+          term: activeTerm,
+          item_code: itemCode || id,
+          item_name: p.item_commercial_name,
+          source: "main_search",
+          shop_nickname: null,
+          session_id: getCookieValue("ihute_sid"),
+        }),
+      }).catch(() => {})
+    }
   }
 
   const onTileKey = (e: KeyboardEvent<HTMLDivElement>, p: Product) => {
@@ -723,7 +748,7 @@ export default function SearchPage() {
   useEffect(() => {
     const cancelled = false
     async function run() {
-      if (!debouncedQ || debouncedQ.length < 2) {
+      if (!shouldRunTextSearch(debouncedQ)) {
         setSearchResult(null)
         return
       }
@@ -867,7 +892,7 @@ export default function SearchPage() {
   useEffect(() => {
     let cancelled = false
     const query = debouncedSupplierSearch.trim()
-    if (!selectedShop || !query) {
+    if (!selectedShop || !shouldRunTextSearch(query)) {
       setSupplierSearchResults(null)
       setLoadingSupplierSearch(false)
       return
@@ -1110,7 +1135,7 @@ export default function SearchPage() {
 
   // Auto-open supplier when global search resolves to a single supplier.
   useEffect(() => {
-    if (!debouncedQ || debouncedQ.length < 2) return
+    if (!shouldRunTextSearch(debouncedQ)) return
     if (!searchResult) return
     if (selectedShop) return
     if (supplierParam) return
@@ -1335,7 +1360,7 @@ export default function SearchPage() {
             placeholder="Search in English or Kinyarwanda (e.g., water, amazi, honey, ubuki...)"
             className="w-full rounded-xl border px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
           />
-          {(loading || (q.trim().length >= 2 && q.trim() !== debouncedQ)) && (
+          {(loading || (shouldRunTextSearch(q) && q.trim() !== debouncedQ)) && (
             <span className="text-sm opacity-60 animate-pulse whitespace-nowrap">Searching…</span>
           )}
         </div>
@@ -1635,9 +1660,9 @@ export default function SearchPage() {
               >
                 {!itemParam ? (
                   <div className="border-b border-slate-100 bg-white">
-                    <div className="px-2 py-2 sm:px-4 sm:py-2.5">
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                        <div className="min-w-0 flex-1">
+                    <div className="px-2 py-3 sm:px-4 sm:py-4">
+                      <div className="flex flex-col gap-3">
+                        <div className="min-w-0">
                           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                             <span className="hidden text-[9px] font-bold uppercase tracking-wide text-slate-400 sm:inline">
                               Catalog
@@ -1664,31 +1689,17 @@ export default function SearchPage() {
                             </Button>
                           </div>
                         </div>
-                        <div className="w-full shrink-0 sm:max-w-[min(100%,280px)] md:max-w-[320px]">
-                          <label className="sr-only" htmlFor="supplier-catalog-search">
-                            Search in {selectedShop.supplier_name}
-                          </label>
-                          <div className="relative">
-                            <Search
-                              className="pointer-events-none absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-slate-400"
-                              aria-hidden
-                            />
-                            <input
-                              id="supplier-catalog-search"
-                              value={supplierSearch}
-                              onChange={(e) => setSupplierSearch(e.target.value)}
-                              placeholder={`Search in ${selectedShop.supplier_name}…`}
-                              className="w-full rounded-md border border-slate-200 bg-slate-50/80 py-1.5 pl-8 pr-2 text-xs shadow-none outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-1 focus:ring-blue-100"
-                              aria-label="Search products from this supplier"
-                            />
-                            {(loadingSupplierSearch ||
-                              (supplierSearch.trim() && supplierSearch.trim() !== debouncedSupplierSearch)) && (
-                              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-medium text-blue-600 animate-pulse">
-                                …
-                              </span>
-                            )}
-                          </div>
-                        </div>
+                        <ShopScopedSearch
+                          id="supplier-catalog-search"
+                          value={supplierSearch}
+                          onChange={setSupplierSearch}
+                          shopName={selectedShop.supplier_name}
+                          isSearching={
+                            loadingSupplierSearch ||
+                            (shouldRunTextSearch(supplierSearch) &&
+                              supplierSearch.trim() !== debouncedSupplierSearch)
+                          }
+                        />
                       </div>
                     </div>
                   </div>
@@ -1698,7 +1709,7 @@ export default function SearchPage() {
                     <div className="mx-auto mb-2 h-6 w-6 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600" />
                     <p className="text-xs font-medium">Loading products…</p>
                   </div>
-                ) : loadingSupplierSearch && debouncedSupplierSearch.trim() ? (
+                ) : loadingSupplierSearch && shouldRunTextSearch(debouncedSupplierSearch) ? (
                   <div className={cn("py-10 text-center text-slate-500", !itemParam && "px-3 sm:px-5")}>
                     <p className="text-xs font-medium">Searching…</p>
                   </div>

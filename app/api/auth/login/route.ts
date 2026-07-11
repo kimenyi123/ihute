@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { getJavaAuthUrlCandidates, isTomcatMissingServlet, warmJavaBackendBase } from "@/lib/backend-config"
 import { getJavaSetCookieValues, rewriteForwardedSetCookie } from "@/lib/java-proxy-cookies"
-import { normalizePhoneDigitsForAuth, rwJavaLoginIdentifiers } from "@/lib/rwanda-phone"
+import { buildLoginCandidates, type LoginChannel } from "@/lib/rwanda-phone"
 
 /** First servlet URL that returned JSON (not Tomcat 404 HTML); avoids probing every login attempt. */
 let cachedJavaAuthUrl: string | null = null
@@ -56,13 +56,24 @@ export async function POST(req: Request) {
       `[api/auth/login][proxyRid=${rid}] START authUrlCandidates=${authUrls.length} first=${authUrls[0] ?? "(none)"}${cachedJavaAuthUrl ? " (cached)" : ""}`
     )
 
-    const { email, password } = await req.json()
+    const { email, password, channel: channelRaw } = await req.json()
     const rawLogin = String(email ?? "").trim()
-    const normalizedLogin = normalizePhoneDigitsForAuth(rawLogin) || rawLogin
-    const loginCandidates = Array.from(new Set(rwJavaLoginIdentifiers(normalizedLogin).filter(Boolean)))
+    const channel: LoginChannel =
+      channelRaw === "email" || channelRaw === "phone" || channelRaw === "auto" ? channelRaw : "auto"
+    const loginCandidates = buildLoginCandidates(rawLogin, channel)
     console.log(
-      `[api/auth/login][proxyRid=${rid}] request raw=${rawLogin || "(empty)"} passwordLen=${password?.length ?? 0} try=${loginCandidates.join(" | ")}`
+      `[api/auth/login][proxyRid=${rid}] request raw=${rawLogin || "(empty)"} channel=${channel} passwordLen=${password?.length ?? 0} try=${loginCandidates.join(" | ")}`
     )
+
+    if (loginCandidates.length === 0) {
+      const msg =
+        channel === "email"
+          ? "Enter the email address you used when registering."
+          : channel === "phone"
+            ? "Enter a valid phone number (e.g. 0788123456)."
+            : "Phone or email required."
+      return NextResponse.json({ ok: false, error: msg, rid, code: "AUTH_LOGIN_MISSING_ID" }, { status: 400 })
+    }
 
     if (authUrls.length === 0 || !authUrls[0]) {
       console.error(`[api/auth/login][proxyRid=${rid}] FATAL: no auth URLs`)
