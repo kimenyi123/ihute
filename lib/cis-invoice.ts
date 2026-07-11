@@ -33,6 +33,7 @@ export type CisInvoiceData = {
   invoiceNumber?: string
   invoiceDate?: string
   date?: string
+  invoicedAt?: string | null
   invoiceUrl?: string
   items?: CisInvoiceItem[]
   totals?: { subtotal?: number; total?: number; currency?: string }
@@ -52,6 +53,11 @@ export type CisInvoiceData = {
   conditionsFr?: string
   tableName?: string | null
   error?: string
+}
+
+/** Fiscal timestamp from CIS only — do not use order CREATED_AT. */
+export function cisInvoiceDateLabel(data: CisInvoiceData): string {
+  return String(data.invoiceDate || data.timeSdc || data.timeMrc || data.invoicedAt || "").trim()
 }
 
 export const RRA_LOGO_PATH = "/RRA_LOGO.png"
@@ -219,19 +225,19 @@ export async function downloadCisInvoicePdf(
   doc.setFontSize(8)
   for (const line of [
     data.sellerAddress || "",
-    data.sellerEmail ? `E-mail: ${data.sellerEmail}` : "",
-    data.sellerTin ? `TIN: ${data.sellerTin}` : "",
-    data.sellerTel ? `Phone: ${data.sellerTel}` : "",
+    data.sellerEmail || "",
+    data.sellerTin || "",
+    data.sellerTel || "",
   ].filter(Boolean)) {
     doc.text(line, margin, yL)
     yL += 3.8
   }
 
-  // Right: date, logos, QR (match web page)
+  // Right: CIS date only (no hardcoded city), logos, QR
   doc.setFontSize(8)
-  const dateLabel = data.invoiceDate || data.date || ""
+  const dateLabel = cisInvoiceDateLabel(data)
   if (dateLabel) {
-    doc.text(`Kigali, On ${dateLabel}`, pageW - margin, y, { align: "right" })
+    doc.text(dateLabel, pageW - margin, y, { align: "right" })
   }
   const qrSize = 20
   const qrX = pageW - margin - qrSize
@@ -288,7 +294,7 @@ export async function downloadCisInvoicePdf(
       by += 4
     }
     if (data.buyerTin) {
-      doc.text(`TIN: ${data.buyerTin}`, boxX + 2, by)
+      doc.text(String(data.buyerTin), boxX + 2, by)
     }
     y += 22
   }

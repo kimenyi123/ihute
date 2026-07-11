@@ -11,6 +11,7 @@ import {
   RRA_LOGO2_PATH,
   RRA_LOGO_PATH,
   type CisInvoiceData,
+  cisInvoiceDateLabel,
   downloadCisInvoicePdf,
   formatInvoiceNumber,
   svgElementToPngDataUrl,
@@ -111,7 +112,8 @@ export default function CisInvoicePage() {
     data.invoiceUrl ||
     (typeof window !== "undefined" ? `${window.location.origin}/invoice/${encodeURIComponent(livId)}` : "")
   const items = data.items || []
-  const dateLabel = data.invoiceDate || data.date || ""
+  // Prefer fiscal CIS times only — never invent "Kigali, On" or fall back to order CREATED_AT
+  const dateLabel = cisInvoiceDateLabel(data)
   const totalFmt = formatInvoiceNumber(total)
 
   return (
@@ -135,13 +137,13 @@ export default function CisInvoicePage() {
           <div className="max-w-[42%] space-y-0.5 leading-snug">
             {data.sellerName ? <p className="text-sm font-bold uppercase">{data.sellerName}</p> : null}
             {data.sellerAddress ? <p>{data.sellerAddress}</p> : null}
-            {data.sellerEmail ? <p>E-mail: {data.sellerEmail}</p> : null}
-            {data.sellerTin ? <p>TIN: {data.sellerTin}</p> : null}
-            {data.sellerTel ? <p>Phone: {data.sellerTel}</p> : null}
+            {data.sellerEmail ? <p>{data.sellerEmail}</p> : null}
+            {data.sellerTin ? <p>{data.sellerTin}</p> : null}
+            {data.sellerTel ? <p>{data.sellerTel}</p> : null}
           </div>
 
           <div className="flex flex-col items-end gap-2">
-            {dateLabel ? <p className="text-[11px]">Kigali, On {dateLabel}</p> : null}
+            {dateLabel ? <p className="text-[11px]">{dateLabel}</p> : null}
             <div className="flex items-start gap-3">
               <Image src={RRA_LOGO_PATH} alt="RRA" width={100} height={40} className="h-10 w-auto" priority />
               <Image src={RRA_LOGO2_PATH} alt="Rwanda" width={48} height={48} className="h-12 w-12" priority />
@@ -155,7 +157,7 @@ export default function CisInvoicePage() {
               <div className="mt-1 min-w-[220px] border border-black px-2.5 py-1.5 text-left leading-snug">
                 {buyerName ? <p className="font-semibold uppercase">{buyerName}</p> : null}
                 {data.buyerLocation ? <p>{data.buyerLocation}</p> : null}
-                {data.buyerTin ? <p>TIN: {data.buyerTin}</p> : null}
+                {data.buyerTin ? <p>{data.buyerTin}</p> : null}
               </div>
             )}
           </div>
