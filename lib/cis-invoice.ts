@@ -215,7 +215,7 @@ export async function downloadCisInvoicePdf(data: CisInvoiceData, origin?: strin
   )
   y += 6
 
-  // Items table — vertical rules only between items
+  // Items table — tall body (~A4 mid section); vertical lines through empty space
   const cols = [
     { h: "CODE", w: 16 },
     { h: "DESIGNATION", w: 52 },
@@ -229,8 +229,10 @@ export async function downloadCisInvoicePdf(data: CisInvoiceData, origin?: strin
   ]
   const tableW = cols.reduce((s, c) => s + c.w, 0)
   const tableX = margin
-  const rowH = 5.5
+  const rowH = 5.2
   const headH = 6
+  // Fixed tall body so few lines still look like the paper form (~170mm usable mid-page)
+  const bodyH = 145
 
   // header
   doc.setFont("helvetica", "bold")
@@ -242,7 +244,6 @@ export async function downloadCisInvoicePdf(data: CisInvoiceData, origin?: strin
     doc.text(cols[i].h, x + 1, y + 4)
     x += cols[i].w
   }
-  // thick bottom under header
   doc.setLineWidth(0.6)
   doc.line(tableX, y + headH, tableX + tableW, y + headH)
   doc.setLineWidth(0.2)
@@ -250,12 +251,8 @@ export async function downloadCisInvoicePdf(data: CisInvoiceData, origin?: strin
 
   doc.setFont("helvetica", "normal")
   doc.setFontSize(7.5)
-  const padRows = Math.min(3, Math.max(0, 4 - items.length))
-  const bodyRows = items.length + padRows
   const bodyTop = y
-  const bodyH = bodyRows * rowH
   doc.rect(tableX, bodyTop, tableW, bodyH)
-  // vertical lines through body
   x = tableX
   for (let i = 0; i < cols.length; i++) {
     if (i > 0) doc.line(x, bodyTop, x, bodyTop + bodyH)
@@ -280,6 +277,7 @@ export async function downloadCisInvoicePdf(data: CisInvoiceData, origin?: strin
     ]
     x = tableX
     const ty = bodyTop + r * rowH + 3.8
+    if (ty > bodyTop + bodyH - 2) break
     for (let i = 0; i < cols.length; i++) {
       const alignRight = i >= 7
       const alignCenter = i >= 2 && i <= 6

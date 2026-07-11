@@ -111,7 +111,7 @@ export default function CisInvoicePage() {
 
   return (
     <main className="min-h-screen bg-slate-200/80 px-2 py-4 print:bg-white print:p-0 sm:px-4 sm:py-6">
-      <div className="mx-auto mb-3 flex max-w-[980px] flex-wrap items-center justify-between gap-2 print:hidden">
+      <div className="mx-auto mb-3 flex max-w-[210mm] flex-wrap items-center justify-between gap-2 print:hidden">
         <p className="text-sm text-slate-600">Scanned invoice copy · {livId}</p>
         <Button
           type="button"
@@ -124,7 +124,7 @@ export default function CisInvoicePage() {
         </Button>
       </div>
 
-      <article className="mx-auto max-w-[980px] bg-white px-4 py-5 text-[11px] text-black shadow-md sm:px-8 sm:py-7 print:shadow-none">
+      <article className="mx-auto flex min-h-[297mm] w-full max-w-[210mm] flex-col bg-white px-5 py-6 text-[11px] text-black shadow-md print:min-h-[297mm] print:max-w-none print:shadow-none sm:px-8 sm:py-7">
         {/* Header */}
         <header className="flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-[42%] space-y-0.5 leading-snug">
@@ -167,82 +167,80 @@ export default function CisInvoicePage() {
             .join(" ")}
         </div>
 
-        {/* Items: header + vertical rules only (no horizontal row lines) */}
-        <div className="mt-3 overflow-x-auto">
-          <table className="w-full min-w-[720px] border-collapse border border-black text-[10px] sm:text-[11px]">
-            <thead>
-              <tr>
-                {(
-                  [
-                    ["CODE", "w-[9%] text-left"],
-                    ["DESIGNATION", "w-[28%] text-left"],
-                    ["QTE", "w-[7%] text-center"],
-                    ["LOT.", "w-[8%] text-center"],
-                    ["PER.", "w-[8%] text-center"],
-                    ["TVA", "w-[7%] text-center"],
-                    ["TAX", "w-[6%] text-center"],
-                    ["SALE P.", "w-[12%] text-right"],
-                    ["TOTAL", "w-[12%] text-right"],
-                  ] as const
-                ).map(([label, cls]) => (
-                  <th
-                    key={label}
-                    className={`border-b-2 border-l border-r border-black px-1 py-1.5 font-bold ${cls}`}
-                  >
-                    {label}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((it, i) => {
+        {/* Items table — tall A4 body; vertical column lines through empty space */}
+        <div className="mt-3 flex min-h-[165mm] flex-1 flex-col border border-black print:min-h-[170mm]">
+          <div
+            className="grid shrink-0 border-b-2 border-black text-[10px] font-bold sm:text-[11px]"
+            style={{
+              gridTemplateColumns: "9% 28% 7% 8% 8% 7% 6% 12% 12%",
+            }}
+          >
+            {(
+              [
+                ["CODE", "text-left"],
+                ["DESIGNATION", "text-left"],
+                ["QTE", "text-center"],
+                ["LOT.", "text-center"],
+                ["PER.", "text-center"],
+                ["TVA", "text-center"],
+                ["TAX", "text-center"],
+                ["SALE P.", "text-right"],
+                ["TOTAL", "text-right"],
+              ] as const
+            ).map(([label, align], i) => (
+              <div
+                key={label}
+                className={`px-1 py-1.5 ${align} ${i < 8 ? "border-r border-black" : ""}`}
+              >
+                {label}
+              </div>
+            ))}
+          </div>
+
+          <div className="relative min-h-0 flex-1">
+            {/* full-height vertical column rules */}
+            <div
+              className="pointer-events-none absolute inset-0 grid"
+              style={{ gridTemplateColumns: "9% 28% 7% 8% 8% 7% 6% 12% 12%" }}
+              aria-hidden
+            >
+              {Array.from({ length: 9 }).map((_, i) => (
+                <div key={i} className={i < 8 ? "border-r border-black" : ""} />
+              ))}
+            </div>
+
+            <div className="relative z-[1]">
+              {items.map((it, rowIdx) => {
                 const qty = it.qty ?? 0
                 const unit = Number(it.unitPrice || 0)
                 const amt = Number(it.amount ?? qty * unit)
+                const cells = [
+                  { t: it.itemCode || it.code || "", a: "text-left" },
+                  { t: it.name || "", a: "text-left font-medium" },
+                  { t: String(qty), a: "text-center" },
+                  { t: it.lot || "", a: "text-center" },
+                  { t: it.per || "", a: "text-center" },
+                  { t: it.tva || "", a: "text-center" },
+                  { t: taxLetter(it.tax), a: "text-center" },
+                  { t: formatInvoiceNumber(unit), a: "text-right tabular-nums" },
+                  { t: formatInvoiceNumber(amt), a: "text-right tabular-nums" },
+                ]
                 return (
-                  <tr key={`${it.name}-${i}`}>
-                    <td className="border-l border-r border-black px-1 py-1 align-top">
-                      {it.itemCode || it.code || ""}
-                    </td>
-                    <td className="border-l border-r border-black px-1 py-1 align-top font-medium">
-                      {it.name || ""}
-                    </td>
-                    <td className="border-l border-r border-black px-1 py-1 text-center align-top">{qty}</td>
-                    <td className="border-l border-r border-black px-1 py-1 text-center align-top">
-                      {it.lot || ""}
-                    </td>
-                    <td className="border-l border-r border-black px-1 py-1 text-center align-top">
-                      {it.per || ""}
-                    </td>
-                    <td className="border-l border-r border-black px-1 py-1 text-center align-top">
-                      {it.tva || ""}
-                    </td>
-                    <td className="border-l border-r border-black px-1 py-1 text-center align-top">
-                      {taxLetter(it.tax)}
-                    </td>
-                    <td className="border-l border-r border-black px-1 py-1 text-right align-top tabular-nums">
-                      {formatInvoiceNumber(unit)}
-                    </td>
-                    <td className="border-l border-r border-black px-1 py-1 text-right align-top tabular-nums">
-                      {formatInvoiceNumber(amt)}
-                    </td>
-                  </tr>
+                  <div
+                    key={`${it.name}-${rowIdx}`}
+                    className="grid text-[10px] sm:text-[11px]"
+                    style={{ gridTemplateColumns: "9% 28% 7% 8% 8% 7% 6% 12% 12%" }}
+                  >
+                    {cells.map((c, i) => (
+                      <div key={i} className={`px-1 py-1 ${c.a}`}>
+                        {c.t}
+                      </div>
+                    ))}
+                  </div>
                 )
               })}
-              {/* spacer so vertical lines continue a bit like the paper form */}
-              {items.length > 0
-                ? Array.from({ length: Math.min(3, Math.max(0, 4 - items.length)) }).map((_, i) => (
-                    <tr key={`pad-${i}`} aria-hidden>
-                      {Array.from({ length: 9 }).map((__, j) => (
-                        <td key={j} className="border-l border-r border-black px-1 py-2">
-                          &nbsp;
-                        </td>
-                      ))}
-                    </tr>
-                  ))
-                : null}
-            </tbody>
-          </table>
+            </div>
+          </div>
         </div>
 
         {/* Totals boxes */}
