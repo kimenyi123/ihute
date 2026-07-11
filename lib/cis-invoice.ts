@@ -103,6 +103,21 @@ async function loadImageDataUrl(path: string, origin?: string): Promise<string |
   }
 }
 
+async function qrCodeDataUrl(text: string): Promise<string | null> {
+  if (!text) return null
+  try {
+    const QRCode = (await import("qrcode")).default
+    return await QRCode.toDataURL(text, {
+      width: 256,
+      margin: 1,
+      errorCorrectionLevel: "M",
+      color: { dark: "#000000", light: "#ffffff" },
+    })
+  } catch {
+    return null
+  }
+}
+
 /** Build RRA-style invoice PDF (logos from /public). */
 export async function downloadCisInvoicePdf(data: CisInvoiceData, origin?: string) {
   const { jsPDF } = await import("jspdf")
@@ -111,9 +126,13 @@ export async function downloadCisInvoicePdf(data: CisInvoiceData, origin?: strin
   const margin = 10
   let y = margin
 
-  const [logo1, logo2] = await Promise.all([
+  const [logo1, logo2, qrImg] = await Promise.all([
     loadImageDataUrl(RRA_LOGO_PATH, origin),
     loadImageDataUrl(RRA_LOGO2_PATH, origin),
+    qrCodeDataUrl(
+      data.invoiceUrl ||
+        absolutePublicUrl(`/invoice/${encodeURIComponent(data.livId || data.livid || String(data.orderId || ""))}`, origin),
+    ),
   ])
 
   const currency = data.totals?.currency || "RWF"
@@ -144,28 +163,41 @@ export async function downloadCisInvoicePdf(data: CisInvoiceData, origin?: strin
     yL += 3.8
   }
 
-  // Right: date, logos
+  // Right: date, logos, QR (match web page)
   doc.setFontSize(8)
   const dateLabel = data.invoiceDate || data.date || ""
   if (dateLabel) {
     doc.text(`Kigali, On ${dateLabel}`, pageW - margin, y, { align: "right" })
   }
+  const qrSize = 18
+  const qrX = pageW - margin - qrSize
+  const logo2Size = 14
+  const logo2X = qrX - 4 - logo2Size
+  const logo1W = 28
+  const logo1X = logo2X - 4 - logo1W
   if (logo1) {
     try {
-      doc.addImage(logo1, "PNG", pageW - margin - 58, y + 4, 28, 12)
+      doc.addImage(logo1, "PNG", logo1X, y + 4, logo1W, 12)
     } catch {
       /* ignore */
     }
   }
   if (logo2) {
     try {
-      doc.addImage(logo2, "PNG", pageW - margin - 28, y + 3, 14, 14)
+      doc.addImage(logo2, "PNG", logo2X, y + 3, logo2Size, logo2Size)
+    } catch {
+      /* ignore */
+    }
+  }
+  if (qrImg) {
+    try {
+      doc.addImage(qrImg, "PNG", qrX, y + 3, qrSize, qrSize)
     } catch {
       /* ignore */
     }
   }
 
-  y = Math.max(yL, y + 22)
+  y = Math.max(yL, y + 22, y + (qrImg ? qrSize + 4 : 0))
 
   // Buyer box
   const buyerName = data.cisBuyerName || data.buyerName || ""
@@ -365,7 +397,7 @@ export async function downloadCisInvoicePdf(data: CisInvoiceData, origin?: strin
   const disclaimer =
     data.conditionsFr ||
     "*Kindly verify the expiry dates, quantities, items and prices on delivery notes before payment and order confirmation. Returns and complaints will not be acceptable once invoices have been made."
-  doc.text(disclaimer, margin, y, { maxWidth: pageW - margin * 2 - 30 })
+  doc.text(disclaimer, margin, y, { maxWidth: pageW - margin * 2 })
 
   const file = `invoice-${livId || data.orderId || "copy"}.pdf`
   doc.save(file)
