@@ -8,7 +8,6 @@ import { useParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Download, Loader2 } from "lucide-react"
 import {
-  DEFAULT_CONDITIONS_FR,
   RRA_LOGO2_PATH,
   RRA_LOGO_PATH,
   type CisInvoiceData,
@@ -127,9 +126,11 @@ export default function CisInvoicePage() {
       <article className="mx-auto max-w-[900px] border border-slate-800 bg-white p-4 text-[12px] text-black shadow-sm sm:p-6 print:shadow-none">
         <header className="flex flex-wrap items-start justify-between gap-4">
           <div className="space-y-0.5 leading-snug">
-            <p>{data.sellerAddress || "KIGALI-RWANDA"}</p>
+            <p>{data.sellerAddress || ""}</p>
             {data.sellerTel ? <p>Tel : {data.sellerTel}</p> : null}
-            <p>fax: {data.sellerFax || ""}</p>
+            {data.sellerFax != null && data.sellerFax !== undefined ? (
+              <p>fax: {data.sellerFax}</p>
+            ) : null}
             {data.sellerEmail ? <p>E-mail : {data.sellerEmail}</p> : null}
             {data.sellerTin ? <p>TIN : {data.sellerTin}</p> : null}
           </div>
@@ -152,8 +153,13 @@ export default function CisInvoicePage() {
 
         <h1 className="mt-6 text-xl font-bold tracking-wide">{invoiceLabel}</h1>
         <p className="mt-1">
-          REFERENCE : {data.paymentName || "CASH"} : {money(total, currency)}
-          {data.servedBy ? ` SERVED BY ${data.servedBy}` : ""}
+          {[
+            data.paymentName ? `REFERENCE : ${data.paymentName}` : null,
+            total != null ? `: ${money(total, currency)}` : null,
+            data.servedBy ? `SERVED BY ${data.servedBy}` : null,
+          ]
+            .filter(Boolean)
+            .join(" ")}
         </p>
 
         <div className="mt-4 overflow-x-auto">
@@ -244,12 +250,16 @@ export default function CisInvoicePage() {
             <p>TIME MRC: {data.timeMrc || data.timeSdc || "—"}</p>
             <p>MRC: {data.mrc || "—"}</p>
             <p>INVOICE NUMBER: {data.invoiceNumber || "—"}</p>
-            <p>{data.ishyigaVersion || "ISHYIGA IMPORT"}</p>
+            {data.ishyigaVersion ? <p>{data.ishyigaVersion}</p> : null}
           </div>
         </section>
 
         <footer className="mt-4 flex flex-wrap items-start justify-between gap-3 border border-black p-2">
-          <p className="max-w-[70%] text-[10px] leading-snug">{data.conditionsFr || DEFAULT_CONDITIONS_FR}</p>
+          {data.conditionsFr ? (
+            <p className="max-w-[70%] text-[10px] leading-snug">{data.conditionsFr}</p>
+          ) : (
+            <p className="max-w-[70%] text-[10px] text-slate-400"> </p>
+          )}
           {shareUrl ? (
             <div className="rounded bg-white p-1">
               <QRCode value={shareUrl} size={72} />

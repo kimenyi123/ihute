@@ -54,11 +54,6 @@ export type CisInvoiceData = {
 export const RRA_LOGO_PATH = "/RRA_LOGO.png"
 export const RRA_LOGO2_PATH = "/rraLogo2.png"
 
-export const DEFAULT_CONDITIONS_FR =
-  "Conditions de règlement: Nos Factures sont payables endéans les 30 jours à partir de la date de réception. " +
-  "Passé ce délai, la direction se réserve le droit de calculer des intérêts de 1,25% par mois de retard. " +
-  "Le paiement se fait à nos caisses contre remise d'un reçu ou via le compte bancaire ci-dessous"
-
 export function money(n: number | undefined | null, currency = "RWF") {
   if (n == null || Number.isNaN(Number(n))) return `0.00 ${currency}`
   return `${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`
@@ -114,12 +109,12 @@ export async function downloadCisInvoicePdf(data: CisInvoiceData, origin?: strin
   doc.setFont("helvetica", "normal")
   doc.setFontSize(8)
   const sellerLines = [
-    data.sellerAddress || "KIGALI-RWANDA",
+    data.sellerAddress || "",
     data.sellerTel ? `Tel : ${data.sellerTel}` : "",
-    data.sellerFax != null ? `fax: ${data.sellerFax || ""}` : "fax:",
+    data.sellerFax ? `fax: ${data.sellerFax}` : data.sellerFax === "" ? "fax:" : "",
     data.sellerEmail ? `E-mail : ${data.sellerEmail}` : "",
     data.sellerTin ? `TIN : ${data.sellerTin}` : "",
-  ].filter(Boolean)
+  ].filter((line) => line.length > 0)
   for (const line of sellerLines) {
     doc.text(line, margin, y)
     y += 4
@@ -260,8 +255,8 @@ export async function downloadCisInvoicePdf(data: CisInvoiceData, origin?: strin
     `TIME MRC: ${data.timeMrc || data.timeSdc || ""}`,
     `MRC: ${data.mrc || ""}`,
     `INVOICE NUMBER: ${data.invoiceNumber || ""}`,
-    data.ishyigaVersion || "ISHYIGA IMPORT",
-  ]
+    data.ishyigaVersion || "",
+  ].filter((line) => line.length > 0)
   const leftLines = ["BK :", "BK :", "BK :", "CODE MoMo:"]
   let yS = y
   for (const line of leftLines) {
@@ -280,12 +275,13 @@ export async function downloadCisInvoicePdf(data: CisInvoiceData, origin?: strin
   }
   y = Math.max(y + leftLines.length * 4, y + sdcLines.length * 4, y + mrcLines.length * 4) + 6
 
-  // Conditions + note QR points to this invoice page
-  doc.setDrawColor(0)
-  doc.rect(margin, y, pageW - margin * 2, 28)
-  doc.setFontSize(6.5)
-  const conditions = data.conditionsFr || DEFAULT_CONDITIONS_FR
-  doc.text(conditions, margin + 2, y + 4, { maxWidth: pageW - margin * 2 - 28 })
+  // Conditions from CIS only (no hardcoded location/company text)
+  if (data.conditionsFr) {
+    doc.setDrawColor(0)
+    doc.rect(margin, y, pageW - margin * 2, 28)
+    doc.setFontSize(6.5)
+    doc.text(data.conditionsFr, margin + 2, y + 4, { maxWidth: pageW - margin * 2 - 28 })
+  }
 
   const file = `invoice-${livId || data.orderId || "copy"}.pdf`
   doc.save(file)
