@@ -51,7 +51,7 @@ import type { ShopAnalyticsBundle } from "@/lib/shop-analytics-types"
 import { useAuthStore } from "@/lib/auth-store"
 import { cn } from "@/lib/utils"
 
-type TabId = "overview" | "sales" | "engagement" | "insights"
+type TabId = "overview" | "sales" | "insights" | "engagement"
 
 type Engagement = {
   pageViews?: number

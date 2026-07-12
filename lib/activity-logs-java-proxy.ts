@@ -8,6 +8,7 @@ export type ActivityLogsServletAction =
   | "getActivityLogs"
   | "getActivitySummary"
   | "getIhuteCommercialStats"
+  | "getSellersWithStock"
 
 export async function proxyActivityLogsServlet(
   req: NextRequest,
@@ -26,13 +27,15 @@ export async function proxyActivityLogsServlet(
   if (adminToken) params.set("adminToken", adminToken)
 
   const url = `${getBackendBaseForProxy()}${SERVLET_PATH}?${params.toString()}`
+  // Redis list: MySQL accounts + pipelined GET; still allow headroom under load
+  const timeoutMs = action === "getSellersWithStock" ? 120_000 : 30_000
 
   try {
     const resp = await fetch(url, {
       method: "GET",
       headers: { Accept: "application/json" },
       cache: "no-store",
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(timeoutMs),
     })
 
     const contentType = resp.headers.get("content-type") || ""

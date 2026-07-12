@@ -21,6 +21,7 @@ import {
   MapPin,
   ScrollText,
   Store,
+  Boxes,
 } from 'lucide-react'
 import { useAuthStore } from '@/lib/auth-store'
 import { AdminGuard } from '@/components/auth/admin-guard'
@@ -38,6 +39,7 @@ const menuItems = [
   { href: '/admin/analytics', label: 'Analytics & Reports', icon: BarChart3 },
   { href: '/admin/activity-logs', label: 'Visitor Tracking', icon: ScrollText },
   { href: '/admin/ihute-stats', label: 'Shop-with-me Sales', icon: Store },
+  { href: '/admin/sellers-stock', label: 'Sellers with stock', icon: Boxes },
   { href: '/admin/payment', label: 'Payment Dashboard', icon: Wallet },
   { href: '/admin/gps', label: 'GPS Management', icon: MapPin },
 ]

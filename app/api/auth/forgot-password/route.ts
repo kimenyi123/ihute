@@ -331,6 +331,17 @@ export async function POST(req: Request) {
     const form = new URLSearchParams()
     form.set("action", "forgot_password")
     form.set("email", emailTrimmed)
+    const publicSiteUrl =
+      String(body?.publicSiteUrl ?? body?.frontendUrl ?? "").trim() ||
+      req.headers.get("origin")?.trim() ||
+      process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
+      process.env.NEXT_PUBLIC_FRONTEND_URL?.trim() ||
+      process.env.FRONTEND_URL?.trim() ||
+      ""
+    if (publicSiteUrl) {
+      form.set("publicSiteUrl", publicSiteUrl)
+      form.set("frontendUrl", publicSiteUrl)
+    }
 
     const candidates = await resolveJavaAuthEndpointForReset()
     let lastJson: AuthJson = {}

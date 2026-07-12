@@ -32,7 +32,10 @@ export default function WebForgotPasswordPage() {
       const res = await fetch("/api/auth/forgot-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: trimmed }),
+        body: JSON.stringify({
+          email: trimmed,
+          publicSiteUrl: typeof window !== "undefined" ? window.location.origin : undefined,
+        }),
       })
       const json = (await res.json().catch(() => ({}))) as {
         ok?: boolean

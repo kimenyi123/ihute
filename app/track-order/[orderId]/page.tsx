@@ -2,6 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
+import dynamic from "next/dynamic"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -47,6 +48,34 @@ import type { BuyerEbmFiscalInfo } from "@/lib/ebm/ebm-buyer-request"
 import { buildTaxInvoiceViewModel } from "@/lib/invoice/tax-invoice-view-model"
 import { downloadTaxInvoicePdf } from "@/lib/invoice/tax-invoice-pdf"
 import type { TaxInvoiceOrderInput } from "@/lib/invoice/tax-invoice-types"
+
+const QRCode = dynamic(() => import("react-qr-code"), { ssr: false })
+
+type DocumentState = "DELIVERY_NOTE" | "INVOICE_REQUESTED" | "INVOICED"
+
+type DeliveryNotePayload = {
+  ok?: boolean
+  orderId?: number
+  livId?: string
+  livid?: string
+  sellerName?: string
+  sellerTin?: string
+  sessionType?: "table" | "single"
+  tableName?: string | null
+  date?: string
+  servedBy?: string | null
+  orderStatus?: string
+  documentState?: DocumentState | string
+  items?: Array<{ name?: string; qty?: number; unitPrice?: number; amount?: number; orderedBy?: string | null }>
+  totals?: { subtotal?: number; total?: number; currency?: string }
+  paymentStatus?: string
+  qrPayload?: string
+  trackUrl?: string
+  invoicePdfUrl?: string | null
+  askingForInvoice?: boolean
+  message?: string
+  error?: string
+}
 
 // Updated to match supplier statuses + cancelled (reject / cancel from seller or system)
 type OrderStatus =
@@ -347,6 +376,9 @@ function TrackOrderPageInner() {
   const [ebmFiscal, setEbmFiscal] = useState<BuyerEbmFiscalInfo | null>(null)
   /** Opaque 5-char code for share links (from API). */
   const [publicToken, setPublicToken] = useState<string | null>(null)
+  const [deliveryNote, setDeliveryNote] = useState<DeliveryNotePayload | null>(null)
+  const [invoiceBusy, setInvoiceBusy] = useState(false)
+  const [invoiceMsg, setInvoiceMsg] = useState("")
 
   // Rating modal state
   const [showRatingModal, setShowRatingModal] = useState(false)
@@ -452,6 +484,19 @@ function TrackOrderPageInner() {
     setPublicToken(typeof json.publicToken === "string" ? json.publicToken : null)
   }, [orderId])
 
+  const loadDeliveryNote = useCallback(async (explicitId?: string) => {
+    const id = (explicitId || (/^\d+$/.test(orderId) ? orderId : "")).trim()
+    if (!id || !/^\d+$/.test(id)) return
+    const origin = typeof window !== "undefined" ? window.location.origin : ""
+    const p = new URLSearchParams({ orderId: id })
+    if (origin) p.set("publicSiteUrl", origin)
+    const res = await fetch(`/api/orders/delivery-note?${p}`, { cache: "no-store" })
+    const json = (await res.json().catch(() => ({}))) as DeliveryNotePayload
+    if (res.ok && json.ok !== false) {
+      setDeliveryNote(json)
+    }
+  }, [orderId])
+
   useEffect(() => {
     let cancelled = false
     void (async () => {
@@ -459,6 +504,10 @@ function TrackOrderPageInner() {
       setError(null)
       try {
         await loadOrderFromServer()
+        if (!cancelled) {
+          const id = /^\d+$/.test(orderId) ? orderId : ""
+          await loadDeliveryNote(id)
+        }
       } catch (err: unknown) {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load order")
       } finally {
@@ -468,7 +517,14 @@ function TrackOrderPageInner() {
     return () => {
       cancelled = true
     }
-  }, [orderId, loadOrderFromServer])
+  }, [orderId, loadOrderFromServer, loadDeliveryNote])
+
+  // After track resolves token → numeric id, load delivery note
+  useEffect(() => {
+    if (order?.orderId != null && /^\d+$/.test(String(order.orderId))) {
+      void loadDeliveryNote(String(order.orderId))
+    }
+  }, [order?.orderId, loadDeliveryNote])
 
   const loadEbmStatus = useCallback(async (numericOrderId: number) => {
     try {
@@ -709,7 +765,6 @@ function TrackOrderPageInner() {
 
   const steps = buildTracking(order.status)
   const sellerPhoneNormalized = normalizePhone(order.sellerPhone)
-  const canShowInvoice = canShowInvoiceActions(order.ORDER_STATUS)
   const displayBuyerLocation =
     buyerAddressOverride !== undefined ? buyerAddressOverride : (order.buyerLocation ?? "")
   const canEditDeliveryAddress = order.status !== "delivered" && order.status !== "cancelled"
@@ -726,6 +781,13 @@ function TrackOrderPageInner() {
   const internalOrderNo = String(order.orderId ?? orderId)
   const publicShopBase = (process.env.NEXT_PUBLIC_SHOP_URL || process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://shop.ihute.rw").replace(/\/$/, "")
   const trackLink = `${publicShopBase}/track-order/${encodeURIComponent(shareTrackSlug)}${fromGrandma ? "?from=grandma" : ""}`
+
+  const documentState = String(deliveryNote?.documentState || "DELIVERY_NOTE").toUpperCase()
+  const invoicePdfHref =
+    (deliveryNote?.invoicePdfUrl && String(deliveryNote.invoicePdfUrl)) ||
+    (order.orderId != null ? `/api/orders/invoice-pdf?orderId=${encodeURIComponent(String(order.orderId))}` : "")
+  const qrValue = deliveryNote?.qrPayload || deliveryNote?.trackUrl || trackLink
+  const canShowInvoice = canShowInvoiceActions(order?.ORDER_STATUS)
 
   const whatsappMessage = buildOrderWhatsAppMessageFromViewModel(
     buildOrderReceiptViewModel({
@@ -765,6 +827,47 @@ function TrackOrderPageInner() {
   )
 
   const whatsappHref = sellerPhoneNormalized ? waHrefFor(sellerPhoneNormalized, whatsappMessage) : ""
+
+  async function askForInvoice() {
+    if (!order?.orderId && !deliveryNote?.livId && !deliveryNote?.livid) return
+    setInvoiceBusy(true)
+    setInvoiceMsg("")
+    try {
+      const liv = (deliveryNote?.livId || deliveryNote?.livid || "").trim()
+      const body: Record<string, unknown> = {
+        publicSiteUrl: typeof window !== "undefined" ? window.location.origin : undefined,
+      }
+      if (liv) {
+        body.livid = liv
+      } else if (order?.orderId) {
+        body.orderId = Number(order.orderId)
+      } else {
+        setInvoiceMsg("Missing order or liv id")
+        return
+      }
+      const res = await fetch("/api/orders/request-invoice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+      const json = (await res.json().catch(() => ({}))) as DeliveryNotePayload
+      if (!res.ok || json.ok === false) {
+        setInvoiceMsg(json.error || "Could not request invoice")
+        return
+      }
+      setDeliveryNote(json)
+      setInvoiceMsg(
+        json.message ||
+          (json.livId || json.livid
+            ? `This person is asking for invoice for ${json.livId || json.livid}`
+            : "This person is asking for invoice"),
+      )
+    } catch (e) {
+      setInvoiceMsg(e instanceof Error ? e.message : "Could not request invoice")
+    } finally {
+      setInvoiceBusy(false)
+    }
+  }
 
   return (
     <div className={trackShell}>
@@ -833,12 +936,37 @@ function TrackOrderPageInner() {
                   </div>
                 </div>
 
-                {order.buyerName && (
-                  <div>
-                    <p className="text-sm text-muted-foreground">Buyer Name</p>
-                    <p className="font-medium">{order.buyerName}</p>
-                  </div>
-                )}
+                {(() => {
+                  const isCisBon = /CIS_BON/i.test(String(order.paymentMethod || ""))
+                  const servedBy = (deliveryNote?.servedBy || "").trim()
+                  const buyer = (order.buyerName || "").trim()
+                  // Never show CIS staff (servedBy) as the buyer
+                  if (isCisBon) {
+                    if (servedBy) {
+                      return (
+                        <div>
+                          <p className="text-sm text-muted-foreground">Served by</p>
+                          <p className="font-medium">{servedBy}</p>
+                        </div>
+                      )
+                    }
+                    return null
+                  }
+                  if (!buyer || (servedBy && buyer.toLowerCase() === servedBy.toLowerCase())) {
+                    return servedBy ? (
+                      <div>
+                        <p className="text-sm text-muted-foreground">Served by</p>
+                        <p className="font-medium">{servedBy}</p>
+                      </div>
+                    ) : null
+                  }
+                  return (
+                    <div>
+                      <p className="text-sm text-muted-foreground">Buyer Name</p>
+                      <p className="font-medium">{buyer}</p>
+                    </div>
+                  )
+                })()}
                 {order.buyerPhone && (
                   <div>
                     <p className="text-sm text-muted-foreground">Buyer Phone</p>
@@ -1053,12 +1181,96 @@ function TrackOrderPageInner() {
             </Card>
           )}
 
+          <Card className="border-0 shadow-xl rounded-2xl border-indigo-100 bg-white text-slate-900">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5 text-indigo-600" />
+                Delivery note
+              </CardTitle>
+              <CardDescription>
+                {deliveryNote?.sellerName || order.sellerName}
+                {deliveryNote?.sessionType === "table" && deliveryNote?.tableName
+                  ? ` · Table ${deliveryNote.tableName}`
+                  : ""}
+                {deliveryNote?.servedBy ? ` · Served by ${deliveryNote.servedBy}` : ""}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                {orderStatusBadge(order)}
+                <Badge variant="outline" className="font-mono text-xs">
+                  {documentState.replace(/_/g, " ")}
+                </Badge>
+                {deliveryNote?.date ? (
+                  <span className="text-slate-500">{deliveryNote.date}</span>
+                ) : null}
+              </div>
+
+              {qrValue ? (
+                <div className="flex flex-col items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="rounded-lg bg-white p-3">
+                    <QRCode value={qrValue} size={128} />
+                  </div>
+                  <p className="text-center text-xs text-slate-500">Scan to open this delivery note</p>
+                </div>
+              ) : null}
+
+              {documentState === "DELIVERY_NOTE" ? (
+                <Button
+                  type="button"
+                  className="w-full bg-indigo-600 hover:bg-indigo-700"
+                  disabled={invoiceBusy}
+                  onClick={() => void askForInvoice()}
+                >
+                  <FileText className="mr-2 h-4 w-4" />
+                  {invoiceBusy ? "Requesting…" : "Ask for invoice"}
+                </Button>
+              ) : null}
+
+              {documentState === "INVOICE_REQUESTED" ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  Invoice requested — waiting on seller
+                </div>
+              ) : null}
+
+              {documentState === "INVOICED" ? (
+                <div className="flex flex-wrap gap-2">
+                  {(deliveryNote?.livId || deliveryNote?.livid) ? (
+                    <Button type="button" className="bg-sky-700 hover:bg-sky-800" asChild>
+                      <Link href={`/invoice/${encodeURIComponent(String(deliveryNote.livId || deliveryNote.livid))}`}>
+                        <Eye className="mr-2 h-4 w-4" />
+                        View / download invoice
+                      </Link>
+                    </Button>
+                  ) : (
+                    <>
+                      <Button type="button" variant="outline" asChild>
+                        <a href={invoicePdfHref} target="_blank" rel="noopener noreferrer">
+                          <Eye className="mr-2 h-4 w-4" />
+                          View invoice
+                        </a>
+                      </Button>
+                      <Button type="button" className="bg-indigo-600 hover:bg-indigo-700" asChild>
+                        <a href={invoicePdfHref} download={`invoice-${order.orderId}.pdf`}>
+                          <Download className="mr-2 h-4 w-4" />
+                          Download invoice
+                        </a>
+                      </Button>
+                    </>
+                  )}
+                </div>
+              ) : null}
+
+              {invoiceMsg ? <p className="text-sm text-slate-600">{invoiceMsg}</p> : null}
+            </CardContent>
+          </Card>
+
           {canShowInvoice && (
             <Card className="border-0 shadow-xl rounded-2xl border-indigo-100 bg-white text-slate-900">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <FileText className="h-5 w-5 text-indigo-600" />
-                  Invoice
+                  Tax invoice (EBM)
                 </CardTitle>
                 <CardDescription>
                   Your order reached invoice stage ({order.ORDER_STATUS || "INVOICE"}). You can view or download it.
@@ -1351,7 +1563,6 @@ function TrackOrderPageInner() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
       <Dialog open={invoiceOpen} onOpenChange={setInvoiceOpen}>
         <DialogContent className="max-w-[min(100vw,820px)] border-0 bg-white text-slate-900 sm:rounded-2xl print:max-w-none">
           <DialogTitle className="sr-only">Invoice</DialogTitle>
@@ -1375,7 +1586,7 @@ function TrackOrderPageInner() {
           <InvoiceQRCode value={taxInvoiceViewModel.sdc.qrContent} show />
         </div>
       ) : null}
-      
+
       {/* Rating Modal */}
       {order && showRatingModal && (
         <RatingModal
