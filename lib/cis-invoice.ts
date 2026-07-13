@@ -89,6 +89,26 @@ export function cisTaxTotalBoxes(data: CisInvoiceData): [string, string][] {
   ]
 }
 
+/** True when CIS synced real SDC fields — RRA logos only then. */
+export function hasCisSdcInfo(data: CisInvoiceData): boolean {
+  return Boolean(
+    String(data.sdcId || "").trim() ||
+      String(data.timeSdc || "").trim() ||
+      String(data.sdcInternalData || "").trim() ||
+      String(data.receiptSignature || "").trim() ||
+      String(data.receiptNumber || "").trim(),
+  )
+}
+
+export function hasCisMrcInfo(data: CisInvoiceData): boolean {
+  // Real MRC block only — do not treat invoiceNumber / items count alone as MRC
+  return Boolean(
+    String(data.mrc || "").trim() ||
+      String(data.timeMrc || "").trim() ||
+      String(data.ishyigaVersion || "").trim(),
+  )
+}
+
 export const RRA_LOGO_PATH = "/RRA_LOGO.png"
 export const RRA_LOGO2_PATH = "/rraLogo2.png"
 
@@ -122,6 +142,18 @@ export function absolutePublicUrl(path: string, origin?: string) {
 }
 
 async function loadImageDataUrl(path: string, origin?: string): Promise<string | null> {
+  // Node (API routes): read from /public
+  if (typeof window === "undefined") {
+    try {
+      const { readFile } = await import("fs/promises")
+      const { join } = await import("path")
+      const file = join(process.cwd(), "public", path.replace(/^\//, ""))
+      const buf = await readFile(file)
+      return `data:image/png;base64,${buf.toString("base64")}`
+    } catch {
+      /* fall through to fetch */
+    }
+  }
   try {
     const url = absolutePublicUrl(path, origin)
     const res = await fetch(url, { cache: "force-cache" })
@@ -208,8 +240,8 @@ async function qrCodeDataUrl(text: string): Promise<string | null> {
   }
 }
 
-/** Build RRA-style invoice PDF (logos from /public). */
-export async function downloadCisInvoicePdf(
+/** Build RRA-style invoice PDF (same layout as `/invoice/[livId]`). */
+export async function createCisInvoicePdf(
   data: CisInvoiceData,
   origin?: string,
   qrDataUrlOverride?: string | null,
@@ -227,9 +259,13 @@ export async function downloadCisInvoicePdf(
       origin,
     )
 
+  const showLogos = hasCisSdcInfo(data)
+  const showSdc = hasCisSdcInfo(data)
+  const showMrc = hasCisMrcInfo(data)
+
   const [logo1, logo2, qrGenerated] = await Promise.all([
-    loadImageDataUrl(RRA_LOGO_PATH, origin),
-    loadImageDataUrl(RRA_LOGO2_PATH, origin),
+    showLogos ? loadImageDataUrl(RRA_LOGO_PATH, origin) : Promise.resolve(null),
+    showLogos ? loadImageDataUrl(RRA_LOGO2_PATH, origin) : Promise.resolve(null),
     qrDataUrlOverride ? Promise.resolve(null) : qrCodeDataUrl(shareUrl),
   ])
   const qrImg = qrDataUrlOverride || qrGenerated
@@ -238,10 +274,13 @@ export async function downloadCisInvoicePdf(
   const livId = data.livId || data.livid || ""
   const invoiceLabel =
     data.invoiceTitle ||
-    (data.invoiceNumber ? `INVOICE ${data.invoiceNumber}` : livId ? `INVOICE ${livId}` : `INVOICE #${data.orderId || ""}`)
+    (data.invoiceNumber
+      ? `INVOICE ${data.invoiceNumber}`
+      : livId
+        ? `INVOICE ${livId}`
+        : `INVOICE #${data.orderId || ""}`)
   const items = data.items || []
 
-  // Header left — seller
   doc.setFont("helvetica", "bold")
   doc.setFontSize(10)
   let yL = y
@@ -261,7 +300,6 @@ export async function downloadCisInvoicePdf(
     yL += 3.8
   }
 
-  // Right: CIS date only (no hardcoded city), logos, QR
   doc.setFontSize(8)
   const dateLabel = cisInvoiceDateLabel(data)
   if (dateLabel) {
@@ -269,40 +307,43 @@ export async function downloadCisInvoicePdf(
   }
   const qrSize = 20
   const qrX = pageW - margin - qrSize
-  const logo2Size = 14
-  const logo2X = qrX - 5 - logo2Size
-  const logo1W = 28
-  const logo1X = logo2X - 4 - logo1W
-  if (logo1) {
-    try {
-      doc.addImage(logo1, "PNG", logo1X, y + 4, logo1W, 12)
-    } catch {
-      /* ignore */
+  let headerRightBottom = y + 4
+  if (showLogos && (logo1 || logo2)) {
+    const logo2Size = 14
+    const logo2X = qrX - 5 - logo2Size
+    const logo1W = 28
+    const logo1X = logo2X - 4 - logo1W
+    if (logo1) {
+      try {
+        doc.addImage(logo1, "PNG", logo1X, y + 4, logo1W, 12)
+      } catch {
+        /* ignore */
+      }
     }
-  }
-  if (logo2) {
-    try {
-      doc.addImage(logo2, "PNG", logo2X, y + 3, logo2Size, logo2Size)
-    } catch {
-      /* ignore */
+    if (logo2) {
+      try {
+        doc.addImage(logo2, "PNG", logo2X, y + 3, logo2Size, logo2Size)
+      } catch {
+        /* ignore */
+      }
     }
+    headerRightBottom = y + 18
   }
   if (qrImg) {
     try {
-      // qrcode / canvas may return PNG or JPEG data URL
       const fmt = qrImg.includes("image/jpeg") ? "JPEG" : "PNG"
       doc.setDrawColor(0)
       doc.setFillColor(255, 255, 255)
       doc.rect(qrX - 0.5, y + 2.5, qrSize + 1, qrSize + 1, "FD")
       doc.addImage(qrImg, fmt, qrX, y + 3, qrSize, qrSize)
+      headerRightBottom = Math.max(headerRightBottom, y + qrSize + 5)
     } catch (e) {
       console.warn("[cis-invoice] addImage QR failed", e)
     }
   }
 
-  y = Math.max(yL, y + 24, y + (qrImg ? qrSize + 5 : 0))
+  y = Math.max(yL, headerRightBottom)
 
-  // Buyer box
   const buyerName = data.cisBuyerName || data.buyerName || ""
   if (buyerName || data.buyerTin || data.buyerLocation) {
     const boxW = 72
@@ -350,7 +391,6 @@ export async function downloadCisInvoicePdf(
   )
   y += 6
 
-  // Items table — tall body (~A4 mid section); vertical lines through empty space
   const cols = [
     { h: "CODE", w: 16 },
     { h: "DESIGNATION", w: 52 },
@@ -366,10 +406,8 @@ export async function downloadCisInvoicePdf(
   const tableX = margin
   const rowH = 5.2
   const headH = 6
-  // Fixed tall body so few lines still look like the paper form (~170mm usable mid-page)
   const bodyH = 145
 
-  // header
   doc.setFont("helvetica", "bold")
   doc.setFontSize(7)
   doc.rect(tableX, y, tableW, headH)
@@ -428,7 +466,6 @@ export async function downloadCisInvoicePdf(
   }
   y = bodyTop + bodyH
 
-  // Totals boxes — CIS taxTotals (LOT/PER/TVA/TAX already on line rows above)
   const boxW = tableW / 6
   const boxH = 12
   doc.rect(tableX, y, tableW, boxH)
@@ -446,47 +483,53 @@ export async function downloadCisInvoicePdf(
   }
   y += boxH + 8
 
-  // SDC / MRC
-  const colW = (pageW - margin * 2) / 3
-  doc.setFont("helvetica", "bold")
-  doc.setFontSize(8)
-  doc.text("SDC INFORMATION", margin + colW, y)
-  doc.text("MRC INFORMATION", margin + colW * 2, y)
-  y += 4
-  doc.setFont("helvetica", "normal")
-  doc.setFontSize(6.5)
-  const leftLines = ["BK :", "BK :", "BK :", "CODE MoMo:"]
-  const sdcLines = [
-    `TIME SDC : ${data.timeSdc || ""}`,
-    `SDC ID: ${data.sdcId || ""}`,
-    `Internal Data: ${data.sdcInternalData || ""}`,
-    `Receipt Signature: ${data.receiptSignature || ""}`,
-    `RECEIPT NUMBER: ${data.receiptNumber || ""}`,
-  ]
-  const mrcLines = [
-    `ITEMS NUMBER: ${data.itemsNumber ?? items.length}`,
-    `TIME MRC: ${data.timeMrc || data.timeSdc || ""}`,
-    `MRC: ${data.mrc || ""}`,
-    `INVOICE NUMBER: ${data.invoiceNumber || ""}`,
-    data.ishyigaVersion || "",
-  ].filter((line) => line.length > 0)
+  if (showSdc || showMrc) {
+    const colW = (pageW - margin * 2) / 3
+    doc.setFont("helvetica", "bold")
+    doc.setFontSize(8)
+    if (showSdc) doc.text("SDC INFORMATION", margin + colW, y)
+    if (showMrc) doc.text("MRC INFORMATION", margin + colW * 2, y)
+    y += 4
+    doc.setFont("helvetica", "normal")
+    doc.setFontSize(6.5)
+    const leftLines = ["BK :", "BK :", "BK :", "CODE MoMo:"]
+    const sdcLines = showSdc
+      ? [
+          `TIME SDC : ${data.timeSdc || ""}`,
+          `SDC ID: ${data.sdcId || ""}`,
+          `Internal Data: ${data.sdcInternalData || ""}`,
+          `Receipt Signature: ${data.receiptSignature || ""}`,
+          `RECEIPT NUMBER: ${data.receiptNumber || ""}`,
+        ]
+      : []
+    const mrcLines = showMrc
+      ? [
+          `ITEMS NUMBER: ${data.itemsNumber ?? items.length}`,
+          `TIME MRC: ${data.timeMrc || data.timeSdc || ""}`,
+          `MRC: ${data.mrc || ""}`,
+          `INVOICE NUMBER: ${data.invoiceNumber || ""}`,
+          data.ishyigaVersion || "",
+        ].filter((line) => line.length > 0)
+      : []
 
-  let yS = y
-  for (const line of leftLines) {
-    doc.text(line, margin, yS)
-    yS += 3.5
+    let yS = y
+    for (const line of leftLines) {
+      doc.text(line, margin, yS)
+      yS += 3.5
+    }
+    yS = y
+    for (const line of sdcLines) {
+      doc.text(line, margin + colW, yS, { maxWidth: colW - 2 })
+      yS += 3.5
+    }
+    yS = y
+    for (const line of mrcLines) {
+      doc.text(line, margin + colW * 2, yS, { maxWidth: colW - 2 })
+      yS += 3.5
+    }
+    y =
+      Math.max(y + leftLines.length * 3.5, y + sdcLines.length * 3.5, y + mrcLines.length * 3.5) + 6
   }
-  yS = y
-  for (const line of sdcLines) {
-    doc.text(line, margin + colW, yS, { maxWidth: colW - 2 })
-    yS += 3.5
-  }
-  yS = y
-  for (const line of mrcLines) {
-    doc.text(line, margin + colW * 2, yS, { maxWidth: colW - 2 })
-    yS += 3.5
-  }
-  y = Math.max(y + leftLines.length * 3.5, y + sdcLines.length * 3.5, y + mrcLines.length * 3.5) + 6
 
   doc.setFont("helvetica", "italic")
   doc.setFontSize(6)
@@ -495,6 +538,26 @@ export async function downloadCisInvoicePdf(
     "*Kindly verify the expiry dates, quantities, items and prices on delivery notes before payment and order confirmation. Returns and complaints will not be acceptable once invoices have been made."
   doc.text(disclaimer, margin, y, { maxWidth: pageW - margin * 2 })
 
-  const file = `invoice-${livId || data.orderId || "copy"}.pdf`
-  doc.save(file)
+  return doc
+}
+
+/** Browser download — same PDF as `/api/orders/invoice-pdf`. */
+export async function downloadCisInvoicePdf(
+  data: CisInvoiceData,
+  origin?: string,
+  qrDataUrlOverride?: string | null,
+) {
+  const doc = await createCisInvoicePdf(data, origin, qrDataUrlOverride)
+  const livId = data.livId || data.livid || ""
+  doc.save(`invoice-${livId || data.orderId || "copy"}.pdf`)
+}
+
+/** Server/API bytes — same layout as guest invoice page download. */
+export async function buildCisInvoicePdfBytes(
+  data: CisInvoiceData,
+  origin?: string,
+  qrDataUrlOverride?: string | null,
+): Promise<Uint8Array> {
+  const doc = await createCisInvoicePdf(data, origin, qrDataUrlOverride)
+  return new Uint8Array(doc.output("arraybuffer"))
 }
