@@ -286,7 +286,8 @@ export async function createCisInvoicePdf(
     )
 
   const showLogos = hasCisSdcInfo(data)
-  const showSdc = hasCisSdcInfo(data)
+  // Always print SDC INFORMATION labels (empty / NS/ is fine) — logos only when real SDC exists
+  const showSdc = true
   const showMrc = hasCisMrcInfo(data)
 
   const [logo1, logo2, qrGenerated] = await Promise.all([

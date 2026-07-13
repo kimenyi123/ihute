@@ -133,7 +133,8 @@ export default function CisInvoicePage() {
   const dateLabel = cisInvoiceDateLabel(data)
   const totalFmt = formatInvoiceNumber(total)
   const showLogos = hasCisSdcInfo(data)
-  const showSdc = hasCisSdcInfo(data)
+  // Always keep SDC INFORMATION labels on the invoice (even if values are empty / NS/)
+  const showSdc = true
   const showMrc = hasCisMrcInfo(data)
 
   return (
