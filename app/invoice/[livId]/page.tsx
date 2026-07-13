@@ -122,7 +122,6 @@ export default function CisInvoicePage() {
     )
   }
 
-  const total = data.totals?.total ?? 0
   const invoiceLabel =
     data.invoiceTitle ||
     (data.invoiceNumber ? `INVOICE ${data.invoiceNumber}` : `INVOICE ${livId}`)
