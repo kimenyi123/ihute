@@ -234,8 +234,7 @@ export async function downloadCisInvoicePdf(
   ])
   const qrImg = qrDataUrlOverride || qrGenerated
 
-  const currency = data.totals?.currency || "RWF"
-  const total = data.totals?.total ?? 0
+  const total = data.totals?.total ?? data.taxTotals?.total ?? 0
   const livId = data.livId || data.livid || ""
   const invoiceLabel =
     data.invoiceTitle ||
