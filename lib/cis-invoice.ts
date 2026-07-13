@@ -89,14 +89,40 @@ export function cisTaxTotalBoxes(data: CisInvoiceData): [string, string][] {
   ]
 }
 
-/** True when CIS synced real SDC fields — RRA logos only then. */
+/** Reject empty / placeholder CIS values (e.g. blank, `NS/`, `N/A`). */
+function isMeaningfulCisValue(raw?: string | null): boolean {
+  const s = String(raw ?? "").trim()
+  if (!s) return false
+  const norm = s.toUpperCase().replace(/\s+/g, "")
+  if (
+    norm === "N/A" ||
+    norm === "NA" ||
+    norm === "NULL" ||
+    norm === "UNDEFINED" ||
+    norm === "-" ||
+    norm === "--" ||
+    norm === "/" ||
+    norm === "NS" ||
+    norm === "NS/"
+  ) {
+    return false
+  }
+  // Bare receipt stubs like "NS/" or "/"
+  if (/^NS\/?$/i.test(s) || /^\/+$/.test(s)) return false
+  return true
+}
+
+/**
+ * True only when CIS sent real SDC payload.
+ * RRA logos + SDC INFORMATION block are shown only then — not for empty labels or `NS/`.
+ */
 export function hasCisSdcInfo(data: CisInvoiceData): boolean {
-  return Boolean(
-    String(data.sdcId || "").trim() ||
-      String(data.timeSdc || "").trim() ||
-      String(data.sdcInternalData || "").trim() ||
-      String(data.receiptSignature || "").trim() ||
-      String(data.receiptNumber || "").trim(),
+  return (
+    isMeaningfulCisValue(data.sdcId) ||
+    isMeaningfulCisValue(data.timeSdc) ||
+    isMeaningfulCisValue(data.sdcInternalData) ||
+    isMeaningfulCisValue(data.receiptSignature) ||
+    isMeaningfulCisValue(data.receiptNumber)
   )
 }
 
