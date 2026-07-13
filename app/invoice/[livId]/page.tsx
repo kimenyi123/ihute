@@ -12,6 +12,7 @@ import {
   RRA_LOGO_PATH,
   type CisInvoiceData,
   cisInvoiceDateLabel,
+  cisTaxTotalBoxes,
   downloadCisInvoicePdf,
   formatInvoiceNumber,
   svgElementToPngDataUrl,
@@ -102,7 +103,6 @@ export default function CisInvoicePage() {
     )
   }
 
-  const currency = data.totals?.currency || "RWF"
   const total = data.totals?.total ?? 0
   const invoiceLabel =
     data.invoiceTitle ||
@@ -250,18 +250,9 @@ export default function CisInvoicePage() {
           </div>
         </div>
 
-        {/* Totals boxes */}
+        {/* Totals boxes — values from CIS taxTotals */}
         <div className="mt-0 grid grid-cols-2 border border-t-0 border-black sm:grid-cols-3 lg:grid-cols-6">
-          {(
-            [
-              ["TOTAL A-EX RWF", "0.00"],
-              ["TOTAL B-18.00% RWF", "0.00"],
-              ["TOTAL C-0% RWF", "0.00"],
-              ["TOTAL TAX B RWF", "0.00"],
-              ["TOTAL TAX RWF", "0.00"],
-              [`TOTAL ${currency}`, totalFmt],
-            ] as const
-          ).map(([label, value], idx) => (
+          {cisTaxTotalBoxes(data).map(([label, value], idx) => (
             <div
               key={label}
               className={`border-black px-1 py-1.5 text-center ${idx > 0 ? "border-l" : ""} ${idx >= 2 ? "border-t sm:border-t-0" : ""} ${idx >= 3 ? "lg:border-t-0" : ""}`}

@@ -13,6 +13,17 @@ export type CisInvoiceItem = {
   tva?: string
 }
 
+/** RRA footer tax boxes — values from CIS `taxTotals` on sync. */
+export type CisTaxTotals = {
+  aEx?: number
+  b18?: number
+  c0?: number
+  taxB?: number
+  tax?: number
+  total?: number
+  currency?: string
+}
+
 export type CisInvoiceData = {
   ok?: boolean
   livId?: string
@@ -37,6 +48,7 @@ export type CisInvoiceData = {
   invoiceUrl?: string
   items?: CisInvoiceItem[]
   totals?: { subtotal?: number; total?: number; currency?: string }
+  taxTotals?: CisTaxTotals
   sdcId?: string | null
   timeSdc?: string | null
   sdcInternalData?: string | null
@@ -58,6 +70,23 @@ export type CisInvoiceData = {
 /** Fiscal timestamp from CIS only — do not use order CREATED_AT. */
 export function cisInvoiceDateLabel(data: CisInvoiceData): string {
   return String(data.invoiceDate || data.timeSdc || data.timeMrc || data.invoicedAt || "").trim()
+}
+
+/** Six RRA total boxes under the items table — amounts from CIS. */
+export function cisTaxTotalBoxes(data: CisInvoiceData): [string, string][] {
+  const t = data.taxTotals || {}
+  const cur = String(t.currency || data.totals?.currency || "RWF").trim() || "RWF"
+  const totalSuffix = cur.toUpperCase() === "RWF" ? "RW" : cur
+  const fmt = (n: number | undefined) => formatInvoiceNumber(n ?? 0)
+  const grand = t.total ?? data.totals?.total ?? 0
+  return [
+    [`TOTAL A-EX ${cur}`, fmt(t.aEx)],
+    [`TOTAL B-18.00% ${cur}`, fmt(t.b18)],
+    [`TOTAL C-0% ${cur}`, fmt(t.c0)],
+    [`TOTAL TAX B ${cur}`, fmt(t.taxB)],
+    [`TOTAL TAX ${cur}`, fmt(t.tax)],
+    [`TOTAL ${totalSuffix}`, fmt(grand)],
+  ]
 }
 
 export const RRA_LOGO_PATH = "/RRA_LOGO.png"
@@ -400,18 +429,11 @@ export async function downloadCisInvoicePdf(
   }
   y = bodyTop + bodyH
 
-  // Totals boxes
+  // Totals boxes — CIS taxTotals (LOT/PER/TVA/TAX already on line rows above)
   const boxW = tableW / 6
   const boxH = 12
   doc.rect(tableX, y, tableW, boxH)
-  const boxes: [string, string][] = [
-    ["TOTAL A-EX RWF", "0.00"],
-    ["TOTAL B-18.00% RWF", "0.00"],
-    ["TOTAL C-0% RWF", "0.00"],
-    ["TOTAL TAX B RWF", "0.00"],
-    ["TOTAL TAX RWF", "0.00"],
-    [`TOTAL ${currency}`, formatInvoiceNumber(total)],
-  ]
+  const boxes = cisTaxTotalBoxes(data)
   doc.setFontSize(5.5)
   for (let i = 0; i < 6; i++) {
     const bx = tableX + i * boxW
