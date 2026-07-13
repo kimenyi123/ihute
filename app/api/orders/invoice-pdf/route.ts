@@ -70,9 +70,10 @@ async function fetchInvoiceNote(args: {
   publicSiteUrl: string
 }): Promise<CisInvoiceData | null> {
   const base = getOrdersUrl()
-  if (args.livId) {
+
+  async function byLiv(livId: string) {
     const url = new URL(base)
-    url.searchParams.set("livid", args.livId)
+    url.searchParams.set("livid", livId)
     url.searchParams.set("publicSiteUrl", args.publicSiteUrl)
     const res = await fetch(url.toString(), {
       method: "GET",
@@ -83,15 +84,30 @@ async function fetchInvoiceNote(args: {
     return (await res.json().catch(() => null)) as CisInvoiceData | null
   }
 
-  const url = new URL(base)
-  url.searchParams.set("action", "getDeliveryNote")
-  url.searchParams.set("orderId", String(args.orderId))
-  url.searchParams.set("publicSiteUrl", args.publicSiteUrl)
-  const res = await fetch(url.toString(), {
-    method: "GET",
-    headers: { Accept: "application/json" },
-    cache: "no-store",
-    signal: AbortSignal.timeout(30_000),
-  })
-  return (await res.json().catch(() => null)) as CisInvoiceData | null
+  async function byOrderId(orderId: string) {
+    const url = new URL(base)
+    url.searchParams.set("action", "getDeliveryNote")
+    url.searchParams.set("orderId", orderId)
+    url.searchParams.set("publicSiteUrl", args.publicSiteUrl)
+    const res = await fetch(url.toString(), {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+      signal: AbortSignal.timeout(30_000),
+    })
+    return (await res.json().catch(() => null)) as CisInvoiceData | null
+  }
+
+  if (args.livId) {
+    return byLiv(args.livId)
+  }
+
+  const note = await byOrderId(String(args.orderId))
+  // Prefer liv lookup when available — richer CIS meta (seller address/email/taxTotals)
+  const liv = String(note?.livId || note?.livid || "").trim()
+  if (note?.ok !== false && liv) {
+    const richer = await byLiv(liv)
+    if (richer && richer.ok !== false) return richer
+  }
+  return note
 }

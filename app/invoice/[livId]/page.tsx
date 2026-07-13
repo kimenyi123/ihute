@@ -12,6 +12,8 @@ import {
   RRA_LOGO_PATH,
   type CisInvoiceData,
   cisInvoiceDateLabel,
+  cisReferenceLine,
+  cisSellerDisplayName,
   cisTaxTotalBoxes,
   downloadCisInvoicePdf,
   formatInvoiceNumber,
@@ -125,13 +127,13 @@ export default function CisInvoicePage() {
     data.invoiceTitle ||
     (data.invoiceNumber ? `INVOICE ${data.invoiceNumber}` : `INVOICE ${livId}`)
   const buyerName = data.cisBuyerName || data.buyerName || ""
+  const sellerTitle = cisSellerDisplayName(data)
   const shareUrl =
     data.invoiceUrl ||
     (typeof window !== "undefined" ? `${window.location.origin}/invoice/${encodeURIComponent(livId)}` : "")
   const items = data.items || []
   // Prefer fiscal CIS times only — never invent "Kigali, On" or fall back to order CREATED_AT
   const dateLabel = cisInvoiceDateLabel(data)
-  const totalFmt = formatInvoiceNumber(total)
   const showLogos = hasCisSdcInfo(data)
   // Always keep SDC INFORMATION labels on the invoice (even if values are empty / NS/)
   const showSdc = true
@@ -156,7 +158,7 @@ export default function CisInvoicePage() {
         {/* Header */}
         <header className="flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-[42%] space-y-0.5 leading-snug">
-            {data.sellerName ? <p className="text-sm font-bold uppercase">{data.sellerName}</p> : null}
+            {sellerTitle ? <p className="text-sm font-bold uppercase">{sellerTitle}</p> : null}
             {data.sellerAddress ? <p>{data.sellerAddress}</p> : null}
             {data.sellerEmail ? <p>{data.sellerEmail}</p> : null}
             {data.sellerTin ? <p>{data.sellerTin}</p> : null}
@@ -190,13 +192,7 @@ export default function CisInvoicePage() {
 
         <h1 className="mt-5 text-2xl font-bold tracking-wide">{invoiceLabel}</h1>
         <div className="mt-1 border-b border-black pb-1 text-[11px] uppercase tracking-wide">
-          {[
-            data.paymentName ? `REFERENCE : ${data.paymentName}` : null,
-            `: ${totalFmt}`,
-            data.servedBy ? `SERVED BY ${data.servedBy}` : null,
-          ]
-            .filter(Boolean)
-            .join(" ")}
+          {cisReferenceLine(data)}
         </div>
 
         {/* Items table — tall A4 body; vertical column lines through empty space */}
@@ -204,7 +200,7 @@ export default function CisInvoicePage() {
           <div
             className="grid shrink-0 border-b-2 border-black text-[10px] font-bold sm:text-[11px]"
             style={{
-              gridTemplateColumns: "9% 28% 7% 8% 8% 7% 6% 12% 12%",
+              gridTemplateColumns: "14% 23% 7% 8% 8% 7% 6% 12% 12%",
             }}
           >
             {(
@@ -233,7 +229,7 @@ export default function CisInvoicePage() {
             {/* full-height vertical column rules */}
             <div
               className="pointer-events-none absolute inset-0 grid"
-              style={{ gridTemplateColumns: "9% 28% 7% 8% 8% 7% 6% 12% 12%" }}
+              style={{ gridTemplateColumns: "14% 23% 7% 8% 8% 7% 6% 12% 12%" }}
               aria-hidden
             >
               {Array.from({ length: 9 }).map((_, i) => (
@@ -247,8 +243,8 @@ export default function CisInvoicePage() {
                 const unit = Number(it.unitPrice || 0)
                 const amt = Number(it.amount ?? qty * unit)
                 const cells = [
-                  { t: it.itemCode || it.code || "", a: "text-left" },
-                  { t: it.name || "", a: "text-left font-medium" },
+                  { t: it.itemCode || it.code || "", a: "text-left break-all leading-tight" },
+                  { t: it.name || "", a: "text-left font-medium leading-tight" },
                   { t: String(qty), a: "text-center" },
                   { t: it.lot || "", a: "text-center" },
                   { t: it.per || "", a: "text-center" },
@@ -261,7 +257,7 @@ export default function CisInvoicePage() {
                   <div
                     key={`${it.name}-${rowIdx}`}
                     className="grid text-[10px] sm:text-[11px]"
-                    style={{ gridTemplateColumns: "9% 28% 7% 8% 8% 7% 6% 12% 12%" }}
+                    style={{ gridTemplateColumns: "14% 23% 7% 8% 8% 7% 6% 12% 12%" }}
                   >
                     {cells.map((c, i) => (
                       <div key={i} className={`px-1 py-1 ${c.a}`}>

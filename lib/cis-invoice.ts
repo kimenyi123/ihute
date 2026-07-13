@@ -35,6 +35,7 @@ export type CisInvoiceData = {
   sellerTel?: string
   sellerEmail?: string
   sellerFax?: string
+  sellerOwner?: string
   servedBy?: string | null
   documentState?: string
   orderStatus?: string
@@ -70,6 +71,32 @@ export type CisInvoiceData = {
 /** Fiscal timestamp from CIS only — do not use order CREATED_AT. */
 export function cisInvoiceDateLabel(data: CisInvoiceData): string {
   return String(data.invoiceDate || data.timeSdc || data.timeMrc || data.invoicedAt || "").trim()
+}
+
+/** Shop / company title for invoice header. */
+export function cisSellerDisplayName(data: CisInvoiceData): string {
+  const name = String(data.sellerName || "").trim()
+  const owner = String(data.sellerOwner || "").trim()
+  const parts = name.split(/\s+/).filter(Boolean)
+  const weak = !name || (parts.length === 2 && parts[0].toLowerCase() === parts[1].toLowerCase())
+  if (weak && owner) return owner
+  return name || owner
+}
+
+/** REFERENCE : CASH : 17,500.00 SERVED BY … — omit empty pieces (no leading lone colon). */
+export function cisReferenceLine(data: CisInvoiceData): string {
+  const total = data.totals?.total ?? data.taxTotals?.total ?? 0
+  const amount = formatInvoiceNumber(total)
+  const payment = String(data.paymentName || "").trim()
+  const served = String(data.servedBy || "").trim()
+  const chunks: string[] = []
+  if (payment) {
+    chunks.push(`REFERENCE : ${payment} : ${amount}`)
+  } else {
+    chunks.push(amount)
+  }
+  if (served) chunks.push(`SERVED BY ${served}`)
+  return chunks.join(" ")
 }
 
 /** Six RRA total boxes under the items table — amounts from CIS. */
@@ -307,12 +334,13 @@ export async function createCisInvoicePdf(
         ? `INVOICE ${livId}`
         : `INVOICE #${data.orderId || ""}`)
   const items = data.items || []
+  const sellerTitle = cisSellerDisplayName(data)
 
   doc.setFont("helvetica", "bold")
   doc.setFontSize(10)
   let yL = y
-  if (data.sellerName) {
-    doc.text(String(data.sellerName).toUpperCase(), margin, yL)
+  if (sellerTitle) {
+    doc.text(String(sellerTitle).toUpperCase(), margin, yL)
     yL += 4.5
   }
   doc.setFont("helvetica", "normal")
@@ -405,22 +433,12 @@ export async function createCisInvoicePdf(
   y += 4
   doc.setFont("helvetica", "normal")
   doc.setFontSize(8)
-  doc.text(
-    [
-      data.paymentName ? `REFERENCE : ${data.paymentName}` : null,
-      `: ${formatInvoiceNumber(total)}`,
-      data.servedBy ? `SERVED BY ${data.servedBy}` : null,
-    ]
-      .filter(Boolean)
-      .join(" "),
-    margin,
-    y,
-  )
+  doc.text(cisReferenceLine(data), margin, y)
   y += 6
 
   const cols = [
-    { h: "CODE", w: 16 },
-    { h: "DESIGNATION", w: 52 },
+    { h: "CODE", w: 24 },
+    { h: "DESIGNATION", w: 44 },
     { h: "QTE", w: 12 },
     { h: "LOT.", w: 14 },
     { h: "PER.", w: 14 },
@@ -450,7 +468,7 @@ export async function createCisInvoicePdf(
   y += headH
 
   doc.setFont("helvetica", "normal")
-  doc.setFontSize(7.5)
+  doc.setFontSize(7)
   const bodyTop = y
   doc.rect(tableX, bodyTop, tableW, bodyH)
   x = tableX
@@ -459,14 +477,23 @@ export async function createCisInvoicePdf(
     x += cols[i].w
   }
 
+  let rowY = bodyTop + 1.5
   for (let r = 0; r < items.length; r++) {
     const it = items[r]
     const qty = it.qty ?? 0
     const unit = Number(it.unitPrice || 0)
     const amt = Number(it.amount ?? qty * unit)
-    const cells = [
-      String(it.itemCode || it.code || ""),
-      String(it.name || "").slice(0, 42),
+    const code = String(it.itemCode || it.code || "")
+    const name = String(it.name || "")
+    const codeLines = doc.splitTextToSize(code, cols[0].w - 2) as string[]
+    const nameLines = doc.splitTextToSize(name, cols[1].w - 2) as string[]
+    const lineCount = Math.max(codeLines.length, nameLines.length, 1)
+    const thisRowH = Math.max(rowH, lineCount * 3.4 + 1.2)
+    if (rowY + thisRowH > bodyTop + bodyH - 1) break
+
+    const cells: Array<string | string[]> = [
+      codeLines,
+      nameLines,
       String(qty),
       String(it.lot || ""),
       String(it.per || ""),
@@ -476,20 +503,26 @@ export async function createCisInvoicePdf(
       formatInvoiceNumber(amt),
     ]
     x = tableX
-    const ty = bodyTop + r * rowH + 3.8
-    if (ty > bodyTop + bodyH - 2) break
     for (let i = 0; i < cols.length; i++) {
+      const cell = cells[i]
       const alignRight = i >= 7
       const alignCenter = i >= 2 && i <= 6
-      if (alignRight) {
-        doc.text(cells[i], x + cols[i].w - 1, ty, { align: "right" })
+      if (Array.isArray(cell)) {
+        let ly = rowY + 3.2
+        for (const line of cell) {
+          doc.text(line, x + 1, ly)
+          ly += 3.4
+        }
+      } else if (alignRight) {
+        doc.text(cell, x + cols[i].w - 1, rowY + 3.8, { align: "right" })
       } else if (alignCenter) {
-        doc.text(cells[i], x + cols[i].w / 2, ty, { align: "center" })
+        doc.text(cell, x + cols[i].w / 2, rowY + 3.8, { align: "center" })
       } else {
-        doc.text(cells[i], x + 1, ty)
+        doc.text(cell, x + 1, rowY + 3.8)
       }
       x += cols[i].w
     }
+    rowY += thisRowH
   }
   y = bodyTop + bodyH
 
