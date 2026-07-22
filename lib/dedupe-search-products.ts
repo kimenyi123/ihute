@@ -175,7 +175,8 @@ export function dedupeSearchProductsByItemCodeAndSellingPrice(
     const code = searchProductItemCode(rec)
     if (!code) {
       // For products without codes, use name + supplier + price as dedupe key
-      const fallbackKey = `${searchProductSupplierKey(rec)}\x1e${(rec.item_commercial_name ?? "").toLowerCase().trim()}\x1e${priceKey(searchProductSellingPrice(rec))}`
+      const fallbackName = String(rec.item_commercial_name ?? "").toLowerCase().trim()
+      const fallbackKey = `${searchProductSupplierKey(rec)}\x1e${fallbackName}\x1e${priceKey(searchProductSellingPrice(rec))}`
       if (!seen.has(fallbackKey)) {
         seen.add(fallbackKey)
         ordered.push(rec)
