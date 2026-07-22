@@ -61,6 +61,12 @@ import {
 } from "@/lib/supplier-sync-datetime";
 import { resolveSellerPhotoUrl } from "@/lib/seller-photo-url";
 import { QrCodeWithLogo } from "@/components/supplier/qr-code-with-logo";
+import {
+  buildFmcgShelf,
+  FMCG_SECTION_SUBTITLE,
+} from "@/lib/fmcg";
+import { VELOCITY_LOOKBACK_DAYS } from "@/lib/sales-velocity";
+import { lookupUnitsSold } from "@/lib/order-sales-lookup";
 
 /** Last bulk/excel/Redis upload — not per-row refresh stamps from catalog GET. */
 function formatLastStockUploadLabel(uploadAt: string | null | undefined): string | null {
@@ -119,6 +125,10 @@ const DASH_UI: Record<Language, {
   bulkPriceTitle: string; bulkPriceDesc: string; percentageChange: string;
   percentageHint: string; cancel: string; updating: string; apply: string;
   showingFirst50: string;
+  fmcg: string; fmcgSubtitle: string; fmcgMovers: string;
+  fmcgExpandHint: string; fmcgCollapseHint: string; fmcgEmpty: string;
+  fmcgUnits30d: string; fmcgPerDay: string; fmcgViewInCatalog: string;
+  fmcgFast: string; fmcgMedium: string; fmcgSlow: string; fmcgStock: string;
 }> = {
   en: {
     loadingProducts: "Loading products…",
@@ -223,6 +233,19 @@ const DASH_UI: Record<Language, {
     updating: "Updating\u2026",
     apply: "Apply",
     showingFirst50: "Showing first 50. Use filters to narrow.",
+    fmcg: "FMCG",
+    fmcgSubtitle: FMCG_SECTION_SUBTITLE,
+    fmcgMovers: "movers",
+    fmcgExpandHint: "Fast movers by units sold (30 days). Click to expand.",
+    fmcgCollapseHint: "Click to collapse.",
+    fmcgEmpty: "No FMCG movers yet — items with sales in the last 30 days appear here.",
+    fmcgUnits30d: "units / 30d",
+    fmcgPerDay: "/day",
+    fmcgViewInCatalog: "View in catalog",
+    fmcgFast: "Fast",
+    fmcgMedium: "Medium",
+    fmcgSlow: "Slow",
+    fmcgStock: "in stock",
   },
   rw: {
     loadingProducts: "Birimo gutangira ibicuruzwa\u2026",
@@ -327,6 +350,19 @@ const DASH_UI: Record<Language, {
     updating: "Birimo guhindura\u2026",
     apply: "Shyira mu bikorwa",
     showingFirst50: "Irekanwa 50 za mbere. Koresha ibisasu kugabanya.",
+    fmcg: "FMCG",
+    fmcgSubtitle: FMCG_SECTION_SUBTITLE,
+    fmcgMovers: "bihuze cyane",
+    fmcgExpandHint: "Ibicuruzwa bihuze cyane (iminsi 30). Kanda kugira ngo ubone.",
+    fmcgCollapseHint: "Kanda kugabanya.",
+    fmcgEmpty: "Nta FMCG kirahari — ibicuruzwa byagurishijwe mu minsi 30 bigaragara hano.",
+    fmcgUnits30d: "zagurishijwe / iminsi 30",
+    fmcgPerDay: "/umunsi",
+    fmcgViewInCatalog: "Reba mu kataloge",
+    fmcgFast: "Byihuse",
+    fmcgMedium: "Hagati",
+    fmcgSlow: "Gake",
+    fmcgStock: "mu bubiko",
   },
   fr: {
     loadingProducts: "Chargement des produits\u2026",
@@ -431,6 +467,19 @@ const DASH_UI: Record<Language, {
     updating: "Mise \u00e0 jour\u2026",
     apply: "Appliquer",
     showingFirst50: "Affichage des 50 premiers. Utilisez les filtres pour affiner.",
+    fmcg: "FMCG",
+    fmcgSubtitle: FMCG_SECTION_SUBTITLE,
+    fmcgMovers: "articles",
+    fmcgExpandHint: "Articles \u00e0 rotation rapide (30 jours). Cliquez pour d\u00e9velopper.",
+    fmcgCollapseHint: "Cliquez pour r\u00e9duire.",
+    fmcgEmpty: "Pas encore de FMCG \u2014 les articles vendus sur 30 jours apparaissent ici.",
+    fmcgUnits30d: "unit\u00e9s / 30j",
+    fmcgPerDay: "/jour",
+    fmcgViewInCatalog: "Voir dans le catalogue",
+    fmcgFast: "Rapide",
+    fmcgMedium: "Moyen",
+    fmcgSlow: "Lent",
+    fmcgStock: "en stock",
   },
 };
 
@@ -458,6 +507,9 @@ function SupplierDashboard() {
 
   // Shop With Me QR (collapsible so it doesn't interrupt the main dashboard)
   const [shopWithMeQROpen, setShopWithMeQROpen] = useState(false);
+  /** FMCG shelf — collapsed by default (busy dashboard) */
+  const [fmcgOpen, setFmcgOpen] = useState(false);
+  const [orderSalesByCode, setOrderSalesByCode] = useState<Record<string, number>>({});
   const [shopNickname, setShopNickname] = useState("");
   const [isBarOrRestaurant, setIsBarOrRestaurant] = useState(false);
   /** When true, Bar or Restaurant was set from account PREFEREDCATEGORIES and must not be edited */
@@ -637,13 +689,18 @@ function SupplierDashboard() {
             );
             const price = p.selling_price != null ? parsePrice(String(p.selling_price)) : 0;
 
+            const catalogCode = String(
+              p.ITEM_CODE ?? p.item_code ?? p.itemCode ?? p.item_key_words ?? "",
+            ).trim();
+
             mapped = {
               ...p, // Keep all original Redis fields
               // Normalize for dashboard display
               itemName: p.item_commercial_name,
               ITEM_NAME: p.item_commercial_name,
-              itemCode: p.item_key_words,
-              ITEM_CODE: p.item_key_words,
+              itemCode: catalogCode,
+              ITEM_CODE: catalogCode,
+              item_code: catalogCode || p.item_code,
               stock: stock,
               STOCK: stock,
               price: price,
@@ -792,6 +849,41 @@ function SupplierDashboard() {
     }
   }, [user?.ishyigaAccount, user?.role])
 
+  useEffect(() => {
+    if (!user?.ishyigaAccount || user?.role !== "supplier") return;
+
+    let cancelled = false;
+
+    const fetchOrderSales = async () => {
+      try {
+        const qs = new URLSearchParams({
+          account: user.ishyigaAccount ?? "",
+          days: String(VELOCITY_LOOKBACK_DAYS),
+        });
+        const nick = shopNickname.trim().toLowerCase();
+        if (nick) qs.set("nickname", nick);
+        const res = await fetch(`/api/supplier/item-order-sales?${qs.toString()}`, {
+          cache: "no-store",
+        });
+        const data = await res.json().catch(() => null);
+        if (cancelled) return;
+        if (data?.ok && data.sales && typeof data.sales === "object") {
+          setOrderSalesByCode(data.sales as Record<string, number>);
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+
+    fetchOrderSales();
+    const id = window.setInterval(fetchOrderSales, 60_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [user?.ishyigaAccount, user?.role, shopNickname]);
+
   const handleLogout = () => {
     logout();
     router.push("/");
@@ -862,6 +954,30 @@ function SupplierDashboard() {
       lineTotal > 0 ? Math.min(100, Math.round((Number(top.total ?? 0) / lineTotal) * 100)) : null;
     return { top, pct, lineTotal };
   }, [analytics]);
+
+  const fmcgShelf = useMemo(() => {
+    const enriched = supplierProducts.map((p) => {
+      const row = p as Record<string, unknown>;
+      const code = String(
+        row.ITEM_CODE ?? row.itemCode ?? row.item_code ?? row.item_key_words ?? "",
+      )
+        .trim()
+        .toUpperCase();
+      const sold = lookupUnitsSold(row, orderSalesByCode);
+      return {
+        ...p,
+        ITEM_CODE: code || p.ITEM_CODE,
+        item_code: code || p.item_code,
+        item_commercial_name: p.item_commercial_name ?? p.itemName ?? p.ITEM_NAME,
+        item_name: p.itemName ?? p.ITEM_NAME ?? p.item_name,
+        famille: p.famille ?? p.FAMILLE ?? p.category,
+        totalSold: sold > 0 ? sold : Number(p.totalSold ?? 0) || 0,
+      };
+    });
+    return buildFmcgShelf(enriched, 24);
+  }, [supplierProducts, orderSalesByCode]);
+
+  const fmcgPreview = fmcgShelf.slice(0, 12);
 
   const topUpSaleBullets = useMemo(() => {
     const bullets: string[] = [];
@@ -1341,6 +1457,116 @@ function SupplierDashboard() {
             </Card>
           </div>
         )}
+
+        {/* FMCG — collapsible (busy dashboard) */}
+        <Card className="mb-8 bg-card shadow-md">
+          <CardHeader
+            className="cursor-pointer select-none border-b bg-slate-50 transition-colors hover:bg-slate-100"
+            onClick={() => setFmcgOpen((o) => !o)}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <Layers className="h-6 w-6 shrink-0 text-violet-600" />
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <CardTitle className="text-xl">{ui.fmcg}</CardTitle>
+                    {fmcgShelf.length > 0 ? (
+                      <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-semibold text-violet-800">
+                        {fmcgShelf.length} {ui.fmcgMovers}
+                      </span>
+                    ) : null}
+                  </div>
+                  <CardDescription className="mt-1">
+                    {fmcgOpen ? ui.fmcgCollapseHint : ui.fmcgExpandHint}
+                  </CardDescription>
+                </div>
+              </div>
+              <ChevronRight
+                className={`h-5 w-5 shrink-0 text-slate-500 transition-transform ${fmcgOpen ? "rotate-90" : ""}`}
+              />
+            </div>
+          </CardHeader>
+          {fmcgOpen && (
+            <CardContent className="p-4 sm:p-6 space-y-3">
+              <p className="text-xs text-slate-500">{ui.fmcgSubtitle}</p>
+              {fmcgPreview.length === 0 ? (
+                <p className="text-sm text-slate-600">{ui.fmcgEmpty}</p>
+              ) : (
+                <ul className="divide-y divide-slate-100 text-sm">
+                  {fmcgPreview.map((p, i) => {
+                    const name = String(
+                      p.item_commercial_name ?? p.itemName ?? p.ITEM_NAME ?? p.item_name ?? "—",
+                    ).trim();
+                    const stock = Number(p.stock ?? p.STOCK ?? 0);
+                    const units = Number(p.unitsSold ?? p.totalSold ?? 0);
+                    const vel = Number(p.salesVelocity ?? 0);
+                    const cls = p.movementClass;
+                    const badge =
+                      cls === "A"
+                        ? { label: ui.fmcgFast, className: "bg-emerald-100 text-emerald-800" }
+                        : cls === "B"
+                          ? { label: ui.fmcgMedium, className: "bg-amber-100 text-amber-900" }
+                          : cls === "C"
+                            ? { label: ui.fmcgSlow, className: "bg-slate-100 text-slate-700" }
+                            : null;
+                    const code = String(p.ITEM_CODE ?? p.itemCode ?? "").trim();
+                    return (
+                      <li
+                        key={code || `${name}-${i}`}
+                        className="flex flex-wrap items-start justify-between gap-2 py-2.5 first:pt-0"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <span className="block truncate font-medium text-slate-900">{name}</span>
+                          <span className="mt-0.5 block text-xs text-slate-500">
+                            {stock.toLocaleString()} {ui.fmcgStock}
+                            {" · "}
+                            {units.toLocaleString()} {ui.fmcgUnits30d}
+                            {" · "}
+                            {vel > 0 ? `${vel.toFixed(1)}${ui.fmcgPerDay}` : `0${ui.fmcgPerDay}`}
+                          </span>
+                        </div>
+                        {badge ? (
+                          <span
+                            className={cn(
+                              "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold",
+                              badge.className,
+                            )}
+                          >
+                            {badge.label}
+                          </span>
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              {fmcgPreview.length > 0 ? (
+                <div className="border-t border-slate-100 pt-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const first = fmcgPreview[0];
+                      const q = String(
+                        first?.item_commercial_name ?? first?.itemName ?? first?.ITEM_NAME ?? "",
+                      ).trim();
+                      if (q) setSearchTerm(q);
+                      setStatusFilter("all");
+                      setCategoryFilter("all");
+                      setCurrentPage(1);
+                      document.getElementById("supplier-products")?.scrollIntoView({
+                        behavior: "smooth",
+                        block: "start",
+                      });
+                    }}
+                  >
+                    {ui.fmcgViewInCatalog}
+                  </Button>
+                </div>
+              ) : null}
+            </CardContent>
+          )}
+        </Card>
 
         {/* Shop With Me QR Code — collapsible so original dashboard stays primary */}
         <Card className="mb-8 bg-card shadow-md">
