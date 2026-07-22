@@ -126,7 +126,7 @@ export function getProductSearchBlob<T extends {
   keywords_en?: string
   item_code?: string
   supplier_name?: string
-  item_packet?: string
+  item_packet?: string | number
   item_emballage?: string
   item_inn?: string
   niki_item_key_words?: string
@@ -143,7 +143,7 @@ export function getProductSearchBlob<T extends {
     product.niki_item_key_words,
     product.item_code,
     product.supplier_name,
-    product.item_packet,
+    product.item_packet != null ? String(product.item_packet) : undefined,
     product.item_emballage,
   ]
     .filter(Boolean)
@@ -182,7 +182,7 @@ export function productMatchesAllSearchTokens<T extends {
   item_key_words?: string
   item_code?: string
   supplier_name?: string
-  item_packet?: string
+  item_packet?: string | number
   item_emballage?: string
 }>(product: T, tokens: string[]): boolean {
   if (tokens.length === 0) return true
