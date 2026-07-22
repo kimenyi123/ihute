@@ -7,6 +7,7 @@ export const TIER2_SHOP_TTL_SEC = 120
 
 export type Tier1Item = {
   item_code: string
+  niki_code?: string
   item_name?: string
   item_french?: string
   IMITERERE?: string
@@ -55,8 +56,10 @@ export function productItemCode(p: Record<string, unknown>): string {
 
 export function extractTier1FromProduct(p: Record<string, unknown>): Tier1Item {
   const code = productItemCode(p)
+  const niki = String(p.niki_code ?? p.NIKI_CODE ?? "").trim()
   return {
     item_code: code,
+    niki_code: niki || undefined,
     item_name: String(p.item_commercial_name ?? p.ITEM_NAME ?? p.item_name ?? "").trim() || undefined,
     item_french: String(p.item_key_words_french ?? p.item_french ?? "").trim() || undefined,
     IMITERERE: String(p.item_key_words_kinyarwanda ?? p.IMITERERE ?? "").trim() || undefined,
@@ -161,6 +164,8 @@ export function mergeTier1AndTier2(t1: Tier1Item, t2: Tier2ShopEntry): Record<st
     ITEM_CODE: t1.item_code,
     item_code: t1.item_code,
     item_key_words: t1.item_code,
+    niki_code: t1.niki_code ?? "",
+    NIKI_CODE: t1.niki_code ?? "",
     item_commercial_name: t1.item_name ?? "",
     item_name: t1.item_name ?? "",
     item_key_words_french: t1.item_french ?? t1.item_key_words_french ?? "",

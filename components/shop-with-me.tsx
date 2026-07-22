@@ -150,6 +150,9 @@ type ShopWithMeProduct = {
   currency?: string;
   /** Category/family from API (e.g. BREAKFAST, COLD STARTERS). Preserved when flattening. */
   famille?: string;
+  /** NIKI catalog code — used for https://ishyiga.rw/NIKI/images/{niki_code}.jpg */
+  niki_code?: string;
+  NIKI_CODE?: string;
   item_key_words_french?: string;
   item_key_words_kinyarwanda?: string;
   keywords_en?: string;
