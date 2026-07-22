@@ -34,9 +34,38 @@ function sanitizeKaosSegment(segment: string): string {
   return segment.replace(/\s+/g, "_").replace(/\/+/g, "_")
 }
 
+/** Official NIKI product photos on ishyiga.rw (prefer before KAOS famille paths). */
+export const NIKI_IMAGES_BASE = "https://ishyiga.rw/NIKI/images/"
+
+function looksLikeNikiCode(value: string): boolean {
+  const v = value.trim()
+  if (v.length < 4 || v.length > 32) return false
+  if (/\s/.test(v)) return false
+  return /^[A-Za-z0-9_-]+$/.test(v)
+}
+
+/** Prefer real niki_code fields for CDN photos (not free-text item_key_words). */
+export function getNikiCodeForCdnImage(source: unknown): string {
+  if (!source || typeof source !== "object") return ""
+  const o = source as Record<string, unknown>
+  const pick = (keys: string[]): string => {
+    for (const k of keys) {
+      const raw = o[k]
+      if (raw == null) continue
+      const v = typeof raw === "string" ? raw.trim() : String(raw).trim()
+      if (v !== "" && looksLikeNikiCode(v)) return v
+    }
+    return ""
+  }
+  return (
+    pick(["niki_code", "NIKI_CODE", "nikiCode", "nikicode"]) ||
+    pick(["ITEM_CODE", "item_code", "itemCode"]) ||
+    pick(["item_key_words"])
+  )
+}
+
 /**
- * NIKI code for images / KAOS paths: in your API this is the same value as `item_key_words`.
- * We also accept explicit `niki_code` / `NIKI_CODE` and catalog fields `ITEM_CODE` / `item_code` / `itemCode`.
+ * NIKI code for images / KAOS paths: prefer explicit niki_code, then catalog codes.
  */
 export function getNikiCodeFromSource(source: unknown): string {
   if (!source || typeof source !== "object") return ""
@@ -50,8 +79,9 @@ export function getNikiCodeFromSource(source: unknown): string {
     }
     return ""
   }
+  const fromCdn = getNikiCodeForCdnImage(source)
+  if (fromCdn) return fromCdn
   return pick([
-    "item_key_words", // canonical: NIKI code === item_key_words
     "niki_code",
     "NIKI_CODE",
     "nikiCode",
@@ -59,6 +89,7 @@ export function getNikiCodeFromSource(source: unknown): string {
     "ITEM_CODE",
     "item_code",
     "itemCode",
+    "item_key_words",
   ])
 }
 
@@ -122,8 +153,11 @@ function collectBackendImageUrls(source: ProductImageSource | null | undefined):
 }
 
 /**
- * Ordered URLs to try for a product image (KAOS famille path, flat NIKI, each backend field, then no_image).
- * Use with onError → next index when the CDN returns 404 (famille folder often wrong while flat path works).
+ * Ordered URLs to try for a product image:
+ * 1) https://ishyiga.rw/NIKI/images/{niki_code}.jpg (+ jpeg/png)
+ * 2) KAOS famille / flat paths
+ * 3) backend image fields
+ * 4) no_image
  */
 export function getProductImageCandidates(source: ProductImageSource | null | undefined): string[] {
   const KAOS_BASE = "https://ishyiga.rw/images_kaos_beta/"
@@ -139,9 +173,17 @@ export function getProductImageCandidates(source: ProductImageSource | null | un
 
   if (source && typeof source === "object") {
     const rawFamille = (source as any).famille ?? (source as any).FAMILLE
+    const nikiCdnCode = getNikiCodeForCdnImage(source)
     const nikiCode = getNikiCodeFromSource(source)
     const famille = typeof rawFamille === "string" ? rawFamille.trim() : String(rawFamille ?? "").trim()
     const nikiPath = nikiCode ? sanitizeKaosSegment(nikiCode) : ""
+
+    if (nikiCdnCode) {
+      const safe = encodeURIComponent(nikiCdnCode)
+      add(`${NIKI_IMAGES_BASE}${safe}.jpg`)
+      add(`${NIKI_IMAGES_BASE}${safe}.jpeg`)
+      add(`${NIKI_IMAGES_BASE}${safe}.png`)
+    }
 
     if (nikiPath) {
       if (famille) {
