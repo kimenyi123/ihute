@@ -119,6 +119,11 @@ export function tokenizeSearchQueryForAnd(query: string): string[] {
 export function getProductSearchBlob<T extends {
   item_commercial_name?: string
   item_key_words?: string
+  item_key_words_kinyarwanda?: string
+  item_key_words_french?: string
+  item_french?: string
+  IMITERERE?: string
+  keywords_en?: string
   item_code?: string
   supplier_name?: string
   item_packet?: string
@@ -129,6 +134,11 @@ export function getProductSearchBlob<T extends {
   return [
     product.item_commercial_name,
     product.item_key_words,
+    product.item_key_words_kinyarwanda,
+    product.IMITERERE,
+    product.keywords_en,
+    product.item_key_words_french,
+    product.item_french,
     product.item_inn,
     product.niki_item_key_words,
     product.item_code,

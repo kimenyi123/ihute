@@ -119,6 +119,7 @@ type ShopWithMeProduct = {
   famille?: string;
   item_key_words_french?: string;
   item_key_words_kinyarwanda?: string;
+  keywords_en?: string;
 } & Partial<ShopWithMeProductMeta> & {
   ITEM_CODE?: string;
   item_code?: string;
@@ -1062,11 +1063,12 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
         const name = (product.item_commercial_name || product.item_name || "").toLowerCase();
         const keywords = (product.item_key_words || "").toLowerCase();
         const famille = String((product as Record<string, unknown>).famille ?? (product as Record<string, unknown>).FAMILLE ?? "").toLowerCase();
-        const french = ((product as Record<string, unknown>).item_key_words_french as string || "").toLowerCase();
-        const kinyarwanda = ((product as Record<string, unknown>).item_key_words_kinyarwanda as string || "").toLowerCase();
+        const french = ((product as Record<string, unknown>).item_key_words_french as string || (product as Record<string, unknown>).item_french as string || "").toLowerCase();
+        const kinyarwanda = ((product as Record<string, unknown>).item_key_words_kinyarwanda as string || (product as Record<string, unknown>).IMITERERE as string || "").toLowerCase();
+        const keywordsEn = ((product as Record<string, unknown>).keywords_en as string || "").toLowerCase();
         const description = ((product as Record<string, unknown>).item_description as string || (product as Record<string, unknown>).description as string || "").toLowerCase();
         const itemKeywords = ((product as Record<string, unknown>).item_keywords as string || "").toLowerCase();
-        const combined = `${name} ${keywords} ${famille} ${french} ${kinyarwanda} ${description} ${itemKeywords}`;
+        const combined = `${name} ${keywords} ${famille} ${french} ${kinyarwanda} ${keywordsEn} ${description} ${itemKeywords}`;
         return terms.every((term) => combined.includes(term));
       });
     }
