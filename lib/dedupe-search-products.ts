@@ -129,7 +129,7 @@ function mergeGroup(arr: Record<string, unknown>[]): Record<string, unknown> {
 }
 
 /**
- * One row per (supplier, item code, selling price). Rows without a code are left in place (no merging).
+ * One row per (supplier, item code, selling price). Rows without a code try to use name as fallback.
  * Merged row: summed non-expired sellable qty, preserved `item_emballage` when present, `merged_lot_count`.
  */
 export function dedupeSearchProductsByItemCodeAndSellingPrice(
@@ -140,12 +140,27 @@ export function dedupeSearchProductsByItemCodeAndSellingPrice(
   const rows = products.filter((p): p is Record<string, unknown> => p != null && typeof p === "object")
 
   const groups = new Map<string, Record<string, unknown>[]>()
+  const productsWithoutCode: Record<string, unknown>[] = []
+
   for (const p of rows) {
-    if (!searchProductItemCode(p)) continue
+    const code = searchProductItemCode(p)
+    if (!code) {
+      // No code found - keep these separate, will handle later
+      productsWithoutCode.push(p)
+      continue
+    }
     const k = dedupeKey(p)
     const g = groups.get(k)
     if (g) g.push(p)
     else groups.set(k, [p])
+  }
+
+  // Log deduplication stats
+  const totalInput = rows.length
+  const uniqueCodes = groups.size
+  const withoutCodes = productsWithoutCode.length
+  if (uniqueCodes > 0 || withoutCodes > 0) {
+    console.log(`[Dedupe] Input: ${totalInput} products | Codes: ${uniqueCodes} unique | No-code: ${withoutCodes}`)
   }
 
   const merged = new Map<string, Record<string, unknown>>()
@@ -157,14 +172,26 @@ export function dedupeSearchProductsByItemCodeAndSellingPrice(
   const ordered: unknown[] = []
   for (const p of rows) {
     const rec = p
-    if (!searchProductItemCode(rec)) {
-      ordered.push(rec)
+    const code = searchProductItemCode(rec)
+    if (!code) {
+      // For products without codes, use name + supplier + price as dedupe key
+      const fallbackKey = `${searchProductSupplierKey(rec)}\x1e${(rec.item_commercial_name ?? "").toLowerCase().trim()}\x1e${priceKey(searchProductSellingPrice(rec))}`
+      if (!seen.has(fallbackKey)) {
+        seen.add(fallbackKey)
+        ordered.push(rec)
+      }
       continue
     }
     const k = dedupeKey(rec)
     if (seen.has(k)) continue
     seen.add(k)
     ordered.push(merged.get(k) ?? rec)
+  }
+
+  const totalOutput = ordered.length
+  const deduped = totalInput - totalOutput
+  if (deduped > 0) {
+    console.log(`[Dedupe] Removed ${deduped} duplicates | Output: ${totalOutput} products`)
   }
 
   return ordered

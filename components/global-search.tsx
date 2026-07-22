@@ -564,8 +564,9 @@ export function GlobalSearch({
         }
 
         const allProducts = json.products || []
+        // Use lower threshold for dropdown (showing fewer results, can afford to be more inclusive)
         const filteredProducts = narrowGlobalDropdownToBestMatch(
-          filterProductsByRelevance(allProducts, trimmedQuery, 10),
+          filterProductsByRelevance(allProducts, trimmedQuery, 5),
           trimmedQuery
         )
 
@@ -574,7 +575,8 @@ export function GlobalSearch({
           GlobalResult & { supplier_name: string }
         >
 
-        const supplierThreshold = filteredProducts.length > 0 ? 8 : 20
+        // More lenient thresholds for dropdown
+        const supplierThreshold = filteredProducts.length > 0 ? 3 : 10
         const filteredSuppliers = filterSuppliersByRelevance(validSuppliers, trimmedQuery, supplierThreshold)
 
         const dedupedSuppliers: typeof filteredSuppliers = []
@@ -591,8 +593,12 @@ export function GlobalSearch({
         const s = dedupedSuppliers.slice(0, Math.max(4, Math.floor(maxSuggestions * 0.3)))
 
         console.log("[GlobalSearch] Filtered results:", {
-          products: p.length,
-          suppliers: s.length,
+          rawProducts: allProducts.length,
+          filteredProducts: filteredProducts.length,
+          shownProducts: p.length,
+          rawSuppliers: validSuppliers.length,
+          filteredSuppliers: filteredSuppliers.length,
+          shownSuppliers: s.length,
           topProductScores: p.slice(0, 3).map((x) => x.finalScore),
         })
 
