@@ -103,6 +103,12 @@ import {
   type SurprisePreferences,
 } from "@/lib/seller-surprise-config";
 import { LocationBadge } from "@/components/location-badge";
+import {
+  buildFmcgShelf,
+  FMCG_SECTION_NAME,
+  FMCG_SECTION_SUBTITLE,
+} from "@/lib/fmcg";
+import { formatMovementBadge } from "@/lib/sales-velocity";
 
 /** Optional fields for production: plug in from DB when available. */
 type ShopWithMeProductMeta = {
@@ -111,6 +117,8 @@ type ShopWithMeProductMeta = {
   salesLast6Hours?: number;
   salesToday?: number;
   totalSold?: number;
+  salesVelocity?: number;
+  movementClass?: "A" | "B" | "C" | null;
   discountPercent?: number;
   originalPrice?: number;
   favoriteScore?: number;
@@ -584,6 +592,24 @@ function categorizeProduct(product: ShopWithMeProduct): string {
   return "Other";
 }
 
+/** FAMILLE aliases for Fast-Moving Consumer Goods — always shown first on shop-with-me. */
+function isFmcgCategoryName(name: string): boolean {
+  const n = name.trim().toLowerCase().replace(/[_-]+/g, " ");
+  return (
+    n === "fmcg" ||
+    n === "fmcgp" ||
+    n.includes("fast moving consumer") ||
+    n.includes("fast-moving consumer")
+  );
+}
+
+function normalizeShopCategoryName(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "Other";
+  if (isFmcgCategoryName(trimmed)) return "FMCG";
+  return trimmed;
+}
+
 function ProductGridSearchSkeleton({ count = 12 }: { count?: number }) {
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5">
@@ -959,24 +985,54 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
       return;
     }
 
-    const categoryMap = new Map<string, ShopWithMeProduct[]>();
-
-    currentSeller.products.forEach((product) => {
+    const pricedProducts: ShopWithMeProduct[] = [];
+    for (const product of currentSeller.products) {
       const r = product as Record<string, unknown>;
       const base =
         extractNumericPrice(r.selling_price ?? product.price ?? r.UNITY_PRICE ?? r.SALE_PRICE_INCLUSIVE);
-      if (base <= 0) return; // don't show 0-price items
+      if (base <= 0) continue;
+      pricedProducts.push(product);
+    }
+
+    /** FMCG for every shop category: taxonomy match, else top sellers by velocity. */
+    const FMCG_MAX_ITEMS = 48;
+    const fmcgProducts = buildFmcgShelf(
+      pricedProducts as Record<string, unknown>[],
+      FMCG_MAX_ITEMS,
+      {
+        isPharmacy: sellerIsPharmacy(currentSeller),
+        isBarOrRestaurant: sellerIsRestaurantOrBar(currentSeller),
+      }
+    ) as ShopWithMeProduct[];
+
+    const fmcgCodes = new Set(
+      fmcgProducts.map((p) => getItemCode(p)).filter(Boolean).map((c) => c.toUpperCase())
+    );
+
+    const categoryMap = new Map<string, ShopWithMeProduct[]>();
+    if (fmcgProducts.length > 0) {
+      categoryMap.set(FMCG_SECTION_NAME, fmcgProducts);
+    }
+
+    for (const product of pricedProducts) {
+      const code = getItemCode(product).toUpperCase();
+      // Fast-movers / FMCG catalog sit in the top section only (no duplicate cards)
+      if (code && fmcgCodes.has(code)) continue;
+
       const fam = (product as Record<string, unknown>).famille ?? (product as Record<string, unknown>).FAMILLE;
-      const category = (fam && String(fam).trim()) ? String(fam).trim() : categorizeProduct(product);
+      const rawCategory = (fam && String(fam).trim()) ? String(fam).trim() : categorizeProduct(product);
+      const category = normalizeShopCategoryName(rawCategory);
+      if (category === FMCG_SECTION_NAME) continue;
       if (!categoryMap.has(category)) {
         categoryMap.set(category, []);
       }
       categoryMap.get(category)!.push(product);
-    });
+    }
 
     const categorySections: CategorySection[] = [];
-    // Restaurant order: starters first, then mains/sides/desserts, drinks last
+    // FMCG first, then restaurant-style / other familles
     const categoryOrder = [
+      FMCG_SECTION_NAME,
       "Cold Starters", "Hot Starters", "Starters", "Breakfast",
       "Main Course", "Main Courses", "Burgers", "Pasta", "Pizzas", "Rice", "Wraps", "Platter", "Sizzling", "Barbecue", "Mother Style",
       "Accompaniments", "Vegetables", "Snacks",
@@ -988,6 +1044,8 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
     ];
 
     const orderedNames = Array.from(categoryMap.keys()).sort((a, b) => {
+      if (a === FMCG_SECTION_NAME && b !== FMCG_SECTION_NAME) return -1;
+      if (b === FMCG_SECTION_NAME && a !== FMCG_SECTION_NAME) return 1;
       const ai = categoryOrder.indexOf(a);
       const bi = categoryOrder.indexOf(b);
       if (ai >= 0 && bi >= 0) return ai - bi;
@@ -1000,7 +1058,7 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
       categorySections.push({
         name: categoryName,
         products: categoryMap.get(categoryName)!,
-        expanded: index === 0, // Only first category expanded for faster initial load
+        expanded: index === 0,
       });
     });
 
@@ -1321,7 +1379,13 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
                 <h1 className="text-xl sm:text-2xl font-bold text-foreground break-words">
                   {currentSeller.OWNER || currentSeller.SELLER_NAMES || currentSeller.NICKNAME}
                 </h1>
-                {/* How I feel today: pills from account_seller.preferedcategories (PREFERRED_CATEGORIES) */}
+                {categories.some((c) => c.name === FMCG_SECTION_NAME) ? (
+                  <div className="mt-3 space-y-0.5">
+                    <p className="text-sm font-semibold tracking-wide text-foreground">FMCG</p>
+                    <p className="text-xs text-muted-foreground">{FMCG_SECTION_SUBTITLE}</p>
+                  </div>
+                ) : null}
+                {/* Mood filters ("How I feel today") temporarily disabled.
                 {moodOptions.length > 0 ? (
                 <div className="mt-3 space-y-1.5">
                   <p className="text-xs font-medium text-muted-foreground">How I feel today:</p>
@@ -1377,6 +1441,7 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
                   </div>
                 </div>
                 ) : null}
+                */}
               </div>
 
               {hasTableContext && tableFromQuery?.trim() && (
@@ -1608,6 +1673,10 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
                               {category.name}
                             </h2>
                             <p className="text-xs text-muted-foreground mt-0.5">
+                              {category.name === FMCG_SECTION_NAME
+                                ? "All shop types · sales in last 30 days · A=80% / B=15% / C=5% of units"
+                                : null}
+                              {category.name === FMCG_SECTION_NAME ? " · " : null}
                               {totalInCategory} product{totalInCategory !== 1 ? "s" : ""}
                             </p>
                           </div>
@@ -1890,6 +1959,11 @@ function ProductCard({
 
   const itemCode = getItemCode(product);
   const p = product as Record<string, unknown>;
+  const movementBadge = formatMovementBadge(
+    product.movementClass,
+    product.salesVelocity,
+    Number(product.totalSold ?? p.unitsSold ?? 0) || undefined,
+  );
   // Base unit price: `selling_price` from Redis/API; `price` is the same meaning when both are present.
   const productName = String(p.item_commercial_name ?? p.item_name ?? p.ITEM_NAME ?? p.ITEM_COMMERCIAL_NAME ?? "").trim() || "Product";
   const categoryVal = p.category ?? p.famille ?? p.FAMILLE ?? p.item_department;
@@ -2125,6 +2199,9 @@ function ProductCard({
       <CardContent className="p-3 flex flex-col gap-2">
         <div className="min-h-[2.5rem]">
           <h3 className="text-sm font-semibold leading-tight line-clamp-2">{displayName}</h3>
+          {movementBadge ? (
+            <p className="text-[10px] font-medium text-emerald-700 mt-0.5">{movementBadge}</p>
+          ) : null}
           {isPharmacy && (
             <div className="mt-1 space-y-0.5 text-[11px] text-muted-foreground">
               {pharmacyViewFields.dosage && <p>Dosage: {pharmacyViewFields.dosage}</p>}
