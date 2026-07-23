@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import Image from "next/image"
+import { useSearchParams } from "next/navigation"
 import { Check, Copy, Flame, Loader2, Phone } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -32,6 +33,7 @@ import { shopCategoryToSectorSlug } from "@/lib/seller-category-sector"
 import { isValidRwandaMobileE164, normalizeRwandaMobileE164 } from "@/lib/rwanda-phone"
 import { cn } from "@/lib/utils"
 import { GRANDMA_PATHS } from "@/lib/grandma-urls"
+import type { UmuriroGqInitial } from "@/lib/umuriro-gq-initial"
 
 const LS_KEY = "ihute:umuriro:lastShop"
 
@@ -66,7 +68,8 @@ function buildUssd(momoDigits: string, totalRwf: number): string {
   return `*182*${d}*${t}#`
 }
 
-export function UmuriroBoarding() {
+export function UmuriroBoarding({ initial }: { initial?: UmuriroGqInitial }) {
+  const searchParams = useSearchParams()
   const lang = useLanguageStore((s) => s.language)
   const user = useAuthStore((s) => s.user)
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
@@ -74,8 +77,8 @@ export function UmuriroBoarding() {
   const touchSession = useAuthStore((s) => s.touchSession)
 
   const [mode, setMode] = useState<UmuriroMode>("quick")
-  const [shopName, setShopName] = useState("")
-  const [momoCode, setMomoCode] = useState("")
+  const [shopName, setShopName] = useState(initial?.shopName ?? "")
+  const [momoCode, setMomoCode] = useState(initial?.momoCode ?? "")
   const [shopPhoneOptional, setShopPhoneOptional] = useState("")
   const [shopCategory, setShopCategory] = useState("")
   const [itemName, setItemName] = useState("")
@@ -92,8 +95,12 @@ export function UmuriroBoarding() {
   const [doneMsg, setDoneMsg] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [trackDialogOpen, setTrackDialogOpen] = useState(false)
+  const [gqTin, setGqTin] = useState<string | null>(initial?.gqTin ?? null)
+  const [gqMrc, setGqMrc] = useState<string | null>(initial?.gqMrc ?? null)
+  const [gqPayload, setGqPayload] = useState<string | null>(initial?.gqPayload ?? null)
 
   useEffect(() => {
+    if (initial?.gqPayload) return
     try {
       const raw = localStorage.getItem(LS_KEY)
       if (!raw) return
@@ -111,6 +118,31 @@ export function UmuriroBoarding() {
       /* ignore */
     }
   }, [])
+
+  useEffect(() => {
+    const name = searchParams.get("name")?.trim()
+    const momo = searchParams.get("momo")?.trim()
+    const tin = searchParams.get("tin")?.trim()
+    const mrc = searchParams.get("mrc")?.trim()
+    const payload = searchParams.get("payload")?.trim()
+
+    if (name) setShopName(name)
+    if (momo) setMomoCode(momo.replace(/\D/g, ""))
+    if (tin) setGqTin(tin)
+    if (mrc) setGqMrc(mrc)
+    if (payload) {
+      setGqPayload(payload)
+      if (!name || !momo) {
+        const parts = payload.split("|")
+        if (parts[0] === "GQ3" && parts.length >= 5) {
+          if (!name) setShopName(parts.slice(4).join("|"))
+          if (!momo) setMomoCode(parts[3].replace(/\D/g, ""))
+          if (!tin) setGqTin(parts[1])
+          if (!mrc) setGqMrc(parts[2])
+        }
+      }
+    }
+  }, [searchParams])
 
   useEffect(() => {
     if (user && isAuthenticated) touchSession()
@@ -302,6 +334,15 @@ export function UmuriroBoarding() {
           companyName: shopName.trim(),
           momoCode: momoCode.trim(),
           momoDigits,
+          ...(gqTin || gqMrc || gqPayload
+            ? {
+                globalQr: {
+                  ...(gqTin ? { tin: gqTin } : {}),
+                  ...(gqMrc ? { mrc: gqMrc } : {}),
+                  ...(gqPayload ? { payload: gqPayload } : {}),
+                },
+              }
+            : {}),
           ...(mode === "advanced"
             ? {
                 shopPhoneOptional: shopPhoneOptional.trim() || undefined,
@@ -513,8 +554,17 @@ export function UmuriroBoarding() {
                   onChange={(e) => setShopName(e.target.value)}
                   className="border-[#dbe7f3]"
                   autoComplete="organization"
+                  readOnly={!!gqPayload}
                 />
               </div>
+
+              {gqTin && gqMrc ? (
+                <div className="rounded-xl border border-[#dbe7f3] bg-[#f7fbff] px-3 py-2 text-xs text-[#6f8399]">
+                  <span className="font-mono font-semibold text-[#17324d]">
+                    TIN {gqTin} · MRC {gqMrc}
+                  </span>
+                </div>
+              ) : null}
 
               {isAdvanced ? (
                 <div className="grid min-w-0 grid-cols-2 gap-3 [grid-template-columns:minmax(0,1fr)_minmax(0,1fr)]">
@@ -525,6 +575,7 @@ export function UmuriroBoarding() {
                       onChange={(e) => setMomoCode(e.target.value)}
                       className="border-[#dbe7f3]"
                       inputMode="numeric"
+                      readOnly={!!gqPayload}
                     />
                   </div>
                   <div className="min-w-0 space-y-2">
@@ -548,6 +599,7 @@ export function UmuriroBoarding() {
                     onChange={(e) => setMomoCode(e.target.value)}
                     className="border-[#dbe7f3]"
                     inputMode="numeric"
+                    readOnly={!!gqPayload}
                   />
                 </div>
               )}
