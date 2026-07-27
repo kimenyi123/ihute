@@ -19,7 +19,11 @@ import {
   buildOrderReceiptViewModel,
   buildOrderWhatsAppMessage,
   isTableCommandOrder,
+  resolveMomoTxIdForReceipt,
   resolveTableCommandLinePerson,
+  absolutePublicAssetUrl,
+  publicSiteBaseUrl,
+  resolveOrderPrescriptionPublicUrl,
 } from "@/lib/table-command-whatsapp"
 import { OrderReceiptPreview } from "@/components/order-receipt-preview"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -29,6 +33,8 @@ import { useTableCommandStore } from "@/lib/table-command-store"
 import { GRANDMA_PATHS } from "@/lib/grandma-urls"
 import { isValidRwandaMobileE164, normalizeRwandaMobileE164 } from "@/lib/rwanda-phone"
 import { formatOrderPlacedAtRwanda } from "@/lib/supplier-sync-datetime"
+import { useToast } from "@/components/ui/use-toast"
+import { ToastAction } from "@/components/ui/toast"
 
 function normalizePhone(raw?: string | null): string {
   const v = (raw || "").replace(/\s|-/g, "")
@@ -71,6 +77,7 @@ function OrderSuccessPageInner() {
   const buyerPhone = searchParams.get("buyerPhone")
   const buyerNameQuery = searchParams.get("buyerName")?.trim() || ""
   const orderNotesQuery = searchParams.get("orderNotes")?.trim() || ""
+  const prescriptionUrlQuery = searchParams.get("prescriptionUrl")?.trim() || ""
   const total = searchParams.get("total")
   const logisticsTypeQuery = searchParams.get("logisticsType")?.trim() || ""
   const logisticsAmountQuery = Number(searchParams.get("logisticsAmount") ?? "0")
@@ -174,7 +181,11 @@ function OrderSuccessPageInner() {
   }, [orderDetails, loadingDetails])
 
   const autoWhatsApp = searchParams.get("autoWhatsApp") === "1"
-  const momoTxId = searchParams.get("momoTxId")?.trim() || ""
+  const momoTxIdFromQuery = searchParams.get("momoTxId")?.trim() || ""
+  const momoTxId = useMemo(
+    () => resolveMomoTxIdForReceipt(orderDetails, momoTxIdFromQuery) || "",
+    [momoTxIdFromQuery, orderDetails],
+  )
   const homeHref = fromGrandma ? "/grandma" : "/"
 
   // ✅ Get table session reactively from store
@@ -186,37 +197,56 @@ function OrderSuccessPageInner() {
   const [tableName, setTableName] = useState<string>("")
   const hasShownAlert = useRef(false)
   const autoWhatsAppOpened = useRef(false)
+  const whatsappRemindedRef = useRef(false)
+  const { toast } = useToast()
 
-  // Check if user is table creator and show shareable link
+  // Check if user is table creator and show shareable link (signed token only)
   useEffect(() => {
-    if (hasShownAlert.current) return // Only show once per session
+    if (hasShownAlert.current) return
+    if (!tableSession) return
 
-    if (tableSession) {
-      console.log('🔍 Order Success - Table session:', tableSession)
-      // User is in a table command session
-      const isCreator = tableSession.userEmail === tableSession.createdBy
-      console.log('🔍 Order Success - Is creator:', isCreator)
+    const isCreator = tableSession.userEmail === tableSession.createdBy
+    if (!isCreator || !tableSession.tableName || !tableSession.locationId) return
 
-      if (isCreator && tableSession.tableName && tableSession.locationId) {
-        // Generate shareable link (same format as backend)
-        const tokenData = `${tableSession.tableName}|${tableSession.locationId}|${Date.now()}`
-        const token = btoa(tokenData).replace(/\+/g, '-').replace(/\//g, '_')
-        const shareLink = `${window.location.origin}/join-table?token=${token}`
+    let cancelled = false
+    let hideTimer: ReturnType<typeof setTimeout> | undefined
 
+    void (async () => {
+      try {
+        let shareLink = ""
+        const existing = String(tableSession.shareableToken || "").trim()
+        if (existing.startsWith("v1.")) {
+          shareLink = `${window.location.origin}/join-table?token=${encodeURIComponent(existing)}`
+        } else if (tableSession.shareableLink && String(tableSession.shareableLink).includes("token=v1.")) {
+          shareLink = String(tableSession.shareableLink)
+        } else {
+          const res = await fetch("/api/table-commands/join-token", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              tableName: tableSession.tableName,
+              locationId: tableSession.locationId,
+            }),
+          })
+          const json = await res.json().catch(() => ({}))
+          if (res.ok && json.ok && json.shareableLink) {
+            shareLink = String(json.shareableLink)
+          }
+        }
+        if (cancelled || !shareLink) return
         setTableShareLink(shareLink)
         setTableName(tableSession.tableName)
         setShowTableLinkAlert(true)
         hasShownAlert.current = true
-
-        console.log('✅ Showing table share alert for:', tableSession.tableName)
-
-        // Auto-hide after 8 seconds
-        const timer = setTimeout(() => {
-          setShowTableLinkAlert(false)
-        }, 8000)
-
-        return () => clearTimeout(timer)
+        hideTimer = setTimeout(() => setShowTableLinkAlert(false), 8000)
+      } catch (err) {
+        console.error("Failed to mint signed table join link:", err)
       }
+    })()
+
+    return () => {
+      cancelled = true
+      if (hideTimer) clearTimeout(hideTimer)
     }
   }, [tableSession])
 
@@ -285,11 +315,10 @@ function OrderSuccessPageInner() {
     ""
   )
 
-  const siteBase = (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw").replace(/\/Trading\/?$/, "")
-  const publicShopBase = (process.env.NEXT_PUBLIC_SHOP_URL || process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://shop.ihute.rw").replace(/\/$/, "")
+  const siteBase = publicSiteBaseUrl()
   const trackSlugForUrl = trackToken || orderId
   const trackPath = `/track-order/${encodeURIComponent(trackSlugForUrl || "")}${fromGrandma ? "?from=grandma" : ""}`
-  const trackingUrl = `${publicShopBase}${trackPath}`
+  const trackingUrl = `${siteBase}${trackPath}`
 
   // Build WhatsApp message with product details - memoized to recalculate when orderDetails changes
   const { whatsappMessage, whatsappHref, orderReceipt } = useMemo(() => {
@@ -359,6 +388,10 @@ function OrderSuccessPageInner() {
         orderDescription: descriptionText || undefined,
         logisticsType: logisticsType,
         logisticsFee: logisticsAmount,
+        prescriptionImageUrl: resolveOrderPrescriptionPublicUrl(
+          orderDetails,
+          prescriptionUrlQuery,
+        ),
       }
 
       receipt = buildOrderReceiptViewModel(receiptArgs)
@@ -393,6 +426,11 @@ function OrderSuccessPageInner() {
         `Follow: ${trackingUrl}`,
       ]
 
+      const fallbackRx = resolveOrderPrescriptionPublicUrl(orderDetails, prescriptionUrlQuery)
+      if (fallbackRx) {
+        fallbackLines.push("", "*Prescription*", fallbackRx)
+      }
+
       console.log("[Order Success] Fallback message array before filter:", fallbackLines)
       message = fallbackLines.filter(Boolean).join("\n")
       
@@ -422,6 +460,7 @@ function OrderSuccessPageInner() {
     logisticsType,
     orderNotesQuery,
     buyerNameQuery,
+    prescriptionUrlQuery,
   ])
 
   useEffect(() => {
@@ -430,6 +469,29 @@ function OrderSuccessPageInner() {
     autoWhatsAppOpened.current = true
     window.open(whatsappHref, "_blank", "noopener,noreferrer")
   }, [fromGrandma, autoWhatsApp, loadingDetails, whatsappHref])
+
+  // Visible reminder: toast on order-success so buyers send the receipt on WhatsApp
+  useEffect(() => {
+    if (!whatsappHref) return
+    if (whatsappRemindedRef.current) return
+    whatsappRemindedRef.current = true
+    toast({
+      title: "Send this order on WhatsApp",
+      description: "Tap WhatsApp so the shop receives your order receipt.",
+      duration: 16000,
+      action: (
+        <ToastAction
+          altText="Open WhatsApp"
+          className="border-[#25D366] bg-[#25D366] text-white hover:bg-[#20b05a] hover:text-white"
+          onClick={() => {
+            window.open(whatsappHref, "_blank", "noopener,noreferrer")
+          }}
+        >
+          WhatsApp
+        </ToastAction>
+      ),
+    })
+  }, [whatsappHref, toast])
 
   const copyTrackingUrl = async () => {
     try {
@@ -482,6 +544,23 @@ function OrderSuccessPageInner() {
       </header>
 
       <main className="mx-auto max-w-[430px] space-y-4 px-4 py-6 pb-12">
+        {whatsappHref ? (
+          <div className="sticky top-[57px] z-30 rounded-xl border-2 border-[#25D366] bg-[#ecfdf5] px-3 py-2.5 shadow-md text-slate-900">
+            <p className="text-sm font-semibold text-green-900">
+              Reminder: send this order to the seller on WhatsApp.
+            </p>
+            <a
+              href={whatsappHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-1.5 inline-flex items-center gap-1.5 text-sm font-bold text-[#128C7E] underline underline-offset-2"
+            >
+              <MessageCircle className="h-4 w-4" />
+              Open WhatsApp now
+            </a>
+          </div>
+        ) : null}
+
         <Card className="border-0 shadow-xl rounded-2xl bg-white text-slate-900">
           <CardHeader className="text-center pb-4">
             <div className="mb-4 flex justify-center">
@@ -633,7 +712,10 @@ function OrderSuccessPageInner() {
         </Card>
 
         {whatsappHref ? (
-          <Card className="border-0 shadow-xl rounded-2xl border-2 border-green-100 bg-white text-slate-900">
+          <Card
+            id="order-success-whatsapp-cta"
+            className="border-0 shadow-xl rounded-2xl border-2 border-green-100 bg-white text-slate-900 scroll-mt-24"
+          >
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
                 <MessageCircle className="h-5 w-5 text-[#25D366]" />
