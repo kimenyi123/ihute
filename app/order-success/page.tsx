@@ -596,9 +596,11 @@ function OrderSuccessPageInner() {
           <Card className="border-0 shadow-xl rounded-2xl bg-white text-slate-900">
             <CardHeader>
               <CardTitle className="text-lg">Order receipt</CardTitle>
-              {orderPlacedAtLabel ? (
-                <p className="mt-1 text-sm tabular-nums text-muted-foreground">{orderPlacedAtLabel}</p>
-              ) : null}
+                {orderPlacedAtLabel ? (
+                  <p className="mt-1 text-sm tabular-nums text-muted-foreground">{orderPlacedAtLabel}</p>
+                ) : (
+                  <p className="mt-1 text-sm tabular-nums text-muted-foreground">{formatOrderPlacedAtRwanda()}</p>
+                )}
             </CardHeader>
             <CardContent>
               <OrderReceiptPreview receipt={orderReceipt} />

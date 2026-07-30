@@ -129,6 +129,55 @@ function normalizeShopNickname(raw: string): string {
     .replace(/^-+|-+$/g, "")
 }
 
+function getPhoneDigits(phone: string): string {
+  return String(phone ?? "").replace(/\D/g, "")
+}
+
+function isValidPhone(phone: string): boolean {
+  const digits = getPhoneDigits(phone)
+  return digits.length >= 10 && digits.length <= 12
+}
+
+function isShopNicknameAllowed(raw: string): boolean {
+  const value = raw.trim()
+  if (!value) return true
+  return /^[a-zA-Z0-9-]+$/.test(value)
+}
+
+function validateSellerField(fieldId: string, value: string, lang: Language): string | undefined {
+  const trimmed = String(value ?? "").trim()
+  switch (fieldId) {
+    case "seller-field-companyName":
+      return trimmed ? undefined : pickLang(ERR.missingCompanyName, lang)
+    case "seller-field-password":
+      return trimmed.length >= 6 ? undefined : pickLang(ERR.missingPassword, lang)
+    case "seller-field-phone":
+      return !trimmed
+        ? pickLang(ERR.missingPhone, lang)
+        : isValidPhone(trimmed)
+        ? undefined
+        : pickLang(ERR.invalidPhone, lang)
+    case "seller-field-owner":
+      return trimmed ? undefined : pickLang(ERR.missingOwner, lang)
+    case "seller-field-category":
+      return trimmed ? undefined : pickLang(ERR.missingCategory, lang)
+    case "seller-field-province":
+      return trimmed ? undefined : pickLang(ERR.missingProvince, lang)
+    case "seller-field-district":
+      return trimmed ? undefined : pickLang(ERR.missingDistrict, lang)
+    case "seller-field-locationSector":
+      return trimmed ? undefined : pickLang(ERR.missingLocationSector, lang)
+    case "seller-field-cellule":
+      return trimmed ? undefined : pickLang(ERR.missingCellule, lang)
+    case "seller-field-village":
+      return trimmed ? undefined : pickLang(ERR.missingVillage, lang)
+    case "seller-field-shopNickname":
+      return isShopNicknameAllowed(value) ? undefined : pickLang(ERR.shopNicknameInvalid, lang)
+    default:
+      return undefined
+  }
+}
+
 function FieldLabel({ tri, lang }: { tri: Tri; lang: Language }) {
   return (
     <Label className="text-sm font-medium leading-none text-[#17324d]">{pickLang(tri, lang)}</Label>
@@ -238,9 +287,26 @@ export function CrazyShoppingBoarding() {
   const [submitting, setSubmitting] = useState(false)
   const [doneMsg, setDoneMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string | undefined>>({})
 
   const lang = useLanguageStore((s) => s.language)
   const setLanguage = useLanguageStore((s) => s.setLanguage)
+
+  const isStep1Valid = useMemo(() => {
+    return (
+      !!business.companyName.trim() &&
+      business.password.trim().length >= 6 &&
+      isValidPhone(business.phone) &&
+      !!business.ownerName.trim() &&
+      !!business.category &&
+      !!business.province &&
+      !!business.district.trim() &&
+      !!business.locationSector.trim() &&
+      !!business.cellule.trim() &&
+      !!business.village.trim() &&
+      isShopNicknameAllowed(business.shopNickname)
+    )
+  }, [business])
 
   const langPersistSkip = useRef(true)
   useEffect(() => {
@@ -438,28 +504,77 @@ export function CrazyShoppingBoarding() {
   }
 
   const validateStep1 = () => {
-    type Check = { ok: boolean; fieldId: string; tri: Tri }
-    const checks: Check[] = [
-      { ok: !!business.companyName.trim(), fieldId: "seller-field-companyName", tri: ERR.missingCompanyName },
-      { ok: business.password.trim().length >= 6, fieldId: "seller-field-password", tri: ERR.missingPassword },
-      { ok: !!business.phone.trim(), fieldId: "seller-field-phone", tri: ERR.missingPhone },
-      { ok: !!business.ownerName.trim(), fieldId: "seller-field-owner", tri: ERR.missingOwner },
-      { ok: !!business.category, fieldId: "seller-field-category", tri: ERR.missingCategory },
-      { ok: !!business.province, fieldId: "seller-field-province", tri: ERR.missingProvince },
-      { ok: !!business.district.trim(), fieldId: "seller-field-district", tri: ERR.missingDistrict },
-      { ok: !!business.locationSector.trim(), fieldId: "seller-field-locationSector", tri: ERR.missingLocationSector },
-      { ok: !!business.cellule.trim(), fieldId: "seller-field-cellule", tri: ERR.missingCellule },
-      { ok: !!business.village.trim(), fieldId: "seller-field-village", tri: ERR.missingVillage },
+    const fieldIds = [
+      "seller-field-companyName",
+      "seller-field-password",
+      "seller-field-phone",
+      "seller-field-owner",
+      "seller-field-category",
+      "seller-field-province",
+      "seller-field-district",
+      "seller-field-locationSector",
+      "seller-field-cellule",
+      "seller-field-village",
+      "seller-field-shopNickname",
     ]
-    const first = checks.find((c) => !c.ok)
-    if (first) {
-      const msg = `${pickLang(first.tri, lang)} ${pickLang(ERR.step1ScrollHint, lang)}`
+
+    const errors: Record<string, string> = {}
+    for (const fieldId of fieldIds) {
+      let value = ""
+      switch (fieldId) {
+        case "seller-field-companyName":
+          value = business.companyName
+          break
+        case "seller-field-password":
+          value = business.password
+          break
+        case "seller-field-phone":
+          value = business.phone
+          break
+        case "seller-field-owner":
+          value = business.ownerName
+          break
+        case "seller-field-category":
+          value = business.category
+          break
+        case "seller-field-province":
+          value = business.province
+          break
+        case "seller-field-district":
+          value = business.district
+          break
+        case "seller-field-locationSector":
+          value = business.locationSector
+          break
+        case "seller-field-cellule":
+          value = business.cellule
+          break
+        case "seller-field-village":
+          value = business.village
+          break
+        case "seller-field-shopNickname":
+          value = business.shopNickname
+          break
+      }
+      const error = validateSellerField(fieldId, value, lang)
+      if (error) errors[fieldId] = error
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors)
+      const firstField = Object.keys(errors)[0]
+      const firstMessage = errors[firstField]
+      const msg = firstMessage
+        ? `${firstMessage} ${pickLang(ERR.step1ScrollHint, lang)}`
+        : pickLang(ERR.step1ScrollHint, lang)
       setErr(msg)
       window.setTimeout(() => {
-        document.getElementById(first.fieldId)?.scrollIntoView({ behavior: "smooth", block: "center" })
+        document.getElementById(firstField)?.scrollIntoView({ behavior: "smooth", block: "center" })
       }, 80)
       return false
     }
+
+    setFieldErrors({})
     setErr(null)
     return true
   }
@@ -796,27 +911,51 @@ export function CrazyShoppingBoarding() {
                 <Input
                   id="companyName"
                   value={business.companyName}
-                  onChange={(e) => setBusiness((b) => ({ ...b, companyName: e.target.value }))}
+                  onChange={(e) => {
+                    setBusiness((b) => ({ ...b, companyName: e.target.value }))
+                    setFieldErrors((prev) => ({ ...prev, "seller-field-companyName": undefined }))
+                  }}
+                  onBlur={() => {
+                    const error = validateSellerField("seller-field-companyName", business.companyName, lang)
+                    setFieldErrors((prev) => ({ ...prev, "seller-field-companyName": error }))
+                  }}
                   placeholder="e.g. Cassa Blanca Liquor Ltd"
+                  aria-invalid={fieldErrors["seller-field-companyName"] ? "true" : undefined}
+                  aria-describedby={fieldErrors["seller-field-companyName"] ? "seller-field-companyName-error" : undefined}
+                  className={fieldErrors["seller-field-companyName"] ? "aria-invalid:ring-destructive/40 aria-invalid:border-destructive" : ""}
                 />
+                {fieldErrors["seller-field-companyName"] ? (
+                  <p id="seller-field-companyName-error" className="text-sm text-destructive">{fieldErrors["seller-field-companyName"]}</p>
+                ) : null}
               </div>
               <div id="seller-field-shopNickname" className="sm:col-span-2 space-y-2 scroll-mt-24">
                 <FieldLabel lang={lang} tri={L.shopNickname} />
                 <Input
                   id="shopNickname"
                   value={business.shopNickname}
-                  onChange={(e) => setBusiness((b) => ({ ...b, shopNickname: e.target.value }))}
-                  onBlur={() =>
+                  onChange={(e) => {
+                    setBusiness((b) => ({ ...b, shopNickname: e.target.value }))
+                    setFieldErrors((prev) => ({ ...prev, "seller-field-shopNickname": undefined }))
+                  }}
+                  onBlur={() => {
                     setBusiness((b) => ({ ...b, shopNickname: normalizeShopNickname(b.shopNickname) }))
-                  }
+                    const error = validateSellerField("seller-field-shopNickname", business.shopNickname, lang)
+                    setFieldErrors((prev) => ({ ...prev, "seller-field-shopNickname": error }))
+                  }}
                   placeholder="e.g. cassablanca"
-                  className="font-mono"
+                  className={cn("font-mono", fieldErrors["seller-field-shopNickname"] ? "aria-invalid:ring-destructive/40 aria-invalid:border-destructive" : "")}
                   autoComplete="off"
+                  aria-invalid={fieldErrors["seller-field-shopNickname"] ? "true" : undefined}
+                  aria-describedby={fieldErrors["seller-field-shopNickname"] ? "seller-field-shopNickname-error" : undefined}
                 />
-                <p className="text-xs text-[#6f8399]">
-                  Letters, numbers, hyphens only — used for Shop With Me links. Leave blank to set later in the
-                  dashboard.
-                </p>
+                {fieldErrors["seller-field-shopNickname"] ? (
+                  <p id="seller-field-shopNickname-error" className="text-sm text-destructive">{fieldErrors["seller-field-shopNickname"]}</p>
+                ) : (
+                  <p className="text-xs text-[#6f8399]">
+                    Letters, numbers, hyphens only — used for Shop With Me links. Leave blank to set later in the
+                    dashboard.
+                  </p>
+                )}
               </div>
               <p className="sm:col-span-2 text-sm text-[#6f8399] rounded-xl border border-[#dbe7f3] bg-[#f7fbff] px-3 py-2">
                 Sign in with your <strong className="text-[#17324d]">phone number</strong> after registration — no email
@@ -829,17 +968,45 @@ export function CrazyShoppingBoarding() {
                   type="password"
                   autoComplete="new-password"
                   value={business.password}
-                  onChange={(e) => setBusiness((b) => ({ ...b, password: e.target.value }))}
+                  onChange={(e) => {
+                    setBusiness((b) => ({ ...b, password: e.target.value }))
+                    setFieldErrors((prev) => ({ ...prev, "seller-field-password": undefined }))
+                  }}
+                  onBlur={() => {
+                    const error = validateSellerField("seller-field-password", business.password, lang)
+                    setFieldErrors((prev) => ({ ...prev, "seller-field-password": error }))
+                  }}
+                  aria-invalid={fieldErrors["seller-field-password"] ? "true" : undefined}
+                  aria-describedby={fieldErrors["seller-field-password"] ? "seller-field-password-error" : undefined}
+                  className={fieldErrors["seller-field-password"] ? "aria-invalid:ring-destructive/40 aria-invalid:border-destructive" : ""}
                 />
+                {fieldErrors["seller-field-password"] ? (
+                  <p id="seller-field-password-error" className="text-sm text-destructive">{fieldErrors["seller-field-password"]}</p>
+                ) : null}
               </div>
               <div id="seller-field-phone" className="space-y-2 scroll-mt-24">
                 <FieldLabel lang={lang} tri={L.phone} />
                 <Input
                   id="phone"
                   value={business.phone}
-                  onChange={(e) => setBusiness((b) => ({ ...b, phone: e.target.value }))}
+                  inputMode="numeric"
+                  onChange={(e) => {
+                    const digits = e.target.value.replace(/\D/g, "").slice(0, 12)
+                    setBusiness((b) => ({ ...b, phone: digits }))
+                    setFieldErrors((prev) => ({ ...prev, "seller-field-phone": undefined }))
+                  }}
+                  onBlur={() => {
+                    const error = validateSellerField("seller-field-phone", business.phone, lang)
+                    setFieldErrors((prev) => ({ ...prev, "seller-field-phone": error }))
+                  }}
                   placeholder="250…"
+                  aria-invalid={fieldErrors["seller-field-phone"] ? "true" : undefined}
+                  aria-describedby={fieldErrors["seller-field-phone"] ? "seller-field-phone-error" : undefined}
+                  className={fieldErrors["seller-field-phone"] ? "aria-invalid:ring-destructive/40 aria-invalid:border-destructive" : ""}
                 />
+                {fieldErrors["seller-field-phone"] ? (
+                  <p id="seller-field-phone-error" className="text-sm text-destructive">{fieldErrors["seller-field-phone"]}</p>
+                ) : null}
               </div>
               <div className="space-y-2">
                 <FieldLabel lang={lang} tri={L.momo} />
@@ -854,8 +1021,21 @@ export function CrazyShoppingBoarding() {
                 <Input
                   id="ownerName"
                   value={business.ownerName}
-                  onChange={(e) => setBusiness((b) => ({ ...b, ownerName: e.target.value }))}
+                  onChange={(e) => {
+                    setBusiness((b) => ({ ...b, ownerName: e.target.value }))
+                    setFieldErrors((prev) => ({ ...prev, "seller-field-owner": undefined }))
+                  }}
+                  onBlur={() => {
+                    const error = validateSellerField("seller-field-owner", business.ownerName, lang)
+                    setFieldErrors((prev) => ({ ...prev, "seller-field-owner": error }))
+                  }}
+                  aria-invalid={fieldErrors["seller-field-owner"] ? "true" : undefined}
+                  aria-describedby={fieldErrors["seller-field-owner"] ? "seller-field-owner-error" : undefined}
+                  className={fieldErrors["seller-field-owner"] ? "aria-invalid:ring-destructive/40 aria-invalid:border-destructive" : ""}
                 />
+                {fieldErrors["seller-field-owner"] ? (
+                  <p id="seller-field-owner-error" className="text-sm text-destructive">{fieldErrors["seller-field-owner"]}</p>
+                ) : null}
               </div>
 
               <div className="sm:col-span-2 space-y-3">
@@ -912,9 +1092,15 @@ export function CrazyShoppingBoarding() {
                 <FieldLabel lang={lang} tri={L.category} />
                 <Select
                   value={business.category || undefined}
-                  onValueChange={(v) => setBusiness((b) => ({ ...b, category: v }))}
+                  onValueChange={(v) => {
+                    setBusiness((b) => ({ ...b, category: v }))
+                    const error = validateSellerField("seller-field-category", v, lang)
+                    setFieldErrors((prev) => ({ ...prev, "seller-field-category": error }))
+                  }}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger
+                    className={fieldErrors["seller-field-category"] ? "border-destructive text-destructive focus-visible:ring-destructive/50" : ""}
+                  >
                     <SelectValue placeholder={pickLang(SELLER_UI.selectCategory, lang)} />
                   </SelectTrigger>
                   <SelectContent>
@@ -925,13 +1111,17 @@ export function CrazyShoppingBoarding() {
                     ))}
                   </SelectContent>
                 </Select>
+                {fieldErrors["seller-field-category"] ? (
+                  <p className="text-sm text-destructive">{fieldErrors["seller-field-category"]}</p>
+                ) : null}
               </div>
 
               <div id="seller-field-province" className="sm:col-span-2 space-y-2 scroll-mt-24">
                 <FieldLabel lang={lang} tri={L.province} />
                 <GeoCombobox
                   value={business.province}
-                  onChange={(v) =>
+                  className={fieldErrors["seller-field-province"] ? "border-destructive text-destructive focus-visible:ring-destructive/50" : ""}
+                  onChange={(v) => {
                     setBusiness((b) => ({
                       ...b,
                       province: v,
@@ -940,16 +1130,21 @@ export function CrazyShoppingBoarding() {
                       cellule: "",
                       village: "",
                     }))
-                  }
+                    setFieldErrors((prev) => ({ ...prev, "seller-field-province": undefined }))
+                  }}
                   options={provinceOptions}
                   placeholder={pickLang(SELLER_UI.searchProvince, lang)}
                 />
+                {fieldErrors["seller-field-province"] ? (
+                  <p className="text-sm text-destructive">{fieldErrors["seller-field-province"]}</p>
+                ) : null}
               </div>
               <div id="seller-field-district" className="space-y-2 scroll-mt-24">
                 <FieldLabel lang={lang} tri={L.district} />
                 <GeoCombobox
                   value={business.district}
-                  onChange={(v) =>
+                  className={fieldErrors["seller-field-district"] ? "border-destructive text-destructive focus-visible:ring-destructive/50" : ""}
+                  onChange={(v) => {
                     setBusiness((b) => ({
                       ...b,
                       district: v,
@@ -957,7 +1152,8 @@ export function CrazyShoppingBoarding() {
                       cellule: "",
                       village: "",
                     }))
-                  }
+                    setFieldErrors((prev) => ({ ...prev, "seller-field-district": undefined }))
+                  }}
                   options={districtOptions}
                   placeholder={
                     business.province
@@ -967,17 +1163,25 @@ export function CrazyShoppingBoarding() {
                   disabled={!business.province}
                   emptyText={pickLang(SELLER_UI.noDistricts, lang)}
                 />
+                {fieldErrors["seller-field-district"] ? (
+                  <p className="text-sm text-destructive">{fieldErrors["seller-field-district"]}</p>
+                ) : null}
               </div>
               <div id="seller-field-locationSector" className="space-y-2 scroll-mt-24">
                 <FieldLabel lang={lang} tri={L.locationSector} />
                 <Select
                   value={business.locationSector || undefined}
-                  onValueChange={(v) =>
+                  onValueChange={(v) => {
                     setBusiness((b) => ({ ...b, locationSector: v, cellule: "", village: "" }))
-                  }
+                    const error = validateSellerField("seller-field-locationSector", v, lang)
+                    setFieldErrors((prev) => ({ ...prev, "seller-field-locationSector": error }))
+                  }}
                   disabled={!business.district || locationSectorOptions.length === 0}
                 >
-                  <SelectTrigger id="locationSector">
+                  <SelectTrigger
+                    id="locationSector"
+                    className={fieldErrors["seller-field-locationSector"] ? "border-destructive text-destructive focus-visible:ring-destructive/50" : ""}
+                  >
                     <SelectValue placeholder={pickLang(SELLER_UI.selectLocationSector, lang)} />
                   </SelectTrigger>
                   <SelectContent className="max-h-60">
@@ -988,15 +1192,25 @@ export function CrazyShoppingBoarding() {
                     ))}
                   </SelectContent>
                 </Select>
+                {fieldErrors["seller-field-locationSector"] ? (
+                  <p className="text-sm text-destructive">{fieldErrors["seller-field-locationSector"]}</p>
+                ) : null}
               </div>
               <div id="seller-field-cellule" className="space-y-2 scroll-mt-24">
                 <FieldLabel lang={lang} tri={L.cellule} />
                 <Select
                   value={business.cellule || undefined}
-                  onValueChange={(v) => setBusiness((b) => ({ ...b, cellule: v, village: "" }))}
+                  onValueChange={(v) => {
+                    setBusiness((b) => ({ ...b, cellule: v, village: "" }))
+                    const error = validateSellerField("seller-field-cellule", v, lang)
+                    setFieldErrors((prev) => ({ ...prev, "seller-field-cellule": error }))
+                  }}
                   disabled={!business.locationSector || celluleOptions.length === 0}
                 >
-                  <SelectTrigger id="cellule">
+                  <SelectTrigger
+                    id="cellule"
+                    className={fieldErrors["seller-field-cellule"] ? "border-destructive text-destructive focus-visible:ring-destructive/50" : ""}
+                  >
                     <SelectValue placeholder={pickLang(SELLER_UI.selectCellule, lang)} />
                   </SelectTrigger>
                   <SelectContent className="max-h-60">
@@ -1007,15 +1221,25 @@ export function CrazyShoppingBoarding() {
                     ))}
                   </SelectContent>
                 </Select>
+                {fieldErrors["seller-field-cellule"] ? (
+                  <p className="text-sm text-destructive">{fieldErrors["seller-field-cellule"]}</p>
+                ) : null}
               </div>
               <div id="seller-field-village" className="space-y-2 sm:col-span-2 scroll-mt-24">
                 <FieldLabel lang={lang} tri={L.village} />
                 <Select
                   value={business.village || undefined}
-                  onValueChange={(v) => setBusiness((b) => ({ ...b, village: v }))}
+                  onValueChange={(v) => {
+                    setBusiness((b) => ({ ...b, village: v }))
+                    const error = validateSellerField("seller-field-village", v, lang)
+                    setFieldErrors((prev) => ({ ...prev, "seller-field-village": error }))
+                  }}
                   disabled={!business.cellule || villageOptions.length === 0}
                 >
-                  <SelectTrigger id="village">
+                  <SelectTrigger
+                    id="village"
+                    className={fieldErrors["seller-field-village"] ? "border-destructive text-destructive focus-visible:ring-destructive/50" : ""}
+                  >
                     <SelectValue placeholder={pickLang(SELLER_UI.selectVillage, lang)} />
                   </SelectTrigger>
                   <SelectContent className="max-h-60">
@@ -1026,6 +1250,9 @@ export function CrazyShoppingBoarding() {
                     ))}
                   </SelectContent>
                 </Select>
+                {fieldErrors["seller-field-village"] ? (
+                  <p className="text-sm text-destructive">{fieldErrors["seller-field-village"]}</p>
+                ) : null}
               </div>
               <div className="space-y-2 sm:col-span-2">
                 <FieldLabel lang={lang} tri={L.street} />
@@ -1243,7 +1470,7 @@ export function CrazyShoppingBoarding() {
             {step === 1 ? (
               <Button
                 type="button"
-                disabled={submitting}
+                disabled={!isStep1Valid || submitting}
                 onClick={goNext}
                 className="bg-gradient-to-r from-[#1897e0] to-[#127fc0] text-white shadow-[0_10px_20px_rgba(24,151,224,.22)] hover:opacity-95"
               >

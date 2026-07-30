@@ -485,7 +485,20 @@ export const ERR = {
     rw: "Andika nimero ya telefoni.",
     fr: "Indiquez un num\u00e9ro de t\u00e9l\u00e9phone.",
   },
-  missingEmail: {
+  invalidPhone: {
+    en: "Enter a valid phone number with 10 to 12 digits.",
+    rw: "Andika nimero ya telefoni ifite inshuro 10 kugera kuri 12.",
+    fr: "Indiquez un numéro de téléphone valide de 10 à 12 chiffres.",
+  },  shopNicknameInvalid: {
+    en: "Shop nickname may contain only letters, numbers, and hyphens.",
+    rw: "Izina ry’iduka rigomba kugira inyuguti, imibare, cyangwa minus gusa.",
+    fr: "Le surnom du magasin ne peut contenir que des lettres, chiffres et tirets.",
+  },
+  nicknameTaken: {
+    en: "This shop nickname is already taken. Choose another or leave it blank.",
+    rw: "Izina ry’iduka ryamaze gufatwa. Hitamo irindi cyangwa usige ubusa.",
+    fr: "Ce surnom de magasin est déjà pris. Choisissez-en un autre ou laissez vide.",
+  },  missingEmail: {
     en: "Enter a valid email for your seller account.",
     rw: "Andika imeri y\u2019ukoresha.",
     fr: "Indiquez un e-mail pour le compte vendeur.",

@@ -77,3 +77,17 @@ test('parses a code-based MTN MoMo payment SMS and matches order total without T
   assert.equal(result.receiverCode, '121464')
   assert.equal(result.txId, null)
 })
+
+test('parses a TxId-based MTN MoMo SMS with standard confirmation format', () => {
+  const now = new Date()
+  const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
+  const sms = `TxId:29535479439*S*Your payment of 10,600 RWF to John Doe 121464 was completed at ${stamp}. Balance: 5,000 RWF.`
+
+  const result = matchMoMoSmsToOrderTotal(sms, 10600, 2)
+
+  assert.equal(result.matched, true)
+  assert.equal(result.amount, 10600)
+  assert.equal(result.txId, '29535479439')
+  assert.equal(result.receiverName, 'John Doe')
+  assert.equal(result.receiverCode, '121464')
+})
