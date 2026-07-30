@@ -10,8 +10,15 @@ import { Input } from "@/components/ui/input"
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Search, RotateCw, Calendar } from "lucide-react"
+import { Search, RotateCw, Calendar, Loader2, CheckCircle2 } from "lucide-react"
 import { SdcInfoCell, sdcRaw } from "@/components/sdc-info-cell"
+import { EbmDebugModal } from "@/components/EbmDebugModal"
+import {
+  extractEbmDebug,
+  logEbmApprovalToConsole,
+  type EbmApprovalApiResponse,
+  type EbmDebugView,
+} from "@/lib/ebm/utils/ebm-browser-debug"
 import { useLanguageStore, type Language } from "@/lib/language-store"
 import {
   formatSupplierOrdersTablePayment,
@@ -70,6 +77,17 @@ const ORDERS_UI: Record<Language, {
   page: string
   next: string
   errorUpdatingOrder: string
+  approveEbm: string
+  approvingEbm: string
+  ebmApproveOk: string
+  ebmApproveFailed: string
+  ebmInvoiceSuccess: string
+  rejectEbm: string
+  rejectingEbm: string
+  ebmRejectOk: string
+  ebmRejectFailed: string
+  ebmRejectConfirm: string
+  ebmInvoiceRejected: string
 }> = {
   en: {
     statusLabels: { open: "Open", processing: "Processing", invoice: "Invoice", "in-transit": "Out for Delivery", delivered: "Delivered" },
@@ -120,6 +138,17 @@ const ORDERS_UI: Record<Language, {
     page: "Page",
     next: "Next",
     errorUpdatingOrder: "Error updating order:",
+    approveEbm: "Approve EBM Invoice",
+    approvingEbm: "Approving…",
+    ebmApproveOk: "EBM invoice sent to RRA successfully.",
+    ebmApproveFailed: "EBM approval failed:",
+    ebmInvoiceSuccess: "EBM invoice successfully",
+    rejectEbm: "Reject",
+    rejectingEbm: "Rejecting…",
+    ebmRejectOk: "EBM request rejected.",
+    ebmRejectFailed: "EBM reject failed:",
+    ebmRejectConfirm: "Reject this EBM request? Use this when the order is fake or invalid.",
+    ebmInvoiceRejected: "EBM rejected",
   },
   rw: {
     statusLabels: { open: "Bifunguye", processing: "Birimo gukorwa", invoice: "Inyemezabuguzi", "in-transit": "Biri mu nzira", delivered: "Byageze" },
@@ -170,6 +199,17 @@ const ORDERS_UI: Record<Language, {
     page: "Paji",
     next: "Komeza",
     errorUpdatingOrder: "Ikosa mu guhindura igitumijwe:",
+    approveEbm: "Emeza inyemezabuguzi ya EBM",
+    approvingEbm: "Birimo…",
+    ebmApproveOk: "Inyemezabuguzi ya EBM yoherejwe kuri RRA.",
+    ebmApproveFailed: "Kwemeza EBM byanze:",
+    ebmInvoiceSuccess: "Inyemezabuguzi ya EBM yemejwe",
+    rejectEbm: "Wanga",
+    rejectingEbm: "Birimo kwanga…",
+    ebmRejectOk: "Icyifuzo cya EBM cyanzwe.",
+    ebmRejectFailed: "Kwanga EBM byanze:",
+    ebmRejectConfirm: "Wanga icyifuzo cya EBM? Koresha iyi buryo iyo itegeko ari ibinyoma.",
+    ebmInvoiceRejected: "EBM yanzwe",
   },
   fr: {
     statusLabels: { open: "Ouvert", processing: "En cours", invoice: "Facture", "in-transit": "En cours de livraison", delivered: "Livr\u00e9" },
@@ -220,6 +260,17 @@ const ORDERS_UI: Record<Language, {
     page: "Page",
     next: "Suivant",
     errorUpdatingOrder: "Erreur lors de la mise \u00e0 jour :",
+    approveEbm: "Approuver facture EBM",
+    approvingEbm: "Approbation…",
+    ebmApproveOk: "Facture EBM envoy\u00e9e \u00e0 la RRA.",
+    ebmApproveFailed: "\u00c9chec approbation EBM :",
+    ebmInvoiceSuccess: "Facture EBM r\u00e9ussie",
+    rejectEbm: "Rejeter",
+    rejectingEbm: "Rejet…",
+    ebmRejectOk: "Demande EBM rejet\u00e9e.",
+    ebmRejectFailed: "\u00c9chec rejet EBM :",
+    ebmRejectConfirm: "Rejeter cette demande EBM ? Utilisez ceci pour une commande frauduleuse ou invalide.",
+    ebmInvoiceRejected: "EBM rejet\u00e9",
   },
 }
 
@@ -473,6 +524,15 @@ export default function SupplierOrdersPage() {
   const [paymentFilter, setPaymentFilter] = useState<"all" | "paid" | "unpaid">("all")
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [sourceFilter, setSourceFilter] = useState<"all" | "kiosk">("all")
+  const [ebmPendingOrderIds, setEbmPendingOrderIds] = useState<Set<string>>(new Set())
+  const [ebmSuccessOrderIds, setEbmSuccessOrderIds] = useState<Set<string>>(new Set())
+  const [ebmRejectedOrderIds, setEbmRejectedOrderIds] = useState<Set<string>>(new Set())
+  const [ebmApprovingId, setEbmApprovingId] = useState<string | null>(null)
+  const [ebmRejectingId, setEbmRejectingId] = useState<string | null>(null)
+  const [ebmDegradedWarning, setEbmDegradedWarning] = useState<string | null>(null)
+  const [ebmConfigured, setEbmConfigured] = useState(false)
+  const [ebmDebugOpen, setEbmDebugOpen] = useState(false)
+  const [ebmDebug, setEbmDebug] = useState<EbmDebugView | null>(null)
 
   // Wait for persisted auth (localStorage) so link-with-account can "auto" show orders when already logged in on this device
   useEffect(() => {
@@ -679,6 +739,136 @@ export default function SupplierOrdersPage() {
     }
   }, [user?.ishyigaAccount, setOrders, loadPageSize, searchQuery, dateFrom, dateTo, statusFilter])
 
+  const loadEbmPending = useCallback(async () => {
+    const sellerAccount = user?.ishyigaAccount?.trim()
+    if (!sellerAccount) return
+    try {
+      const res = await fetch(
+        `/api/seller/ebm?sellerAccount=${encodeURIComponent(sellerAccount)}`,
+        { cache: "no-store", signal: AbortSignal.timeout(25_000) },
+      )
+      const json = (await res.json()) as {
+        ok?: boolean
+        pendingOrderIds?: number[]
+        successOrderIds?: number[]
+        rejectedOrderIds?: number[]
+        pending?: Array<{ orderId: number }>
+        degraded?: boolean
+        warning?: string
+        configured?: boolean
+      }
+      if (!json.ok) return
+      setEbmConfigured(json.configured !== false)
+      const pendingIds = Array.isArray(json.pendingOrderIds)
+        ? json.pendingOrderIds
+        : (json.pending ?? []).map((p) => p.orderId)
+      const successIds = Array.isArray(json.successOrderIds) ? json.successOrderIds : []
+      const rejectedIds = Array.isArray(json.rejectedOrderIds) ? json.rejectedOrderIds : []
+      const successSet = new Set(successIds.map((id) => String(id)))
+      const rejectedSet = new Set(rejectedIds.map((id) => String(id)))
+      const pendingSet = new Set(pendingIds.map((id) => String(id)))
+      for (const id of successSet) pendingSet.delete(id)
+      for (const id of rejectedSet) pendingSet.delete(id)
+      setEbmPendingOrderIds(pendingSet)
+      setEbmSuccessOrderIds((prev) =>
+        json.degraded ? new Set([...prev, ...successSet]) : successSet,
+      )
+      setEbmRejectedOrderIds((prev) =>
+        json.degraded ? new Set([...prev, ...rejectedSet]) : rejectedSet,
+      )
+      setEbmDegradedWarning(json.degraded && json.warning ? String(json.warning) : null)
+    } catch {
+      /* non-blocking */
+    }
+  }, [user?.ishyigaAccount])
+
+  const approveEbmInvoice = useCallback(
+    async (orderId: string) => {
+      const sellerAccount = user?.ishyigaAccount?.trim()
+      if (!sellerAccount) return
+      setEbmApprovingId(orderId)
+      try {
+        const res = await fetch("/api/seller/ebm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ orderId: Number(orderId), sellerAccount }),
+        })
+        const json = (await res.json()) as EbmApprovalApiResponse & {
+          code?: string
+          receiptNumber?: string
+          message?: string
+        }
+        logEbmApprovalToConsole(json.ok ? "SUCCESS" : "FAILED", json)
+        if (!res.ok || !json.ok) {
+          const view = extractEbmDebug(json)
+          setEbmDebug(view)
+          setEbmDebugOpen(true)
+          throw new Error(
+            json.code === "EBM_NOT_CONFIGURED"
+              ? json.error || "EBM is not configured on this server. Add EBM_SECURITY_KEY to .env.local and restart."
+              : view.userMessage,
+          )
+        }
+        alert(
+          json.receiptNumber
+            ? `${ui.ebmApproveOk} Receipt: ${json.receiptNumber}`
+            : json.message || ui.ebmApproveOk,
+        )
+        setEbmPendingOrderIds((prev) => {
+          const next = new Set(prev)
+          next.delete(orderId)
+          return next
+        })
+        setEbmSuccessOrderIds((prev) => new Set(prev).add(orderId))
+      void loadEbmPending()
+      void loadOrders()
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : ui.ebmApproveFailed
+        alert(`${ui.ebmApproveFailed} ${msg}\n\nFull request/response opened below (+). Also check F12 → Console.`)
+      } finally {
+        setEbmApprovingId(null)
+      }
+    },
+    [user?.ishyigaAccount, loadOrders, loadEbmPending, ui],
+  )
+
+  const rejectEbmInvoice = useCallback(
+    async (orderId: string) => {
+      const sellerAccount = user?.ishyigaAccount?.trim()
+      if (!sellerAccount) return
+      if (!window.confirm(ui.ebmRejectConfirm)) return
+      setEbmRejectingId(orderId)
+      try {
+        const res = await fetch("/api/seller/ebm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            orderId: Number(orderId),
+            sellerAccount,
+            action: "reject",
+          }),
+        })
+        const json = (await res.json()) as { ok?: boolean; error?: string; message?: string }
+        if (!res.ok || !json.ok) {
+          throw new Error(json.error || ui.ebmRejectFailed)
+        }
+        alert(json.message || ui.ebmRejectOk)
+        setEbmPendingOrderIds((prev) => {
+          const next = new Set(prev)
+          next.delete(orderId)
+          return next
+        })
+        setEbmRejectedOrderIds((prev) => new Set(prev).add(orderId))
+        void loadEbmPending()
+      } catch (e: unknown) {
+        alert(`${ui.ebmRejectFailed} ${e instanceof Error ? e.message : ""}`)
+      } finally {
+        setEbmRejectingId(null)
+      }
+    },
+    [user?.ishyigaAccount, loadEbmPending, ui],
+  )
+
   useEffect(() => {
     if (!isAuthenticated || !user) return
     // When link is for another seller (?account=X), don't load; show banner and "View my orders"
@@ -693,6 +883,13 @@ export default function SupplierOrdersPage() {
       setErr(ui.noSupplierAccount)
     }
   }, [isAuthenticated, user, user?.ishyigaAccount, loadOrders, isWrongSeller, setOrders])
+
+  useEffect(() => {
+    if (!isAuthenticated || !user?.ishyigaAccount || isWrongSeller) return
+    void loadEbmPending()
+    const timer = setInterval(() => void loadEbmPending(), 30_000)
+    return () => clearInterval(timer)
+  }, [isAuthenticated, user?.ishyigaAccount, isWrongSeller, loadEbmPending, orders.length])
 
   useEffect(() => {
     if (!user?.ishyigaAccount) return
@@ -826,7 +1023,16 @@ export default function SupplierOrdersPage() {
         <div className="flex items-center justify-between gap-4 mb-4 flex-wrap">
           <h1 className="text-2xl font-bold">My Orders</h1>
           {user?.ishyigaAccount && (
-            <Button variant="outline" size="sm" onClick={() => loadOrders()} disabled={loading} className="gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                void loadEbmPending()
+                loadOrders()
+              }}
+              disabled={loading}
+              className="gap-2"
+            >
               <RotateCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
               Refresh
             </Button>
@@ -834,6 +1040,22 @@ export default function SupplierOrdersPage() {
         </div>
 
         {err && <div className="mb-4 p-2 bg-red-50 border border-red-300 rounded text-sm">{err}</div>}
+        {ebmDegradedWarning && (
+          <div className="mb-4 p-2 bg-amber-50 border border-amber-300 rounded text-sm text-amber-900">
+            EBM approvals unavailable: {ebmDegradedWarning}
+          </div>
+        )}
+        {!ebmConfigured && (
+          <div className="mb-4 p-2 bg-amber-50 border border-amber-300 rounded text-sm text-amber-900">
+            EBM approval is not configured. Add to <code className="text-xs">ihute-frontend/.env.local</code>:{" "}
+            <code className="text-xs">EBM_SECURITY_KEY=...</code> and optionally{" "}
+            <code className="text-xs">EBM_COMPANY_TIN=...</code>, then restart{" "}
+            <code className="text-xs">npm run dev</code>. Or insert the key into MySQL table{" "}
+            <code className="text-xs">ebm_platform_config</code> (see{" "}
+            <code className="text-xs">sql/ebm_platform_config.sql</code>). Get the security key from
+            Algorithm/Ishyiga RRA VSDC integration.
+          </div>
+        )}
         {loading && <div className="mb-4 p-2 text-sm">Loading...</div>}
 
         <div className="mb-4 flex flex-col gap-4 rounded-lg border bg-white p-3 sm:p-4">
@@ -983,7 +1205,7 @@ export default function SupplierOrdersPage() {
         </div>
 
         <div className="rounded-lg border bg-white overflow-x-auto">
-          <Table className="min-w-[1150px]">
+          <Table className="min-w-[1250px]">
             <TableHeader>
               <TableRow>
                 <TableHead>Order #</TableHead>
@@ -1033,9 +1255,9 @@ export default function SupplierOrdersPage() {
                       <InlineStatusPicker order={order} orders={orders} setOrders={setOrders} />
                     </TableCell>
                     <TableCell className="text-center">
-                      <div className="flex flex-col sm:flex-row gap-2 justify-center sm:items-center">
-                        <Button variant="outline" size="sm" onClick={() => router.push(supplierOrderLink(order.id))}>
-                          View
+                      <div className="inline-flex flex-nowrap items-center justify-center gap-1">
+                        <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => router.push(supplierOrderLink(order.id))}>
+                          {ui.view}
                         </Button>
                         <IssueInvoiceButton
                           order={order}
@@ -1045,9 +1267,62 @@ export default function SupplierOrdersPage() {
                             (user?.name || user?.email || user?.ishyigaAccount || "").trim()
                           }
                         />
-                        <Button variant="outline" size="sm" onClick={() => exportOrderRowCsv(order)}>
-                          Export
+                        <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => exportOrderRowCsv(order)}>
+                          {ui.exportLabel}
                         </Button>
+                        {ebmSuccessOrderIds.has(order.id) ? (
+                          <Button
+                            size="sm"
+                            disabled
+                            className="h-7 px-2 text-xs bg-green-600 text-white opacity-100 cursor-default hover:bg-green-600"
+                            title={ui.ebmInvoiceSuccess}
+                          >
+                            <CheckCircle2 className="h-3 w-3 mr-1 shrink-0" />
+                            {ui.ebmInvoiceSuccess}
+                          </Button>
+                        ) : ebmRejectedOrderIds.has(order.id) ? (
+                          <Button
+                            size="sm"
+                            disabled
+                            className="h-7 px-2 text-xs bg-red-600 text-white opacity-100 cursor-default hover:bg-red-600"
+                            title={ui.ebmInvoiceRejected}
+                          >
+                            {ui.ebmInvoiceRejected}
+                          </Button>
+                        ) : ebmPendingOrderIds.has(order.id) ? (
+                          <>
+                            <Button
+                              size="sm"
+                              disabled={ebmApprovingId === order.id || ebmRejectingId === order.id || !ebmConfigured}
+                              title={
+                                !ebmConfigured
+                                  ? "Set EBM_SECURITY_KEY in .env.local and restart the dev server"
+                                  : undefined
+                              }
+                              className="h-7 px-2 text-xs bg-green-600 hover:bg-green-700 text-white disabled:opacity-50"
+                              onClick={() => void approveEbmInvoice(order.id)}
+                            >
+                              {ebmApprovingId === order.id ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                ui.approveEbm
+                              )}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={ebmApprovingId === order.id || ebmRejectingId === order.id}
+                              className="h-7 px-2 text-xs border-red-300 text-red-700 hover:bg-red-50"
+                              onClick={() => void rejectEbmInvoice(order.id)}
+                            >
+                              {ebmRejectingId === order.id ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                ui.rejectEbm
+                              )}
+                            </Button>
+                          </>
+                        ) : null}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -1064,6 +1339,7 @@ export default function SupplierOrdersPage() {
           <Button disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>Next</Button>
         </div>
       </main>
+      <EbmDebugModal open={ebmDebugOpen} onOpenChange={setEbmDebugOpen} debug={ebmDebug} />
     </div>
   )
 }

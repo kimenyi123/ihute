@@ -49,20 +49,34 @@ export async function fetchSectorStatsFromApi(sectorId: string): Promise<{ shops
   const debugSql =
     typeof process !== "undefined" && process.env.NEXT_PUBLIC_SECTOR_STATS_DEBUG === "1"
   const url = `/api/fetchSuggestions?sectorStats=${encodeURIComponent(sid)}${debugSql ? "&debugSql=1" : ""}`
-  const r = await fetch(url, { cache: "no-store" })
-  const j = (await r.json().catch(() => null)) as Record<string, unknown> | null
-  if (!j || typeof j !== "object") {
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 25_000)
+
+  try {
+    const r = await fetch(url, { cache: "no-store", signal: controller.signal })
+    const j = (await r.json().catch(() => null)) as Record<string, unknown> | null
+    if (!j || typeof j !== "object") {
+      return { shops: 0, items: 0 }
+    }
+    if (j.ok === false || typeof j.error === "string") {
+      return { shops: 0, items: 0 }
+    }
+    const shops = Number(j.shops)
+    const items = Number(j.items)
+    const s = Number.isFinite(shops) ? Math.max(0, Math.floor(shops)) : 0
+    const it = Number.isFinite(items) ? Math.max(0, Math.floor(items)) : 0
+    if (!r.ok) {
+      return { shops: 0, items: 0 }
+    }
+    return { shops: s, items: it }
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    if (typeof console !== "undefined" && process.env.NODE_ENV === "development") {
+      console.warn(`[fetchSectorStatsFromApi] ${sid}:`, msg)
+    }
     return { shops: 0, items: 0 }
+  } finally {
+    clearTimeout(timer)
   }
-  if (j.ok === false || typeof j.error === "string") {
-    return { shops: 0, items: 0 }
-  }
-  const shops = Number(j.shops)
-  const items = Number(j.items)
-  const s = Number.isFinite(shops) ? Math.max(0, Math.floor(shops)) : 0
-  const it = Number.isFinite(items) ? Math.max(0, Math.floor(items)) : 0
-  if (!r.ok) {
-    return { shops: 0, items: 0 }
-  }
-  return { shops: s, items: it }
 }

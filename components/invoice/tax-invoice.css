@@ -1,0 +1,249 @@
+/* Professional tax invoice — A4 printable, black & white */
+
+.tax-invoice {
+  --ti-border: #1a1a1a;
+  --ti-muted: #4b5563;
+  --ti-bg: #ffffff;
+  max-width: 210mm;
+  margin: 0 auto;
+  padding: 12mm 14mm;
+  background: var(--ti-bg);
+  color: #111827;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.tax-invoice-header {
+  border-bottom: 2px solid var(--ti-border);
+  padding-bottom: 10px;
+  margin-bottom: 14px;
+}
+
+.tax-invoice-title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-align: center;
+  margin: 0 0 8px;
+}
+
+.tax-invoice-meta-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.tax-invoice-meta-block {
+  min-width: 0;
+}
+
+.tax-invoice-buyer-col {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tax-invoice-date-block {
+  margin-top: auto;
+  padding-top: 8px;
+  text-align: right;
+}
+
+.tax-invoice-meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.tax-invoice-meta-label {
+  display: block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ti-muted);
+  margin-bottom: 2px;
+}
+
+.tax-invoice-meta-value {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tax-invoice-parties {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+  align-items: stretch;
+}
+
+.tax-invoice-section {
+  margin-bottom: 14px;
+}
+
+.tax-invoice-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid #d1d5db;
+  padding-bottom: 4px;
+  margin: 0 0 8px;
+}
+
+.tax-invoice-dl {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.tax-invoice-dl dt {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ti-muted);
+  margin: 0;
+}
+
+.tax-invoice-dl dd {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.tax-invoice-table-wrap {
+  overflow-x: auto;
+}
+
+.tax-invoice-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+}
+
+.tax-invoice-table th,
+.tax-invoice-table td {
+  border: 1px solid #9ca3af;
+  padding: 6px 8px;
+  vertical-align: top;
+}
+
+.tax-invoice-table th {
+  background: #f3f4f6;
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 9px;
+  letter-spacing: 0.03em;
+}
+
+.tax-invoice-totals-table {
+  width: 100%;
+  max-width: 280px;
+  margin-left: auto;
+  border-collapse: collapse;
+}
+
+.tax-invoice-totals-table td {
+  border: 1px solid #9ca3af;
+  padding: 5px 10px;
+  font-size: 10px;
+}
+
+.tax-invoice-totals-table tr:last-child td {
+  font-weight: 700;
+  background: #f9fafb;
+}
+
+.tax-invoice-sdc-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 16px;
+  align-items: start;
+  margin-top: 8px;
+}
+
+.tax-invoice-sdc-dl dd {
+  word-break: break-all;
+}
+
+.tax-invoice-qr {
+  text-align: center;
+  border: 1px solid #9ca3af;
+  padding: 10px;
+  min-width: 150px;
+}
+
+.tax-invoice-qr-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ti-muted);
+  margin: 0 0 8px;
+}
+
+.tax-invoice-qr-box {
+  display: inline-flex;
+  padding: 4px;
+  background: #fff;
+}
+
+.tax-invoice-note {
+  font-size: 10px;
+  color: var(--ti-muted);
+  border: 1px dashed #d1d5db;
+  padding: 8px;
+  margin: 12px 0 0;
+}
+
+.tax-invoice-footer {
+  margin-top: 18px;
+  padding-top: 10px;
+  border-top: 1px solid #d1d5db;
+  text-align: center;
+  font-size: 9px;
+  color: var(--ti-muted);
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+
+  body {
+    background: #fff !important;
+  }
+
+  .tax-invoice {
+    max-width: none;
+    width: 100%;
+    padding: 0;
+    box-shadow: none !important;
+  }
+
+  .tax-invoice-table th {
+    background: #eee !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
+
+@media (max-width: 640px) {
+  .tax-invoice-parties,
+  .tax-invoice-meta-row,
+  .tax-invoice-meta-grid,
+  .tax-invoice-sdc-row {
+    grid-template-columns: 1fr;
+  }
+
+  .tax-invoice-meta-row {
+    flex-direction: column;
+  }
+
+  .tax-invoice-date-block {
+    text-align: left;
+  }
+}

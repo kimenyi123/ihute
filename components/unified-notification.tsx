@@ -12,6 +12,16 @@ import { sellerAccountFromOrder, sellerNameFromOrder } from "@/lib/order-seller-
 import { cn } from "@/lib/utils"
 import { mapBackendOrderStatusToTrack, type TrackOrderStatus } from "@/lib/order-status-map"
 
+function isFetchAbortError(err: unknown, signal: AbortSignal): boolean {
+  if (signal.aborted) return true
+  if (err instanceof DOMException && err.name === "AbortError") return true
+  if (err instanceof Error && err.name === "AbortError") return true
+  if (err instanceof TypeError && /failed to fetch|networkerror|aborted/i.test(err.message)) {
+    return signal.aborted
+  }
+  return false
+}
+
 type OrderNotification = {
   id: string
   type: "order"
@@ -215,15 +225,18 @@ export function UnifiedNotification() {
   // Fetch order notifications
   useEffect(() => {
     if (!hasHydrated || !isAuthenticated || user?.role !== "supplier") return
+    const sellerAccount = user?.ishyigaAccount?.trim()
+    if (!sellerAccount) return
 
     const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 20_000)
 
     const fetchOrders = async () => {
       try {
         const res = await fetch("/api/seller-orders", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sellerAccount: user.ishyigaAccount }),
+          body: JSON.stringify({ sellerAccount, pageSize: 30 }),
           cache: "no-store",
           signal: controller.signal,
         })
@@ -296,33 +309,38 @@ export function UnifiedNotification() {
           })
         }
       } catch (err) {
-        if (controller.signal.aborted) return
-        console.error("Failed to fetch order notifications:", err)
+        if (isFetchAbortError(err, controller.signal)) return
+        console.warn("Order notifications unavailable:", err)
       }
     }
 
     const interval = setInterval(fetchOrders, 30000)
     fetchOrders()
     return () => {
+      clearTimeout(timeout)
       controller.abort()
       clearInterval(interval)
     }
   }, [hasHydrated, isAuthenticated, user?.role, user?.ishyigaAccount, pinned])
 
+  const ratingNotifUserKey = (user?.email || user?.ishyigaAccount || "").trim()
+
   // Fetch rating notifications
   useEffect(() => {
-    if (!hasHydrated || !isAuthenticated || !user) return
+    if (!hasHydrated || !isAuthenticated || !ratingNotifUserKey) return
 
     const controller = new AbortController()
 
     const fetchRatings = async () => {
       try {
-        const userEmail = user?.email || user?.ishyigaAccount
-        if (!userEmail) return
-
-        const res = await fetch(`/api/notifications/unread?userId=${encodeURIComponent(userEmail)}`, {
-          signal: controller.signal,
-        })
+        const res = await fetch(
+          `/api/notifications/unread?userId=${encodeURIComponent(ratingNotifUserKey)}`,
+          {
+            cache: "no-store",
+            signal: controller.signal,
+          },
+        )
+        if (!res.ok) return
         const data = await res.json()
 
         if (data.ok && Array.isArray(data.notifications)) {
@@ -372,8 +390,8 @@ export function UnifiedNotification() {
           })
         }
       } catch (err) {
-        if (controller.signal.aborted) return
-        console.error("Failed to fetch rating notifications:", err)
+        if (isFetchAbortError(err, controller.signal)) return
+        console.warn("Rating notifications unavailable:", err)
       }
     }
 
@@ -383,7 +401,7 @@ export function UnifiedNotification() {
       controller.abort()
       clearInterval(interval)
     }
-  }, [hasHydrated, isAuthenticated, user, pinned])
+  }, [hasHydrated, isAuthenticated, ratingNotifUserKey, pinned])
 
   // Urubuto onboarding / live notifications (supplier)
   useEffect(() => {
@@ -442,8 +460,8 @@ export function UnifiedNotification() {
           }).slice(0, 10)
         })
       } catch (err) {
-        if (controller.signal.aborted) return
-        console.error("Failed to fetch Urubuto notifications:", err)
+        if (isFetchAbortError(err, controller.signal)) return
+        console.warn("Urubuto notifications unavailable:", err)
       }
     }
 
