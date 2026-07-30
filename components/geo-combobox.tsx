@@ -33,6 +33,7 @@ export function GeoCombobox({
   disabled,
   emptyText = "No match.",
   searchPlaceholder = "Search…",
+  className,
 }: {
   value: string
   onChange: (v: string) => void
@@ -41,6 +42,7 @@ export function GeoCombobox({
   disabled?: boolean
   emptyText?: string
   searchPlaceholder?: string
+  className?: string
 }) {
   const [open, setOpen] = useState(false)
   const selected = findOption(options, value)
@@ -55,7 +57,7 @@ export function GeoCombobox({
           role="combobox"
           aria-expanded={open}
           disabled={disabled}
-          className="h-auto min-h-10 w-full justify-between py-2 font-normal"
+          className={cn("h-auto min-h-10 w-full justify-between py-2 font-normal", className)}
         >
           <span className="truncate text-left">{triggerLabel ?? placeholder}</span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />

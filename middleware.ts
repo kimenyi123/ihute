@@ -43,9 +43,10 @@ export function middleware(req: NextRequest) {
 
     // Local dev override: add ?surface=grandma to URL to simulate shop.ihute.rw
     const surfaceOverride = url.searchParams.get("surface")
+    const isLocalDevHost = host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0"
     const isGrandma =
       grandmaHost ||
-      (process.env.NODE_ENV === "development" && surfaceOverride === "grandma")
+      (process.env.NODE_ENV === "development" && (surfaceOverride === "grandma" || isLocalDevHost))
 
     if (isGrandma) {
       url.pathname = `/register/grandma-${role}`

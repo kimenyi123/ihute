@@ -89,7 +89,7 @@ export function extractMoMoPhonePaymentDetailsFromSms(text: string): { receiverN
 
 export function extractMoMoCodePaymentDetailsFromSms(text: string): { receiverName: string; receiverCode: string } | null {
   const s = String(text ?? "")
-  const pattern = /Your payment of\s+[\d\s,.]+\s*(?:RWF|FRW|Frw|frw)\s+to\s+(.+?)\s+(\d{3,})\s+was\s+completed\s+at/i
+  const pattern = /Your payment of\s+[\d\s,.]+\s*(?:RWF|FRW|Frw|frw)\s+to\s+(.+?)\s+(\d{3,})(?:\s+(?:was\s+completed\s+at|was\s+successful\b|on\b|,|\.|$))?/i
   const m = s.match(pattern)
   if (!m) return null
   return {

@@ -1,5 +1,5 @@
 import { CrazyShoppingBoarding } from "@/components/crazy-shopping-boarding"
 
-export default function GrandmaSellerPage() {
+export default function GrandmaSellerRegisterPage() {
   return <CrazyShoppingBoarding />
 }
