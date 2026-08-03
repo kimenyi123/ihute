@@ -142,10 +142,13 @@ export default function OrdersPage() {
         if (silent) setRefreshing(true)
         else setLoading(true)
 
+        const q = filters.buyerSearch.trim()
         const res = await postAdminApi({
           action: "getAllOrders",
           ...filters,
-          buyerSearch: filters.buyerSearch.trim(),
+          buyerSearch: q,
+          search: q,
+          q,
           attentionOnly: filters.attentionOnly ? "true" : "",
           limit: PAGE_SIZE,
           page,
@@ -423,8 +426,9 @@ export default function OrdersPage() {
           <Input
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Search order #, buyer, phone, email, seller, LIV / payment ref…"
+            placeholder="Search order #, seller name/ALG, buyer, phone, LIV…"
             className="h-10 border-slate-200 bg-white pl-9 text-sm"
+            aria-label="Search orders by order id, seller name, seller account, buyer, or payment ref"
           />
         </div>
         <div className="flex gap-2">
