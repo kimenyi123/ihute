@@ -70,6 +70,7 @@ import {
 } from "@/lib/image-utils";
 import {
   generalSellingPrice,
+  lineSellingPriceFromProductRow,
   normalizeItemEmballageForCart,
   resolveItemEmballageRaw,
 } from "@/lib/package-price";
@@ -156,6 +157,9 @@ type ShopWithMeProduct = {
   item_key_words_french?: string;
   item_key_words_kinyarwanda?: string;
   keywords_en?: string;
+  /** From niki_items / seller_add_stock enrichment */
+  requires_prescription?: boolean | number;
+  requiresPrescription?: boolean;
 } & Partial<ShopWithMeProductMeta> & {
   ITEM_CODE?: string;
   item_code?: string;
@@ -1976,7 +1980,8 @@ function ProductCard({
   const priceRaw = p.selling_price ?? p.price ?? p.UNITY_PRICE ?? p.SALE_PRICE_INCLUSIVE;
   const baseUnit = extractNumericPrice(priceRaw);
   const embRaw = resolveItemEmballageRaw(p);
-  const price = generalSellingPrice(baseUnit, embRaw);
+  // Prefer alias retail amounts when CIS left selling_price as 1 (package flag).
+  const price = lineSellingPriceFromProductRow(p as Record<string, unknown>) || generalSellingPrice(baseUnit, embRaw);
   const itemEmballageCart = normalizeItemEmballageForCart(embRaw);
   const embStr =
     embRaw != null && String(embRaw).trim() !== "" ? String(embRaw) : null;
@@ -2064,6 +2069,9 @@ function ProductCard({
         erx,
         notes: erx ? serializeErxForNotes(erx) : undefined,
         ...(itemEmballageCart ? { itemEmballage: itemEmballageCart } : {}),
+        ...(Boolean(p.requires_prescription ?? p.requiresPrescription)
+          ? { requiresPrescription: true }
+          : {}),
       },
       Math.max(1, qty)
     );

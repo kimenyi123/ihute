@@ -119,13 +119,61 @@ function pickFirstPresentField(
   return 0
 }
 
-/** Base unit catalog price: `price` is the same meaning as `selling_price` when both exist. */
+/** Base unit catalog price: prefer real RWF amount when CIS left selling_price as 1. */
 const SELLING_BASE_KEYS: readonly string[] = [
   "selling_price",
+  "SELLING_PRICE",
+  "Selling_Price",
+  "SellingPrice",
   "price",
+  "PRICE",
+  "Price",
+  "P_VENTE",
+  "p_vente",
+  "PRIX_VENTE",
+  "prix_vente",
+  "PRIX",
+  "prix",
   "UNITY_PRICE",
+  "unity_price",
+  "SALE_PRICE",
+  "sale_price",
   "SALE_PRICE_INCLUSIVE",
+  "retail_price",
+  "RETAIL_PRICE",
+  "pv",
+  "PV",
 ]
+
+/**
+ * Prefer the best (largest) positive candidate when the primary selling_price looks like a
+ * package/unit flag (≤1) — CIS often sends PRICE/P_VENTE with the real RWF amount.
+ */
+function pickSellingBase(p: Record<string, unknown>): unknown {
+  const primary = pickFirstPresentField(p, SELLING_BASE_KEYS)
+  const primaryN =
+    typeof primary === "number" && Number.isFinite(primary)
+      ? primary
+      : parseFloat(String(primary ?? "").replace(/[^\d.-]/g, "")) || 0
+
+  let best = primaryN
+  let bestRaw: unknown = primary
+  for (const k of SELLING_BASE_KEYS) {
+    const v = p[k]
+    if (v == null) continue
+    if (typeof v === "string" && v.trim() === "") continue
+    const n =
+      typeof v === "number" && Number.isFinite(v)
+        ? v
+        : parseFloat(String(v).replace(/[^\d.-]/g, ""))
+    if (!Number.isFinite(n) || n <= 0) continue
+    if (primaryN <= 1 && n > best) {
+      best = n
+      bestRaw = v
+    }
+  }
+  return bestRaw ?? 0
+}
 
 const COST_BASE_KEYS: readonly string[] = [
   "cost_price",
@@ -136,7 +184,7 @@ const COST_BASE_KEYS: readonly string[] = [
 
 /** Customer line selling total for one catalog row (same as search / ProductCard). */
 export function lineSellingPriceFromProductRow(p: Record<string, unknown>): number {
-  const baseRaw = pickFirstPresentField(p, SELLING_BASE_KEYS)
+  const baseRaw = pickSellingBase(p)
   return generalSellingPrice(baseRaw as number, resolveItemEmballageRaw(p))
 }
 
