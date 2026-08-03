@@ -12,8 +12,13 @@ import {
   RRA_LOGO_PATH,
   type CisInvoiceData,
   cisInvoiceDateLabel,
+  cisReferenceLine,
+  cisSellerDisplayName,
+  cisTaxTotalBoxes,
   downloadCisInvoicePdf,
   formatInvoiceNumber,
+  hasCisMrcInfo,
+  hasCisSdcInfo,
   svgElementToPngDataUrl,
   taxLetter,
 } from "@/lib/cis-invoice"
@@ -67,8 +72,23 @@ export default function CisInvoicePage() {
     if (!data) return
     setPdfBusy(true)
     try {
+      // Same bytes as `/api/orders/invoice-pdf` (shared createCisInvoicePdf builder)
       const origin = typeof window !== "undefined" ? window.location.origin : undefined
-      // Prefer the QR already rendered on the page (same as what you see)
+      const qs = new URLSearchParams()
+      if (livId) qs.set("livId", livId)
+      if (data.orderId) qs.set("orderId", String(data.orderId))
+      const res = await fetch(`/api/orders/invoice-pdf?${qs}`, { cache: "no-store" })
+      if (res.ok && (res.headers.get("content-type") || "").includes("pdf")) {
+        const blob = await res.blob()
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement("a")
+        a.href = url
+        a.download = `invoice-${livId || data.orderId || "copy"}.pdf`
+        a.click()
+        URL.revokeObjectURL(url)
+        return
+      }
+      // Fallback: client-side PDF (same layout helper)
       const svg = document.querySelector<SVGElement>("[data-invoice-qr] svg")
       const fromPage = svg ? await svgElementToPngDataUrl(svg, 256) : null
       await downloadCisInvoicePdf(data, origin, fromPage)
@@ -102,19 +122,21 @@ export default function CisInvoicePage() {
     )
   }
 
-  const currency = data.totals?.currency || "RWF"
-  const total = data.totals?.total ?? 0
   const invoiceLabel =
     data.invoiceTitle ||
     (data.invoiceNumber ? `INVOICE ${data.invoiceNumber}` : `INVOICE ${livId}`)
   const buyerName = data.cisBuyerName || data.buyerName || ""
+  const sellerTitle = cisSellerDisplayName(data)
   const shareUrl =
     data.invoiceUrl ||
     (typeof window !== "undefined" ? `${window.location.origin}/invoice/${encodeURIComponent(livId)}` : "")
   const items = data.items || []
   // Prefer fiscal CIS times only — never invent "Kigali, On" or fall back to order CREATED_AT
   const dateLabel = cisInvoiceDateLabel(data)
-  const totalFmt = formatInvoiceNumber(total)
+  const showLogos = hasCisSdcInfo(data)
+  // Always keep SDC INFORMATION labels on the invoice (even if values are empty / NS/)
+  const showSdc = true
+  const showMrc = hasCisMrcInfo(data)
 
   return (
     <main className="min-h-screen bg-slate-200/80 px-2 py-4 print:bg-white print:p-0 sm:px-4 sm:py-6">
@@ -135,7 +157,7 @@ export default function CisInvoicePage() {
         {/* Header */}
         <header className="flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-[42%] space-y-0.5 leading-snug">
-            {data.sellerName ? <p className="text-sm font-bold uppercase">{data.sellerName}</p> : null}
+            {sellerTitle ? <p className="text-sm font-bold uppercase">{sellerTitle}</p> : null}
             {data.sellerAddress ? <p>{data.sellerAddress}</p> : null}
             {data.sellerEmail ? <p>{data.sellerEmail}</p> : null}
             {data.sellerTin ? <p>{data.sellerTin}</p> : null}
@@ -145,8 +167,12 @@ export default function CisInvoicePage() {
           <div className="flex flex-col items-end gap-2">
             {dateLabel ? <p className="text-[11px]">{dateLabel}</p> : null}
             <div className="flex items-start gap-3">
-              <Image src={RRA_LOGO_PATH} alt="RRA" width={100} height={40} className="h-10 w-auto" priority />
-              <Image src={RRA_LOGO2_PATH} alt="Rwanda" width={48} height={48} className="h-12 w-12" priority />
+              {showLogos ? (
+                <>
+                  <Image src={RRA_LOGO_PATH} alt="RRA" width={100} height={40} className="h-10 w-auto" priority />
+                  <Image src={RRA_LOGO2_PATH} alt="Rwanda" width={48} height={48} className="h-12 w-12" priority />
+                </>
+              ) : null}
               {shareUrl ? (
                 <div data-invoice-qr className="rounded border border-slate-200 bg-white p-1">
                   <QRCode value={shareUrl} size={64} />
@@ -165,13 +191,7 @@ export default function CisInvoicePage() {
 
         <h1 className="mt-5 text-2xl font-bold tracking-wide">{invoiceLabel}</h1>
         <div className="mt-1 border-b border-black pb-1 text-[11px] uppercase tracking-wide">
-          {[
-            data.paymentName ? `REFERENCE : ${data.paymentName}` : null,
-            `: ${totalFmt}`,
-            data.servedBy ? `SERVED BY ${data.servedBy}` : null,
-          ]
-            .filter(Boolean)
-            .join(" ")}
+          {cisReferenceLine(data)}
         </div>
 
         {/* Items table — tall A4 body; vertical column lines through empty space */}
@@ -179,7 +199,7 @@ export default function CisInvoicePage() {
           <div
             className="grid shrink-0 border-b-2 border-black text-[10px] font-bold sm:text-[11px]"
             style={{
-              gridTemplateColumns: "9% 28% 7% 8% 8% 7% 6% 12% 12%",
+              gridTemplateColumns: "14% 23% 7% 8% 8% 7% 6% 12% 12%",
             }}
           >
             {(
@@ -208,7 +228,7 @@ export default function CisInvoicePage() {
             {/* full-height vertical column rules */}
             <div
               className="pointer-events-none absolute inset-0 grid"
-              style={{ gridTemplateColumns: "9% 28% 7% 8% 8% 7% 6% 12% 12%" }}
+              style={{ gridTemplateColumns: "14% 23% 7% 8% 8% 7% 6% 12% 12%" }}
               aria-hidden
             >
               {Array.from({ length: 9 }).map((_, i) => (
@@ -222,8 +242,8 @@ export default function CisInvoicePage() {
                 const unit = Number(it.unitPrice || 0)
                 const amt = Number(it.amount ?? qty * unit)
                 const cells = [
-                  { t: it.itemCode || it.code || "", a: "text-left" },
-                  { t: it.name || "", a: "text-left font-medium" },
+                  { t: it.itemCode || it.code || "", a: "text-left break-all leading-tight" },
+                  { t: it.name || "", a: "text-left font-medium leading-tight" },
                   { t: String(qty), a: "text-center" },
                   { t: it.lot || "", a: "text-center" },
                   { t: it.per || "", a: "text-center" },
@@ -236,7 +256,7 @@ export default function CisInvoicePage() {
                   <div
                     key={`${it.name}-${rowIdx}`}
                     className="grid text-[10px] sm:text-[11px]"
-                    style={{ gridTemplateColumns: "9% 28% 7% 8% 8% 7% 6% 12% 12%" }}
+                    style={{ gridTemplateColumns: "14% 23% 7% 8% 8% 7% 6% 12% 12%" }}
                   >
                     {cells.map((c, i) => (
                       <div key={i} className={`px-1 py-1 ${c.a}`}>
@@ -250,18 +270,9 @@ export default function CisInvoicePage() {
           </div>
         </div>
 
-        {/* Totals boxes */}
+        {/* Totals boxes — values from CIS taxTotals */}
         <div className="mt-0 grid grid-cols-2 border border-t-0 border-black sm:grid-cols-3 lg:grid-cols-6">
-          {(
-            [
-              ["TOTAL A-EX RWF", "0.00"],
-              ["TOTAL B-18.00% RWF", "0.00"],
-              ["TOTAL C-0% RWF", "0.00"],
-              ["TOTAL TAX B RWF", "0.00"],
-              ["TOTAL TAX RWF", "0.00"],
-              [`TOTAL ${currency}`, totalFmt],
-            ] as const
-          ).map(([label, value], idx) => (
+          {cisTaxTotalBoxes(data).map(([label, value], idx) => (
             <div
               key={label}
               className={`border-black px-1 py-1.5 text-center ${idx > 0 ? "border-l" : ""} ${idx >= 2 ? "border-t sm:border-t-0" : ""} ${idx >= 3 ? "lg:border-t-0" : ""}`}
@@ -272,31 +283,41 @@ export default function CisInvoicePage() {
           ))}
         </div>
 
-        {/* BK / SDC / MRC */}
-        <section className="mt-5 grid gap-4 sm:grid-cols-3">
-          <div className="space-y-1 font-mono text-[10px] leading-snug">
-            <p>BK :</p>
-            <p>BK :</p>
-            <p>BK :</p>
-            <p>CODE MoMo:</p>
-          </div>
-          <div className="space-y-0.5 font-mono text-[10px] leading-snug">
-            <p className="font-sans text-[11px] font-bold">SDC INFORMATION</p>
-            <p>TIME SDC : {data.timeSdc || ""}</p>
-            <p>SDC ID: {data.sdcId || ""}</p>
-            <p className="break-all">Internal Data: {data.sdcInternalData || ""}</p>
-            <p className="break-all">Receipt Signature: {data.receiptSignature || ""}</p>
-            <p>RECEIPT NUMBER: {data.receiptNumber || ""}</p>
-          </div>
-          <div className="space-y-0.5 font-mono text-[10px] leading-snug">
-            <p className="font-sans text-[11px] font-bold">MRC INFORMATION</p>
-            <p>ITEMS NUMBER: {data.itemsNumber ?? items.length}</p>
-            <p>TIME MRC: {data.timeMrc || data.timeSdc || ""}</p>
-            <p>MRC: {data.mrc || ""}</p>
-            <p>INVOICE NUMBER: {data.invoiceNumber || ""}</p>
-            {data.ishyigaVersion ? <p>{data.ishyigaVersion}</p> : null}
-          </div>
-        </section>
+        {/* BK / SDC / MRC — SDC + RRA logos only when CIS sent SDC */}
+        {(showSdc || showMrc) && (
+          <section className="mt-5 grid gap-4 sm:grid-cols-3">
+            <div className="space-y-1 font-mono text-[10px] leading-snug">
+              <p>BK :</p>
+              <p>BK :</p>
+              <p>BK :</p>
+              <p>CODE MoMo:</p>
+            </div>
+            <div className="space-y-0.5 font-mono text-[10px] leading-snug">
+              {showSdc ? (
+                <>
+                  <p className="font-sans text-[11px] font-bold">SDC INFORMATION</p>
+                  <p>TIME SDC : {data.timeSdc || ""}</p>
+                  <p>SDC ID: {data.sdcId || ""}</p>
+                  <p className="break-all">Internal Data: {data.sdcInternalData || ""}</p>
+                  <p className="break-all">Receipt Signature: {data.receiptSignature || ""}</p>
+                  <p>RECEIPT NUMBER: {data.receiptNumber || ""}</p>
+                </>
+              ) : null}
+            </div>
+            <div className="space-y-0.5 font-mono text-[10px] leading-snug">
+              {showMrc ? (
+                <>
+                  <p className="font-sans text-[11px] font-bold">MRC INFORMATION</p>
+                  <p>ITEMS NUMBER: {data.itemsNumber ?? items.length}</p>
+                  <p>TIME MRC: {data.timeMrc || data.timeSdc || ""}</p>
+                  <p>MRC: {data.mrc || ""}</p>
+                  <p>INVOICE NUMBER: {data.invoiceNumber || ""}</p>
+                  {data.ishyigaVersion ? <p>{data.ishyigaVersion}</p> : null}
+                </>
+              ) : null}
+            </div>
+          </section>
+        )}
 
         <p className="mt-6 text-[9px] italic leading-snug text-slate-700">
           {data.conditionsFr ||

@@ -92,7 +92,14 @@ export function escapeRegex(str: string): string {
  * Split query on spaces into tokens for AND matching.
  * - Pure digits: keep from length 1 (e.g. "500")
  * - Text: min length 2 (drops stray single letters)
+ * - Recipe measures (cup, tsp, …) are dropped so "½ CUP ALMONDS" can match shelf "ALMONDS"
  */
+const MEASURE_TOKENS = new Set([
+  "cup", "cups", "tsp", "tbsp", "tablespoon", "teaspoon", "ounce", "ounces", "oz",
+  "gram", "grams", "kg", "ml", "liter", "litre", "ltr", "pinch", "dash", "half",
+  "quarter", "clove", "cloves", "slice", "slices", "can", "cans", "pack", "packet",
+])
+
 export function tokenizeSearchQueryForAnd(query: string): string[] {
   const raw = query
     .trim()
@@ -100,6 +107,9 @@ export function tokenizeSearchQueryForAnd(query: string): string[] {
     .split(/\s+/)
     .filter(Boolean)
   return raw.filter((t) => {
+    if (MEASURE_TOKENS.has(t)) return false
+    // Unicode fractions / single glyphs
+    if (t.length === 1 && !/^\d$/.test(t)) return false
     if (/^\d+$/.test(t)) return t.length >= 1
     return t.length >= 2
   })
@@ -109,18 +119,32 @@ export function tokenizeSearchQueryForAnd(query: string): string[] {
 export function getProductSearchBlob<T extends {
   item_commercial_name?: string
   item_key_words?: string
+  item_key_words_kinyarwanda?: string
+  item_key_words_french?: string
+  item_french?: string
+  IMITERERE?: string
+  keywords_en?: string
   item_code?: string
   supplier_name?: string
-  item_packet?: string
+  item_packet?: string | number
   item_emballage?: string
+  item_inn?: string
+  niki_item_key_words?: string
 }>(product: T): string {
   const q = product as Record<string, unknown>
   return [
     product.item_commercial_name,
     product.item_key_words,
+    product.item_key_words_kinyarwanda,
+    product.IMITERERE,
+    product.keywords_en,
+    product.item_key_words_french,
+    product.item_french,
+    product.item_inn,
+    product.niki_item_key_words,
     product.item_code,
     product.supplier_name,
-    product.item_packet,
+    product.item_packet != null ? String(product.item_packet) : undefined,
     product.item_emballage,
     // Include additional searchable fields
     q.item_description ?? q.description ?? "",
@@ -140,6 +164,17 @@ export function getProductSearchBlob<T extends {
  * One token must appear in the blob. Numeric tokens use digit boundaries so
  * "500" matches "500ml" but not "1500".
  */
+/** almonds → almond only (strip plural). Do not invent nolesi→nolesis. */
+function stemVariants(token: string): string[] {
+  const t = token.toLowerCase()
+  if (!t) return []
+  const out = new Set<string>([t])
+  if (t.length >= 5 && t.endsWith("s") && !t.endsWith("ss")) {
+    out.add(t.slice(0, -1))
+  }
+  return [...out]
+}
+
 export function tokenMatchesInSearchBlob(token: string, blob: string): boolean {
   const t = token.toLowerCase()
   if (!t || !blob) return false
@@ -147,7 +182,7 @@ export function tokenMatchesInSearchBlob(token: string, blob: string): boolean {
     const re = new RegExp(`(?<!\\d)${escapeRegex(t)}(?!\\d)`, "i")
     return re.test(blob)
   }
-  return blob.includes(t)
+  return stemVariants(t).some((v) => blob.includes(v))
 }
 
 /** Every token must match somewhere in the blob (logical AND across tokens). */
@@ -156,7 +191,7 @@ export function productMatchesAllSearchTokens<T extends {
   item_key_words?: string
   item_code?: string
   supplier_name?: string
-  item_packet?: string
+  item_packet?: string | number
   item_emballage?: string
 }>(product: T, tokens: string[]): boolean {
   if (tokens.length === 0) return true

@@ -22,6 +22,7 @@ import {
   ScrollText,
   Store,
   Boxes,
+  Pill,
 } from 'lucide-react'
 import { useAuthStore } from '@/lib/auth-store'
 import { AdminGuard } from '@/components/auth/admin-guard'
@@ -34,6 +35,7 @@ const menuItems = [
   { href: '/admin/commission', label: 'Commission & Billing', icon: CreditCard },
   { href: '/admin/orders', label: 'Order Monitor', icon: ShoppingCart },
   { href: '/admin/products', label: 'Product Moderation', icon: Package },
+  { href: '/admin/prescription-review', label: 'Prescription review', icon: Pill },
   { href: '/admin/content', label: 'Content Manager', icon: Image },
   { href: '/admin/notifications', label: 'Notification Center', icon: Bell },
   { href: '/admin/analytics', label: 'Analytics & Reports', icon: BarChart3 },

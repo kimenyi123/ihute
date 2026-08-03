@@ -47,9 +47,15 @@ export type IshyigaLoginCardProps = {
   uiVariant?: "ihute" | "grandma"
   /** When set, overrides the default tie between `uiVariant` and submit button look. */
   primaryButtonStyle?: "navy" | "gradient"
-  onSuccess: (user: User) => void | Promise<void>
+  onSuccess: (user: User, options?: { rememberMe?: boolean }) => void | Promise<void>
   /** Java returned `mustChangePassword` — caller shows set-password UI (e.g. `/login` dialog). */
-  onMustChangePassword?: (payload: ApiLoginOK, password: string) => void | Promise<void>
+  onMustChangePassword?: (
+    payload: ApiLoginOK,
+    password: string,
+    options?: { rememberMe?: boolean },
+  ) => void | Promise<void>
+  /** Show Remember me between password and Sign in. Default true for ihute email UI. */
+  showRememberMe?: boolean
 }
 
 export function IshyigaLoginCard({
@@ -68,10 +74,12 @@ export function IshyigaLoginCard({
   primaryButtonStyle,
   onSuccess,
   onMustChangePassword,
+  showRememberMe,
 }: IshyigaLoginCardProps) {
   const initialPhone = defaultPhone ?? defaultPhoneOrEmail ?? ""
   const [phone, setPhone] = useState(initialPhone)
   const [password, setPassword] = useState("")
+  const [rememberMe, setRememberMe] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -104,6 +112,7 @@ export function IshyigaLoginCard({
   const resolvedPrimaryButton =
     primaryButtonStyle ?? (isGrandmaUi ? "gradient" : "navy")
   const submitBtnClass = resolvedPrimaryButton === "gradient" ? btnGrandmaGradient : btnPrimaryNavy
+  const rememberMeVisible = showRememberMe ?? !isGrandmaUi
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -134,12 +143,14 @@ export function IshyigaLoginCard({
       const result = await loginWithCredentialsResult(id, password, channel)
       if (result.outcome === "must_change") {
         if (onMustChangePassword) {
-          await onMustChangePassword(result.payload, password)
+          await onMustChangePassword(result.payload, password, {
+            rememberMe: rememberMeVisible ? rememberMe : false,
+          })
         } else {
           setError("This account must set a new password. Open ihute on a browser and sign in again.")
         }
       } else {
-        await onSuccess(result.user)
+        await onSuccess(result.user, { rememberMe: rememberMeVisible ? rememberMe : false })
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Network error")
@@ -198,6 +209,17 @@ export function IshyigaLoginCard({
               required
             />
           </div>
+          {rememberMeVisible ? (
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-[#17324d]">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-[#dbe7f3]"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+              />
+              <span>Remember me</span>
+            </label>
+          ) : null}
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
           <Button type="submit" className={submitBtnClass} disabled={loading}>
             {loading ? "Signing in…" : submitLabel}

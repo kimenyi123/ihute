@@ -1,8 +1,9 @@
 "use client"
 
-import { useEffect, useRef } from 'react'
-import { useSession } from '@/hooks/use-session'
-import { useAuthStore } from '@/lib/auth-store'
+import { useEffect, useRef } from "react"
+import { useRouter, usePathname } from "next/navigation"
+import { useSession } from "@/hooks/use-session"
+import { useAuthStore } from "@/lib/auth-store"
 import { useFavoritesStore } from "@/lib/favorites-store"
 import { fetchFavorites, flattenFavoriteGroups, mergeFavoritesApi } from "@/lib/favorites-api"
 import { CartSyncEffect } from "@/components/cart-sync-effect"
@@ -11,24 +12,42 @@ interface SessionProviderProps {
   children: React.ReactNode
 }
 
+const TOUCH_DEBOUNCE_MS = 60_000
+
 /**
- * SessionProvider component that manages user session lifecycle
- * Tracks user activity and maintains inactivity-based session timeout
+ * SessionProvider — inactivity + absolute session timeout.
+ * Default: 30 min idle / 8 h absolute (15 min idle for admin).
  */
 export function SessionProvider({ children }: SessionProviderProps) {
+  const router = useRouter()
+  const pathname = usePathname()
   const { isAuthenticated, checkSession } = useSession()
   const user = useAuthStore((state) => state.user)
   const hasHydrated = useAuthStore((state) => state.hasHydrated)
+  const sessionExpiredReason = useAuthStore((state) => state.sessionExpiredReason)
   const favorites = useFavoritesStore((state) => state.favorites)
   const setFavorites = useFavoritesStore((state) => state.setFavorites)
   const lastSyncedUserRef = useRef<string | null>(null)
+  const lastTouchRef = useRef(0)
 
   useEffect(() => {
-    // Check session on app initialization
     if (isAuthenticated) {
       checkSession()
     }
   }, [isAuthenticated, checkSession])
+
+  // After forced logout, send user to login once
+  useEffect(() => {
+    if (!hasHydrated || isAuthenticated || !sessionExpiredReason) return
+    const onLoginPage =
+      pathname === "/login" ||
+      pathname?.startsWith("/login/") ||
+      pathname === "/grandma/login" ||
+      pathname?.startsWith("/grandma/login")
+    if (onLoginPage) return
+    const redirect = pathname && pathname !== "/" ? `?redirect=${encodeURIComponent(pathname)}` : ""
+    router.replace(`/login${redirect}`)
+  }, [hasHydrated, isAuthenticated, sessionExpiredReason, pathname, router])
 
   useEffect(() => {
     if (!isAuthenticated || !user?.email || !hasHydrated) return
@@ -66,24 +85,25 @@ export function SessionProvider({ children }: SessionProviderProps) {
     run()
   }, [isAuthenticated, user?.email, hasHydrated, favorites, setFavorites])
 
-  // Extend sliding session window on real user activity (60 min from last activity)
+  // Debounced activity → sliding idle window (at most once per minute)
   useEffect(() => {
     if (!isAuthenticated) return
 
-    const activityEvents = ['mousedown', 'keydown', 'scroll', 'touchstart', 'click']
+    const activityEvents = ["mousedown", "keydown", "scroll", "touchstart", "click"] as const
 
     const handleActivity = () => {
+      const now = Date.now()
+      if (now - lastTouchRef.current < TOUCH_DEBOUNCE_MS) return
+      lastTouchRef.current = now
       useAuthStore.getState().touchSession()
     }
 
-    // Add event listeners
-    activityEvents.forEach(event => {
+    activityEvents.forEach((event) => {
       window.addEventListener(event, handleActivity, { passive: true })
     })
 
-    // Cleanup
     return () => {
-      activityEvents.forEach(event => {
+      activityEvents.forEach((event) => {
         window.removeEventListener(event, handleActivity)
       })
     }

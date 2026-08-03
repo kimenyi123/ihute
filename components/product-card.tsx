@@ -92,6 +92,9 @@ type Product = {
   shop_count?: number
   cheapest_shop_nickname?: string
   niki_merge?: boolean
+  /** From NIKI / stock — Rx photo required at checkout */
+  requiresPrescription?: boolean
+  requires_prescription?: boolean
 }
 
 export type ProductSearchRankingBadgeProps = {
@@ -380,6 +383,11 @@ export function ProductCard({
   }, [id, supplierId, displayPrice, name, checkPriceDrop, toast])
 
   const addProductToCart = () => {
+    const needsRx = Boolean(
+      product.requiresPrescription
+        ?? product.requires_prescription
+        ?? (product as { requires_prescription?: unknown }).requires_prescription,
+    )
     addOrInc(
       {
         id,
@@ -395,6 +403,7 @@ export function ProductCard({
         momo,
         selectedUnit: unit,
         ...(itemEmballageForCart ? { itemEmballage: itemEmballageForCart } : {}),
+        ...(needsRx ? { requiresPrescription: true } : {}),
       },
       1
     )
@@ -715,6 +724,11 @@ export function ProductCard({
         productName={name}
         prefillSource={product as Record<string, unknown>}
         onConfirm={(erx) => {
+          const needsRx = Boolean(
+            product.requiresPrescription
+              ?? product.requires_prescription
+              ?? (product as { requires_prescription?: unknown }).requires_prescription,
+          )
           addOrInc(
             {
               id,
@@ -730,6 +744,7 @@ export function ProductCard({
               momo,
               selectedUnit: unit,
               ...(itemEmballageForCart ? { itemEmballage: itemEmballageForCart } : {}),
+              ...(needsRx ? { requiresPrescription: true } : {}),
               erx,
               notes: serializeErxForNotes(erx),
             },

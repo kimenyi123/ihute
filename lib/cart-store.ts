@@ -55,6 +55,9 @@ export type CartItem = {
   /** Expiry label (e.g. dd/mm/yy from Ex:) for price-variant lines */
   expiryLabel?: string
 
+  /** From NIKI / seller_add_stock — this line needs an Rx photo at checkout */
+  requiresPrescription?: boolean
+
   qty: number
 }
 
