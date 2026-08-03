@@ -93,12 +93,25 @@ export default function OrdersPage() {
   const [notifyingId, setNotifyingId] = useState<number | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const inFlightRef = useRef(false)
+  const [searchInput, setSearchInput] = useState("")
+  const requestIdRef = useRef(0)
 
   const updateFilters = (next: Partial<Filters>) => {
     setFilters((current) => ({ ...current, ...next }))
     setPage(1)
   }
+
+  // Debounce search so typing does not race / drop requests mid-flight.
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      setFilters((current) => {
+        if (current.buyerSearch === searchInput) return current
+        return { ...current, buyerSearch: searchInput }
+      })
+      setPage(1)
+    }, 300)
+    return () => window.clearTimeout(t)
+  }, [searchInput])
 
   const loadSectors = useCallback(async () => {
     try {
@@ -124,8 +137,7 @@ export default function OrdersPage() {
 
   const loadOrders = useCallback(
     async (silent = false) => {
-      if (inFlightRef.current) return
-      inFlightRef.current = true
+      const requestId = ++requestIdRef.current
       try {
         if (silent) setRefreshing(true)
         else setLoading(true)
@@ -133,12 +145,15 @@ export default function OrdersPage() {
         const res = await postAdminApi({
           action: "getAllOrders",
           ...filters,
+          buyerSearch: filters.buyerSearch.trim(),
           attentionOnly: filters.attentionOnly ? "true" : "",
           limit: PAGE_SIZE,
           page,
           ...(silent ? { includeStats: "false" } : {}),
         })
         const data = await res.json()
+        // Ignore stale responses when filters/search changed mid-flight.
+        if (requestId !== requestIdRef.current) return
 
         if (data.ok) {
           setLoadError(null)
@@ -164,12 +179,14 @@ export default function OrdersPage() {
           setLoadError(data.error || "Could not load orders")
         }
       } catch (error) {
+        if (requestId !== requestIdRef.current) return
         console.error("Error loading orders:", error)
         setLoadError("Could not reach order service — showing last loaded data")
       } finally {
-        inFlightRef.current = false
-        setLoading(false)
-        setRefreshing(false)
+        if (requestId === requestIdRef.current) {
+          setLoading(false)
+          setRefreshing(false)
+        }
       }
     },
     [filters, page],
@@ -262,6 +279,7 @@ export default function OrdersPage() {
     filters.dateTo,
     filters.attentionOnly,
     filters.fulfillment,
+    filters.buyerSearch.trim(),
   ].filter(Boolean).length
 
   const exportToExcel = () => {
@@ -403,9 +421,9 @@ export default function OrdersPage() {
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <Input
-            value={filters.buyerSearch}
-            onChange={(e) => updateFilters({ buyerSearch: e.target.value })}
-            placeholder="Search buyer, phone, email, order #…"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Search order #, buyer, phone, email, seller, LIV / payment ref…"
             className="h-10 border-slate-200 bg-white pl-9 text-sm"
           />
         </div>
@@ -526,6 +544,7 @@ export default function OrdersPage() {
                 size="sm"
                 className="text-slate-600"
                 onClick={() => {
+                  setSearchInput("")
                   setFilters(defaultFilters)
                   setPage(1)
                 }}
