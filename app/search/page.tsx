@@ -807,13 +807,13 @@ export default function SearchPage() {
           const filteredSuppliersByName = filterSuppliersByRelevance(
             data.suppliersByName || [],
             debouncedQ,
-            10 // Lower threshold for suppliers
+            5 // Lowered threshold for full page results (more inclusive)
           )
 
           const filteredSuppliersByProduct = filterSuppliersByRelevance(
             data.suppliersByProduct || [],
             debouncedQ,
-            10 // Lower threshold for suppliers
+            5 // Lowered threshold for full page results (more inclusive)
           )
 
           setSearchResult({

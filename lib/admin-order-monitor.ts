@@ -108,6 +108,7 @@ export function formatAdminCurrency(amount: number): string {
   return new Intl.NumberFormat("en-RW", {
     style: "currency",
     currency: "RWF",
+    currencyDisplay: "code",
     minimumFractionDigits: 0,
   }).format(amount)
 }
@@ -151,12 +152,21 @@ export function getStatusLabel(status: TrackOrderStatus): string {
 }
 
 /** Neutral admin UI — no colored status pills */
-export function getStatusBadgeClass(_status?: TrackOrderStatus): string {
-  return "inline-flex items-center rounded border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-700"
+export function getStatusBadgeClass(status?: TrackOrderStatus): string {
+  switch (status) {
+    case "open":
+      return "inline-flex items-center whitespace-nowrap rounded border border-sky-200 bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-700"
+    case "delivered":
+      return "inline-flex items-center whitespace-nowrap rounded border border-emerald-200 bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700"
+    default:
+      return "inline-flex items-center whitespace-nowrap rounded border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-700"
+  }
 }
 
-export function getPaymentBadgeClass(_paid?: boolean): string {
-  return "inline-flex items-center rounded border border-slate-200 bg-white px-2 py-0.5 text-xs font-medium text-slate-700"
+export function getPaymentBadgeClass(paid?: boolean): string {
+  return paid
+    ? "inline-flex items-center whitespace-nowrap rounded border border-emerald-200 bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700"
+    : "inline-flex items-center whitespace-nowrap rounded border border-slate-200 bg-white px-2 py-0.5 text-xs font-medium text-slate-700"
 }
 
 export function normalizeOrderStatus(order: AdminMonitorOrder): TrackOrderStatus {

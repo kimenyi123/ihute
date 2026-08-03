@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server"
 
 import { getOrderStatusUrl } from "@/lib/backend-config"
+import { triggerEbmAutoFiscalize } from "@/lib/ebm/ebm-auto-trigger"
 
 const ORDER_STATUS_URL = getOrderStatusUrl()
 
@@ -142,6 +143,11 @@ export async function POST(req: Request) {
     }
 
     console.log(`[UPDATE-STATUS] Success:`, json)
+
+    if (ok) {
+      triggerEbmAutoFiscalize(Number(orderId), st)
+    }
+
     return NextResponse.json(json)
 
   } catch (e: any) {

@@ -1,7 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server"
 
 export function middleware(req: NextRequest) {
-  const host = (req.headers.get("host") || "").split(":")[0].toLowerCase()
+  // Prefer proxy-provided host (`x-forwarded-host`) when present so nginx / proxies
+  // that don't preserve the original `Host` header still allow host-based routing.
+  const rawHostHeader = req.headers.get("x-forwarded-host") || req.headers.get("host") || ""
+  const host = rawHostHeader.split(",")[0].split(":")[0].trim().toLowerCase()
   const { pathname } = req.nextUrl
   const redirectParam = req.nextUrl.searchParams.get("redirect") || ""
   const referer = (req.headers.get("referer") || "").toLowerCase()
@@ -43,9 +46,10 @@ export function middleware(req: NextRequest) {
 
     // Local dev override: add ?surface=grandma to URL to simulate shop.ihute.rw
     const surfaceOverride = url.searchParams.get("surface")
+    const isLocalDevHost = host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0"
     const isGrandma =
       grandmaHost ||
-      (process.env.NODE_ENV === "development" && surfaceOverride === "grandma")
+      (process.env.NODE_ENV === "development" && (surfaceOverride === "grandma" || isLocalDevHost))
 
     if (isGrandma) {
       url.pathname = `/register/grandma-${role}`

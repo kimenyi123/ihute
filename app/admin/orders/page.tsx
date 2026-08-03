@@ -3,17 +3,15 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import Link from "next/link"
 import {
-  Bell,
   ChevronDown,
   ChevronUp,
-  ExternalLink,
+  Eye,
   Loader2,
-  MoreHorizontal,
   RefreshCw,
   Search,
   SlidersHorizontal,
 } from "lucide-react"
-import { postAdminApi } from "@/lib/admin-client"
+import { postAdminApi, postAdminEbmRequest } from "@/lib/admin-client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -81,6 +79,8 @@ export default function OrdersPage() {
   const [page, setPage] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
   const [totalPages, setTotalPages] = useState(1)
+  const [ebmLoadingId, setEbmLoadingId] = useState<number | null>(null)
+  const [ebmMessage, setEbmMessage] = useState<string | null>(null)
   const [attentionCount, setAttentionCount] = useState(0)
   const [awaitingSellerCount, setAwaitingSellerCount] = useState(0)
   const [sellerServingCount, setSellerServingCount] = useState(0)
@@ -231,6 +231,28 @@ export default function OrdersPage() {
     }
   }
 
+  const requestEbm = async (orderId: number) => {
+    setEbmMessage(null)
+    setEbmLoadingId(orderId)
+    try {
+      const res = await postAdminEbmRequest(orderId)
+      const data = await res.json()
+      if (!res.ok || !data.ok) {
+        setEbmMessage(data.error || "EBM request failed")
+        return
+      }
+      setEbmMessage(
+        data.duplicate
+          ? `Order #${orderId} already fiscalized (receipt ${data.receiptNumber || "—"})`
+          : `EBM OK for order #${orderId}${data.receiptNumber ? ` — receipt ${data.receiptNumber}` : ""}`,
+      )
+    } catch (e) {
+      setEbmMessage(e instanceof Error ? e.message : "EBM request failed")
+    } finally {
+      setEbmLoadingId(null)
+    }
+  }
+
   const activeFilterCount = [
     filters.sector,
     filters.sellerAccount,
@@ -321,6 +343,15 @@ export default function OrdersPage() {
       {loadError ? (
         <div className="mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           {loadError}
+        </div>
+      ) : null}
+
+      {ebmMessage ? (
+        <div className="mb-6 rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+          {ebmMessage}
+          <button type="button" className="ml-3 underline" onClick={() => setEbmMessage(null)}>
+            Dismiss
+          </button>
         </div>
       ) : null}
 
@@ -520,10 +551,11 @@ export default function OrdersPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
+                    <th className="w-12 px-3 py-3 text-center">#</th>
                     <th className="px-4 py-3">Order</th>
                     <th className="px-4 py-3">Seller</th>
                     <th className="px-4 py-3">Buyer</th>
-                    <th className="px-4 py-3 text-right">Amount</th>
+                    <th className="px-4 py-3 text-right whitespace-nowrap">Amount</th>
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3">Seller served?</th>
                     <th className="px-4 py-3">Payment</th>
@@ -532,12 +564,15 @@ export default function OrdersPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {orders.map((order) => (
+                  {orders.map((order, index) => (
                     <OrderTableRow
                       key={order.id}
                       order={order}
+                      rowNumber={(page - 1) * PAGE_SIZE + index + 1}
                       notifyingId={notifyingId}
+                      ebmLoadingId={ebmLoadingId}
                       onNotify={handleNotifySeller}
+                      onRequestEbm={requestEbm}
                     />
                   ))}
                 </tbody>
@@ -550,7 +585,9 @@ export default function OrdersPage() {
                   key={order.id}
                   order={order}
                   notifyingId={notifyingId}
+                  ebmLoadingId={ebmLoadingId}
                   onNotify={handleNotifySeller}
+                  onRequestEbm={requestEbm}
                 />
               ))}
             </div>
@@ -600,12 +637,18 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 function OrderTableRow({
   order,
+  rowNumber,
   notifyingId,
+  ebmLoadingId,
   onNotify,
+  onRequestEbm,
 }: {
   order: AdminMonitorOrder
+  rowNumber: number
   notifyingId: number | null
+  ebmLoadingId: number | null
   onNotify: (o: AdminMonitorOrder) => void
+  onRequestEbm: (orderId: number) => void
 }) {
   const normalizedStatus = normalizeOrderStatus(order)
   const attention = orderNeedsAttention(order)
@@ -614,10 +657,11 @@ function OrderTableRow({
 
   return (
     <tr
-      className={`border-b border-slate-100 last:border-0 hover:bg-slate-50/80 ${
+      className={`border-b border-slate-100 last:border-0 cursor-pointer transition-colors hover:bg-slate-50 ${
         attention ? "border-l-2 border-l-slate-900" : ""
       }`}
     >
+      <td className="w-12 px-3 py-3 text-center text-slate-500">{rowNumber}</td>
       <td className="px-4 py-3">
         <Link href={`/admin/orders/${order.id}`} className="font-medium text-slate-900 hover:underline">
           {order.orderNumber || `#${order.id}`}
@@ -636,7 +680,7 @@ function OrderTableRow({
         <p className="text-slate-800">{order.buyerName || "Guest"}</p>
         <p className="text-xs text-slate-500">{order.buyerPhone || "—"}</p>
       </td>
-      <td className="px-4 py-3 text-right font-medium tabular-nums text-slate-900">
+      <td className="px-4 py-3 text-right font-medium tabular-nums text-slate-900 whitespace-nowrap">
         {formatAdminCurrency(order.amount)}
       </td>
       <td className="px-4 py-3">
@@ -660,7 +704,13 @@ function OrderTableRow({
         <p className="mt-0.5 text-[10px] text-slate-400">{formatOrderTime(order.timestamp)}</p>
       </td>
       <td className="px-4 py-3 text-right">
-        <OrderActions order={order} notifyingId={notifyingId} onNotify={onNotify} />
+        <OrderActions
+          order={order}
+          notifyingId={notifyingId}
+          ebmLoadingId={ebmLoadingId}
+          onNotify={onNotify}
+          onRequestEbm={onRequestEbm}
+        />
       </td>
     </tr>
   )
@@ -669,11 +719,15 @@ function OrderTableRow({
 function OrderCard({
   order,
   notifyingId,
+  ebmLoadingId,
   onNotify,
+  onRequestEbm,
 }: {
   order: AdminMonitorOrder
   notifyingId: number | null
+  ebmLoadingId: number | null
   onNotify: (o: AdminMonitorOrder) => void
+  onRequestEbm: (orderId: number) => void
 }) {
   const attention = orderNeedsAttention(order)
   const normalizedStatus = normalizeOrderStatus(order)
@@ -710,7 +764,13 @@ function OrderCard({
         </span>
       </div>
       <div className="mt-3 flex justify-end">
-        <OrderActions order={order} notifyingId={notifyingId} onNotify={onNotify} />
+        <OrderActions
+          order={order}
+          notifyingId={notifyingId}
+          ebmLoadingId={ebmLoadingId}
+          onNotify={onNotify}
+          onRequestEbm={onRequestEbm}
+        />
       </div>
     </div>
   )
@@ -745,42 +805,20 @@ function FulfillmentCell({
 
 function OrderActions({
   order,
-  notifyingId,
-  onNotify,
 }: {
   order: AdminMonitorOrder
   notifyingId: number | null
+  ebmLoadingId: number | null
   onNotify: (o: AdminMonitorOrder) => void
+  onRequestEbm: (orderId: number) => void
 }) {
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-slate-600">
-          <MoreHorizontal className="h-4 w-4" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-48">
-        <DropdownMenuItem asChild>
-          <Link href={`/admin/orders/${order.id}`}>View details</Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <Link href={buyerTrackHref(order.id)} target="_blank">
-            Buyer tracking
-            <ExternalLink className="ml-auto h-3 w-3" />
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          disabled={notifyingId === order.id}
-          onClick={() => onNotify(order)}
-        >
-          {notifyingId === order.id ? (
-            <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Bell className="mr-2 h-3.5 w-3.5" />
-          )}
-          Notify seller
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <Link
+      href={`/admin/orders/${order.id}`}
+      className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-emerald-700 whitespace-nowrap"
+    >
+      <Eye className="h-4 w-4" />
+      View
+    </Link>
   )
 }

@@ -57,6 +57,13 @@ import { digitsOnly, normalizePhoneDigitsForAuth, normalizeRwandaMobileE164 } fr
 import { lineSellingPriceFromProductRow } from "@/lib/package-price"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { EbmDebugModal } from "@/components/EbmDebugModal"
+import {
+  extractEbmDebug,
+  logEbmApprovalToConsole,
+  type EbmApprovalApiResponse,
+  type EbmDebugView,
+} from "@/lib/ebm/utils/ebm-browser-debug"
 import { Textarea } from "@/components/ui/textarea"
 import { matchMoMoSmsToOrderTotal, type MoMoSmsMatchResult } from "@/lib/momo-payment-sms-match"
 import { Button } from "@/components/ui/button"
@@ -2306,6 +2313,13 @@ export default function GrandmaPage() {
     valueRwf: 0,
   })
   const [sellerPaymentLocal, setSellerPaymentLocal] = useState<Record<string, "paid" | "pending">>({})
+  const [ebmPendingOrderIds, setEbmPendingOrderIds] = useState<Set<string>>(new Set())
+  const [ebmSuccessOrderIds, setEbmSuccessOrderIds] = useState<Set<string>>(new Set())
+  const [ebmRejectedOrderIds, setEbmRejectedOrderIds] = useState<Set<string>>(new Set())
+  const [ebmApprovingId, setEbmApprovingId] = useState<string | null>(null)
+  const [ebmRejectingId, setEbmRejectingId] = useState<string | null>(null)
+  const [ebmDebugOpen, setEbmDebugOpen] = useState(false)
+  const [ebmDebug, setEbmDebug] = useState<EbmDebugView | null>(null)
   
   // API state for real data
   const [apiShops, setApiShops] = useState<ShopEntry[]>([])
@@ -2328,13 +2342,12 @@ export default function GrandmaPage() {
     setHomeSectorItemsLoading(true)
     void (async () => {
       const next: Partial<Record<Category, number>> = {}
-      await Promise.all(
-        CATEGORIES.map(async (c) => {
-          const slug = GRANDMA_CATEGORY_TO_SECTOR_SLUG[c.name]
-          const s = await fetchSectorStatsFromApi(slug)
-          if (!cancelled) next[c.name] = s.items
-        }),
-      )
+      for (const c of CATEGORIES) {
+        if (cancelled) break
+        const slug = GRANDMA_CATEGORY_TO_SECTOR_SLUG[c.name]
+        const s = await fetchSectorStatsFromApi(slug)
+        if (!cancelled) next[c.name] = s.items
+      }
       if (!cancelled) {
         setHomeSectorItemsByCategory(next)
         setHomeSectorItemsLoading(false)
@@ -3412,6 +3425,126 @@ export default function GrandmaPage() {
     return () => clearInterval(t)
   }, [appMode, sellerAccountForOrders, sellerView, loadSellerOrders])
 
+  const loadEbmPending = useCallback(async () => {
+    if (!sellerAccountForOrders || appMode !== "seller") return
+    try {
+      const res = await fetch(
+        `/api/seller/ebm?sellerAccount=${encodeURIComponent(sellerAccountForOrders)}`,
+        { cache: "no-store" },
+      )
+      const json = (await res.json()) as {
+        ok?: boolean
+        pendingOrderIds?: number[]
+        successOrderIds?: number[]
+        rejectedOrderIds?: number[]
+        pending?: Array<{ orderId: number }>
+      }
+      if (!json.ok) return
+      const pendingIds = Array.isArray(json.pendingOrderIds)
+        ? json.pendingOrderIds
+        : (json.pending ?? []).map((p) => p.orderId)
+      const successIds = Array.isArray(json.successOrderIds) ? json.successOrderIds : []
+      const rejectedIds = Array.isArray(json.rejectedOrderIds) ? json.rejectedOrderIds : []
+      const successSet = new Set(successIds.map((id) => String(id)))
+      const rejectedSet = new Set(rejectedIds.map((id) => String(id)))
+      const pendingSet = new Set(pendingIds.map((id) => String(id)))
+      for (const id of successSet) pendingSet.delete(id)
+      for (const id of rejectedSet) pendingSet.delete(id)
+      setEbmPendingOrderIds(pendingSet)
+      setEbmSuccessOrderIds(successSet)
+      setEbmRejectedOrderIds(rejectedSet)
+    } catch {
+      /* non-blocking */
+    }
+  }, [sellerAccountForOrders, appMode])
+
+  useEffect(() => {
+    if (appMode !== "seller" || !sellerAccountForOrders) return
+    void loadEbmPending()
+    const t = setInterval(() => void loadEbmPending(), 30_000)
+    return () => clearInterval(t)
+  }, [appMode, sellerAccountForOrders, loadEbmPending])
+
+  const approveEbmInvoice = useCallback(
+    async (orderId: string) => {
+      if (!sellerAccountForOrders) return
+      setEbmApprovingId(orderId)
+      try {
+        const res = await fetch("/api/seller/ebm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ orderId: Number(orderId), sellerAccount: sellerAccountForOrders }),
+        })
+        const json = (await res.json()) as EbmApprovalApiResponse & {
+          message?: string
+          receiptNumber?: string
+        }
+        logEbmApprovalToConsole(json.ok ? "SUCCESS" : "FAILED", json)
+        if (!res.ok || !json.ok) {
+          const view = extractEbmDebug(json)
+          setEbmDebug(view)
+          setEbmDebugOpen(true)
+          throw new Error(view.userMessage)
+        }
+        window.alert(
+          json.receiptNumber
+            ? `EBM fiscalized — receipt ${json.receiptNumber}`
+            : json.message || "EBM invoice sent to RRA successfully",
+        )
+        setEbmPendingOrderIds((prev) => {
+          const next = new Set(prev)
+          next.delete(orderId)
+          return next
+        })
+        setEbmSuccessOrderIds((prev) => new Set(prev).add(orderId))
+        void loadEbmPending()
+        void loadSellerOrders()
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "EBM approval failed"
+        window.alert(`${msg}\n\nFull request/response opened below (+). Also check F12 → Console.`)
+      } finally {
+        setEbmApprovingId(null)
+      }
+    },
+    [sellerAccountForOrders, loadSellerOrders, loadEbmPending],
+  )
+
+  const rejectEbmInvoice = useCallback(
+    async (orderId: string) => {
+      if (!sellerAccountForOrders) return
+      if (!window.confirm("Reject this EBM request? Use when the order is fake or invalid.")) return
+      setEbmRejectingId(orderId)
+      try {
+        const res = await fetch("/api/seller/ebm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            orderId: Number(orderId),
+            sellerAccount: sellerAccountForOrders,
+            action: "reject",
+          }),
+        })
+        const json = (await res.json()) as { ok?: boolean; error?: string; message?: string }
+        if (!res.ok || !json.ok) {
+          throw new Error(json.error || "EBM reject failed")
+        }
+        window.alert(json.message || "EBM request rejected")
+        setEbmPendingOrderIds((prev) => {
+          const next = new Set(prev)
+          next.delete(orderId)
+          return next
+        })
+        setEbmRejectedOrderIds((prev) => new Set(prev).add(orderId))
+        void loadEbmPending()
+      } catch (e: unknown) {
+        window.alert(e instanceof Error ? e.message : "EBM reject failed")
+      } finally {
+        setEbmRejectingId(null)
+      }
+    },
+    [sellerAccountForOrders, loadEbmPending],
+  )
+
   useEffect(() => {
     if (appMode !== "seller" || !sellerAccountForOrders.trim()) return
     let cancelled = false
@@ -4172,6 +4305,14 @@ export default function GrandmaPage() {
     if (sellerFilter === "served") return sellerOrders.filter((o) => o.status === "sent")
     return sellerOrders.filter((o) => o.status === "rejected")
   }, [sellerOrders, sellerFilter])
+  /** First EBM-pending order in current filter (for toolbar Approve/Reject). */
+  const ebmToolbarOrderId = useMemo(() => {
+    for (const o of sellerOrdersFiltered) {
+      if (ebmPendingOrderIds.has(o.id)) return o.id
+    }
+    const any = [...ebmPendingOrderIds][0]
+    return any ?? null
+  }, [sellerOrdersFiltered, ebmPendingOrderIds])
   const sellerDashboard = useMemo(() => {
     const calc = (list: SellerOrder[]) => ({
       count: list.length,
@@ -4800,6 +4941,11 @@ export default function GrandmaPage() {
         .seller-btn.accept{background:linear-gradient(90deg,#2f7fe6,#2867c8);color:#fff;}
         .seller-btn.prepare{background:#fef9c3;color:#854d0e;border:1px solid #fde68a;}
         .seller-btn.sent{background:linear-gradient(90deg,#2f7fe6,#2867c8);color:#fff;}
+        .seller-btn.ebm{background:#16a34a;color:#fff;border:1px solid #15803d;}
+        .seller-orders-toolbar{display:flex;flex-wrap:nowrap;align-items:center;gap:5px;padding:0 4px 6px;overflow-x:auto;-webkit-overflow-scrolling:touch;}
+        .seller-toolbar-btn{border:none;border-radius:7px;padding:4px 7px;font-size:10px;font-weight:800;line-height:1.2;white-space:nowrap;flex-shrink:0;cursor:pointer;}
+        .seller-toolbar-export{margin-left:auto;border:1px solid #1897e0;background:#fff;color:#127fc0;}
+        .seller-toolbar-order{font-size:10px;font-weight:700;color:#166534;white-space:nowrap;flex-shrink:0;padding:0 2px;}
         .seller-status-pill{display:inline-block;border-radius:999px;padding:4px 8px;font-size:11px;font-weight:800;}
         .seller-status-pill.accepted{background:#e7f7ec;color:#147c3d;}
         .seller-status-pill.rejected{background:#fff0f0;color:#b42318;}
@@ -5024,19 +5170,67 @@ export default function GrandmaPage() {
             </button>
           </div>
 
-          <div className="flex justify-end px-1">
+          {ebmPendingOrderIds.size > 0 ? (
+            <div
+              className="card note"
+              style={{
+                background: "#ecfdf5",
+                borderColor: "#86efac",
+                color: "#166534",
+                fontWeight: 700,
+              }}
+            >
+              🧾 {ebmPendingOrderIds.size} buyer{ebmPendingOrderIds.size > 1 ? "s" : ""} requested RRA EBM invoice
+              approval — use Approve or Reject next to Export Excel.
+            </div>
+          ) : null}
+
+          <div className="seller-orders-toolbar">
+            {ebmToolbarOrderId ? (
+              <>
+                <button
+                  type="button"
+                  className="seller-btn ebm seller-toolbar-btn"
+                  title={`Approve EBM for order #${ebmToolbarOrderId}`}
+                  disabled={
+                    ebmApprovingId === ebmToolbarOrderId || ebmRejectingId === ebmToolbarOrderId
+                  }
+                  onClick={() => void approveEbmInvoice(ebmToolbarOrderId)}
+                >
+                  {ebmApprovingId === ebmToolbarOrderId ? "…" : "Approve EBM"}
+                </button>
+                <button
+                  type="button"
+                  className="seller-btn reject seller-toolbar-btn"
+                  title={`Reject EBM for order #${ebmToolbarOrderId}`}
+                  disabled={
+                    ebmApprovingId === ebmToolbarOrderId || ebmRejectingId === ebmToolbarOrderId
+                  }
+                  onClick={() => void rejectEbmInvoice(ebmToolbarOrderId)}
+                >
+                  {ebmRejectingId === ebmToolbarOrderId ? "…" : "Reject"}
+                </button>
+                <span className="seller-toolbar-order" title="EBM pending order">
+                  #{ebmToolbarOrderId}
+                  {ebmPendingOrderIds.size > 1 ? ` (${ebmPendingOrderIds.size})` : ""}
+                </span>
+              </>
+            ) : null}
             <button
               type="button"
-              className="rounded-xl border border-[#1897e0] bg-white px-4 py-2 text-sm font-bold text-[#127fc0] shadow-sm hover:bg-[#f0f8ff]"
+              className="seller-toolbar-btn seller-toolbar-export"
               onClick={exportSellerOrdersExcel}
             >
-              📥 {GRANDMA_LABELS[language].sellerExportExcel}
+              📥 Export
             </button>
           </div>
 
           {sellerOrdersFiltered.map((order) => {
             const effectivePayment =
               sellerPaymentLocal[order.id] ?? order.sellerPaymentAck ?? order.paymentStatus ?? "pending"
+            const ebmPending = ebmPendingOrderIds.has(order.id)
+            const ebmSuccess = ebmSuccessOrderIds.has(order.id)
+            const ebmRejected = ebmRejectedOrderIds.has(order.id)
             return (
             <div className="card seller-order" key={order.id}>
               <button
@@ -5047,6 +5241,28 @@ export default function GrandmaPage() {
               >
                 <div className="seller-order-head-top">
                   <span>Order #{order.id}</span>
+                  {ebmPending ? (
+                    <span
+                      className="seller-status-pill"
+                      style={{ background: "#dcfce7", color: "#166534", marginLeft: 8 }}
+                    >
+                      EBM requested
+                    </span>
+                  ) : ebmSuccess ? (
+                    <span
+                      className="seller-status-pill"
+                      style={{ background: "#dcfce7", color: "#166534", marginLeft: 8 }}
+                    >
+                      EBM invoice successfully
+                    </span>
+                  ) : ebmRejected ? (
+                    <span
+                      className="seller-status-pill"
+                      style={{ background: "#fee2e2", color: "#991b1b", marginLeft: 8 }}
+                    >
+                      EBM rejected
+                    </span>
+                  ) : null}
                 </div>
                 <div className="seller-order-head-meta">
                   <span className="seller-order-meta-chip" title="Minutes since order">
@@ -7378,6 +7594,7 @@ export default function GrandmaPage() {
           </div>
         </div>
       ) : null}
+      <EbmDebugModal open={ebmDebugOpen} onOpenChange={setEbmDebugOpen} debug={ebmDebug} />
     </div>
   )
 }
