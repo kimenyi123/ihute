@@ -48,7 +48,10 @@ function LoginPageInner() {
   const redirectTo = searchParams?.get("redirect")
   const phonePrefill = searchParams?.get("phone") ?? ""
   const loginStore = useAuthStore((s) => s.login)
+  const clearSessionExpiredReason = useAuthStore((s) => s.clearSessionExpiredReason)
 
+  const [rememberMe, setRememberMe] = useState(false)
+  const [sessionNotice, setSessionNotice] = useState<string | null>(null)
   const [pendingLoginPayload, setPendingLoginPayload] = useState<ApiLoginOK | null>(null)
   const [existingPassword, setExistingPassword] = useState("")
   const [newPassword, setNewPassword] = useState("")
@@ -92,6 +95,21 @@ function LoginPageInner() {
     router.replace(`/grandma/login?${qs.toString()}`)
   }, [redirectTo, phonePrefill, router])
 
+  useEffect(() => {
+    try {
+      const flag = sessionStorage.getItem("ihute_session_expired")
+      if (flag === "idle") {
+        setSessionNotice("You were signed out after a period of inactivity.")
+      } else if (flag === "absolute") {
+        setSessionNotice("Your session expired. Please sign in again.")
+      }
+      if (flag) sessionStorage.removeItem("ihute_session_expired")
+    } catch {
+      /* ignore */
+    }
+    clearSessionExpiredReason()
+  }, [clearSessionExpiredReason])
+
   const applyGrandmaModeHint = (user: User, decodedRedirect: string) => {
     if (typeof window === "undefined") return
     if (!decodedRedirect.startsWith("/grandma")) return
@@ -123,7 +141,7 @@ function LoginPageInner() {
 
   const finishLoginAndRedirect = (payload: ApiLoginOK) => {
     const user: User = normalizeJavaLoginToUser(payload)
-    loginStore(user)
+    loginStore(user, { rememberMe })
     setPendingLoginPayload(null)
     setExistingPassword("")
     setNewPassword("")
@@ -134,16 +152,23 @@ function LoginPageInner() {
     redirectAfterLogin(user, decoded, safeRedirect)
   }
 
-  const handleSuccess = async (user: User) => {
+  const handleSuccess = async (user: User, options?: { rememberMe?: boolean }) => {
     log("LOGIN", "success", user)
-    loginStore(user)
+    const remember = Boolean(options?.rememberMe)
+    setRememberMe(remember)
+    loginStore(user, { rememberMe: remember })
     const decoded = redirectTo ? decodeURIComponent(redirectTo) : ""
     const safeRedirect = decoded.startsWith("/") && !decoded.startsWith("//") && decoded.length > 0
     applyGrandmaModeHint(user, decoded)
     redirectAfterLogin(user, decoded, safeRedirect)
   }
 
-  const handleMustChangePassword = (payload: ApiLoginOK, password: string) => {
+  const handleMustChangePassword = (
+    payload: ApiLoginOK,
+    password: string,
+    options?: { rememberMe?: boolean },
+  ) => {
+    setRememberMe(Boolean(options?.rememberMe))
     setPendingLoginPayload(payload)
     setExistingPassword(password)
     setNewPassword("")
@@ -210,6 +235,12 @@ function LoginPageInner() {
           {backHomeLabel}
         </Link>
 
+        {sessionNotice ? (
+          <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+            {sessionNotice}
+          </div>
+        ) : null}
+
         <IshyigaLoginCard
           title="Welcome back"
           description={
@@ -224,6 +255,7 @@ function LoginPageInner() {
           uiVariant="ihute"
           forgotHref="/forgot-password/web-form"
           registerHref="/register/web-form"
+          showRememberMe={!adminLoginIntent}
         />
 
         <Dialog open={!!pendingLoginPayload} onOpenChange={() => {}}>
