@@ -39,6 +39,13 @@ import {
   type SellerFulfillment,
 } from "@/lib/admin-order-monitor"
 import { fetchOrderMonitorStats, type OrderMonitorStats } from "@/lib/admin-order-stats"
+import {
+  ORDER_MONITOR_DBS,
+  orderMonitorDbLabel,
+  readOrderMonitorDb,
+  writeOrderMonitorDb,
+  type OrderMonitorDb,
+} from "@/lib/admin-order-db"
 import { OrderMonitorCharts } from "@/components/admin/order-monitor-charts"
 import { downloadExcel } from "@/lib/grandma-excel-export"
 
@@ -94,11 +101,22 @@ export default function OrdersPage() {
   const [toast, setToast] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [searchInput, setSearchInput] = useState("")
+  const [db, setDb] = useState<OrderMonitorDb>("chaos_beta")
+  const [dbReady, setDbReady] = useState(false)
   const requestIdRef = useRef(0)
 
   const updateFilters = (next: Partial<Filters>) => {
     setFilters((current) => ({ ...current, ...next }))
     setPage(1)
+  }
+
+  const selectDb = (next: OrderMonitorDb) => {
+    if (next === db) return
+    writeOrderMonitorDb(next)
+    setDb(next)
+    setPage(1)
+    setOrders([])
+    setLoadError(null)
   }
 
   // Debounce search so typing does not race / drop requests mid-flight.
@@ -126,17 +144,19 @@ export default function OrdersPage() {
   }, [])
 
   const loadChartStats = useCallback(async () => {
+    if (!dbReady) return
     try {
       setChartsLoading(true)
-      const stats = await fetchOrderMonitorStats()
+      const stats = await fetchOrderMonitorStats(db)
       setChartStats(stats)
     } finally {
       setChartsLoading(false)
     }
-  }, [])
+  }, [db, dbReady])
 
   const loadOrders = useCallback(
     async (silent = false) => {
+      if (!dbReady) return
       const requestId = ++requestIdRef.current
       try {
         if (silent) setRefreshing(true)
@@ -145,6 +165,7 @@ export default function OrdersPage() {
         const q = filters.buyerSearch.trim()
         const res = await postAdminApi({
           action: "getAllOrders",
+          db,
           ...filters,
           buyerSearch: q,
           search: q,
@@ -192,12 +213,16 @@ export default function OrdersPage() {
         }
       }
     },
-    [filters, page],
+    [filters, page, db, dbReady],
   )
 
   useEffect(() => {
     if (typeof window === "undefined") return
     const params = new URLSearchParams(window.location.search)
+    const initialDb = readOrderMonitorDb()
+    setDb(initialDb)
+    writeOrderMonitorDb(initialDb)
+    setDbReady(true)
     if (params.get("attentionOnly") === "1") {
       setFilters((f) => ({ ...f, attentionOnly: true }))
       setFiltersOpen(true)
@@ -211,21 +236,24 @@ export default function OrdersPage() {
 
   useEffect(() => {
     loadSectors()
+  }, [loadSectors])
+
+  useEffect(() => {
     loadChartStats()
-  }, [loadSectors, loadChartStats])
+  }, [loadChartStats])
 
   useEffect(() => {
     loadOrders()
   }, [loadOrders])
 
   useEffect(() => {
-    if (!autoRefresh) return
+    if (!autoRefresh || !dbReady) return
     const id = window.setInterval(() => {
       loadOrders(true)
       loadChartStats()
     }, AUTO_REFRESH_MS)
     return () => window.clearInterval(id)
-  }, [autoRefresh, loadOrders, loadChartStats])
+  }, [autoRefresh, loadOrders, loadChartStats, dbReady])
 
   useEffect(() => {
     const onNew = () => {
@@ -240,7 +268,7 @@ export default function OrdersPage() {
     setNotifyingId(order.id)
     setToast(null)
     try {
-      const res = await postAdminApi({ action: "notifySellerOrder", orderId: order.id })
+      const res = await postAdminApi({ action: "notifySellerOrder", orderId: order.id, db })
       const data = await res.json()
       setToast(data.ok ? data.message || "Seller notified." : data.error || "Notify failed")
     } catch {
@@ -312,6 +340,34 @@ export default function OrdersPage() {
               Every buyer order across IHUTE shops. When payment is confirmed but the seller never moved the order,
               use <span className="font-medium text-slate-800">Notify seller</span> — the header bell also alerts you to new orders.
             </p>
+            <div className="mt-4 flex flex-wrap items-center gap-2" role="group" aria-label="Database">
+              <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Database</span>
+              {ORDER_MONITOR_DBS.map((opt) => {
+                const active = db === opt.id
+                const isProd = opt.id === "chaos_test"
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => selectDb(opt.id)}
+                    className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+                      active
+                        ? isProd
+                          ? "border-emerald-700 bg-emerald-700 text-white"
+                          : "border-slate-900 bg-slate-900 text-white"
+                        : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+                    }`}
+                    title={opt.hint}
+                  >
+                    {opt.label}
+                    <span className={`ml-1.5 font-mono ${active ? "opacity-80" : "text-slate-400"}`}>
+                      {opt.hint}
+                    </span>
+                  </button>
+                )
+              })}
+              <span className="text-xs text-slate-500">Viewing {orderMonitorDbLabel(db)}</span>
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600">
@@ -591,6 +647,7 @@ export default function OrdersPage() {
                     <OrderTableRow
                       key={order.id}
                       order={order}
+                      db={db}
                       rowNumber={(page - 1) * PAGE_SIZE + index + 1}
                       notifyingId={notifyingId}
                       ebmLoadingId={ebmLoadingId}
@@ -607,6 +664,7 @@ export default function OrdersPage() {
                 <OrderCard
                   key={order.id}
                   order={order}
+                  db={db}
                   notifyingId={notifyingId}
                   ebmLoadingId={ebmLoadingId}
                   onNotify={handleNotifySeller}
@@ -660,6 +718,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 function OrderTableRow({
   order,
+  db,
   rowNumber,
   notifyingId,
   ebmLoadingId,
@@ -667,6 +726,7 @@ function OrderTableRow({
   onRequestEbm,
 }: {
   order: AdminMonitorOrder
+  db: OrderMonitorDb
   rowNumber: number
   notifyingId: number | null
   ebmLoadingId: number | null
@@ -677,6 +737,7 @@ function OrderTableRow({
   const attention = orderNeedsAttention(order)
   const reasons = getOrderAttentionReasons(order)
   const fulfillment = deriveSellerFulfillment(order)
+  const detailHref = `/admin/orders/${order.id}?db=${encodeURIComponent(db)}`
 
   return (
     <tr
@@ -686,7 +747,7 @@ function OrderTableRow({
     >
       <td className="w-12 px-3 py-3 text-center text-slate-500">{rowNumber}</td>
       <td className="px-4 py-3">
-        <Link href={`/admin/orders/${order.id}`} className="font-medium text-slate-900 hover:underline">
+        <Link href={detailHref} className="font-medium text-slate-900 hover:underline">
           {order.orderNumber || `#${order.id}`}
         </Link>
         {attention ? (
@@ -729,6 +790,7 @@ function OrderTableRow({
       <td className="px-4 py-3 text-right">
         <OrderActions
           order={order}
+          db={db}
           notifyingId={notifyingId}
           ebmLoadingId={ebmLoadingId}
           onNotify={onNotify}
@@ -741,12 +803,14 @@ function OrderTableRow({
 
 function OrderCard({
   order,
+  db,
   notifyingId,
   ebmLoadingId,
   onNotify,
   onRequestEbm,
 }: {
   order: AdminMonitorOrder
+  db: OrderMonitorDb
   notifyingId: number | null
   ebmLoadingId: number | null
   onNotify: (o: AdminMonitorOrder) => void
@@ -755,12 +819,13 @@ function OrderCard({
   const attention = orderNeedsAttention(order)
   const normalizedStatus = normalizeOrderStatus(order)
   const fulfillment = deriveSellerFulfillment(order)
+  const detailHref = `/admin/orders/${order.id}?db=${encodeURIComponent(db)}`
 
   return (
     <div className={`p-4 ${attention ? "border-l-2 border-l-slate-900" : ""}`}>
       <div className="flex items-start justify-between gap-2">
         <div>
-          <Link href={`/admin/orders/${order.id}`} className="font-medium text-slate-900">
+          <Link href={detailHref} className="font-medium text-slate-900">
             {order.orderNumber || `#${order.id}`}
           </Link>
           <p className="mt-1 text-xs text-slate-500">{formatOrderTimeRelative(order.timestamp)}</p>
@@ -789,6 +854,7 @@ function OrderCard({
       <div className="mt-3 flex justify-end">
         <OrderActions
           order={order}
+          db={db}
           notifyingId={notifyingId}
           ebmLoadingId={ebmLoadingId}
           onNotify={onNotify}
@@ -828,8 +894,10 @@ function FulfillmentCell({
 
 function OrderActions({
   order,
+  db,
 }: {
   order: AdminMonitorOrder
+  db: OrderMonitorDb
   notifyingId: number | null
   ebmLoadingId: number | null
   onNotify: (o: AdminMonitorOrder) => void
@@ -837,7 +905,7 @@ function OrderActions({
 }) {
   return (
     <Link
-      href={`/admin/orders/${order.id}`}
+      href={`/admin/orders/${order.id}?db=${encodeURIComponent(db)}`}
       className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-emerald-700 whitespace-nowrap"
     >
       <Eye className="h-4 w-4" />
