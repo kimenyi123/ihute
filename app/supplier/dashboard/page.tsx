@@ -27,6 +27,7 @@ import {
   Plus,
   Package,
   TrendingUp,
+  TrendingDown,
   Trophy,
   Sparkles,
   LogOut,
@@ -40,6 +41,7 @@ import {
   Copy,
   User,
   Layers,
+  RefreshCw,
 } from "lucide-react";
 import Link from "next/link";
 import AddProductModal, { ProductFormData } from "@/components/supplier/AddProductModal";
@@ -61,6 +63,18 @@ import {
 } from "@/lib/supplier-sync-datetime";
 import { resolveSellerPhotoUrl } from "@/lib/seller-photo-url";
 import { QrCodeWithLogo } from "@/components/supplier/qr-code-with-logo";
+import {
+  buildFmcgShelf,
+  FMCG_SECTION_SUBTITLE,
+} from "@/lib/fmcg";
+import { VELOCITY_LOOKBACK_DAYS } from "@/lib/sales-velocity";
+import { lookupUnitsSold } from "@/lib/order-sales-lookup";
+import {
+  enrichCatalogForInsights,
+  buildSlowMovers,
+  buildRestockRecommendations,
+  RESTOCK_TARGET_DAYS,
+} from "@/lib/inventory-insights";
 
 /** Last bulk/excel/Redis upload — not per-row refresh stamps from catalog GET. */
 function formatLastStockUploadLabel(uploadAt: string | null | undefined): string | null {
@@ -119,6 +133,16 @@ const DASH_UI: Record<Language, {
   bulkPriceTitle: string; bulkPriceDesc: string; percentageChange: string;
   percentageHint: string; cancel: string; updating: string; apply: string;
   showingFirst50: string;
+  fmcg: string; fmcgSubtitle: string; fmcgMovers: string;
+  fmcgExpandHint: string; fmcgCollapseHint: string; fmcgEmpty: string;
+  fmcgUnits30d: string; fmcgPerDay: string; fmcgViewInCatalog: string;
+  fmcgFast: string; fmcgMedium: string; fmcgSlow: string; fmcgStock: string;
+  fastMoving: string; fastMovingDesc: string;
+  slowMoving: string; slowMovingDesc: string; slowMovingEmpty: string;
+  recommendedRestock: string; recommendedRestockDesc: string; recommendedRestockEmpty: string;
+  insightUnits30d: string; insightPerDay: string; insightInStock: string;
+  insightDaysCover: string; insightSuggest: string; insightNoSales: string;
+  insightViewCatalog: string;
 }> = {
   en: {
     loadingProducts: "Loading products…",
@@ -223,6 +247,34 @@ const DASH_UI: Record<Language, {
     updating: "Updating\u2026",
     apply: "Apply",
     showingFirst50: "Showing first 50. Use filters to narrow.",
+    fmcg: "FMCG",
+    fmcgSubtitle: FMCG_SECTION_SUBTITLE,
+    fmcgMovers: "movers",
+    fmcgExpandHint: "Fast movers & FMCG by units sold (30 days). Click to expand.",
+    fmcgCollapseHint: "Click to collapse.",
+    fmcgEmpty: "No fast movers yet — items with sales in the last 30 days appear here.",
+    fmcgUnits30d: "units / 30d",
+    fmcgPerDay: "/day",
+    fmcgViewInCatalog: "View in catalog",
+    fmcgFast: "Fast",
+    fmcgMedium: "Medium",
+    fmcgSlow: "Slow",
+    fmcgStock: "in stock",
+    fastMoving: "Fast moving items",
+    fastMovingDesc: "FMCG & top sellers by units sold (last 30 days)",
+    slowMoving: "Slow moving items",
+    slowMovingDesc: "In stock with little or no sales lately",
+    slowMovingEmpty: "No slow movers — your stock is turning over well.",
+    recommendedRestock: "Recommended restock",
+    recommendedRestockDesc: `Keep ~${RESTOCK_TARGET_DAYS} days of cover on what sells`,
+    recommendedRestockEmpty: "Nothing urgent to restock right now.",
+    insightUnits30d: "units / 30d",
+    insightPerDay: "/day",
+    insightInStock: "in stock",
+    insightDaysCover: "days cover",
+    insightSuggest: "suggest",
+    insightNoSales: "No sales / 30d",
+    insightViewCatalog: "Open catalog",
   },
   rw: {
     loadingProducts: "Birimo gutangira ibicuruzwa\u2026",
@@ -327,6 +379,34 @@ const DASH_UI: Record<Language, {
     updating: "Birimo guhindura\u2026",
     apply: "Shyira mu bikorwa",
     showingFirst50: "Irekanwa 50 za mbere. Koresha ibisasu kugabanya.",
+    fmcg: "FMCG",
+    fmcgSubtitle: FMCG_SECTION_SUBTITLE,
+    fmcgMovers: "bihuze cyane",
+    fmcgExpandHint: "Ibicuruzwa bihuze n\u2019FMCG (iminsi 30). Kanda kugira ngo ubone.",
+    fmcgCollapseHint: "Kanda kugabanya.",
+    fmcgEmpty: "Nta bicuruzwa bihuze — ibicuruzwa byagurishijwe mu minsi 30 bigaragara hano.",
+    fmcgUnits30d: "zagurishijwe / iminsi 30",
+    fmcgPerDay: "/umunsi",
+    fmcgViewInCatalog: "Reba mu kataloge",
+    fmcgFast: "Byihuse",
+    fmcgMedium: "Hagati",
+    fmcgSlow: "Gake",
+    fmcgStock: "mu bubiko",
+    fastMoving: "Ibicuruzwa byihuse cyane",
+    fastMovingDesc: "FMCG n\u2019ibyo byagurishijwe cyane (iminsi 30 ishize)",
+    slowMoving: "Ibicuruzwa bigenda gake",
+    slowMovingDesc: "Biri mu bubiko ariko ntibigurishwa cyangwa bigurishwa gake",
+    slowMovingEmpty: "Nta bicuruzwa bigenda gake — sitoki yawe irimo gukora neza.",
+    recommendedRestock: "Ibyo kongera sitoki",
+    recommendedRestockDesc: `Bika sitoki y\u2019iminsi ~${RESTOCK_TARGET_DAYS} ku byagurishwa`,
+    recommendedRestockEmpty: "Nta byihutirwa byo kongera sitoki ubu.",
+    insightUnits30d: "zagurishijwe / iminsi 30",
+    insightPerDay: "/umunsi",
+    insightInStock: "mu bubiko",
+    insightDaysCover: "iminsi isigaye",
+    insightSuggest: "sugira",
+    insightNoSales: "Nta kugurisha / iminsi 30",
+    insightViewCatalog: "Fungura kataloge",
   },
   fr: {
     loadingProducts: "Chargement des produits\u2026",
@@ -431,6 +511,34 @@ const DASH_UI: Record<Language, {
     updating: "Mise \u00e0 jour\u2026",
     apply: "Appliquer",
     showingFirst50: "Affichage des 50 premiers. Utilisez les filtres pour affiner.",
+    fmcg: "FMCG",
+    fmcgSubtitle: FMCG_SECTION_SUBTITLE,
+    fmcgMovers: "articles",
+    fmcgExpandHint: "Rotation rapide & FMCG (30 jours). Cliquez pour d\u00e9velopper.",
+    fmcgCollapseHint: "Cliquez pour r\u00e9duire.",
+    fmcgEmpty: "Pas encore de rotation rapide \u2014 les articles vendus sur 30 jours apparaissent ici.",
+    fmcgUnits30d: "unit\u00e9s / 30j",
+    fmcgPerDay: "/jour",
+    fmcgViewInCatalog: "Voir dans le catalogue",
+    fmcgFast: "Rapide",
+    fmcgMedium: "Moyen",
+    fmcgSlow: "Lent",
+    fmcgStock: "en stock",
+    fastMoving: "Articles \u00e0 rotation rapide",
+    fastMovingDesc: "FMCG et meilleures ventes (30 derniers jours)",
+    slowMoving: "Articles \u00e0 rotation lente",
+    slowMovingDesc: "En stock avec peu ou pas de ventes r\u00e9centes",
+    slowMovingEmpty: "Pas de stock dormant \u2014 votre rotation est saine.",
+    recommendedRestock: "R\u00e9approvisionnement recommand\u00e9",
+    recommendedRestockDesc: `Visez ~${RESTOCK_TARGET_DAYS} jours de couverture sur ce qui se vend`,
+    recommendedRestockEmpty: "Rien d\u2019urgent \u00e0 r\u00e9approvisionner pour l\u2019instant.",
+    insightUnits30d: "unit\u00e9s / 30j",
+    insightPerDay: "/jour",
+    insightInStock: "en stock",
+    insightDaysCover: "jours de couverture",
+    insightSuggest: "sugg\u00e9rer",
+    insightNoSales: "Aucune vente / 30j",
+    insightViewCatalog: "Ouvrir le catalogue",
   },
 };
 
@@ -458,6 +566,9 @@ function SupplierDashboard() {
 
   // Shop With Me QR (collapsible so it doesn't interrupt the main dashboard)
   const [shopWithMeQROpen, setShopWithMeQROpen] = useState(false);
+  /** FMCG shelf — collapsed by default (busy dashboard) */
+  const [fmcgOpen, setFmcgOpen] = useState(false);
+  const [orderSalesByCode, setOrderSalesByCode] = useState<Record<string, number>>({});
   const [shopNickname, setShopNickname] = useState("");
   const [isBarOrRestaurant, setIsBarOrRestaurant] = useState(false);
   /** When true, Bar or Restaurant was set from account PREFEREDCATEGORIES and must not be edited */
@@ -635,15 +746,22 @@ function SupplierDashboard() {
               p.item_packet,
               resolveItemEmballageRaw(p)
             );
-            const price = p.selling_price != null ? parsePrice(String(p.selling_price)) : 0;
+            // Prefer alias retail amounts when CIS left selling_price as package flag (1).
+            const price = lineSellingPriceFromProductRow(p as Record<string, unknown>)
+              || (p.selling_price != null ? parsePrice(String(p.selling_price)) : 0);
+
+            const catalogCode = String(
+              p.ITEM_CODE ?? p.item_code ?? p.itemCode ?? p.item_key_words ?? "",
+            ).trim();
 
             mapped = {
               ...p, // Keep all original Redis fields
               // Normalize for dashboard display
               itemName: p.item_commercial_name,
               ITEM_NAME: p.item_commercial_name,
-              itemCode: p.item_key_words,
-              ITEM_CODE: p.item_key_words,
+              itemCode: catalogCode,
+              ITEM_CODE: catalogCode,
+              item_code: catalogCode || p.item_code,
               stock: stock,
               STOCK: stock,
               price: price,
@@ -792,6 +910,41 @@ function SupplierDashboard() {
     }
   }, [user?.ishyigaAccount, user?.role])
 
+  useEffect(() => {
+    if (!user?.ishyigaAccount || user?.role !== "supplier") return;
+
+    let cancelled = false;
+
+    const fetchOrderSales = async () => {
+      try {
+        const qs = new URLSearchParams({
+          account: user.ishyigaAccount ?? "",
+          days: String(VELOCITY_LOOKBACK_DAYS),
+        });
+        const nick = shopNickname.trim().toLowerCase();
+        if (nick) qs.set("nickname", nick);
+        const res = await fetch(`/api/supplier/item-order-sales?${qs.toString()}`, {
+          cache: "no-store",
+        });
+        const data = await res.json().catch(() => null);
+        if (cancelled) return;
+        if (data?.ok && data.sales && typeof data.sales === "object") {
+          setOrderSalesByCode(data.sales as Record<string, number>);
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+
+    fetchOrderSales();
+    const id = window.setInterval(fetchOrderSales, 60_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [user?.ishyigaAccount, user?.role, shopNickname]);
+
   const handleLogout = () => {
     logout();
     router.push("/");
@@ -862,6 +1015,41 @@ function SupplierDashboard() {
       lineTotal > 0 ? Math.min(100, Math.round((Number(top.total ?? 0) / lineTotal) * 100)) : null;
     return { top, pct, lineTotal };
   }, [analytics]);
+
+  const fmcgShelf = useMemo(() => {
+    const enriched = supplierProducts.map((p) => {
+      const row = p as Record<string, unknown>;
+      const code = String(
+        row.ITEM_CODE ?? row.itemCode ?? row.item_code ?? row.item_key_words ?? "",
+      )
+        .trim()
+        .toUpperCase();
+      const sold = lookupUnitsSold(row, orderSalesByCode);
+      return {
+        ...p,
+        ITEM_CODE: code || p.ITEM_CODE,
+        item_code: code || p.item_code,
+        item_commercial_name: p.item_commercial_name ?? p.itemName ?? p.ITEM_NAME,
+        item_name: p.itemName ?? p.ITEM_NAME ?? p.item_name,
+        famille: p.famille ?? p.FAMILLE ?? p.category,
+        totalSold: sold > 0 ? sold : Number(p.totalSold ?? 0) || 0,
+      };
+    });
+    return buildFmcgShelf(enriched, 24);
+  }, [supplierProducts, orderSalesByCode]);
+
+  const fmcgPreview = fmcgShelf.slice(0, 12);
+
+  const inventoryInsights = useMemo(() => {
+    const enriched = enrichCatalogForInsights(
+      supplierProducts as Record<string, unknown>[],
+      orderSalesByCode,
+    );
+    return {
+      slow: buildSlowMovers(enriched),
+      restock: buildRestockRecommendations(enriched),
+    };
+  }, [supplierProducts, orderSalesByCode]);
 
   const topUpSaleBullets = useMemo(() => {
     const bullets: string[] = [];
@@ -1341,6 +1529,237 @@ function SupplierDashboard() {
             </Card>
           </div>
         )}
+
+        {/* Slow movers + Restock */}
+        <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-2">
+          <Card className="border-slate-200 bg-gradient-to-b from-slate-50 to-white shadow-md">
+            <CardHeader className="pb-2">
+              <div className="flex items-start gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-slate-500 to-slate-700 text-white shadow-md">
+                  <TrendingDown className="h-5 w-5" strokeWidth={2.2} aria-hidden />
+                </span>
+                <div className="min-w-0">
+                  <CardTitle className="text-xs font-extrabold uppercase tracking-[0.12em] text-slate-700">
+                    {ui.slowMoving}
+                  </CardTitle>
+                  <CardDescription className="mt-0.5 text-[11px] font-medium text-slate-600">
+                    {ui.slowMovingDesc}
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-0">
+              {inventoryInsights.slow.length === 0 ? (
+                <p className="text-sm text-slate-600">{ui.slowMovingEmpty}</p>
+              ) : (
+                <ul className="divide-y divide-slate-100 text-sm">
+                  {inventoryInsights.slow.map((item) => (
+                    <li
+                      key={item.itemCode || item.name}
+                      className="flex items-start justify-between gap-2 py-2.5 first:pt-0"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <span className="block truncate font-medium text-slate-900">{item.name}</span>
+                        <span className="mt-0.5 block text-xs text-slate-500">
+                          {item.stock.toLocaleString()} {ui.insightInStock}
+                          {" · "}
+                          {item.unitsSold > 0
+                            ? `${item.unitsSold.toLocaleString()} ${ui.insightUnits30d}`
+                            : ui.insightNoSales}
+                        </span>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-700">
+                        {ui.fmcgSlow}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="border-orange-200/80 bg-gradient-to-b from-orange-50/90 to-white shadow-md">
+            <CardHeader className="pb-2">
+              <div className="flex items-start gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-orange-400 to-amber-600 text-white shadow-md shadow-orange-500/20">
+                  <RefreshCw className="h-5 w-5" strokeWidth={2.2} aria-hidden />
+                </span>
+                <div className="min-w-0">
+                  <CardTitle className="text-xs font-extrabold uppercase tracking-[0.12em] text-orange-900/80">
+                    {ui.recommendedRestock}
+                  </CardTitle>
+                  <CardDescription className="mt-0.5 text-[11px] font-medium text-slate-600">
+                    {ui.recommendedRestockDesc}
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3 pt-0">
+              {inventoryInsights.restock.length === 0 ? (
+                <p className="text-sm text-slate-600">{ui.recommendedRestockEmpty}</p>
+              ) : (
+                <ul className="divide-y divide-orange-100/80 text-sm">
+                  {inventoryInsights.restock.map((item) => (
+                    <li
+                      key={item.itemCode || item.name}
+                      className="flex items-start justify-between gap-2 py-2.5 first:pt-0"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <span className="block truncate font-medium text-slate-900">{item.name}</span>
+                        <span className="mt-0.5 block text-xs text-slate-500">
+                          {item.stock.toLocaleString()} {ui.insightInStock}
+                          {" · "}
+                          {Number.isFinite(item.daysCover)
+                            ? `${item.daysCover < 10 ? item.daysCover.toFixed(1) : Math.round(item.daysCover)} ${ui.insightDaysCover}`
+                            : `— ${ui.insightDaysCover}`}
+                          {item.suggestedQty > 0 ? (
+                            <>
+                              {" · "}
+                              {ui.insightSuggest} +{item.suggestedQty.toLocaleString()}
+                            </>
+                          ) : null}
+                        </span>
+                      </div>
+                      <span
+                        className={cn(
+                          "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold",
+                          item.stock === 0
+                            ? "bg-red-100 text-red-800"
+                            : "bg-orange-100 text-orange-900",
+                        )}
+                      >
+                        {item.stock === 0 ? ui.outOfStock : ui.statusLowStock}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="border-t border-orange-100 pt-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-orange-200 bg-white text-orange-900"
+                  asChild
+                >
+                  <a href="#supplier-products">{ui.insightViewCatalog}</a>
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Fast moving · FMCG — one collapsible */}
+        <Card className="mb-8 bg-card shadow-md">
+          <CardHeader
+            className="cursor-pointer select-none border-b bg-emerald-50/80 transition-colors hover:bg-emerald-50"
+            onClick={() => setFmcgOpen((o) => !o)}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <TrendingUp className="h-6 w-6 shrink-0 text-emerald-600" />
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <CardTitle className="text-xl">{ui.fastMoving}</CardTitle>
+                    <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-semibold text-violet-800">
+                      {ui.fmcg}
+                    </span>
+                    {fmcgShelf.length > 0 ? (
+                      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">
+                        {fmcgShelf.length} {ui.fmcgMovers}
+                      </span>
+                    ) : null}
+                  </div>
+                  <CardDescription className="mt-1">
+                    {fmcgOpen ? ui.fmcgCollapseHint : ui.fastMovingDesc}
+                  </CardDescription>
+                </div>
+              </div>
+              <ChevronRight
+                className={`h-5 w-5 shrink-0 text-slate-500 transition-transform ${fmcgOpen ? "rotate-90" : ""}`}
+              />
+            </div>
+          </CardHeader>
+          {fmcgOpen && (
+            <CardContent className="p-4 sm:p-6 space-y-3">
+              <p className="text-xs text-slate-500">{ui.fmcgSubtitle}</p>
+              {fmcgPreview.length === 0 ? (
+                <p className="text-sm text-slate-600">{ui.fmcgEmpty}</p>
+              ) : (
+                <ul className="divide-y divide-slate-100 text-sm">
+                  {fmcgPreview.map((p, i) => {
+                    const name = String(
+                      p.item_commercial_name ?? p.itemName ?? p.ITEM_NAME ?? p.item_name ?? "—",
+                    ).trim();
+                    const stock = Number(p.stock ?? p.STOCK ?? 0);
+                    const units = Number(p.unitsSold ?? p.totalSold ?? 0);
+                    const vel = Number(p.salesVelocity ?? 0);
+                    const cls = p.movementClass;
+                    const badge =
+                      cls === "A"
+                        ? { label: ui.fmcgFast, className: "bg-emerald-100 text-emerald-800" }
+                        : cls === "B"
+                          ? { label: ui.fmcgMedium, className: "bg-amber-100 text-amber-900" }
+                          : cls === "C"
+                            ? { label: ui.fmcgSlow, className: "bg-slate-100 text-slate-700" }
+                            : null;
+                    const code = String(p.ITEM_CODE ?? p.itemCode ?? "").trim();
+                    return (
+                      <li
+                        key={code || `${name}-${i}`}
+                        className="flex flex-wrap items-start justify-between gap-2 py-2.5 first:pt-0"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <span className="block truncate font-medium text-slate-900">{name}</span>
+                          <span className="mt-0.5 block text-xs text-slate-500">
+                            {stock.toLocaleString()} {ui.fmcgStock}
+                            {" · "}
+                            {units.toLocaleString()} {ui.fmcgUnits30d}
+                            {" · "}
+                            {vel > 0 ? `${vel.toFixed(1)}${ui.fmcgPerDay}` : `0${ui.fmcgPerDay}`}
+                          </span>
+                        </div>
+                        {badge ? (
+                          <span
+                            className={cn(
+                              "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold",
+                              badge.className,
+                            )}
+                          >
+                            {badge.label}
+                          </span>
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              {fmcgPreview.length > 0 ? (
+                <div className="border-t border-slate-100 pt-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const first = fmcgPreview[0];
+                      const q = String(
+                        first?.item_commercial_name ?? first?.itemName ?? first?.ITEM_NAME ?? "",
+                      ).trim();
+                      if (q) setSearchTerm(q);
+                      setStatusFilter("all");
+                      setCategoryFilter("all");
+                      setCurrentPage(1);
+                      document.getElementById("supplier-products")?.scrollIntoView({
+                        behavior: "smooth",
+                        block: "start",
+                      });
+                    }}
+                  >
+                    {ui.fmcgViewInCatalog}
+                  </Button>
+                </div>
+              ) : null}
+            </CardContent>
+          )}
+        </Card>
 
         {/* Shop With Me QR Code — collapsible so original dashboard stays primary */}
         <Card className="mb-8 bg-card shadow-md">

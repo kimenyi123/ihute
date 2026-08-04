@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ProductCard } from "@/components/product-card";
 import { ProductQuickView, type QuickViewProduct } from "@/components/product-quick-view";
 import { useCartStore } from "@/lib/cart-store";
@@ -55,6 +55,8 @@ type ServerProduct = {
   /** Catalogue / NIKI code for KAOS images and deduping */
   item_code?: string;
   ITEM_CODE?: string;
+  requires_prescription?: boolean;
+  requiresPrescription?: boolean;
 };
 
 function extractNumericPrice(value: any): number {
@@ -110,14 +112,48 @@ function normalizeProduct(
     p.image ?? p.image_url ?? p.item_image_url ?? p.IMAGE_URL ?? undefined
   const imgStr = typeof img === "string" ? img.trim() : img != null ? String(img).trim() : ""
 
+  const sellCandidates = [
+    p.selling_price,
+    p.PRICE,
+    p.P_VENTE,
+    p.PRIX_VENTE,
+    p.UNITY_PRICE,
+    p.SALE_PRICE_INCLUSIVE,
+    p.final_selling_price,
+    p.price,
+  ]
+  let sellingPrice: number | string | undefined =
+    p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? p.final_selling_price ?? p.price
+  if (
+    sellingPrice != null &&
+    typeof sellingPrice !== "number" &&
+    typeof sellingPrice !== "string"
+  ) {
+    sellingPrice = String(sellingPrice)
+  }
+  let bestSell = 0
+  for (const c of sellCandidates) {
+    if (c == null || (typeof c === "string" && String(c).trim() === "")) continue
+    const n = typeof c === "number" ? c : parseFloat(String(c).replace(/[^\d.-]/g, ""))
+    if (!Number.isFinite(n) || n <= 0) continue
+    if (bestSell <= 1 && n > bestSell) {
+      bestSell = n
+      sellingPrice = typeof c === "number" || typeof c === "string" ? c : String(c)
+    } else if (bestSell <= 0 && n > 0) {
+      bestSell = n
+      sellingPrice = typeof c === "number" || typeof c === "string" ? c : String(c)
+    }
+  }
+
   return {
     item_commercial_name: p.item_commercial_name ?? p.ITEM_NAME ?? p.name ?? "Product",
     item_packet: p.item_packet ?? p.UNIT ?? p.pack ?? "",
     item_emballage: p.item_emballage ?? p.ITEM_EMBALLAGE ?? "",
-    selling_price: p.selling_price,
+    selling_price: sellingPrice,
     cost_price: p.cost_price,
     currency: p.currency,
-    item_key_words: p.item_key_words ?? p.DESCRIPTION_KEYWORD ?? "",
+    item_code: code || (p.item_key_words ?? p.NIKI_CODE ?? p.niki_code ?? "").toString().trim() || undefined,
+    item_key_words: p.item_key_words ?? p.DESCRIPTION_KEYWORD ?? code ?? "",
     item_seller_account:
       p.item_seller_account ??
       p.supplier_account ??
@@ -143,6 +179,22 @@ function normalizeProduct(
     famille: (p.famille ?? p.FAMILLE ?? p.category ?? p.CATEGORY ?? "")
       .toString()
       .trim() || undefined,
+    requires_prescription: Boolean(
+      p.requires_prescription === true
+        || p.requires_prescription === 1
+        || p.requires_prescription === "1"
+        || p.requiresPrescription === true
+        || p.requiresPrescription === 1
+        || p.requiresPrescription === "1",
+    ),
+    requiresPrescription: Boolean(
+      p.requires_prescription === true
+        || p.requires_prescription === 1
+        || p.requires_prescription === "1"
+        || p.requiresPrescription === true
+        || p.requiresPrescription === 1
+        || p.requiresPrescription === "1",
+    ),
   };
 }
 
@@ -191,7 +243,10 @@ export type GridCardProduct = {
   supplierId?: string;
   supplierName?: string;
   supplierLocation?: string;
+  /** Stable catalog / NIKI code — never the composite grid id. */
+  itemCode?: string;
   item_code?: string;
+  ITEM_CODE?: string;
   item_key_words?: string;
   image?: string;
   image_url?: string;
@@ -203,17 +258,57 @@ export type GridCardProduct = {
   item_state?: string;
   expiryLabel?: string;
   _routeCategory?: string;
+  requiresPrescription?: boolean;
+  requires_prescription?: boolean;
 };
+
+function catalogCodeOf(p: {
+  item_code?: string;
+  ITEM_CODE?: string;
+  item_key_words?: string;
+  itemCode?: string;
+}): string {
+  return (
+    [p.itemCode, p.item_code, p.ITEM_CODE, p.item_key_words]
+      .map((x) => (x == null ? "" : String(x).trim()))
+      .find((s) => s.length > 0 && !s.toLowerCase().startsWith("pharmacy-") && !/^[\w-]+-\w+-\d+$/.test(s)) ||
+    [p.itemCode, p.item_code, p.ITEM_CODE, p.item_key_words]
+      .map((x) => (x == null ? "" : String(x).trim()))
+      .find((s) => s.length > 0) ||
+    ""
+  );
+}
+
+/** Display/cart hint when API has not stamped requires_prescription yet (gate still re-checks DB). */
+function looksLikeRxRequiredName(name: string | undefined | null): boolean {
+  const n = (name || "").toUpperCase();
+  if (!n) return false;
+  return (
+    n.includes("AUGMENTIN") ||
+    n.includes("AMOXICLAV") ||
+    n.includes("AMOXICIL") ||
+    n.includes("AZITHROMYC") ||
+    n.includes("FLAGYL") ||
+    n.includes("METRONIDAZ") ||
+    n.includes("AMLODIPINE") ||
+    n.includes("AMLO-DENK") ||
+    n.includes("AMITRYPT") ||
+    n.includes("LEVETIRACETAM") ||
+    n.includes("ARTEMETHER") ||
+    n.includes("HYDROCORTISONE")
+  );
+}
 
 function gridProductToQuickView(p: GridCardProduct): QuickViewProduct {
   const line = generalSellingPrice(p.price, p.itemEmballage);
+  const code = catalogCodeOf(p);
   return {
-    id: (p.item_code ?? p.item_key_words ?? p.id).toString(),
+    id: (code || p.id).toString(),
     name: p.name,
     price: line,
     currency: p.currency || "RWF",
     unit: p.unit?.toString(),
-    itemCode: p.item_code ?? p.item_key_words,
+    itemCode: code || undefined,
     supplierId: p.supplierId,
     supplierName: p.supplierName,
     itemEmballage: normalizeItemEmballageForCart(p.itemEmballage),
@@ -223,8 +318,10 @@ function gridProductToQuickView(p: GridCardProduct): QuickViewProduct {
     IMAGE_URL: p.IMAGE_URL,
     famille: p.famille ?? p.FAMILLE,
     FAMILLE: p.FAMILLE,
-    item_key_words: p.item_key_words,
-    item_code: p.item_code ?? p.item_key_words,
+    item_key_words: p.item_key_words || code,
+    item_code: code || p.item_code,
+    requiresPrescription: Boolean(p.requiresPrescription ?? p.requires_prescription),
+    requires_prescription: Boolean(p.requiresPrescription ?? p.requires_prescription),
   };
 }
 
@@ -249,16 +346,26 @@ export function ProductGrid({
   preloadedSectorListSuppliers?: unknown[] | null;
 }) {
   const { t } = useTranslation();
+  const router = useRouter();
+  const pathname = usePathname() || "";
   const searchParams = useSearchParams();
   const urlSq = (searchParams.get("sq") ?? "").trim();
   const [searchQuery, setSearchQuery] = useState("");
   /** category_ai item mode: header search writes `?sq=` — grid filters from URL. */
   const effectiveSearchQuery = hideInlineSearch ? urlSq : searchQuery;
-  /** Non–category-item pages: sort is local state. Category "Choose an item" uses `?sort=` (filter sheet). */
+  /** Non–category-item pages: sort is local state. Category "Choose an item" uses `?sort=` (filter sheet / URL). */
   const [sortByPage, setSortByPage] = useState("featured");
   const sortBy =
     browseMode === "item" ? (searchParams.get("sort") || "price-low") : sortByPage;
-  const setSortBy = setSortByPage;
+  const setSortBy = (value: string) => {
+    if (browseMode === "item") {
+      const p = new URLSearchParams(searchParams.toString());
+      p.set("sort", value);
+      router.replace(`${pathname}?${p.toString()}`, { scroll: false });
+      return;
+    }
+    setSortByPage(value);
+  };
   const [displayCount, setDisplayCount] = useState(12);
   const [familleFilter, setFamilleFilter] = useState<string | null>(null);
   const [serverProducts, setServerProducts] = useState<ServerProduct[]>([]);
@@ -283,7 +390,7 @@ export function ProductGrid({
     setGlobalSearchResults([]);
   }, [selectedSupplier, browseMode]);
 
-  // Global search with debounce - searches both PRODUCTS and SUPPLIERS in this category
+  // Global / sector search with debounce — category_ai item mode uses sector-scoped-search
   useEffect(() => {
     if (!effectiveSearchQuery.trim()) {
       setGlobalSearchResults([]);
@@ -294,6 +401,44 @@ export function ProductGrid({
     setSearching(true);
     const timeoutId = setTimeout(async () => {
       try {
+        // category_ai "Choose an item": dedicated sector catalog search (same as header GlobalSearch when sector is set)
+        if (browseMode === "item" && selectedSupplier === "all") {
+          const params = new URLSearchParams({
+            sector: categoryId,
+            mode: "items",
+            q: effectiveSearchQuery.trim(),
+            Currency: "RWF",
+          });
+          const res = await fetch(`/api/sector-scoped-search?${params}`, {
+            cache: "no-store",
+            headers: { Accept: "application/json" },
+          });
+          if (!res.ok) throw new Error(`Search failed: ${res.status}`);
+          const json = (await res.json()) as { results?: unknown[]; ok?: boolean; error?: string };
+          const rawResults = Array.isArray(json.results) ? json.results : [];
+          console.log(
+            `[ProductGrid Search] sector-scoped items: query="${effectiveSearchQuery}" sector=${categoryId} count=${rawResults.length}`,
+          );
+          const normalized = rawResults.map((p: any) =>
+            normalizeProduct({
+              ...p,
+              item_commercial_name:
+                p.item_commercial_name ?? p.ITEM_NAME ?? p.item_name ?? p.name,
+              item_key_words: p.item_key_words ?? p.ITEM_CODE ?? p.item_code ?? p.niki_code,
+              supplier_account: p.supplier_account ?? p.item_seller_account ?? p.SELLER_ISHYIGA_ACCOUNT,
+              supplier_name: p.supplier_name ?? p.SELLER_NAMES ?? p.nickname,
+              selling_price: p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? p.price,
+            }),
+          );
+          const filtered = filterProductsByRelevance(
+            normalized,
+            effectiveSearchQuery.trim(),
+            10,
+          );
+          setGlobalSearchResults(filtered);
+          return;
+        }
+
         const params = new URLSearchParams({
           globalSearch: effectiveSearchQuery.trim(),
           sector: categoryId, // Filter to current category only
@@ -416,7 +561,7 @@ export function ProductGrid({
     }, 300); // 300ms debounce
 
     return () => clearTimeout(timeoutId);
-  }, [effectiveSearchQuery, categoryId]);
+  }, [effectiveSearchQuery, categoryId, browseMode, selectedSupplier]);
 
   /** category_ai: sector list + badges come from parent — do not re-fetch listSuppliersWithProducts. */
   useEffect(() => {
@@ -536,8 +681,12 @@ export function ProductGrid({
         fromType ||
         toRouteCategoryId(p.sector) ||
         toRouteCategoryId(p.category);
-      const kw = (p.item_key_words ?? "").toString();
+      const kw = (p.item_key_words ?? p.item_code ?? "").toString();
       const acct = (p.item_seller_account ?? "").toString();
+      const catalogCode = catalogCodeOf(p);
+      const needsRx =
+        Boolean(p.requiresPrescription ?? p.requires_prescription) ||
+        (categoryId === "pharmacy" && looksLikeRxRequiredName(p.item_commercial_name));
 
       // Do not set `image` to a local placeholder: getProductImageSrc treats `/placeholder...` as a valid URL and skips KAOS / backend fallbacks.
       const embRaw = resolveItemEmballageRaw(p as Record<string, unknown>);
@@ -547,7 +696,7 @@ export function ProductGrid({
       // Customer line = base × item_emballage — applied once in ProductCard via `generalSellingPrice`.
       // Do not pre-multiply here or prices become base × emballage² (e.g. 510×50 vs 10.2×50).
       return {
-        id: `${categoryId}-${acct}-${kw}-${idx}`,
+        id: `${categoryId}-${acct}-${kw || catalogCode}-${idx}`,
         name: p.item_commercial_name || "Product",
         description: undefined,
         price: extractNumericPrice(p.selling_price),
@@ -556,6 +705,9 @@ export function ProductGrid({
         unit: p.item_packet,
         inStock: true,
         rating: 4,
+        itemCode: catalogCode || undefined,
+        item_code: catalogCode || p.item_code,
+        ITEM_CODE: catalogCode || p.ITEM_CODE,
         supplierId:
           p.item_seller_account ||
           (selectedSupplier !== "all" ? selectedSupplier : "") ||
@@ -566,12 +718,12 @@ export function ProductGrid({
         image_url: p.image_url,
         item_image_url: p.item_image_url,
         IMAGE_URL: p.IMAGE_URL,
-        item_code: p.item_code,
-        ITEM_CODE: p.ITEM_CODE,
-        item_key_words: p.item_key_words,
+        item_key_words: p.item_key_words || catalogCode,
         famille: (p as { famille?: string }).famille ?? (p as { FAMILLE?: string }).FAMILLE ?? "",
         FAMILLE: (p as { FAMILLE?: string }).FAMILLE,
         momo: p.momo,
+        requiresPrescription: needsRx,
+        requires_prescription: needsRx,
         _routeCategory: firstCategoryHint,
       };
     });
@@ -661,10 +813,14 @@ export function ProductGrid({
       p as Record<string, unknown>,
       "/placeholder.svg?height=300&width=300",
     );
+    const catalogCode = catalogCodeOf(p);
+    const needsRx =
+      Boolean(p.requiresPrescription ?? p.requires_prescription) ||
+      (categoryId === "pharmacy" && looksLikeRxRequiredName(p.name));
     addOrInc(
       {
         id: p.id,
-        itemCode: (p.item_code ?? p.item_key_words ?? p.id).toString(),
+        itemCode: catalogCode || p.id,
         name: p.name,
         price: displayPrice,
         unit: p.unit?.toString(),
@@ -672,7 +828,7 @@ export function ProductGrid({
         image_url: p.image_url,
         item_image_url: p.item_image_url,
         IMAGE_URL: p.IMAGE_URL,
-        item_key_words: p.item_key_words,
+        item_key_words: p.item_key_words || catalogCode,
         famille: p.famille,
         supplierId: (p.supplierId || "unknown").toString().trim(),
         supplierName: p.supplierName || "Supplier",
@@ -680,6 +836,7 @@ export function ProductGrid({
         momo: p.momo,
         selectedUnit: p.unit?.toString(),
         ...(itemEmballageForCart ? { itemEmballage: itemEmballageForCart } : {}),
+        ...(needsRx ? { requiresPrescription: true } : {}),
       },
       1,
     );
@@ -698,6 +855,7 @@ export function ProductGrid({
                   {t("categoryBrowseAllItemsInSector" as TranslationKey)} —{" "}
                   <span className="font-semibold text-foreground">{filteredProducts.length}</span>{" "}
                   product{filteredProducts.length !== 1 ? "s" : ""}
+                  {searching && effectiveSearchQuery.trim() ? " (searching…)" : ""}
                 </p>
                 {hideInlineSearch && (
                   <p className="text-xs text-muted-foreground pt-1 border-t border-border/60 mt-2">
@@ -714,37 +872,7 @@ export function ProductGrid({
           </div>
         )}
 
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              type="search"
-              placeholder={`Search ${categoryName} products or suppliers…`}
-              value={searchQuery}
-              onChange={(e) => {
-                console.log("[ProductGrid] Search input changed:", e.target.value);
-                setSearchQuery(e.target.value);
-              }}
-              className="pl-10 pr-10"
-            />
-            {searching && (
-              <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-blue-600" />
-            )}
-          </div>
-          <Select value={sortBy} onValueChange={setSortBy}>
-            <SelectTrigger className="w-full sm:w-[200px]">
-              <SelectValue placeholder="Sort by" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="featured">Featured</SelectItem>
-              <SelectItem value="price-low">Price: Low to High</SelectItem>
-              <SelectItem value="price-high">Price: High to Low</SelectItem>
-              <SelectItem value="newest">Newest First</SelectItem>
-              <SelectItem value="rating">Highest Rated</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        {(!hideInlineSearch || browseMode !== "item") && (
+        {!slimCategoryItemHeader && (
           <div className="flex flex-col sm:flex-row gap-3">
             {!hideInlineSearch && (
               <div className="relative flex-1">
@@ -753,7 +881,10 @@ export function ProductGrid({
                   type="search"
                   placeholder={`Search ${categoryName} products or suppliers…`}
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onChange={(e) => {
+                    console.log("[ProductGrid] Search input changed:", e.target.value);
+                    setSearchQuery(e.target.value);
+                  }}
                   className="pl-10 pr-10"
                 />
                 {searching && (
@@ -761,20 +892,34 @@ export function ProductGrid({
                 )}
               </div>
             )}
-            {browseMode !== "item" && (
-              <Select value={sortBy} onValueChange={setSortBy}>
-                <SelectTrigger className={cn("w-full", "sm:w-[200px]")}>
-                  <SelectValue placeholder="Sort by" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="featured">Featured</SelectItem>
-                  <SelectItem value="price-low">Price: Low to High</SelectItem>
-                  <SelectItem value="price-high">Price: High to Low</SelectItem>
-                  <SelectItem value="newest">Newest First</SelectItem>
-                  <SelectItem value="rating">Highest Rated</SelectItem>
-                </SelectContent>
-              </Select>
-            )}
+            <Select value={sortBy} onValueChange={setSortBy}>
+              <SelectTrigger className={cn("w-full", "sm:w-[200px]")}>
+                <SelectValue placeholder="Sort by" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="featured">Featured</SelectItem>
+                <SelectItem value="price-low">Price: Low to High</SelectItem>
+                <SelectItem value="price-high">Price: High to Low</SelectItem>
+                <SelectItem value="newest">Newest First</SelectItem>
+                <SelectItem value="rating">Highest Rated</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+        {slimCategoryItemHeader && (
+          <div className="flex justify-end">
+            <Select value={sortBy} onValueChange={setSortBy}>
+              <SelectTrigger className="w-full sm:w-[200px]">
+                <SelectValue placeholder="Sort by" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="featured">Featured</SelectItem>
+                <SelectItem value="price-low">Price: Low to High</SelectItem>
+                <SelectItem value="price-high">Price: High to Low</SelectItem>
+                <SelectItem value="newest">Newest First</SelectItem>
+                <SelectItem value="rating">Highest Rated</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         )}
 
@@ -827,7 +972,14 @@ export function ProductGrid({
       {loading && <div className="text-center py-12 text-muted-foreground">Loading products…</div>}
       {error && <div className="text-center py-12 text-destructive">Failed to load products: {error}</div>}
 
-      {!loading && !error && (
+      {!loading && !error && searching && effectiveSearchQuery.trim() && filteredProducts.length === 0 && (
+        <div className="flex flex-col items-center justify-center gap-2 py-12 text-muted-foreground">
+          <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+          <p>Searching for &quot;{effectiveSearchQuery}&quot;…</p>
+        </div>
+      )}
+
+      {!loading && !error && !(searching && filteredProducts.length === 0) && (
         <>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
             {displayedProducts.map((product) => (

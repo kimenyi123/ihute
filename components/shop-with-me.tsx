@@ -51,12 +51,15 @@ import {
 } from "@/components/ui/sheet";
 import { Slider } from "@/components/ui/slider";
 import { useCartStore } from "@/lib/cart-store";
+import { getCookieValue } from "@/lib/cookies";
 import { useAuthStore } from "@/lib/auth-store";
 import { useFavoritesStore } from "@/lib/favorites-store";
 import { trackProductView, trackClick } from "@/lib/interaction-tracker";
-import { trackQrScan } from "@/lib/activity-tracker";
-import { writeShopOrderContext } from "@/lib/ihute-shop-order-context";
+import { trackAddToCartActivity, trackQrScan } from "@/lib/activity-tracker";
 import { cn } from "@/lib/utils";
+import { shouldRunTextSearch } from "@/lib/search-query-min";
+import { productMatchesAllSearchTokens } from "@/lib/search-utils";
+import { writeShopOrderContext } from "@/lib/ihute-shop-order-context";
 import { useToast } from "@/components/ui/use-toast";
 import {
   getProductImageUrl,
@@ -67,6 +70,7 @@ import {
 } from "@/lib/image-utils";
 import {
   generalSellingPrice,
+  lineSellingPriceFromProductRow,
   normalizeItemEmballageForCart,
   resolveItemEmballageRaw,
 } from "@/lib/package-price";
@@ -83,7 +87,16 @@ import {
   resolveSellerMoodSector,
   sellerIsPharmacyCategory,
 } from "@/lib/seller-mood-options";
-import { filterProductsByMoodOption } from "@/lib/seller-mood-filter";
+import {
+  buildAlcoholCategorySections,
+  filterProductsByMoodOption,
+  getMoodSectionLabel,
+  productIsAlcoholic,
+  resolveFavoritesMoodMode,
+  sortProductsByMoodOption,
+  type FavoritesMoodMode,
+  type MoodFilterContext,
+} from "@/lib/seller-mood-filter";
 import {
   getSurpriseDialogConfig,
   filterProductsBySurprisePreferences,
@@ -91,6 +104,12 @@ import {
   type SurprisePreferences,
 } from "@/lib/seller-surprise-config";
 import { LocationBadge } from "@/components/location-badge";
+import {
+  buildFmcgShelf,
+  FMCG_SECTION_NAME,
+  FMCG_SECTION_SUBTITLE,
+} from "@/lib/fmcg";
+import { formatMovementBadge } from "@/lib/sales-velocity";
 
 /** Optional fields for production: plug in from DB when available. */
 type ShopWithMeProductMeta = {
@@ -99,6 +118,8 @@ type ShopWithMeProductMeta = {
   salesLast6Hours?: number;
   salesToday?: number;
   totalSold?: number;
+  salesVelocity?: number;
+  movementClass?: "A" | "B" | "C" | null;
   discountPercent?: number;
   originalPrice?: number;
   favoriteScore?: number;
@@ -130,8 +151,15 @@ type ShopWithMeProduct = {
   currency?: string;
   /** Category/family from API (e.g. BREAKFAST, COLD STARTERS). Preserved when flattening. */
   famille?: string;
+  /** NIKI catalog code — used for https://ishyiga.rw/NIKI/images/{niki_code}.jpg */
+  niki_code?: string;
+  NIKI_CODE?: string;
   item_key_words_french?: string;
   item_key_words_kinyarwanda?: string;
+  keywords_en?: string;
+  /** From niki_items / seller_add_stock enrichment */
+  requires_prescription?: boolean | number;
+  requiresPrescription?: boolean;
 } & Partial<ShopWithMeProductMeta> & {
   ITEM_CODE?: string;
   item_code?: string;
@@ -172,65 +200,14 @@ type CategorySection = {
   expanded: boolean;
 };
 
-/** Alcohol category regex for filter. */
-const ALCOHOL_REGEX = /wine|beer|spirits|cocktail|whiskey|whisky|vodka|rum|gin|cognac|lager|ale|sparkling/i;
-/** Non-alcohol drinks (soda, juice, water, malt, zero-alcohol, energy drinks). */
-const NON_ALCOHOL_REGEX = /soft drink|juice|smoothie|virgin|tea|coffee|water|beverage|malt|energy|zero|non-alcohol|hot coffee|iced coffee|hot tea/i;
-
-/** Single source of truth for mood merchandising: section title, filter, sort, card meta. */
-const MOOD_CONFIG: Record<
-  string,
-  {
-    sectionLabel: string;
-    filter: (p: ShopWithMeProduct) => boolean;
-    sort?: (a: ShopWithMeProduct, b: ShopWithMeProduct) => number;
-    /** When set, used instead of sort() to build ordered list (e.g. surprise mix). */
-    sortProducts?: (products: ShopWithMeProduct[]) => ShopWithMeProduct[];
-    metaType: MoodMetaType;
-  }
-> = {
-  "white-wine": {
-    sectionLabel: "Alcohol",
-    filter: (p) => getProductMeta(p).isAlcohol,
-    metaType: "alcohol",
-  },
-  whisky: {
-    sectionLabel: "Non-Alcohol",
-    filter: (p) => {
-      const meta = getProductMeta(p);
-      const cat = meta.category + String((p as Record<string, unknown>).item_commercial_name ?? "");
-      return !meta.isAlcohol && NON_ALCOHOL_REGEX.test(cat);
-    },
-    metaType: "nonAlcohol",
-  },
-  beer: {
-    sectionLabel: "Trending Now",
-    filter: (p) => ALCOHOL_REGEX.test(getProductMeta(p).category) || /beer|lager|ale/i.test(String((p as Record<string, unknown>).item_commercial_name ?? "")),
-    sort: (a, b) => getProductMeta(b).trendScore - getProductMeta(a).trendScore,
-    metaType: "trending",
-  },
-  cocktails: {
-    sectionLabel: "Discounted",
-    filter: (p) => {
-      const meta = getProductMeta(p);
-      if (meta.discountPercent > 0) return true;
-      return /cocktail|shot cocktail|coffee cocktail/i.test(meta.category) || /cocktail/i.test(String((p as Record<string, unknown>).item_commercial_name ?? ""));
-    },
-    sort: (a, b) => getProductMeta(b).discountPercent - getProductMeta(a).discountPercent,
-    metaType: "discounted",
-  },
-  coffee: {
-    sectionLabel: "Favorites",
-    filter: (p) => /coffee|hot coffee|iced coffee|tea/i.test(getProductMeta(p).category) || /coffee|tea/i.test(String((p as Record<string, unknown>).item_commercial_name ?? "")),
-    sort: (a, b) => (getProductMeta(b).favoriteScore ?? 0) - (getProductMeta(a).favoriteScore ?? 0),
-    metaType: "favorites",
-  },
-  "no-alcohol": {
-    sectionLabel: "Surprise me :)",
-    filter: (p) => NON_ALCOHOL_REGEX.test(getProductMeta(p).category) || getProductMeta(p).inStock,
-    sortProducts: (products) => buildSurpriseMix(products),
-    metaType: "surprise",
-  },
+/** Mood id → card subtitle type (filtering lives in seller-mood-filter). */
+const MOOD_META_TYPES: Record<string, MoodMetaType> = {
+  "white-wine": "alcohol",
+  whisky: "nonAlcohol",
+  beer: "trending",
+  cocktails: "discounted",
+  coffee: "favorites",
+  [SURPRISE_MOOD_ID]: "surprise",
 };
 
 /** Filter products for Surprise section based on table + mood (food — legacy path). */
@@ -268,7 +245,7 @@ function filterSurpriseByPreferencesFood(
     if (filtered.length > 0) return filtered;
   }
   if (wantAlcohol) {
-    const filtered = products.filter((p) => match(p, ALCOHOL_REGEX));
+    const filtered = products.filter((p) => productIsAlcoholic(p as Record<string, unknown>));
     if (filtered.length > 0) return filtered;
   }
   const moodRegexes: RegExp[] = [];
@@ -395,7 +372,8 @@ function getTrendingPlaceholder(p: ShopWithMeProduct): { x: number; y: number } 
 /** Returns text and optional discount info for card under product name. */
 function getMoodMetaText(
   p: ShopWithMeProduct,
-  metaType: MoodMetaType
+  metaType: MoodMetaType,
+  favoritesMode?: FavoritesMoodMode
 ): { text: string | null; wasPrice?: number; discountPercent?: number } {
   const meta = getProductMeta(p);
   switch (metaType) {
@@ -424,7 +402,13 @@ function getMoodMetaText(
       }
       return { text: "Discounted" };
     case "favorites":
-      return { text: meta.favoriteScore != null && meta.favoriteScore > 0 ? "Most popular" : "Top favorite" };
+      if (favoritesMode === "yours") return { text: "Your favorite" };
+      return {
+        text:
+          getProductMeta(p).favoriteScore != null && getProductMeta(p).favoriteScore! > 0
+            ? "Others love ordering this"
+            : "Popular here",
+      };
     case "surprise":
       return { text: "Surprise me :)" };
     default:
@@ -615,6 +599,24 @@ function categorizeProduct(product: ShopWithMeProduct): string {
   return "Other";
 }
 
+/** FAMILLE aliases for Fast-Moving Consumer Goods — always shown first on shop-with-me. */
+function isFmcgCategoryName(name: string): boolean {
+  const n = name.trim().toLowerCase().replace(/[_-]+/g, " ");
+  return (
+    n === "fmcg" ||
+    n === "fmcgp" ||
+    n.includes("fast moving consumer") ||
+    n.includes("fast-moving consumer")
+  );
+}
+
+function normalizeShopCategoryName(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "Other";
+  if (isFmcgCategoryName(trimmed)) return "FMCG";
+  return trimmed;
+}
+
 function ProductGridSearchSkeleton({ count = 12 }: { count?: number }) {
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5">
@@ -693,7 +695,8 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
     setLoading(true);
     setError(null);
     const params = new URLSearchParams({ nickname: normalizedNickname });
-    if (debouncedProductSearch) params.set("productSearch", debouncedProductSearch);
+    const effectiveSearch = shouldRunTextSearch(debouncedProductSearch) ? debouncedProductSearch : "";
+    if (effectiveSearch) params.set("productSearch", effectiveSearch);
     const url = `/api/shop-with-me?${params.toString()}`;
     fetch(url, { cache: "no-store" })
       .then((res) => {
@@ -872,29 +875,29 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
   );
 
   useEffect(() => {
-    if (!nicknameLower) return;
-    const src = (searchParams?.get("src") || "").trim().toLowerCase();
-    const acquisitionSource = src === "qr" ? ("qr" as const) : undefined;
+    if (!nicknameLower) return
+    const src = (searchParams?.get("src") || "").trim().toLowerCase()
+    const acquisitionSource = src === "qr" ? ("qr" as const) : undefined
     writeShopOrderContext({
       shopNickname: nicknameLower,
       sellerAccount: currentSeller?.ISHYIGA_ACCOUNT,
       acquisitionSource,
-    });
-  }, [nicknameLower, currentSeller?.ISHYIGA_ACCOUNT, searchParams]);
+    })
+  }, [nicknameLower, currentSeller?.ISHYIGA_ACCOUNT, searchParams])
 
-  const qrScanLoggedRef = useRef<string>("");
+  const qrScanLoggedRef = useRef<string>("")
   useEffect(() => {
-    if (!nicknameLower) return;
-    const src = (searchParams?.get("src") || "").trim().toLowerCase();
-    if (src !== "qr") return;
-    const key = `${nicknameLower}|${searchParams?.get("table") || ""}`;
-    if (qrScanLoggedRef.current === key) return;
-    qrScanLoggedRef.current = key;
+    if (!nicknameLower) return
+    const src = (searchParams?.get("src") || "").trim().toLowerCase()
+    if (src !== "qr") return
+    const key = `${nicknameLower}|${searchParams?.get("table") || ""}`
+    if (qrScanLoggedRef.current === key) return
+    qrScanLoggedRef.current = key
     trackQrScan(nicknameLower, {
       sellerAccount: currentSeller?.ISHYIGA_ACCOUNT,
       table: searchParams?.get("table") || undefined,
-    });
-  }, [nicknameLower, currentSeller?.ISHYIGA_ACCOUNT, searchParams]);
+    })
+  }, [nicknameLower, currentSeller?.ISHYIGA_ACCOUNT, searchParams])
 
   const moodOptions = useMemo(
     () =>
@@ -942,6 +945,10 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
     }
   }, [moodOptions, moodPreference]);
 
+  useEffect(() => {
+    setCategoryPages({});
+  }, [moodPreference]);
+
   const surpriseDialogConfig = useMemo(
     () => (moodSector ? getSurpriseDialogConfig(moodSector, sellerCategorySlugs) : null),
     [moodSector, sellerCategorySlugs]
@@ -985,24 +992,54 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
       return;
     }
 
-    const categoryMap = new Map<string, ShopWithMeProduct[]>();
-
-    currentSeller.products.forEach((product) => {
+    const pricedProducts: ShopWithMeProduct[] = [];
+    for (const product of currentSeller.products) {
       const r = product as Record<string, unknown>;
       const base =
         extractNumericPrice(r.selling_price ?? product.price ?? r.UNITY_PRICE ?? r.SALE_PRICE_INCLUSIVE);
-      if (base <= 0) return; // don't show 0-price items
+      if (base <= 0) continue;
+      pricedProducts.push(product);
+    }
+
+    /** FMCG for every shop category: taxonomy match, else top sellers by velocity. */
+    const FMCG_MAX_ITEMS = 48;
+    const fmcgProducts = buildFmcgShelf(
+      pricedProducts as Record<string, unknown>[],
+      FMCG_MAX_ITEMS,
+      {
+        isPharmacy: sellerIsPharmacy(currentSeller),
+        isBarOrRestaurant: sellerIsRestaurantOrBar(currentSeller),
+      }
+    ) as ShopWithMeProduct[];
+
+    const fmcgCodes = new Set(
+      fmcgProducts.map((p) => getItemCode(p)).filter(Boolean).map((c) => c.toUpperCase())
+    );
+
+    const categoryMap = new Map<string, ShopWithMeProduct[]>();
+    if (fmcgProducts.length > 0) {
+      categoryMap.set(FMCG_SECTION_NAME, fmcgProducts);
+    }
+
+    for (const product of pricedProducts) {
+      const code = getItemCode(product).toUpperCase();
+      // Fast-movers / FMCG catalog sit in the top section only (no duplicate cards)
+      if (code && fmcgCodes.has(code)) continue;
+
       const fam = (product as Record<string, unknown>).famille ?? (product as Record<string, unknown>).FAMILLE;
-      const category = (fam && String(fam).trim()) ? String(fam).trim() : categorizeProduct(product);
+      const rawCategory = (fam && String(fam).trim()) ? String(fam).trim() : categorizeProduct(product);
+      const category = normalizeShopCategoryName(rawCategory);
+      if (category === FMCG_SECTION_NAME) continue;
       if (!categoryMap.has(category)) {
         categoryMap.set(category, []);
       }
       categoryMap.get(category)!.push(product);
-    });
+    }
 
     const categorySections: CategorySection[] = [];
-    // Restaurant order: starters first, then mains/sides/desserts, drinks last
+    // FMCG first, then restaurant-style / other familles
     const categoryOrder = [
+      FMCG_SECTION_NAME,
       "Cold Starters", "Hot Starters", "Starters", "Breakfast",
       "Main Course", "Main Courses", "Burgers", "Pasta", "Pizzas", "Rice", "Wraps", "Platter", "Sizzling", "Barbecue", "Mother Style",
       "Accompaniments", "Vegetables", "Snacks",
@@ -1014,6 +1051,8 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
     ];
 
     const orderedNames = Array.from(categoryMap.keys()).sort((a, b) => {
+      if (a === FMCG_SECTION_NAME && b !== FMCG_SECTION_NAME) return -1;
+      if (b === FMCG_SECTION_NAME && a !== FMCG_SECTION_NAME) return 1;
       const ai = categoryOrder.indexOf(a);
       const bi = categoryOrder.indexOf(b);
       if (ai >= 0 && bi >= 0) return ai - bi;
@@ -1026,7 +1065,7 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
       categorySections.push({
         name: categoryName,
         products: categoryMap.get(categoryName)!,
-        expanded: index === 0, // Only first category expanded for faster initial load
+        expanded: index === 0,
       });
     });
 
@@ -1061,9 +1100,15 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
   const showProductGridSkeleton =
     categories.length > 0 && (isSearchDebouncing || loading);
 
-  // Price range filter only — text search is server-side after debounce (no interim client filter).
+  // Price range always; interim client text filter while debounce pending (uses EN/FR/RW fields).
+  // After debounce, API productSearch is authoritative — skip client text filter.
   const getFilteredProducts = (products: ShopWithMeProduct[]) => {
     let list = products;
+
+    if (!debouncedProductSearch.trim() && productSearchQuery.trim()) {
+      const terms = productSearchQuery.toLowerCase().trim().split(/\s+/).filter(Boolean);
+      list = list.filter((product) => productMatchesAllSearchTokens(product, terms));
+    }
 
     const minNum = priceMin.trim() ? parseInt(priceMin.trim(), 10) : NaN;
     const maxNum = priceMax.trim() ? parseInt(priceMax.trim(), 10) : NaN;
@@ -1128,28 +1173,47 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
 
   /** Total items from backend (full Redis/API list) */
   const totalItemsFromBackend = currentSeller?.products?.length ?? currentSeller?.product_count ?? 0;
-  /** Categories to display: category filter + optional mood (product keyword match by sector). */
-  const categoriesToShow = useMemo(() => {
+
+  const shopFavorites = useFavoritesStore((s) => s.favorites);
+  const shopFavoriteIds = useMemo(() => {
+    const sid = currentSeller?.ISHYIGA_ACCOUNT;
+    if (!sid) return new Set<string>();
+    return new Set(
+      shopFavorites
+        .filter((f) => (f.supplierId || "unknown") === sid)
+        .map((f) => f.id)
+    );
+  }, [shopFavorites, currentSeller?.ISHYIGA_ACCOUNT]);
+
+  const moodFilterCtx = useMemo(
+    (): MoodFilterContext => ({
+      sector: moodSector,
+      supplierAccount: currentSeller?.ISHYIGA_ACCOUNT,
+      shopFavoriteIds,
+    }),
+    [moodSector, currentSeller?.ISHYIGA_ACCOUNT, shopFavoriteIds]
+  );
+
+  /** Categories to display: category filter + optional mood (exact match by sector). */
+  const { categoriesToShow, favoritesMoodMode } = useMemo(() => {
     let list = categoryFilter ? categories.filter((c) => c.name === categoryFilter) : categories;
-    if (!moodPreference) return list;
+    let favoritesMode: FavoritesMoodMode = null;
+    if (!moodPreference) return { categoriesToShow: list, favoritesMoodMode: favoritesMode };
 
     const option = moodOptions.find((o) => o.id === moodPreference);
-    if (!option) return list;
+    if (!option) return { categoriesToShow: list, favoritesMoodMode: favoritesMode };
 
     const sourceList = categoryFilter ? list : categories;
     const allProducts = sourceList.flatMap((c) => c.products);
-    const useLegacyFoodConfig =
-      moodSector === "food" || moodSector === "liquor";
-    const config = useLegacyFoodConfig ? MOOD_CONFIG[moodPreference] : undefined;
 
-    let filtered: ShopWithMeProduct[] = config
-      ? allProducts.filter(config.filter)
-      : filterProductsByMoodOption(allProducts as Record<string, unknown>[], option);
+    let filtered = filterProductsByMoodOption(
+      allProducts as Record<string, unknown>[],
+      option,
+      moodFilterCtx
+    ) as ShopWithMeProduct[];
 
-    if (option.id === "beer") {
-      filtered = filtered.filter((p) => getProductMeta(p).inStock);
-    } else if (option.id === "cocktails") {
-      filtered = filtered.filter((p) => getProductMeta(p).discountPercent > 0);
+    if (option.id === "coffee") {
+      favoritesMode = resolveFavoritesMoodMode(allProducts as Record<string, unknown>[], option, moodFilterCtx);
     }
 
     if (isSurpriseMoodId(moodPreference) && surprisePreferences && moodSector) {
@@ -1164,34 +1228,36 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
       }
     }
 
-    let ordered: ShopWithMeProduct[] = config?.sortProducts
-      ? config.sortProducts(filtered)
-      : config?.sort
-        ? [...filtered].sort(config.sort)
-        : filtered;
+    let ordered: ShopWithMeProduct[] = sortProductsByMoodOption(
+      filtered as Record<string, unknown>[],
+      option
+    ) as ShopWithMeProduct[];
 
-    if (option.id === "beer") {
-      ordered = [...ordered].sort(
-        (a, b) => getProductMeta(b).trendScore - getProductMeta(a).trendScore
-      );
-    } else if (option.id === "cocktails") {
-      ordered = [...ordered].sort(
-        (a, b) => getProductMeta(b).discountPercent - getProductMeta(a).discountPercent
-      );
-    } else if (option.id === "coffee") {
-      ordered = [...ordered].sort(
-        (a, b) => (getProductMeta(b).favoriteScore ?? 0) - (getProductMeta(a).favoriteScore ?? 0)
-      );
-    } else if (isSurpriseMoodId(moodPreference)) {
+    if (isSurpriseMoodId(moodPreference)) {
       ordered = buildSurpriseMix(ordered.length > 0 ? ordered : allProducts);
     }
 
     if (ordered.length > 0) {
-      list = [{ name: config?.sectionLabel ?? option.label, products: ordered, expanded: true }];
+      if (option.id === "white-wine") {
+        const alcoholSections = buildAlcoholCategorySections(ordered as Record<string, unknown>[])
+        list = alcoholSections.map((section, index) => ({
+          name: section.label,
+          products: section.products as ShopWithMeProduct[],
+          expanded: index === 0,
+        }))
+      } else {
+        list = [
+          {
+            name: getMoodSectionLabel(option, favoritesMode),
+            products: ordered,
+            expanded: true,
+          },
+        ]
+      }
     } else {
-      list = [];
+      list = []
     }
-    return list;
+    return { categoriesToShow: list, favoritesMoodMode: favoritesMode };
   }, [
     categories,
     categoryFilter,
@@ -1200,6 +1266,7 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
     moodOptions,
     moodSector,
     sellerCategorySlugs,
+    moodFilterCtx,
   ]);
   /** Filtered count (after search and category filter) */
   const totalProductCount = categoriesToShow.reduce((sum, cat) => {
@@ -1319,7 +1386,13 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
                 <h1 className="text-xl sm:text-2xl font-bold text-foreground break-words">
                   {currentSeller.OWNER || currentSeller.SELLER_NAMES || currentSeller.NICKNAME}
                 </h1>
-                {/* How I feel today: pills from account_seller.preferedcategories (PREFERRED_CATEGORIES) */}
+                {categories.some((c) => c.name === FMCG_SECTION_NAME) ? (
+                  <div className="mt-3 space-y-0.5">
+                    <p className="text-sm font-semibold tracking-wide text-foreground">FMCG</p>
+                    <p className="text-xs text-muted-foreground">{FMCG_SECTION_SUBTITLE}</p>
+                  </div>
+                ) : null}
+                {/* Mood filters ("How I feel today") temporarily disabled.
                 {moodOptions.length > 0 ? (
                 <div className="mt-3 space-y-1.5">
                   <p className="text-xs font-medium text-muted-foreground">How I feel today:</p>
@@ -1375,6 +1448,7 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
                   </div>
                 </div>
                 ) : null}
+                */}
               </div>
 
               {hasTableContext && tableFromQuery?.trim() && (
@@ -1384,17 +1458,24 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
               )}
             </div>
 
-            {/* Shop-scoped search + filters (single header: main Header above; no duplicate nav bar) */}
+            {/* Simple product search + filters (same as before — not the blue shop-scoped card) */}
             <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
               <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                 <Input
+                  id="shop-with-me-product-search"
                   type="search"
                   placeholder="Search products..."
                   value={productSearchQuery}
                   onChange={(e) => setProductSearchQuery(e.target.value)}
                   className="pl-10"
+                  aria-label="Search products in this shop"
                 />
+                {isSearchDebouncing ? (
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground animate-pulse">
+                    …
+                  </span>
+                ) : null}
               </div>
               <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
                 <span className="text-sm text-muted-foreground whitespace-nowrap">
@@ -1402,7 +1483,7 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
                     ? `${totalProductCount} of ${totalItemsFromBackend} item${totalItemsFromBackend !== 1 ? "s" : ""}`
                     : `${totalItemsFromBackend} item${totalItemsFromBackend !== 1 ? "s" : ""}`}
                 </span>
-                {showFilterButton && (
+                {showFilterButton ? (
                   <Button
                     variant="outline"
                     size="sm"
@@ -1412,13 +1493,13 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
                   >
                     <SlidersHorizontal className="h-4 w-4" />
                     <span className="hidden sm:inline">Filters</span>
-                    {hasActiveFilters && (
+                    {hasActiveFilters ? (
                       <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-primary text-[10px] font-medium text-primary-foreground flex items-center justify-center">
                         {[categoryFilter, priceMin.trim(), priceMax.trim(), moodPreference].filter(Boolean).length}
                       </span>
-                    )}
+                    ) : null}
                   </Button>
-                )}
+                ) : null}
               </div>
             </div>
 
@@ -1568,7 +1649,7 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
                 {categoriesToShow.map((category) => {
                   const filteredProducts = getFilteredProducts(category.products);
                   const sortedProducts = getSortedProducts(filteredProducts);
-                  const currentMoodConfig = moodPreference ? MOOD_CONFIG[moodPreference] : null;
+                  const currentMoodMetaType = moodPreference ? MOOD_META_TYPES[moodPreference] : null;
 
                   if (sortedProducts.length === 0) return null;
 
@@ -1599,6 +1680,10 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
                               {category.name}
                             </h2>
                             <p className="text-xs text-muted-foreground mt-0.5">
+                              {category.name === FMCG_SECTION_NAME
+                                ? "All shop types · sales in last 30 days · A=80% / B=15% / C=5% of units"
+                                : null}
+                              {category.name === FMCG_SECTION_NAME ? " · " : null}
                               {totalInCategory} product{totalInCategory !== 1 ? "s" : ""}
                             </p>
                           </div>
@@ -1661,12 +1746,15 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
                               <ProductCard
                                 key={`${category.name}-${startIndex + idx}`}
                                 product={product}
-                                moodMetaType={currentMoodConfig?.metaType}
+                                moodMetaType={currentMoodMetaType}
+                                favoritesMoodMode={favoritesMoodMode}
                                 ownerName={currentSeller.OWNER || currentSeller.SELLER_NAMES || currentSeller.NICKNAME}
                                 supplierId={currentSeller.ISHYIGA_ACCOUNT || ""}
                                 isBarOrRestaurant={isBarOrRestaurant}
                                 isPharmacy={isPharmacy}
-                                productSearchActive={!!debouncedProductSearch.trim()}
+                                productSearchActive={shouldRunTextSearch(debouncedProductSearch)}
+                                shopNickname={nicknameFromUrl.trim().toLowerCase()}
+                                currentSearchQuery={productSearchQuery}
                               />
                             ))}
                           </div>
@@ -1734,7 +1822,7 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
                   categoriesToShow.every((cat) => getFilteredProducts(cat.products).length === 0) && (
                   <div className="text-center py-12">
                     <p className="text-muted-foreground">
-                      {debouncedProductSearch ? `No products found matching "${debouncedProductSearch}"` : "No products available"}
+                      {shouldRunTextSearch(debouncedProductSearch) ? `No products found matching "${debouncedProductSearch}"` : "No products available"}
                     </p>
                   </div>
                 )}
@@ -1849,20 +1937,26 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
 function ProductCard({
   product,
   moodMetaType,
+  favoritesMoodMode,
   ownerName,
   supplierId,
   isBarOrRestaurant,
   isPharmacy,
   productSearchActive,
+  shopNickname,
+  currentSearchQuery,
 }: {
   product: ShopWithMeProduct;
-  /** When set, show contextual subtitle under product name (from MOOD_CONFIG.metaType). */
+  /** When set, show contextual subtitle under product name. */
   moodMetaType?: MoodMetaType | null;
+  favoritesMoodMode?: FavoritesMoodMode;
   ownerName?: string;
   supplierId: string;
   isBarOrRestaurant?: boolean;
   isPharmacy?: boolean;
   productSearchActive?: boolean;
+  shopNickname?: string;
+  currentSearchQuery?: string;
 }) {
   const router = useRouter();
   const { toast } = useToast();
@@ -1872,6 +1966,11 @@ function ProductCard({
 
   const itemCode = getItemCode(product);
   const p = product as Record<string, unknown>;
+  const movementBadge = formatMovementBadge(
+    product.movementClass,
+    product.salesVelocity,
+    Number(product.totalSold ?? p.unitsSold ?? 0) || undefined,
+  );
   // Base unit price: `selling_price` from Redis/API; `price` is the same meaning when both are present.
   const productName = String(p.item_commercial_name ?? p.item_name ?? p.ITEM_NAME ?? p.ITEM_COMMERCIAL_NAME ?? "").trim() || "Product";
   const categoryVal = p.category ?? p.famille ?? p.FAMILLE ?? p.item_department;
@@ -1881,12 +1980,13 @@ function ProductCard({
   const priceRaw = p.selling_price ?? p.price ?? p.UNITY_PRICE ?? p.SALE_PRICE_INCLUSIVE;
   const baseUnit = extractNumericPrice(priceRaw);
   const embRaw = resolveItemEmballageRaw(p);
-  const price = generalSellingPrice(baseUnit, embRaw);
+  // Prefer alias retail amounts when CIS left selling_price as 1 (package flag).
+  const price = lineSellingPriceFromProductRow(p as Record<string, unknown>) || generalSellingPrice(baseUnit, embRaw);
   const itemEmballageCart = normalizeItemEmballageForCart(embRaw);
   const embStr =
     embRaw != null && String(embRaw).trim() !== "" ? String(embRaw) : null;
   const unitLabel = itemEmballageDisplaySuffix(embStr ?? "1") ?? "1 Pkg";
-  const moodMeta = moodMetaType ? getMoodMetaText(product, moodMetaType) : { text: null };
+  const moodMeta = moodMetaType ? getMoodMetaText(product, moodMetaType, favoritesMoodMode) : { text: null };
 
   /** Try KAOS famille → flat NIKI → each backend URL → no_image (same order as getProductImageSrc, but advance on 404). */
   const imageCandidates = useMemo(
@@ -1912,7 +2012,7 @@ function ProductCard({
     (imageUrl.startsWith("http://") || imageUrl.startsWith("https://") || imageUrl.startsWith("/"));
   const [imgError, setImgError] = useState(false);
   const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
-  const fav = isFavorite(itemCode);
+  const fav = isFavorite(itemCode, supplierId);
   const [erxOpen, setErxOpen] = useState(false);
   const user = useAuthStore((s) => s.user);
   const isDoctor = String(user?.dbRole ?? "").trim().toUpperCase() === "DOCTOR";
@@ -1969,15 +2069,40 @@ function ProductCard({
         erx,
         notes: erx ? serializeErxForNotes(erx) : undefined,
         ...(itemEmballageCart ? { itemEmballage: itemEmballageCart } : {}),
+        ...(Boolean(p.requires_prescription ?? p.requiresPrescription)
+          ? { requiresPrescription: true }
+          : {}),
       },
       Math.max(1, qty)
     );
+
+    trackAddToCartActivity(itemCode, productName, {
+      price,
+      quantity: Math.max(1, qty),
+      shopNickname: shopNickname || undefined,
+      supplierId,
+    });
 
     toast({
       title: "Added to cart",
       description: productName,
       duration: 2000,
     });
+
+    if (currentSearchQuery?.trim()) {
+      fetch("/api/internal/search-event-select", {
+        method: "POST",
+        headers: { "x-ihute-internal": "true", "Content-Type": "application/json" },
+        body: JSON.stringify({
+          term: currentSearchQuery,
+          item_code: itemCode,
+          item_name: productName,
+          source: "shopwithme",
+          shop_nickname: shopNickname ?? null,
+          session_id: getCookieValue("ihute_sid"),
+        }),
+      }).catch(() => {});
+    }
   };
 
   const openErxDialog = () => {
@@ -2085,6 +2210,9 @@ function ProductCard({
       <CardContent className="p-3 flex flex-col gap-2">
         <div className="min-h-[2.5rem]">
           <h3 className="text-sm font-semibold leading-tight line-clamp-2">{displayName}</h3>
+          {movementBadge ? (
+            <p className="text-[10px] font-medium text-emerald-700 mt-0.5">{movementBadge}</p>
+          ) : null}
           {isPharmacy && (
             <div className="mt-1 space-y-0.5 text-[11px] text-muted-foreground">
               {pharmacyViewFields.dosage && <p>Dosage: {pharmacyViewFields.dosage}</p>}

@@ -285,6 +285,11 @@ export type OrderReceiptViewModel = {
   followLink?: string
   placedAt?: string
   logisticsType?: string
+  /**
+   * Absolute or site-relative public URL of the Rx photo for THIS seller-order only.
+   * Only set when PRESCRIPTION_REQUIRED=1 for that order.
+   */
+  prescriptionImageUrl?: string
 }
 
 function formatReceiptMoney(amount: number): string {
@@ -331,6 +336,8 @@ export function buildOrderReceiptViewModel(args: {
   defaultOrderedBy?: string
   /** Order placed time — raw timestamp or pre-formatted label */
   placedAt?: number | string | null
+  /** Rx photo URL for this seller-order only (when PRESCRIPTION_REQUIRED). */
+  prescriptionImageUrl?: string | null
 }): OrderReceiptViewModel {
   const discount = args.discount ?? 0
   const description = args.orderDescription?.trim()
@@ -368,6 +375,7 @@ export function buildOrderReceiptViewModel(args: {
 
   const phone = (args.myPhone ?? "").trim()
   const normalizedPhone = phone && !/^n\/?a$/i.test(phone) ? phone : ""
+  const rxUrl = String(args.prescriptionImageUrl ?? "").trim() || undefined
 
   return {
     shop: args.shop,
@@ -393,6 +401,7 @@ export function buildOrderReceiptViewModel(args: {
         ? args.placedAt.trim() || undefined
         : formatTableRoundTimestamp(args.placedAt),
     logisticsType: args.logisticsType?.trim() || undefined,
+    prescriptionImageUrl: rxUrl,
   }
 }
 
@@ -447,6 +456,11 @@ export function buildOrderWhatsAppMessageFromViewModel(vm: OrderReceiptViewModel
   lines.push(waLabelValue("Paid at", vm.paidAt))
   if (vm.reference) lines.push(waLabelValue("Message", vm.reference))
   if (vm.myPhone) lines.push(waLabelValue("My phone", vm.myPhone))
+
+  if (vm.prescriptionImageUrl) {
+    lines.push("", waSection("Prescription"), vm.prescriptionImageUrl)
+  }
+
   if (vm.followLink) {
     lines.push("", waSection("Track order"), vm.followLink)
   }
@@ -473,6 +487,109 @@ export function buildOrderWhatsAppMessage(args: {
   logisticsType?: string
   logisticsFee?: number
   placedAt?: string
+  /** Rx photo URL for this seller-order only. */
+  prescriptionImageUrl?: string | null
 }): string {
   return buildOrderWhatsAppMessageFromViewModel(buildOrderReceiptViewModel(args))
+}
+
+/** Make Rx path absolute for WhatsApp (sellers open the link outside the app). */
+export function publicSiteBaseUrl(): string {
+  const candidates = [
+    process.env.NEXT_PUBLIC_PUBLIC_BASE_URL,
+    process.env.NEXT_PUBLIC_SITE_URL,
+    process.env.NEXT_PUBLIC_SHOP_URL,
+  ]
+  for (const raw of candidates) {
+    const v = String(raw || "").trim()
+    if (!v) continue
+    if (isLocalDevHost(v)) continue
+    // Trading API URL is not a public web origin for /uploads or /track-order
+    if (/\/Trading\/?$/i.test(v) || /:8080\b/.test(v)) continue
+    return v.replace(/\/Trading\/?$/i, "").replace(/\/$/, "")
+  }
+  return "https://ihute.rw"
+}
+
+function isLocalDevHost(urlOrHost: string): boolean {
+  const s = String(urlOrHost || "").toLowerCase()
+  return (
+    s.includes("localhost") ||
+    s.includes("127.0.0.1") ||
+    s.includes("0.0.0.0") ||
+    s.includes("[::1]")
+  )
+}
+
+/**
+ * Absolute URL for WhatsApp / SMS / external clients.
+ * Rewrites localhost absolute URLs (common when NEXT_PUBLIC_SITE_URL is local) to the public site base.
+ */
+export function absolutePublicAssetUrl(pathOrUrl: string | null | undefined): string | undefined {
+  const raw = String(pathOrUrl ?? "").trim()
+  if (!raw) return undefined
+  const base = publicSiteBaseUrl()
+
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const u = new URL(raw)
+      if (isLocalDevHost(u.hostname) || isLocalDevHost(u.origin)) {
+        return `${base}${u.pathname}${u.search}${u.hash}`
+      }
+      return raw
+    } catch {
+      return raw
+    }
+  }
+
+  return `${base}${raw.startsWith("/") ? "" : "/"}${raw}`
+}
+
+/**
+ * Rx photo for WhatsApp / receipt — include whenever a URL exists.
+ * Do not gate on PRESCRIPTION_REQUIRED alone: checkout may upload via name-hint
+ * while DB flag is still 0, and the image URL is still stored on the order.
+ */
+export function resolveOrderPrescriptionPublicUrl(
+  orderLike: Record<string, unknown> | null | undefined,
+  fallbackUrl?: string | null,
+): string | undefined {
+  const raw = String(
+    orderLike?.PRESCRIPTION_IMAGE_URL ??
+      orderLike?.prescriptionImageUrl ??
+      orderLike?.prescription_image_url ??
+      fallbackUrl ??
+      "",
+  ).trim()
+  return absolutePublicAssetUrl(raw)
+}
+
+/**
+ * Prefer BANK_TRANSACTION_ID, then real gateway/MoMo ids on PAYMENT_ID.
+ * Filters synthetic placeholders (MOMO_*, COD_*, …).
+ */
+export function resolveMomoTxIdForReceipt(order: {
+  BANK_TRANSACTION_ID?: string | null
+  bankTransactionId?: string | null
+  PAYMENT_ID?: string | null
+  paymentId?: string | null
+  REFERENCE?: string | null
+  reference?: string | null
+} | null | undefined, fallback?: string | null): string | undefined {
+  const candidates = [
+    fallback,
+    order?.BANK_TRANSACTION_ID,
+    order?.bankTransactionId,
+    order?.PAYMENT_ID,
+    order?.paymentId,
+    order?.REFERENCE,
+    order?.reference,
+  ]
+  for (const raw of candidates) {
+    const tx = String(raw ?? "").trim()
+    if (!tx) continue
+    if (/^(MOMO_|AIRTEL_|COD_|URUBUTO-PENDING|PAY_|ORDER\s)/i.test(tx)) continue
+    return tx
+  }
+  return undefined
 }

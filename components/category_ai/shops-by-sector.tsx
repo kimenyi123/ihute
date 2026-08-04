@@ -146,14 +146,30 @@ function pickSupplierNickname(x: unknown): string | null {
 
 /** Best-effort count of catalog lines (aligns with seller_add_stock / catalog rows when backend sends them). */
 function pickStockLineCount(x: Record<string, unknown>): number | undefined {
-  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined)
+  const n = (v: unknown): number | undefined => {
+    if (typeof v === "number" && Number.isFinite(v)) return v
+    if (typeof v === "string" && v.trim() !== "") {
+      const parsed = Number(v.replace(/,/g, "").trim())
+      if (Number.isFinite(parsed)) return parsed
+    }
+    return undefined
+  }
   const pc =
     n(x.product_count) ??
     n(x.productCount) ??
     n(x.PRODUCT_COUNT) ??
+    n(x.item_count) ??
+    n(x.itemCount) ??
+    n(x.ITEM_COUNT) ??
+    n(x.items_count) ??
+    n(x.itemsCount) ??
+    n(x.nb_products) ??
+    n(x.nbProducts) ??
+    n(x.total_products) ??
+    n(x.totalProducts) ??
     (Array.isArray(x.products) ? x.products.length : undefined)
   if (pc != null && pc >= 0) return Math.round(pc)
-  const stock = n(x.in_stock_products) ?? n(x.inStockProducts)
+  const stock = n(x.in_stock_products) ?? n(x.inStockProducts) ?? n(x.IN_STOCK_PRODUCTS)
   return stock != null && stock >= 0 ? Math.round(stock) : undefined
 }
 
@@ -176,19 +192,23 @@ function matchesSectorShopFilter(shop: ShopInfo, raw: string): boolean {
 }
 
 export function mapListSuppliersWithProductsToShops(arr: unknown[]): ShopInfo[] {
-  return (arr || []).map((x: any) => {
-    const rec = x as Record<string, unknown>
-    return {
-      seller_account: x.seller_account ?? x.ACC ?? x.ISHYIGA_ACCOUNT ?? "",
-      seller_name: x.seller_name ?? x.OWNER ?? x.SELLER_NAMES ?? "Shop",
-      seller_location: x.seller_location ?? x.LOCATION,
-      officialNickname: pickSupplierNickname(x),
-      stockLineCount: pickStockLineCount(rec),
-      sellerPhoto: String(
-        x.seller_photo ?? x.sellerPhoto ?? x.photo ?? x.PHOTO ?? ""
-      ).trim() || undefined,
-    }
-  }).filter((s: ShopInfo) => s.seller_account || s.seller_name)
+  return (arr || [])
+    .map((x: any) => {
+      const rec = x as Record<string, unknown>
+      return {
+        seller_account: x.seller_account ?? x.ACC ?? x.ISHYIGA_ACCOUNT ?? "",
+        seller_name: x.seller_name ?? x.OWNER ?? x.SELLER_NAMES ?? "Shop",
+        seller_location: x.seller_location ?? x.LOCATION,
+        officialNickname: pickSupplierNickname(x),
+        stockLineCount: pickStockLineCount(rec),
+        sellerPhoto: String(
+          x.seller_photo ?? x.sellerPhoto ?? x.photo ?? x.PHOTO ?? ""
+        ).trim() || undefined,
+      }
+    })
+    .filter((s: ShopInfo) => s.seller_account || s.seller_name)
+    // Hide empty catalogs on /category_ai/* and Shops-by-sector (e.g. "0 items")
+    .filter((s: ShopInfo) => (s.stockLineCount ?? 0) > 0)
 }
 
 function shopLogoSrc(shop: ShopInfo, imageMap?: Record<string, string>): string | null {
@@ -476,7 +496,7 @@ export function ShopsForSingleSector({
   const SHOPS_PER_PAGE = 15
 
   const filteredShops = useMemo(() => {
-    let list = shops
+    let list = shops.filter((s) => (s.stockLineCount ?? 0) > 0)
     const pref = (locationPref || "").trim().toLowerCase()
     if (pref) {
       list = list.filter((s) => {

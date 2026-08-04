@@ -25,7 +25,7 @@ import { SURPRISE_MOOD_ID } from "@/lib/seller-surprise-config"
 const ALCOHOL_REGEX =
   /wine|beer|spirits|cocktail|whiskey|whisky|vodka|rum|gin|cognac|lager|ale|sparkling|bitters|cream|shot cocktail|coffee cocktail/i
 const NON_ALCOHOL_REGEX =
-  /juice|smoothie|soft drink|virgin|tea|coffee|water|milkshake|iced|hot tea|hot coffee|fresh juice|dessert|accompaniment|vegetable/i
+  /juice|smoothie|soft drink|soda|cola|water|malt|energy drink|virgin|mocktail|non.?alcohol|iced tea|hot tea|hot coffee|iced coffee|lemonade|milkshake|beverage/i
 const KIDS_EXCLUDE =
   /child|kids|pediatric|baby|infant|syrup|enfant|pediatri|junior|nourrisson/i
 
@@ -77,22 +77,21 @@ const MOOD_OPTIONS_FOOD: MoodOption[] = [
     Icon: Flame,
     colorClass: "text-orange-600",
     categoryRegex:
-      /main course|burger|barbecue|bbq|meat|platter|sizzling|rice|pasta|pizza|beef|goat|pork/i,
+      /beef|pork|goat|lamb|mutton|steak|burger|bbq|barbecue|meat|bacon|ham|sausage|ribs|sizzling/i,
   },
   {
     id: "vg",
     label: "I'm a VG",
     Icon: Carrot,
     colorClass: "text-emerald-600",
-    categoryRegex:
-      /vegetable|salad|cold starter|dessert|beverage|juice|smoothie|soft drink|virgin|tea|coffee|vegan|vg/i,
+    categoryRegex: /vegetable|vegetables|vegan|vegetarian|salad|vg\b|plant.?based|veggie/i,
   },
   {
     id: "white-meat",
     label: "I eat white meat",
     Icon: Egg,
     colorClass: "text-amber-600",
-    categoryRegex: /chicken|fish|seafood|salad|cold starter|hot starter|main course|rice|pasta|turkey/i,
+    categoryRegex: /chicken|fish|seafood|turkey|duck|prawn|shrimp|salmon|tilapia|trout|tuna|white meat/i,
   },
   {
     id: "white-wine",

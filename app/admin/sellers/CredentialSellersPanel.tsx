@@ -74,7 +74,6 @@ const CREDENTIAL_UI_HIDDEN_COLUMNS = new Set(
     "CERTIFICATE",
     "COUNTRY",
     "GPS_ACCURACY",
-    "GPS_LAST_UPDATED",
     "GPS_OVERRIDE",
     "ID",
     "PWD_HASH",
@@ -102,6 +101,16 @@ const CREDENTIAL_TABLE_COLUMNS: CredentialTableCol[] = [
   { id: "status", header: "Status", pick: (r) => r.STATUS ?? r.status ?? "" },
   { id: "department", header: "Department", pick: (r) => r.DEPARTMENT ?? r.department ?? "" },
   { id: "hq", header: "HQ location", pick: (r) => r.HQ_LOCATION ?? r.hq_location ?? "" },
+  {
+    id: "gpsUpdated",
+    header: "GPS updated",
+    pick: (r) => r.GPS_LAST_UPDATED ?? r.gps_last_updated ?? "",
+  },
+  {
+    id: "locSource",
+    header: "Loc source",
+    pick: (r) => r.LOCATION_SOURCE ?? r.location_source ?? "",
+  },
 ]
 
 export function CredentialSellersPanel({
@@ -118,6 +127,20 @@ export function CredentialSellersPanel({
   const [searchApplied, setSearchApplied] = useState("")
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+
+  // Live search as you type (debounced) — no need to click Search
+  useEffect(() => {
+    if (!active) return
+    const t = window.setTimeout(() => {
+      const next = searchDraft.trim()
+      setSearchApplied((prev) => {
+        if (prev === next) return prev
+        setPage(1)
+        return next
+      })
+    }, 280)
+    return () => window.clearTimeout(t)
+  }, [active, searchDraft])
 
   const [editOpen, setEditOpen] = useState(false)
   const [edit, setEdit] = useState<Record<string, string>>({})
@@ -276,8 +299,11 @@ export function CredentialSellersPanel({
   return (
     <div className="bg-white p-6 rounded-lg border shadow-sm space-y-6">
       <p className="text-sm text-gray-600">
-        Compact view: Ishyiga, owner, contact, status, and location. Stored passwords are bcrypt and cannot be shown;
-        use <strong>Edit</strong> (pencil) to change fields and set new seller or buyer passwords.
+        Compact view: Ishyiga, owner, contact, status, and location. Search updates as you type.
+        Wrong HQ on shop cards usually means bad data in <strong>hq_location</strong> — check{" "}
+        <strong>GPS updated</strong> / <strong>Loc source</strong>, then fix HQ in Edit.
+        Stored passwords are bcrypt and cannot be shown; use <strong>Edit</strong> (pencil) for fields and
+        new seller or buyer passwords.
       </p>
 
       <div className="flex flex-wrap items-end gap-3">
@@ -288,21 +314,18 @@ export function CredentialSellersPanel({
             <input
               value={searchDraft}
               onChange={(e) => setSearchDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  setSearchApplied(searchDraft.trim())
+                  setPage(1)
+                }
+              }}
               className="w-full border rounded-lg pl-8 pr-3 py-2"
-              placeholder="Email, Ishyiga, name, phone, owner…"
+              placeholder="Email, Ishyiga, name, phone, owner, HQ location…"
             />
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            setSearchApplied(searchDraft.trim())
-            setPage(1)
-          }}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg"
-        >
-          Search
-        </button>
         <button
           type="button"
           onClick={() => {

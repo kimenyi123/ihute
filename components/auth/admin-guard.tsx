@@ -18,30 +18,16 @@ interface AdminGuardProps {
 export function AdminGuard({ children }: AdminGuardProps) {
     const router = useRouter()
     const pathname = usePathname()
-    const { user, isAuthenticated, checkSession, loginTime, lastActivityAt, sessionTimeout } =
-        useAuthStore()
-    const [hydrated, setHydrated] = useState(false)
+    const { user, isAuthenticated, checkSession, hasHydrated } = useAuthStore()
     const [denyReason, setDenyReason] = useState<'session' | 'not_admin' | null>(null)
 
     const adminTarget =
         pathname?.startsWith('/admin') ? pathname : '/admin/dashboard'
 
-    useEffect(() => {
-        const setNow = () => setHydrated(true)
-        setHydrated(!!useAuthStore.persist?.hasHydrated?.())
-        const unsub = useAuthStore.persist?.onFinishHydration?.(setNow)
-        return () => {
-            unsub?.()
-        }
-    }, [])
-
-    const sessionAnchor = lastActivityAt ?? loginTime
-    const sessionFresh =
-        sessionAnchor != null && Date.now() - sessionAnchor <= sessionTimeout
-
+    const hydrated = hasHydrated
     const isAdmin = isAdminUser(user)
-
-    const allowed = hydrated && isAuthenticated && isAdmin && sessionFresh
+    // Do not call checkSession() during render (it may logout). Effect below enforces expiry.
+    const allowed = hydrated && isAuthenticated && isAdmin && denyReason !== 'session' && denyReason !== 'not_admin'
 
     useEffect(() => {
         if (!hydrated) return

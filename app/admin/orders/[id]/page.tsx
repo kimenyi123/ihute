@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
-import { useParams, useRouter } from "next/navigation"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
 import {
   ArrowLeft,
   Bell,
@@ -32,6 +32,13 @@ import {
   sellerFulfillmentLabel,
   type AdminMonitorOrder,
 } from "@/lib/admin-order-monitor"
+import {
+  isOrderMonitorDb,
+  orderMonitorDbLabel,
+  readOrderMonitorDb,
+  writeOrderMonitorDb,
+  type OrderMonitorDb,
+} from "@/lib/admin-order-db"
 import { Button } from "@/components/ui/button"
 
 type OrderDetail = AdminMonitorOrder & {
@@ -54,8 +61,11 @@ type OrderItem = {
 export default function AdminOrderDetailPage() {
   const params = useParams()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const orderId = String(params.id ?? "")
 
+  const [db, setDb] = useState<OrderMonitorDb>("chaos_beta")
+  const [dbReady, setDbReady] = useState(false)
   const [order, setOrder] = useState<OrderDetail | null>(null)
   const [items, setItems] = useState<OrderItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -63,12 +73,20 @@ export default function AdminOrderDetailPage() {
   const [notifying, setNotifying] = useState(false)
   const [notifyMsg, setNotifyMsg] = useState<string | null>(null)
 
+  useEffect(() => {
+    const fromQuery = searchParams.get("db")
+    const resolved = isOrderMonitorDb(fromQuery) ? fromQuery : readOrderMonitorDb()
+    setDb(resolved)
+    writeOrderMonitorDb(resolved)
+    setDbReady(true)
+  }, [searchParams])
+
   const loadOrder = useCallback(async () => {
-    if (!orderId) return
+    if (!orderId || !dbReady) return
     try {
       setLoading(true)
       setError(null)
-      const res = await postAdminApi({ action: "getOrderDetails", orderId })
+      const res = await postAdminApi({ action: "getOrderDetails", orderId, db })
       const data = await res.json()
       if (!data.ok || !data.order) {
         setError(data.error || "Order not found")
@@ -106,7 +124,7 @@ export default function AdminOrderDetailPage() {
     } finally {
       setLoading(false)
     }
-  }, [orderId])
+  }, [orderId, db, dbReady])
 
   useEffect(() => {
     loadOrder()
@@ -117,7 +135,7 @@ export default function AdminOrderDetailPage() {
     setNotifying(true)
     setNotifyMsg(null)
     try {
-      const res = await postAdminApi({ action: "notifySellerOrder", orderId: order.id })
+      const res = await postAdminApi({ action: "notifySellerOrder", orderId: order.id, db })
       const data = await res.json()
       if (!data.ok) {
         setNotifyMsg(data.error || "Could not notify seller")
@@ -143,7 +161,7 @@ export default function AdminOrderDetailPage() {
   if (error || !order) {
     return (
       <div className="space-y-4">
-        <Link href="/admin/orders" className="inline-flex items-center gap-2 text-sm text-blue-600 hover:underline">
+        <Link href={`/admin/orders?db=${encodeURIComponent(db)}`} className="inline-flex items-center gap-2 text-sm text-blue-600 hover:underline">
           <ArrowLeft className="h-4 w-4" />
           Back to Order Monitor
         </Link>
@@ -167,7 +185,7 @@ export default function AdminOrderDetailPage() {
       <div className="flex flex-col gap-4 border-b border-slate-200 pb-6 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <Link
-            href="/admin/orders"
+            href={`/admin/orders?db=${encodeURIComponent(db)}`}
             className="mb-3 inline-flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -178,6 +196,7 @@ export default function AdminOrderDetailPage() {
             {order.orderNumber || `#${order.id}`}
           </h1>
           <p className="mt-1 text-sm text-slate-600">{formatOrderTime(order.timestamp)}</p>
+          <p className="mt-1 font-mono text-xs text-slate-500">{orderMonitorDbLabel(db)}</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button asChild variant="outline" size="sm" className="border-slate-200">
@@ -361,7 +380,11 @@ export default function AdminOrderDetailPage() {
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
-          onClick={() => router.push(`/admin/orders?sellerAccount=${encodeURIComponent(order.sellerAccount || "")}`)}
+          onClick={() =>
+            router.push(
+              `/admin/orders?db=${encodeURIComponent(db)}&sellerAccount=${encodeURIComponent(order.sellerAccount || "")}`,
+            )
+          }
           className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
         >
           More orders from this seller
