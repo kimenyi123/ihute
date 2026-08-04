@@ -201,12 +201,19 @@ function LoginPageInner() {
     if (!pendingLoginPayload) return
     setPwChangeLoading(true)
     try {
+      const email =
+        String(pendingLoginPayload?.user?.email ?? "").trim() ||
+        String((pendingLoginPayload as { email?: string })?.email ?? "").trim()
+      if (!email) {
+        setPwChangeError("Missing account email. Sign out and sign in again.")
+        return
+      }
       const res = await fetch("/api/auth/change-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({
-          email: pendingLoginPayload?.user?.email,
+          email,
           currentPassword: current,
           newPassword,
         }),

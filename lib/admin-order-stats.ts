@@ -35,9 +35,12 @@ export type OrderMonitorStats = {
   fulfillmentBreakdown: BreakdownPoint[]
 }
 
-export async function fetchOrderMonitorStats(): Promise<OrderMonitorStats | null> {
+export async function fetchOrderMonitorStats(db?: string): Promise<OrderMonitorStats | null> {
   try {
-    const res = await postAdminApi({ action: "getOrderMonitorStats" })
+    const res = await postAdminApi({
+      action: "getOrderMonitorStats",
+      ...(db ? { db } : {}),
+    })
     const data = await res.json()
     if (!data.ok) return null
     return {
