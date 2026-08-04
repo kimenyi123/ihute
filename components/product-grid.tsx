@@ -122,7 +122,15 @@ function normalizeProduct(
     p.final_selling_price,
     p.price,
   ]
-  let sellingPrice: unknown = p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? p.final_selling_price ?? p.price
+  let sellingPrice: number | string | undefined =
+    p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? p.final_selling_price ?? p.price
+  if (
+    sellingPrice != null &&
+    typeof sellingPrice !== "number" &&
+    typeof sellingPrice !== "string"
+  ) {
+    sellingPrice = String(sellingPrice)
+  }
   let bestSell = 0
   for (const c of sellCandidates) {
     if (c == null || (typeof c === "string" && String(c).trim() === "")) continue
@@ -130,10 +138,10 @@ function normalizeProduct(
     if (!Number.isFinite(n) || n <= 0) continue
     if (bestSell <= 1 && n > bestSell) {
       bestSell = n
-      sellingPrice = c
+      sellingPrice = typeof c === "number" || typeof c === "string" ? c : String(c)
     } else if (bestSell <= 0 && n > 0) {
       bestSell = n
-      sellingPrice = c
+      sellingPrice = typeof c === "number" || typeof c === "string" ? c : String(c)
     }
   }
 
