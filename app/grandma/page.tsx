@@ -5080,7 +5080,7 @@ export default function GrandmaPage() {
           onClients={() => window.alert("Clients — coming soon")}
           onItems={() => setSellerView("items")}
           onNikiStock={() => {
-            router.push("/register/seller?step=2")
+            router.push(`${GRANDMA_PATHS.registerForm}?role=seller&step=2`)
           }}
           onSales={() => setSellerView("orders")}
           onExportExcel={exportSellerOrdersExcel}
@@ -5547,7 +5547,7 @@ export default function GrandmaPage() {
             onClick={() => {
               writeGrandmaSignupRole("seller")
               router.push(
-                `${GRANDMA_OUTBOUND.registerSeller}?redirect=${encodeURIComponent(GRANDMA_PATHS.appRoot)}`,
+                `${GRANDMA_PATHS.registerForm}?role=seller&redirect=${encodeURIComponent(GRANDMA_PATHS.appRoot)}`,
               )
             }}
           >

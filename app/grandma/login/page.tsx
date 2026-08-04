@@ -8,7 +8,12 @@ import { ArrowLeft } from "lucide-react"
 import { useAuthStore } from "@/lib/auth-store"
 import type { User } from "@/lib/auth-store"
 import { IshyigaLoginCard } from "@/components/ishyiga-login-card"
-import { GRANDMA_PATHS, readGrandmaSignupRole, writeGrandmaSignupRole } from "@/lib/grandma-urls"
+import {
+  GRANDMA_PATHS,
+  grandmaRegisterFormHref,
+  readGrandmaSignupRole,
+  writeGrandmaSignupRole,
+} from "@/lib/grandma-urls"
 import { grandmaUserCanUseSellerWorkspace, isAdminUser } from "@/lib/auth-login-client"
 import { useTranslation } from "@/hooks/use-translation"
 
@@ -60,10 +65,10 @@ function GrandmaLoginInner() {
   const { language } = useTranslation()
   const ui = LOGIN_UI[language] ?? LOGIN_UI.en
 
-  const [registerHref, setRegisterHref] = useState("/register/buyer")
+  const [registerHref, setRegisterHref] = useState(grandmaRegisterFormHref("buyer"))
 
   useLayoutEffect(() => {
-    setRegisterHref(readGrandmaSignupRole() === "seller" ? "/register/seller" : "/register/buyer")
+    setRegisterHref(grandmaRegisterFormHref(readGrandmaSignupRole()))
   }, [])
 
   useLayoutEffect(() => {
@@ -134,7 +139,7 @@ function GrandmaLoginInner() {
           defaultPhone={phonePrefill}
           registerHref={registerHref}
           registerLinkText={
-            registerHref === "/register/seller" ? ui.registerSeller : ui.registerBuyer
+            registerHref.includes("role=seller") ? ui.registerSeller : ui.registerBuyer
           }
           forgotHref="/forgot-password/grandma"
           loginMode="phoneOnly"

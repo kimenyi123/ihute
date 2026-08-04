@@ -1,9 +1,10 @@
-import { getPublicSiteUrl } from "@/lib/backend-config"
+import { getShopPublicUrl } from "@/lib/shop-public-url"
+import { grandmaRegisterFormHref } from "@/lib/grandma-urls"
 
-/** Base URL for marketing site (not the Java /Trading API path). */
-function siteRootForLinks(): string {
-  const raw = getPublicSiteUrl()
-  return raw.replace(/\/Trading\/?$/i, "").replace(/\/+$/, "") || "https://ihute.rw"
+/** Shop origin for Grandma deep links (strip trailing `/grandma` from local default). */
+function shopOriginForLinks(): string {
+  const raw = getShopPublicUrl().replace(/\/+$/, "")
+  return raw.replace(/\/grandma$/i, "") || "https://shop.ihute.rw"
 }
 
 /**
@@ -27,7 +28,8 @@ export function buildUmuriroSellerSmsBodyFromLines(itemNames: string[], shopId: 
             .slice(0, 3)
             .map((n) => n.slice(0, 40))
             .join(", ")}${names.length > 3 ? "…" : ""})`
-  const url = `${siteRootForLinks()}/register/seller/${encodeURIComponent(shopId)}`
+  const path = grandmaRegisterFormHref("seller", { shopId })
+  const url = `${shopOriginForLinks()}${path}`
 
   const line1 = "Mukeneye ibindi bicuruzwa matubwira"
   const line2 =
