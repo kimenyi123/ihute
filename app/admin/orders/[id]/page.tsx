@@ -20,6 +20,7 @@ import {
   attentionReasonLabel,
   buyerTrackHref,
   formatAdminCurrency,
+  formatOrderCommission,
   formatOrderTime,
   getOrderAttentionReasons,
   getPaymentBadgeClass,
@@ -117,6 +118,9 @@ export default function AdminOrderDetailPage() {
         servedAmount: Number(o.servedAmount ?? 0),
         servedQtyTotal: Number(o.servedQtyTotal ?? 0),
         sellerFulfillment: o.sellerFulfillment as AdminMonitorOrder["sellerFulfillment"],
+        commissionRate: o.commissionRate != null ? Number(o.commissionRate) : undefined,
+        commissionEligible: o.commissionEligible === true,
+        commissionAmount: o.commissionAmount != null ? Number(o.commissionAmount) : 0,
       })
       setItems((data.items ?? []) as OrderItem[])
     } catch {
@@ -307,10 +311,21 @@ export default function AdminOrderDetailPage() {
             </p>
           ) : null}
         </div>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <div>
             <p className="text-xs uppercase text-gray-500">Amount</p>
             <p className="text-xl font-bold text-gray-900">{formatAdminCurrency(order.amount)}</p>
+          </div>
+          <div>
+            <p className="text-xs uppercase text-gray-500">Commission</p>
+            <p className="text-xl font-bold text-gray-900">{formatOrderCommission(order)}</p>
+            {order.commissionEligible ? (
+              <p className="mt-1 text-[11px] text-slate-500">
+                Rate {((Number(order.commissionRate) || 0) * 100).toFixed(3)}% · PAID
+              </p>
+            ) : (
+              <p className="mt-1 text-[11px] text-slate-500">Accrues only when payment is PAID</p>
+            )}
           </div>
           <div>
             <p className="text-xs uppercase text-gray-500">Order status</p>
