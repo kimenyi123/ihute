@@ -1909,7 +1909,7 @@ function SupplierDashboard() {
                   {ui.bulkPriceUpdate}
                 </Button>
                 <Button asChild variant="outline" className="gap-2 border-emerald-200 text-emerald-900 hover:bg-emerald-50">
-                  <Link href="/register/seller?step=2">
+                  <Link href="/grandma/register-form?role=seller&step=2">
                     <Layers className="h-4 w-4" />
                     {ui.addStockFromNiki}
                   </Link>

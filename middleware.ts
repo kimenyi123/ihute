@@ -39,26 +39,32 @@ export function middleware(req: NextRequest) {
     }
   }
 
-  if (pathname === "/register/buyer" || pathname === "/register/seller") {
+  // Registration aliases → canonical paths only (no host / ?surface branching).
+  // Main owns /register/web-form; Grandma owns /grandma/register-form.
+  if (pathname === "/register/grandma-buyer") {
     const url = req.nextUrl.clone()
-    const role = pathname.includes("buyer") ? "buyer" : "seller"
-    const grandmaHost = host === "shop.ihute.rw" || host.startsWith("grandma.ihute.rw")
-
-    // Local dev override: add ?surface=grandma to URL to simulate shop.ihute.rw
-    const surfaceOverride = url.searchParams.get("surface")
-    const isLocalDevHost = host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0"
-    const isGrandma =
-      grandmaHost ||
-      (process.env.NODE_ENV === "development" && (surfaceOverride === "grandma" || isLocalDevHost))
-
-    if (isGrandma) {
-      url.pathname = `/register/grandma-${role}`
-      url.searchParams.delete("surface")
-    } else {
-      url.pathname = `/register/web-form`
-      url.searchParams.set("role", role)
-    }
-    return NextResponse.rewrite(url)
+    url.pathname = "/grandma/register-form"
+    url.searchParams.set("role", "buyer")
+    return NextResponse.redirect(url, 308)
+  }
+  if (pathname === "/register/grandma-seller") {
+    const url = req.nextUrl.clone()
+    url.pathname = "/grandma/register-form"
+    url.searchParams.set("role", "seller")
+    return NextResponse.redirect(url, 308)
+  }
+  if (pathname === "/register/buyer") {
+    const url = req.nextUrl.clone()
+    url.pathname = "/register/web-form"
+    url.searchParams.set("role", "buyer")
+    return NextResponse.redirect(url, 308)
+  }
+  if (pathname === "/register/seller") {
+    // Exact path only — `/register/seller/[shopId]` is handled by its page redirect.
+    const url = req.nextUrl.clone()
+    url.pathname = "/register/web-form"
+    url.searchParams.set("role", "seller")
+    return NextResponse.redirect(url, 308)
   }
 
   if (pathname === "/forgot-password") {
@@ -110,11 +116,12 @@ export function middleware(req: NextRequest) {
     }
   }
 
-  // Dedicated registration entry points (configure DNS A/CNAME to same deployment as ihute.rw)
+  // Dedicated Main seller registration host → canonical Main register route
   if (host === "seller.ihute.rw") {
     if (pathname === "/" || pathname === "") {
       const url = req.nextUrl.clone()
-      url.pathname = "/register/seller"
+      url.pathname = "/register/web-form"
+      url.searchParams.set("role", "seller")
       return NextResponse.rewrite(url)
     }
   }

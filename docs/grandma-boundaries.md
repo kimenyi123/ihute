@@ -16,7 +16,8 @@ Grandma is the Next.js surface under `/grandma`. Sign-in is the shared app page 
 ## Shared app UI (not Grandma-themed)
 
 - **`/login`** — single sign-in (`IshyigaLoginCard`) for buyers, sellers, and admins; use `?redirect=/grandma` from Grandma when you need to land back in the shop space after auth.
-- **`/forgot-password`**, **`/register`**, **`/onboarding/crazy-shopping`** — linked from login / Grandma as configured in `lib/grandma-urls.ts` (`GRANDMA_OUTBOUND`).
+- **`/forgot-password`** (Grandma surface: `/forgot-password/grandma`) — password reset linked from Grandma login.
+- **Registration is path-owned:** Main → `/register/web-form`; Grandma → `/grandma/register-form` (`GRANDMA_PATHS.registerForm`). No host-based register branching.
 
 ## Grandma-owned routes in `GRANDMA_PATHS` (`lib/grandma-urls.ts`).
 - Components under `app/grandma/*`, `components/grandma-*`.

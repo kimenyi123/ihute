@@ -22,7 +22,7 @@ type FormRole = "buyer" | "seller" | "rider"
 export type RegisterAccountFormProps = {
   /** Default role when the form loads */
   initialRole?: FormRole
-  /** Hide buyer/seller/rider switch (used on /register/seller and /register/rider) */
+  /** Hide buyer/seller/rider switch (used when role is fixed by the page) */
   hideRolePicker?: boolean
   pageTitle?: string
   pageDescription?: string

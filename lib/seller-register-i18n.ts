@@ -43,7 +43,7 @@ export const L = {
   },
 } satisfies Record<string, Tri>
 
-/** Buyer registration at `/register/buyer` (location labels reuse `L` where applicable). */
+/** Buyer registration at `/grandma/register-form` (location labels reuse `L` where applicable). */
 export const BUYER_UI = {
   pageTitle: { en: "Buyer", rw: "Umuguzi", fr: "Acheteur" },
   /** Header subtitle \u2014 matches seller shell tone */
