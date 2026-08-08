@@ -1,5 +1,9 @@
 /**
  * Prescription upload paths — dedicated module (no imports from shop-image / account-photo).
+ *
+ * Default paths use a literal path.join(process.cwd(), "public", "uploads", "prescriptions", …)
+ * so NFT analysis can scope under that subdirectory. Deploy env overrides are read via
+ * globalThis so path.resolve(process.env.*) does not mark the whole project as an NFT root.
  */
 import { existsSync, mkdirSync } from "fs"
 import path from "path"
@@ -7,19 +11,31 @@ import { randomBytes } from "crypto"
 
 const MAX_AGE_MS = 48 * 60 * 60 * 1000 // 48h pending cleanup
 
+const DEFAULT_PUBLIC_DIR = path.join(process.cwd(), "public")
+const DEFAULT_PRESCRIPTION_UPLOADS_ROOT = path.join(
+  process.cwd(),
+  "public",
+  "uploads",
+  "prescriptions",
+)
+
+/** Deploy-time env without exposing process.env.NAME to Turbopack NFT path analysis. */
+function runtimeEnv(name: string): string {
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
+    ?.env
+  return String(env?.[name] ?? "").trim()
+}
+
 export function resolvePrescriptionPublicDir(): string {
-  const explicit = (process.env.IHUTE_PUBLIC_DIR || "").trim()
-  if (explicit) return path.resolve(explicit)
-  const cwd = process.cwd()
-  const fromCwd = path.join(cwd, "public")
-  if (existsSync(fromCwd)) return fromCwd
-  return fromCwd
+  return runtimeEnv("IHUTE_PUBLIC_DIR") || DEFAULT_PUBLIC_DIR
 }
 
 export function getPrescriptionUploadsRoot(): string {
-  const explicit = (process.env.PRESCRIPTION_UPLOADS_DIR || "").trim()
-  if (explicit) return path.resolve(explicit)
-  return path.join(resolvePrescriptionPublicDir(), "uploads", "prescriptions")
+  const explicit = runtimeEnv("PRESCRIPTION_UPLOADS_DIR")
+  if (explicit) return explicit
+  const publicDir = runtimeEnv("IHUTE_PUBLIC_DIR")
+  if (publicDir) return path.join(publicDir, "uploads", "prescriptions")
+  return DEFAULT_PRESCRIPTION_UPLOADS_ROOT
 }
 
 export function getPendingPrescriptionDir(pendingKey: string): string {
