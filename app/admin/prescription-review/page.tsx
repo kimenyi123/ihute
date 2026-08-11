@@ -298,8 +298,10 @@ export default function PrescriptionReviewPage() {
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
           {error}
           <div className="mt-1 text-xs text-red-700">
-            Ensure GQ_MYSQL_* points at the marketplace DB (e.g. chaos_dev) with access to{" "}
-            <code>niki.niki_items</code>.
+            Use the same MySQL as kaos <code>MySQLConnector</code>: set{" "}
+            <code>GQ_MYSQL_*</code> (or copy kaos <code>DB_URL</code> / <code>DB_USER</code> /{" "}
+            <code>DB_PASS</code>) on the frontend host to the marketplace DB (e.g.{" "}
+            <code>chaos_dev</code>) with access to <code>niki.niki_items</code>.
           </div>
         </div>
       ) : null}

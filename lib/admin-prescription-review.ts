@@ -1,9 +1,15 @@
 /**
  * Pharmacist Rx review — list + decide on niki_items, mirror seller_add_stock.
- * Uses marketplace MySQL (GQ_MYSQL_*) with qualified `niki.niki_items` (override via NIKI_MYSQL_DATABASE).
+ * MySQL: same marketplace DB as kaos MySQLConnector (GQ_MYSQL_* / ONBOARDING_* / DB_URL+DB_USER+DB_PASS).
+ * Catalog rows are read from qualified `niki.niki_items` (override via NIKI_MYSQL_DATABASE).
  */
 import mysql, { type Pool, type RowDataPacket, type ResultSetHeader } from "mysql2/promise"
 import { DRUG_FAMILLES } from "@/lib/prescription-review-constants"
+import {
+  getKaosAlignedMysqlConfig,
+  kaosAlignedMysqlConfigHint,
+  toKaosAlignedPoolOptions,
+} from "@/lib/kaos-mysql-config"
 
 let pool: Pool | null = null
 
@@ -14,6 +20,8 @@ function nikiDb(): string {
 }
 
 function marketplaceDb(): string {
+  const cfg = getKaosAlignedMysqlConfig()
+  if (cfg?.database) return cfg.database
   return (
     process.env.GQ_MYSQL_DATABASE ||
     process.env.ONBOARDING_MYSQL_DATABASE ||
@@ -24,33 +32,11 @@ function marketplaceDb(): string {
 
 function dbPool(): Pool {
   if (pool) return pool
-  const host =
-    process.env.GQ_MYSQL_HOST ||
-    process.env.ONBOARDING_MYSQL_HOST ||
-    process.env.MYSQL_HOST
-  const user =
-    process.env.GQ_MYSQL_USER ||
-    process.env.ONBOARDING_MYSQL_USER ||
-    process.env.MYSQL_USER
-  const password =
-    process.env.GQ_MYSQL_PASSWORD ??
-    process.env.ONBOARDING_MYSQL_PASSWORD ??
-    process.env.MYSQL_PASSWORD
-  const database = marketplaceDb()
-  if (!host || !user || password === undefined || !database) {
-    throw new Error(
-      "MySQL is not configured. Set GQ_MYSQL_* (or ONBOARDING_MYSQL_* / MYSQL_*) in .env.local.",
-    )
+  const cfg = getKaosAlignedMysqlConfig()
+  if (!cfg) {
+    throw new Error(kaosAlignedMysqlConfigHint())
   }
-  pool = mysql.createPool({
-    host,
-    user,
-    password,
-    database,
-    connectionLimit: 4,
-    connectTimeout: 15_000,
-    enableKeepAlive: true,
-  })
+  pool = mysql.createPool(toKaosAlignedPoolOptions(cfg))
   return pool
 }
 
