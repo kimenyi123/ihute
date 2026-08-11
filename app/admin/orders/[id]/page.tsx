@@ -34,7 +34,8 @@ import {
   type AdminMonitorOrder,
 } from "@/lib/admin-order-monitor"
 import {
-  isOrderMonitorDb,
+  decodeOrderMonitorDb,
+  encodeOrderMonitorDb,
   orderMonitorDbLabel,
   readOrderMonitorDb,
   writeOrderMonitorDb,
@@ -76,7 +77,7 @@ export default function AdminOrderDetailPage() {
 
   useEffect(() => {
     const fromQuery = searchParams.get("db")
-    const resolved = isOrderMonitorDb(fromQuery) ? fromQuery : readOrderMonitorDb()
+    const resolved = decodeOrderMonitorDb(fromQuery) ?? readOrderMonitorDb()
     setDb(resolved)
     writeOrderMonitorDb(resolved)
     setDbReady(true)
@@ -165,7 +166,7 @@ export default function AdminOrderDetailPage() {
   if (error || !order) {
     return (
       <div className="space-y-4">
-        <Link href={`/admin/orders?db=${encodeURIComponent(db)}`} className="inline-flex items-center gap-2 text-sm text-blue-600 hover:underline">
+        <Link href={`/admin/orders?db=${encodeURIComponent(encodeOrderMonitorDb(db))}`} className="inline-flex items-center gap-2 text-sm text-blue-600 hover:underline">
           <ArrowLeft className="h-4 w-4" />
           Back to Order Monitor
         </Link>
@@ -189,7 +190,7 @@ export default function AdminOrderDetailPage() {
       <div className="flex flex-col gap-4 border-b border-slate-200 pb-6 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <Link
-            href={`/admin/orders?db=${encodeURIComponent(db)}`}
+            href={`/admin/orders?db=${encodeURIComponent(encodeOrderMonitorDb(db))}`}
             className="mb-3 inline-flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -397,7 +398,7 @@ export default function AdminOrderDetailPage() {
           type="button"
           onClick={() =>
             router.push(
-              `/admin/orders?db=${encodeURIComponent(db)}&sellerAccount=${encodeURIComponent(order.sellerAccount || "")}`,
+              `/admin/orders?db=${encodeURIComponent(encodeOrderMonitorDb(db))}&sellerAccount=${encodeURIComponent(order.sellerAccount || "")}`,
             )
           }
           className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"

@@ -42,6 +42,7 @@ import {
 import { fetchOrderMonitorStats, type OrderMonitorStats } from "@/lib/admin-order-stats"
 import {
   ORDER_MONITOR_DBS,
+  encodeOrderMonitorDb,
   orderMonitorDbLabel,
   readOrderMonitorDb,
   writeOrderMonitorDb,
@@ -369,12 +370,9 @@ export default function OrdersPage() {
                           : "border-slate-900 bg-slate-900 text-white"
                         : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
                     }`}
-                    title={opt.hint}
+                    title={opt.label}
                   >
                     {opt.label}
-                    <span className={`ml-1.5 font-mono ${active ? "opacity-80" : "text-slate-400"}`}>
-                      {opt.hint}
-                    </span>
                   </button>
                 )
               })}
@@ -755,7 +753,7 @@ function OrderTableRow({
   const attention = orderNeedsAttention(order)
   const reasons = getOrderAttentionReasons(order)
   const fulfillment = deriveSellerFulfillment(order)
-  const detailHref = `/admin/orders/${order.id}?db=${encodeURIComponent(db)}`
+  const detailHref = `/admin/orders/${order.id}?db=${encodeURIComponent(encodeOrderMonitorDb(db))}`
 
   return (
     <tr
@@ -840,7 +838,7 @@ function OrderCard({
   const attention = orderNeedsAttention(order)
   const normalizedStatus = normalizeOrderStatus(order)
   const fulfillment = deriveSellerFulfillment(order)
-  const detailHref = `/admin/orders/${order.id}?db=${encodeURIComponent(db)}`
+  const detailHref = `/admin/orders/${order.id}?db=${encodeURIComponent(encodeOrderMonitorDb(db))}`
 
   return (
     <div className={`p-4 ${attention ? "border-l-2 border-l-slate-900" : ""}`}>
@@ -929,7 +927,7 @@ function OrderActions({
 }) {
   return (
     <Link
-      href={`/admin/orders/${order.id}?db=${encodeURIComponent(db)}`}
+      href={`/admin/orders/${order.id}?db=${encodeURIComponent(encodeOrderMonitorDb(db))}`}
       className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-emerald-700 whitespace-nowrap"
     >
       <Eye className="h-4 w-4" />

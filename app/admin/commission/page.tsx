@@ -802,12 +802,9 @@ export default function CommissionPage() {
                           : "border-white/40 bg-white text-slate-900"
                         : "border-white/20 bg-white/5 text-slate-200 hover:bg-white/10"
                     )}
-                    title={opt.hint}
+                    title={opt.label}
                   >
                     {opt.label}
-                    <span className={cn("ml-1.5 font-mono", active ? "opacity-80" : "text-slate-400")}>
-                      {opt.hint}
-                    </span>
                   </button>
                 )
               })}
