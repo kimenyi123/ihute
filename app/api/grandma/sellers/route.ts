@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server"
 import { getGrandmaSellerApiUrl, getProxyTimeoutMs } from "@/lib/backend-config"
+import { persistGrandmaSellerGps } from "@/lib/grandma-seller-gps-persist"
+import { isValidLatLng } from "@/lib/geo-haversine"
 
 export const runtime = "nodejs"
 
@@ -10,7 +12,7 @@ export async function POST(req: Request) {
   const url = getGrandmaSellerApiUrl()
 
   try {
-    const body = await req.json()
+    const body = (await req.json()) as Record<string, unknown>
     let res: Response
     try {
       res = await fetch(url, {
@@ -30,7 +32,7 @@ export async function POST(req: Request) {
           code: "GRANDMA_SELLER_UNREACHABLE",
           rid,
         },
-        { status: 503 }
+        { status: 503 },
       )
     }
 
@@ -52,11 +54,43 @@ export async function POST(req: Request) {
           raw: text.slice(0, 600),
           rid,
         },
-        { status: 502 }
+        { status: 502 },
       )
     }
 
-    const payload = typeof json === "object" && json !== null ? { ...(json as object), rid } : { ok: false, rid }
+    const base =
+      typeof json === "object" && json !== null
+        ? { ...(json as Record<string, unknown>) }
+        : ({ ok: false } as Record<string, unknown>)
+
+    // Best-effort: write GPS onto existing supplier_* columns so Near Me works
+    // even if CreateSellerServlet ignores latitude/longitude in the JSON body.
+    let gpsPersist: unknown = undefined
+    const ishyiga = String(base.ishyigaAccount ?? "").trim()
+    const lat = body.latitude != null ? Number(body.latitude) : NaN
+    const lng = body.longitude != null ? Number(body.longitude) : NaN
+    if (res.ok && base.ok && ishyiga && isValidLatLng(lat, lng)) {
+      const accuracy =
+        body.gpsAccuracy != null && Number.isFinite(Number(body.gpsAccuracy))
+          ? Number(body.gpsAccuracy)
+          : null
+      const persist = await persistGrandmaSellerGps({
+        ishyigaAccount: ishyiga,
+        latitude: lat,
+        longitude: lng,
+        gpsAccuracy: accuracy,
+      })
+      gpsPersist = persist
+      if (!persist.ok && !persist.skipped) {
+        console.warn(`[RID ${rid}] Grandma seller GPS persist failed:`, persist.error)
+      } else if (persist.ok) {
+        console.log(
+          `[RID ${rid}] Grandma seller GPS persisted seller=${persist.updatedSeller} signup=${persist.updatedSignup}`,
+        )
+      }
+    }
+
+    const payload = { ...base, rid, ...(gpsPersist ? { gpsPersist } : {}) }
     const statusOut = res.status >= 500 ? 502 : res.status
     console.log(`[RID ${rid}] Grandma seller proxy -> ${res.status} in ${Date.now() - t0}ms`)
     return NextResponse.json(payload, { status: statusOut })
@@ -64,7 +98,7 @@ export async function POST(req: Request) {
     console.error(`[RID ${rid}] /api/grandma/sellers`, e)
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : "unknown error", rid },
-      { status: 400 }
+      { status: 400 },
     )
   }
 }

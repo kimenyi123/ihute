@@ -25,8 +25,11 @@ function safePendingFile(pendingKey: string, fileName: string): string | null {
   if (!key || !TOKEN_FILE_RE.test(base)) return null
   const dir = getPendingPrescriptionDir(key)
   const full = path.join(dir, base)
-  const resolved = path.resolve(full)
-  if (!resolved.startsWith(path.resolve(dir) + path.sep) && resolved !== path.resolve(dir)) {
+  // path.resolve on dynamic upload paths widens NFT; normalize is enough for traversal checks.
+  const resolved = path.normalize(full)
+  const dirNorm = path.normalize(dir)
+  const dirPrefix = dirNorm.endsWith(path.sep) ? dirNorm : dirNorm + path.sep
+  if (!resolved.startsWith(dirPrefix) && resolved !== dirNorm) {
     return null
   }
   return resolved

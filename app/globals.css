@@ -402,3 +402,69 @@ html[lang="fr"] .text-wrap-i18n {
   word-break: break-word;
   overflow-wrap: anywhere;
 }
+
+/* Grandma seller registration — Current Location attention hints */
+@keyframes shop-gps-icon-zoom {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.15);
+  }
+}
+
+@keyframes shop-gps-ring-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.28);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.12);
+  }
+}
+
+@keyframes shop-gps-arrow-nudge {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(5px);
+  }
+}
+
+@keyframes shop-gps-btn-attention {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.22);
+  }
+}
+
+.shop-gps-icon-hint {
+  animation: shop-gps-icon-zoom 1.6s ease-in-out infinite;
+}
+
+.shop-gps-icon-ring-hint {
+  animation: shop-gps-ring-pulse 1.6s ease-in-out infinite;
+}
+
+.shop-gps-arrow-hint {
+  animation: shop-gps-arrow-nudge 1.2s ease-in-out infinite;
+}
+
+.shop-gps-btn-attention {
+  animation: shop-gps-btn-attention 1.2s ease-in-out 3;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shop-gps-icon-hint,
+  .shop-gps-icon-ring-hint,
+  .shop-gps-arrow-hint,
+  .shop-gps-btn-attention {
+    animation: none !important;
+  }
+}

@@ -25,6 +25,14 @@ import {
   Trash2,
 } from "lucide-react"
 import { grandmaApiService } from "@/lib/grandma-api-service"
+import { haversineKm, isValidLatLng } from "@/lib/geo-haversine"
+import {
+  GRANDMA_NEAR_ME_DEFAULT_RADIUS_KM,
+  GRANDMA_NEAR_ME_RADIUS_OPTIONS_KM,
+  maxFiniteDistanceKm,
+  shopWithinNearMeRadius,
+  splitHighlightMarkers,
+} from "@/lib/grandma-search"
 import { getUserPreferences, toggleUserPreference, saveUserPreferences, getCurrentUserId, loadUserPreferences } from "@/lib/user-preferences-api"
 import {
   GRANDMA_APP_VERSION,
@@ -178,7 +186,7 @@ type ShopEntry = {
   orderedBefore: boolean
   trending: boolean
   onSale: boolean
-  /** km — used when “location sort” is on */
+  /** km — used when “location sort” is on; Infinity = unknown */
   distanceKm: number
   momo: string
   /** optional — from API; otherwise derived deterministically from id */
@@ -191,6 +199,28 @@ type ShopEntry = {
   /** merchant payout — demo; replace with API */
   bankName?: string
   payoutAccount?: string
+  latitude?: number | null
+  longitude?: number | null
+  /** «matched» highlight snippet from Grandma search */
+  matchSnippet?: string
+  matchedProductSample?: string
+}
+
+function GrandmaHighlightText({ snippet, fallback }: { snippet?: string; fallback: string }) {
+  if (!snippet) return <>{fallback}</>
+  return (
+    <>
+      {splitHighlightMarkers(snippet).map((p, i) =>
+        p.hit ? (
+          <mark key={i} style={{ background: "#fef08a", padding: "0 1px", borderRadius: 2 }}>
+            {p.text}
+          </mark>
+        ) : (
+          <span key={i}>{p.text}</span>
+        ),
+      )}
+    </>
+  )
 }
 
 const GRANDMA_ORDERED_SHOPS_LS = "ihute:grandma:orderedShopIds" as const
@@ -2246,6 +2276,17 @@ export default function GrandmaPage() {
   /** Seller accounts (uppercase) returned by global product search — shops are included if they sell matching items. */
   const [shopProductSearchAccounts, setShopProductSearchAccounts] = useState<string[]>([])
   const [shopProductSearchLoading, setShopProductSearchLoading] = useState(false)
+  /** Production search API results (null = use legacy browse list). */
+  const [backendSearchShops, setBackendSearchShops] = useState<ShopEntry[] | null>(null)
+  const [backendSearchLoading, setBackendSearchLoading] = useState(false)
+  const [backendEmptyReason, setBackendEmptyReason] = useState<string | null>(null)
+  const [searchSuggestions, setSearchSuggestions] = useState<string[]>([])
+  const [showSearchSuggestions, setShowSearchSuggestions] = useState(false)
+  const [searchHasMore, setSearchHasMore] = useState(false)
+  const [searchPage, setSearchPage] = useState(1)
+  const [nearMeRadiusKm, setNearMeRadiusKm] = useState<number | null>(GRANDMA_NEAR_ME_DEFAULT_RADIUS_KM)
+  const [geoPermissionError, setGeoPermissionError] = useState<string | null>(null)
+  const allAvailableShopsRef = useRef<ShopEntry[]>([])
   /** Shop ids the buyer has successfully ordered from on this device (localStorage). */
   const [grandmaOrderedShopIds, setGrandmaOrderedShopIds] = useState<string[]>([])
   /** SELLER_ISHYIGA_ACCOUNT keys (uppercase) from buyer order history — powers Reorder when LS is empty. */
@@ -2331,6 +2372,9 @@ export default function GrandmaPage() {
   
   // All available shops for settings (across all categories)
   const [allAvailableShops, setAllAvailableShops] = useState<ShopEntry[]>([])
+  useEffect(() => {
+    allAvailableShopsRef.current = allAvailableShops
+  }, [allAvailableShops])
   const [allShopsLoading, setAllShopsLoading] = useState(false)
   const [allShopsError, setAllShopsError] = useState<string | null>(null)
   /** Full per-sector item totals (Kaos `sectorStats`) for Home cards. */
@@ -2401,6 +2445,190 @@ export default function GrandmaPage() {
       ac.abort()
     }
   }, [shopSearch, category])
+
+  /** Production Grandma search: MySQL-backed ranking + Near Me radius (falls back to legacy client filter). */
+  useEffect(() => {
+    let cancelled = false
+    const q = shopSearch.trim()
+    const nearMe = useLocationSort
+    const needsSearch = q.length >= 1 || nearMe
+    if (!needsSearch) {
+      setBackendSearchShops(null)
+      setBackendEmptyReason(null)
+      setSearchSuggestions([])
+      setBackendSearchLoading(false)
+      setSearchHasMore(false)
+      return
+    }
+
+    if (nearMe) {
+      const lat = locationData?.latitude
+      const lng = locationData?.longitude
+      if (!isValidLatLng(lat, lng)) {
+        setGeoPermissionError(
+          language === "rw"
+            ? "Emeza aho uri (GPS) kugira ngo Near me ikore."
+            : language === "fr"
+              ? "Autorisez la localisation (GPS) pour Near me."
+              : "Allow location access so Near me can find nearby shops.",
+        )
+        if (!q) {
+          setBackendSearchShops(null)
+          setBackendSearchLoading(false)
+          return
+        }
+      } else {
+        setGeoPermissionError(null)
+      }
+    } else {
+      setGeoPermissionError(null)
+    }
+
+    const ac = new AbortController()
+    const tid = setTimeout(() => {
+      if (cancelled) return
+      void (async () => {
+        setBackendSearchLoading(true)
+        try {
+          const sector = GRANDMA_CATEGORY_TO_SECTOR_SLUG[category]?.trim() || ""
+          const params = new URLSearchParams({
+            suggest: "1",
+            page: String(searchPage),
+            pageSize: "40",
+          })
+          if (q) params.set("q", q)
+          if (sector) params.set("sector", sector)
+          params.set("category", category)
+          if (nearMe && isValidLatLng(locationData?.latitude, locationData?.longitude)) {
+            params.set("nearMe", "1")
+            params.set("lat", String(locationData!.latitude))
+            params.set("lng", String(locationData!.longitude))
+            if (nearMeRadiusKm == null) params.set("radiusKm", "all")
+            else params.set("radiusKm", String(nearMeRadiusKm))
+          }
+          const requestUrl = `/api/grandma/search?${params}`
+          const res = await fetch(requestUrl, {
+            signal: ac.signal,
+            cache: "no-store",
+          })
+          const json = (await res.json().catch(() => null)) as {
+            ok?: boolean
+            shops?: Array<{
+              id: string
+              sellerAccount: string
+              name: string
+              sellerName: string
+              category: string
+              tagline: string
+              momo: string
+              distanceKm: number | null
+              latitude: number | null
+              longitude: number | null
+              highlights?: { field: string; snippet: string }[]
+              matchedProductSample?: string
+              stockLineCount?: number
+            }>
+            suggestions?: string[]
+            hasMore?: boolean
+            emptyReason?: string | null
+            code?: string
+          } | null
+
+          if (!res.ok || !json?.ok) {
+            // Keep legacy client filtering when MySQL search unavailable
+            if (!cancelled) {
+              setBackendSearchShops(null)
+              setSearchSuggestions([])
+              setBackendEmptyReason(null)
+            }
+            return
+          }
+
+          const existingByAccount = new Map<string, ShopEntry>()
+          for (const s of allAvailableShopsRef.current) {
+            existingByAccount.set(sellerAccountFromGrandmaShopId(s.id).toUpperCase(), s)
+          }
+
+          const mapped: ShopEntry[] = (json.shops ?? []).map((hit) => {
+            const acct = String(hit.sellerAccount || "").toUpperCase()
+            const prev = existingByAccount.get(acct)
+            const cat = (hit.category as Category) || category
+            let distanceKm =
+              hit.distanceKm != null && Number.isFinite(hit.distanceKm)
+                ? hit.distanceKm
+                : Number.POSITIVE_INFINITY
+            if (
+              !Number.isFinite(distanceKm) &&
+              isValidLatLng(locationData?.latitude, locationData?.longitude) &&
+              isValidLatLng(hit.latitude, hit.longitude)
+            ) {
+              distanceKm =
+                Math.round(
+                  haversineKm(
+                    locationData!.latitude!,
+                    locationData!.longitude!,
+                    hit.latitude!,
+                    hit.longitude!,
+                  ) * 10,
+                ) / 10
+            }
+            return {
+              id: prev?.id ?? hit.id,
+              name: hit.name || prev?.name || acct,
+              category: cat,
+              tagline: hit.tagline || prev?.tagline || "Local supplier",
+              favorite: prev?.favorite ?? false,
+              orderedBefore: prev?.orderedBefore ?? false,
+              trending: prev?.trending ?? false,
+              onSale: prev?.onSale ?? false,
+              distanceKm,
+              momo: hit.momo || prev?.momo || "",
+              rating: prev?.rating,
+              reviewCount: prev?.reviewCount,
+              logoSrc: prev?.logoSrc || "/placeholder.jpg",
+              stockLineCount: hit.stockLineCount ?? prev?.stockLineCount,
+              latitude: hit.latitude,
+              longitude: hit.longitude,
+              matchSnippet: hit.highlights?.[0]?.snippet,
+              matchedProductSample: hit.matchedProductSample,
+            }
+          })
+
+          if (!cancelled) {
+            setBackendSearchShops(mapped)
+            setSearchSuggestions(json.suggestions ?? [])
+            setSearchHasMore(Boolean(json.hasMore))
+            setBackendEmptyReason(json.emptyReason ?? null)
+            if (q.length >= 2) {
+              setShopProductSearchAccounts(
+                mapped.map((s) => sellerAccountFromGrandmaShopId(s.id).toUpperCase()).filter(Boolean),
+              )
+            }
+          }
+        } catch {
+          if (!cancelled && !ac.signal.aborted) {
+            setBackendSearchShops(null)
+          }
+        } finally {
+          if (!cancelled && !ac.signal.aborted) setBackendSearchLoading(false)
+        }
+      })()
+    }, 320)
+
+    return () => {
+      cancelled = true
+      clearTimeout(tid)
+      ac.abort()
+    }
+  }, [
+    shopSearch,
+    category,
+    useLocationSort,
+    nearMeRadiusKm,
+    locationData?.latitude,
+    locationData?.longitude,
+    searchPage,
+  ])
 
   useEffect(() => {
     setGrandmaOrderedShopIds(readGrandmaOrderedShopIdsFromStorage())
@@ -2865,6 +3093,23 @@ export default function GrandmaPage() {
           const rawDistance =
             supplier.distance ?? supplier.distance_km ?? supplier.supplier_distance ?? supplier.DISTANCE ?? supplier.LOCATION_DISTANCE
           const parsedDistance = rawDistance != null ? parseFloat(String(rawDistance)) : NaN
+          const rawLat =
+            supplier.supplier_latitude ?? supplier.latitude ?? supplier.lat ?? supplier.LATITUDE
+          const rawLng =
+            supplier.supplier_longitude ?? supplier.longitude ?? supplier.lng ?? supplier.LONGITUDE
+          const latitude = rawLat != null && rawLat !== "" ? Number(rawLat) : null
+          const longitude = rawLng != null && rawLng !== "" ? Number(rawLng) : null
+          let distanceKm = Number.isFinite(parsedDistance) ? parsedDistance : Number.POSITIVE_INFINITY
+          if (
+            !Number.isFinite(distanceKm) &&
+            isValidLatLng(locationData?.latitude, locationData?.longitude) &&
+            isValidLatLng(latitude, longitude)
+          ) {
+            distanceKm =
+              Math.round(
+                haversineKm(locationData!.latitude!, locationData!.longitude!, latitude!, longitude!) * 10,
+              ) / 10
+          }
 
           return {
             id: uniqueId,
@@ -2875,7 +3120,9 @@ export default function GrandmaPage() {
             orderedBefore: false,
             trending: false,
             onSale: supplierRowSuggestsOnSale(supplier as Record<string, unknown>),
-            distanceKm: Number.isFinite(parsedDistance) ? parsedDistance : Math.random() * 5 + 0.5,
+            distanceKm,
+            latitude: Number.isFinite(latitude as number) ? latitude : null,
+            longitude: Number.isFinite(longitude as number) ? longitude : null,
             momo: `MTN MoMo: ${supplier.seller_momo || 'N/A'}`,
             rating: 4.0,
             reviewCount: 0,
@@ -2925,6 +3172,26 @@ export default function GrandmaPage() {
     
     fetchAllShops()
   }, [])
+
+  /** Keep shop distances in sync when GPS becomes available or moves (Near Me radius filter depends on this). */
+  useEffect(() => {
+    const lat = locationData?.latitude
+    const lng = locationData?.longitude
+    if (!isValidLatLng(lat, lng)) return
+    setAllAvailableShops((prev) => {
+      if (!prev.length) return prev
+      let changed = false
+      const next = prev.map((s) => {
+        if (!isValidLatLng(s.latitude, s.longitude)) return s
+        const d =
+          Math.round(haversineKm(lat!, lng!, s.latitude!, s.longitude!) * 10) / 10
+        if (s.distanceKm === d) return s
+        changed = true
+        return { ...s, distanceKm: d }
+      })
+      return changed ? next : prev
+    })
+  }, [locationData?.latitude, locationData?.longitude])
 
   // Debug toggle rendering
   useEffect(() => {
@@ -3890,20 +4157,33 @@ export default function GrandmaPage() {
       return list
     }
 
-    const base = shopsInCategory
+    const applyNearMeRadius = (list: ShopEntry[]): ShopEntry[] => {
+      if (!useLocationSort) return list
+      return list.filter((s) =>
+        shopWithinNearMeRadius(s.distanceKm, { nearMe: true, radiusKm: nearMeRadiusKm }),
+      )
+    }
+
+    const baseList = backendSearchShops != null ? backendSearchShops : shopsInCategory
     let relaxedNote: string | null = null
 
-    if (!tokens.length) {
-      const list = shopTab ? applyTab(base) : base
+    // Backend path: apply tabs + client radius (covers legacy fallback + shrinking radius before refetch)
+    if (backendSearchShops != null) {
+      const list = applyNearMeRadius(shopTab ? applyTab(baseList) : baseList)
       return { shops: sortList(list), relaxedNote: null }
     }
 
-    const searchHits = base.filter(shopMatchesQuery)
+    if (!tokens.length) {
+      const list = applyNearMeRadius(shopTab ? applyTab(shopsInCategory) : shopsInCategory)
+      return { shops: sortList(list), relaxedNote: null }
+    }
+
+    const searchHits = applyNearMeRadius(shopsInCategory.filter(shopMatchesQuery))
     if (!shopTab) {
       return { shops: sortList(searchHits), relaxedNote: null }
     }
 
-    const tabbed = applyTab(base)
+    const tabbed = applyNearMeRadius(applyTab(shopsInCategory))
     const tabAndSearch = tabbed.filter(shopMatchesQuery)
     if (tabAndSearch.length > 0) {
       return { shops: sortList(tabAndSearch), relaxedNote: null }
@@ -3925,16 +4205,50 @@ export default function GrandmaPage() {
     shopSearch,
     shopTab,
     useLocationSort,
+    nearMeRadiusKm,
     preferredShopIds,
     language,
     shopProductSearchAccounts,
     grandmaOrderedShopIds,
     reorderSellerKeySet,
     onsaleSellerKeysSet,
+    backendSearchShops,
+    category,
   ])
 
   const visibleShops = shopListFilterResult.shops
   const shopSearchRelaxedNote = shopListFilterResult.relaxedNote
+
+  const nearMeRadiusStatus = useMemo(() => {
+    if (!useLocationSort) return null
+    const distances = visibleShops.map((s) => s.distanceKm)
+    const farthest = maxFiniteDistanceKm(distances)
+    const withDist = distances.filter((d) => Number.isFinite(d) && d < Number.POSITIVE_INFINITY).length
+    const radiusLabel = nearMeRadiusKm == null ? "all" : `${nearMeRadiusKm} km`
+    let sameRadiusHint: string | null = null
+    if (
+      nearMeRadiusKm != null &&
+      farthest != null &&
+      visibleShops.length > 0 &&
+      farthest + 0.05 < nearMeRadiusKm
+    ) {
+      const tighter = GRANDMA_NEAR_ME_RADIUS_OPTIONS_KM.filter((km) => km < nearMeRadiusKm && farthest <= km)
+      const alreadyWithin = tighter.length ? tighter[tighter.length - 1] : Math.ceil(farthest)
+      sameRadiusHint =
+        language === "rw"
+          ? `Amaduka yose ari mu ${farthest.toFixed(1)} km — kongera radius ntibizana andi (yari mu ${alreadyWithin} km).`
+          : language === "fr"
+            ? `Tous les commerces listés sont déjà à ≤ ${farthest.toFixed(1)} km — élargir le rayon n’ajoute rien ici.`
+            : `All listed shops are already within ${farthest.toFixed(1)} km — a larger radius may look the same.`
+    }
+    return {
+      radiusLabel,
+      count: visibleShops.length,
+      withDist,
+      farthest,
+      sameRadiusHint,
+    }
+  }, [useLocationSort, nearMeRadiusKm, visibleShops, language])
 
   const isAllPreferred = useMemo(() => preferredShopIds.includes(PREFERRED_ALL_ID), [preferredShopIds])
   const multiShopMode = useMemo(() => isAllPreferred && !selectedShopId, [isAllPreferred, selectedShopId])
@@ -5532,11 +5846,14 @@ export default function GrandmaPage() {
             className={`shop-trio-btn ${useLocationSort ? "on" : ""}`}
             onClick={() => {
               const willEnable = !useLocationSort
-              // If enabling and we don't have a recent location, ask the user
               if (willEnable && (!locationData || useLocationStoreEnhanced.getState().isLocationExpired())) {
                 setLocationDialogOpen(true)
               }
               setUseLocationSort(willEnable)
+              if (willEnable) {
+                setNearMeRadiusKm(GRANDMA_NEAR_ME_DEFAULT_RADIUS_KM)
+                setSearchPage(1)
+              }
             }}
           >
             {useLocationSort ? "📍 Near me on" : "📍 Near me off"}
@@ -5562,14 +5879,130 @@ export default function GrandmaPage() {
           </button>
         </div>
 
-        <div className="search">
+        {useLocationSort ? (
+          <div className="shop-filter-row" style={{ marginBottom: 10 }} role="group" aria-label="Near me radius">
+            {GRANDMA_NEAR_ME_RADIUS_OPTIONS_KM.map((km) => (
+              <button
+                key={km}
+                type="button"
+                className={`shop-filter-pill ${nearMeRadiusKm === km ? "active" : ""}`}
+                onClick={() => {
+                  setNearMeRadiusKm(km)
+                  setSearchPage(1)
+                }}
+              >
+                {km} km
+              </button>
+            ))}
+            <button
+              type="button"
+              className={`shop-filter-pill ${nearMeRadiusKm == null ? "active" : ""}`}
+              onClick={() => {
+                setNearMeRadiusKm(null)
+                setSearchPage(1)
+              }}
+            >
+              All shops
+            </button>
+          </div>
+        ) : null}
+        {useLocationSort && nearMeRadiusStatus ? (
+          <p className="note" style={{ marginTop: 0, marginBottom: 10, fontSize: 12 }}>
+            {language === "rw"
+              ? `Near me · ${nearMeRadiusStatus.radiusLabel} · ${nearMeRadiusStatus.count} amaduka`
+              : language === "fr"
+                ? `Near me · ${nearMeRadiusStatus.radiusLabel} · ${nearMeRadiusStatus.count} commerces`
+                : `Near me · ${nearMeRadiusStatus.radiusLabel} · ${nearMeRadiusStatus.count} shops`}
+            {nearMeRadiusStatus.farthest != null
+              ? language === "rw"
+                ? ` · kure cyane: ${nearMeRadiusStatus.farthest.toFixed(1)} km`
+                : language === "fr"
+                  ? ` · le plus loin: ${nearMeRadiusStatus.farthest.toFixed(1)} km`
+                  : ` · farthest: ${nearMeRadiusStatus.farthest.toFixed(1)} km`
+              : ""}
+            {nearMeRadiusStatus.sameRadiusHint ? (
+              <>
+                <br />
+                <span style={{ color: "#92400e" }}>{nearMeRadiusStatus.sameRadiusHint}</span>
+              </>
+            ) : null}
+          </p>
+        ) : null}
+        {geoPermissionError ? (
+          <p className="card note" style={{ marginTop: 0, marginBottom: 10, fontSize: 12, color: "#92400e", background: "#fffbeb" }}>
+            {geoPermissionError}{" "}
+            <button type="button" className="reorder-btn" onClick={() => setLocationDialogOpen(true)}>
+              Set location
+            </button>
+          </p>
+        ) : null}
+
+        <div className="search" style={{ position: "relative" }}>
           <span aria-hidden>🔎</span>
           <input
             value={shopSearch}
-            onChange={(e) => setShopSearch(e.target.value)}
+            onChange={(e) => {
+              setShopSearch(e.target.value)
+              setShowSearchSuggestions(true)
+              setSearchPage(1)
+            }}
+            onFocus={() => setShowSearchSuggestions(true)}
+            onBlur={() => setTimeout(() => setShowSearchSuggestions(false), 180)}
             placeholder="Search shops or products (e.g. milk, bread)"
             aria-label="Search shops or products"
+            aria-autocomplete="list"
           />
+          {backendSearchLoading || shopProductSearchLoading ? (
+            <Loader2 className="h-4 w-4 animate-spin" style={{ color: "#1897e0" }} aria-hidden />
+          ) : null}
+          {showSearchSuggestions && searchSuggestions.length > 0 ? (
+            <ul
+              role="listbox"
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                top: "100%",
+                zIndex: 40,
+                margin: 0,
+                padding: 6,
+                listStyle: "none",
+                background: "#fff",
+                border: "1px solid var(--line)",
+                borderRadius: 12,
+                boxShadow: "0 8px 18px rgba(24,151,224,.12)",
+                maxHeight: 220,
+                overflow: "auto",
+              }}
+            >
+              {searchSuggestions.map((sug) => (
+                <li key={sug}>
+                  <button
+                    type="button"
+                    style={{
+                      width: "100%",
+                      textAlign: "left",
+                      border: "none",
+                      background: "transparent",
+                      padding: "8px 10px",
+                      borderRadius: 8,
+                      cursor: "pointer",
+                      fontWeight: 600,
+                      color: "#17324d",
+                    }}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      setShopSearch(sug)
+                      setShowSearchSuggestions(false)
+                      setSearchPage(1)
+                    }}
+                  >
+                    {sug}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
 
         <div className="shop-filter-row" role="tablist" aria-label="Shop filters">
@@ -5611,33 +6044,64 @@ export default function GrandmaPage() {
               {!GRANDMA_SHOW_DEMO_SHOPS && allAvailableShops.length === 0 ? (
                 <p style={{ marginBottom: 10, color: "#5a6b7a", fontSize: "0.92rem" }}>{GRANDMA_NO_LIVE_SHOPS_HINT}</p>
               ) : null}
-              {shopSearch.trim() ? (
-                shopProductSearchLoading ? (
+              {shopSearch.trim() || useLocationSort ? (
+                backendSearchLoading || shopProductSearchLoading ? (
                   <p style={{ margin: 0 }}>
                     {language === "rw"
-                      ? "Turimo gushakisha ibicuruzya kugira ngo tubone amaduka abibamo…"
+                      ? "Turimo gushakisha…"
                       : language === "fr"
-                        ? "Recherche des produits pour afficher les boutiques concernées…"
-                        : "Searching the product catalog for shops that carry matching items…"}
+                        ? "Recherche en cours…"
+                        : "Searching…"}
                   </p>
+                ) : backendEmptyReason === "no_shops_in_radius" ||
+                  backendEmptyReason === "no_match_in_radius" ||
+                  (useLocationSort &&
+                    nearMeRadiusKm != null &&
+                    !backendSearchLoading &&
+                    !shopProductSearchLoading) ? (
+                  <div>
+                    <p style={{ margin: "0 0 10px" }}>
+                      {language === "rw"
+                        ? `Nta duka riboneka mu ${nearMeRadiusKm ?? "—"} km.`
+                        : language === "fr"
+                          ? `Aucun commerce dans un rayon de ${nearMeRadiusKm ?? "—"} km.`
+                          : `No shops found within ${nearMeRadiusKm ?? "—"} km.`}
+                    </p>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      <button
+                        type="button"
+                        className="reorder-btn"
+                        onClick={() =>
+                          setNearMeRadiusKm((r) => {
+                            const cur = r ?? GRANDMA_NEAR_ME_DEFAULT_RADIUS_KM
+                            const next = GRANDMA_NEAR_ME_RADIUS_OPTIONS_KM.find((x) => x > cur)
+                            return next ?? null
+                          })
+                        }
+                      >
+                        Expand radius
+                      </button>
+                      <button type="button" className="reorder-btn" onClick={() => setNearMeRadiusKm(null)}>
+                        Search all shops
+                      </button>
+                    </div>
+                  </div>
                 ) : language === "rw" ? (
                   <p style={{ margin: 0 }}>
-                    Nta duka ryahuye na <strong>&quot;{shopSearch.trim()}&quot;</strong> ku izina cyangwa ibicuruzya.
+                    Nta duka ryahuye na <strong>&quot;{shopSearch.trim() || "Near me"}&quot;</strong>.
                     {shopTab ? " Gerageza gukura filtere." : ""} Gerageza andi magambo cyangwa siba uko wanditse.
                   </p>
                 ) : language === "fr" ? (
                   <p style={{ margin: 0 }}>
-                    Aucun commerce ne correspond à <strong>&quot;{shopSearch.trim()}&quot;</strong> (nom ou produits du
-                    catalogue).
-                    {shopTab ? " Essayez de désactiver le filtre actif." : ""} Essayez d&apos;autres mots ou effacez la
-                    recherche.
+                    Aucun commerce ne correspond à <strong>&quot;{shopSearch.trim() || "Near me"}&quot;</strong>.
+                    {shopTab ? " Essayez de désactiver le filtre actif." : ""} Essayez d&apos;autres mots ou élargissez
+                    le rayon.
                   </p>
                 ) : (
                   <p style={{ margin: 0 }}>
-                    No shops match <strong>&quot;{shopSearch.trim()}&quot;</strong> by shop name, MoMo, or catalog
-                    products
-                    {shopTab ? " with the current filter." : "."} Try different words, clear the search box, or tap the
-                    active filter again to turn it off.
+                    No shops match <strong>&quot;{shopSearch.trim() || "your Near me filter"}&quot;</strong>
+                    {shopTab ? " with the current filter." : "."} Try different words, clear search, expand the radius,
+                    or turn off the active filter.
                   </p>
                 )
               ) : (
@@ -5670,8 +6134,18 @@ export default function GrandmaPage() {
                   <img src={s.logoSrc} alt="" />
                 </div>
                 <div className="shop-row-meta">
-                  <div className="shop-row-name">{s.name}</div>
-                  <div className="shop-row-tag">{s.tagline}</div>
+                  <div className="shop-row-name">
+                    <GrandmaHighlightText snippet={s.matchSnippet} fallback={s.name} />
+                  </div>
+                  <div className="shop-row-tag">
+                    {s.matchedProductSample ? (
+                      <>
+                        Product: <GrandmaHighlightText snippet={undefined} fallback={s.matchedProductSample} />
+                      </>
+                    ) : (
+                      s.tagline
+                    )}
+                  </div>
                   <div className="shop-row-items">
                     {`${Math.max(0, Math.floor(Number(s.stockLineCount ?? 0)))} ${tPay.sectorPanelItems}`}
                   </div>
@@ -5702,7 +6176,11 @@ export default function GrandmaPage() {
                     ) : null}
                   </div>
                 </div>
-                <div className="shop-row-dist">{s.distanceKm.toFixed(1)} km</div>
+                <div className="shop-row-dist">
+                  {Number.isFinite(s.distanceKm) && s.distanceKm < Number.POSITIVE_INFINITY
+                    ? `${s.distanceKm.toFixed(1)} km`
+                    : "—"}
+                </div>
               </div>
             ))
           ) : null}

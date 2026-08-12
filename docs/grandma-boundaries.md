@@ -5,7 +5,7 @@ Grandma is the Next.js surface under `/grandma`. Sign-in is the shared app page 
 ## Backend / APIs (Kaos Java, deployed WAR)
 
 - **Auth:** `POST …/Kaos/user-auth` (`action=login`, etc.) — proxied from Next as `/api/auth/login`.
-- **Shop catalog / search:** `GET …/Kaos/fetchSuggestions` (`listSuppliersWithProducts`, `globalSearch`, …) — Grandma calls via `getBackendBase()` from `lib/backend-config.ts`.
+- **Shop catalog / search:** `GET …/Kaos/fetchSuggestions` plus production Grandma search `GET /api/grandma/search` (MySQL on `account_signup` + `seller_add_stock`; optional indexes in `sql/grandma_search_indexes.sql`).
 - **Grandma REST:** buyers, sellers, stock, inventory, temp items — URLs from `lib/backend-config.ts` / env (`GRANDMA_*`, `JAVA_AUTH_URL`, etc.).
 
 ## Database

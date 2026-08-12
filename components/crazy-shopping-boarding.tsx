@@ -1,13 +1,14 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ArrowLeft, ArrowRight, Check, Loader2, Plus, Trash2, X } from "lucide-react"
+import { ArrowLeft, ArrowRight, Check, Loader2, MapPin, Plus, Trash2, X } from "lucide-react"
 import type { GlobalResult } from "@/components/global-search"
 import { filterProductsByRelevance } from "@/lib/search-utils"
 import { getNikiCodeFromSource, getProductImageSrc, type ProductImageSource } from "@/lib/image-utils"
 import { ProductImageFallback } from "@/components/product-image-fallback"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { GeoCombobox } from "@/components/geo-combobox"
@@ -42,6 +43,7 @@ import { useLanguageStore } from "@/lib/language-store"
 import { LanguageSelector } from "@/components/language-selector"
 import { DELIVERY_MODES, ERR, L, pickLang, SELLER_UI } from "@/lib/seller-register-i18n"
 import { shopCategoryToSectorSlug } from "@/lib/seller-category-sector"
+import { classifyBrowserGpsError, isShopGpsInRwanda } from "@/lib/grandma-seller-gps"
 
 const BUSINESS_CATEGORIES = [
   "pharmacy",
@@ -116,6 +118,9 @@ const initialBusiness: ShopBusinessDraft = {
   cellule: "",
   village: "",
   street: "",
+  latitude: null,
+  longitude: null,
+  gpsAccuracy: null,
   shopNickname: "",
   logoDataUrl: null,
 }
@@ -288,6 +293,12 @@ export function CrazyShoppingBoarding() {
   const [doneMsg, setDoneMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string | undefined>>({})
+  const [gpsCapturing, setGpsCapturing] = useState(false)
+  const [gpsError, setGpsError] = useState<string | null>(null)
+  const [confirmUseCurrentLocation, setConfirmUseCurrentLocation] = useState(false)
+
+  /** True only after GPS capture succeeds (lat/lng set). */
+  const locationSelected = business.latitude != null && business.longitude != null
 
   const lang = useLanguageStore((s) => s.language)
   const setLanguage = useLanguageStore((s) => s.setLanguage)
@@ -619,9 +630,36 @@ export function CrazyShoppingBoarding() {
   const catalogList = searchActive ? searchHits : categoryPreview
   const catalogLoading = searchActive ? searchLoading : categoryPreviewLoading
 
+  const requireLocationSelected = () => {
+    if (locationSelected) return true
+    const msg = pickLang(ERR.currentLocationRequired, lang)
+    setFieldErrors((prev) => ({ ...prev, "seller-field-shop-location": msg }))
+    setErr(msg)
+    window.setTimeout(() => {
+      document.getElementById("seller-field-shop-location")?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      })
+    }, 80)
+    return false
+  }
+
   const goNext = () => {
     if (step === 1) {
       if (!validateStep1()) return
+      if (!requireLocationSelected()) return
+      if (!confirmUseCurrentLocation) {
+        const msg = pickLang(ERR.confirmUseCurrentLocationRequired, lang)
+        setFieldErrors((prev) => ({ ...prev, "seller-field-confirm-location": msg }))
+        setErr(msg)
+        window.setTimeout(() => {
+          document.getElementById("seller-field-shop-location")?.scrollIntoView({
+            behavior: "smooth",
+            block: "center",
+          })
+        }, 80)
+        return
+      }
       setStep(2)
     }
   }
@@ -632,12 +670,90 @@ export function CrazyShoppingBoarding() {
     setStep(1)
   }
 
+  const captureShopGps = () => {
+    setGpsError(null)
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setGpsError(pickLang(ERR.gpsUnsupported, lang))
+      return
+    }
+    setGpsCapturing(true)
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = pos.coords.latitude
+        const lng = pos.coords.longitude
+        const accuracy =
+          typeof pos.coords.accuracy === "number" && Number.isFinite(pos.coords.accuracy)
+            ? pos.coords.accuracy
+            : null
+        if (!isShopGpsInRwanda(lat, lng)) {
+          setBusiness((b) => ({ ...b, latitude: null, longitude: null, gpsAccuracy: null }))
+          setConfirmUseCurrentLocation(false)
+          setGpsError(pickLang(ERR.gpsOutsideRwanda, lang))
+          setGpsCapturing(false)
+          return
+        }
+        setBusiness((b) => ({
+          ...b,
+          latitude: lat,
+          longitude: lng,
+          gpsAccuracy: accuracy,
+        }))
+        setFieldErrors((prev) => ({
+          ...prev,
+          "seller-field-shop-location": undefined,
+        }))
+        setGpsError(null)
+        setGpsCapturing(false)
+      },
+      (geoErr) => {
+        const kind = classifyBrowserGpsError(geoErr)
+        const msg =
+          kind === "denied"
+            ? pickLang(ERR.gpsPermissionDenied, lang)
+            : kind === "unavailable"
+              ? pickLang(ERR.gpsUnavailable, lang)
+              : kind === "timeout"
+                ? pickLang(ERR.gpsTimeout, lang)
+                : pickLang(ERR.gpsUnavailable, lang)
+        setGpsError(msg)
+        setGpsCapturing(false)
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
+    )
+  }
+
   const submit = async () => {
     if (picks.length === 0) {
       setErr(pickLang(ERR.step2, lang))
       return
     }
     if (!validateLinesForSubmit()) return
+    if (!locationSelected) {
+      const msg = pickLang(ERR.currentLocationRequired, lang)
+      setFieldErrors((prev) => ({ ...prev, "seller-field-shop-location": msg }))
+      setErr(msg)
+      setStep(1)
+      window.setTimeout(() => {
+        document.getElementById("seller-field-shop-location")?.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+        })
+      }, 80)
+      return
+    }
+    if (!confirmUseCurrentLocation) {
+      const msg = pickLang(ERR.confirmUseCurrentLocationRequired, lang)
+      setFieldErrors((prev) => ({ ...prev, "seller-field-confirm-location": msg }))
+      setErr(msg)
+      setStep(1)
+      window.setTimeout(() => {
+        document.getElementById("seller-field-shop-location")?.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+        })
+      }, 80)
+      return
+    }
     setErr(null)
     setSubmitting(true)
     setDoneMsg(null)
@@ -666,12 +782,26 @@ export function CrazyShoppingBoarding() {
         tel: business.phone.trim(),
         phone: business.phone.trim(),
         location: locationSummary,
+        shopAddress: locationSummary,
         sector: shopCategoryToSectorSlug(business.category),
         delivery_mode: business.deliveryPref,
         momo_code: business.momoCode.trim(),
       }
       if (nickNorm) {
         regBody.nickname = nickNorm
+      }
+      if (
+        business.latitude != null &&
+        business.longitude != null &&
+        Number.isFinite(business.latitude) &&
+        Number.isFinite(business.longitude)
+      ) {
+        regBody.latitude = business.latitude
+        regBody.longitude = business.longitude
+        if (business.gpsAccuracy != null && Number.isFinite(business.gpsAccuracy)) {
+          regBody.gpsAccuracy = business.gpsAccuracy
+        }
+        regBody.location_source = "AUTO"
       }
       const regRes = await fetch("/api/grandma/sellers", {
         method: "POST",
@@ -1262,6 +1392,145 @@ export function CrazyShoppingBoarding() {
                   onChange={(e) => setBusiness((b) => ({ ...b, street: e.target.value }))}
                   placeholder="Street, building, landmark…"
                 />
+              </div>
+
+              <div
+                id="seller-field-shop-location"
+                className="sm:col-span-2 space-y-3 overflow-visible rounded-xl border border-[#dbe7f3] bg-[#f7fbff] p-4 scroll-mt-24"
+              >
+                <div>
+                  <FieldLabel lang={lang} tri={L.shopLocation} />
+                  <p className="mt-1 text-xs text-[#6f8399]">
+                    {pickLang(L.locationStatus, lang)}
+                    {": "}
+                    {business.latitude != null && business.longitude != null ? (
+                      <span className="font-medium text-emerald-700">
+                        ✓ {pickLang(L.locationCaptured, lang)}
+                      </span>
+                    ) : (
+                      <span>{pickLang(L.locationNotCaptured, lang)}</span>
+                    )}
+                  </p>
+                </div>
+                <div className="relative flex w-full items-center gap-2 sm:w-auto">
+                  {!locationSelected && !gpsCapturing ? (
+                    <span
+                      className="shop-gps-arrow-hint pointer-events-none shrink-0 text-blue-600"
+                      aria-hidden
+                    >
+                      <ArrowRight className="h-5 w-5" strokeWidth={2.5} />
+                    </span>
+                  ) : null}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className={cn(
+                      "relative z-0 w-full border-[#dbe7f3] bg-white text-[#17324d] hover:bg-white sm:w-auto",
+                      fieldErrors["seller-field-shop-location"] && !locationSelected
+                        ? "shop-gps-btn-attention border-blue-400"
+                        : "",
+                    )}
+                    disabled={gpsCapturing || submitting}
+                    onClick={captureShopGps}
+                    aria-invalid={fieldErrors["seller-field-shop-location"] ? "true" : undefined}
+                    aria-describedby={
+                      fieldErrors["seller-field-shop-location"]
+                        ? "seller-field-shop-location-error"
+                        : undefined
+                    }
+                  >
+                    {gpsCapturing ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        {pickLang(L.locationCapturing, lang)}
+                      </>
+                    ) : locationSelected ? (
+                      <>
+                        <MapPin className="mr-2 h-4 w-4" aria-hidden />
+                        {pickLang(L.useCurrentLocation, lang)}
+                      </>
+                    ) : (
+                      <>
+                        <span className="shop-gps-icon-hint shop-gps-icon-ring-hint mr-2 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-[1.5px] border-emerald-600 bg-white">
+                          <MapPin className="h-3 w-3 text-emerald-700" aria-hidden />
+                        </span>
+                        {pickLang(L.useCurrentLocation, lang)}
+                      </>
+                    )}
+                  </Button>
+                </div>
+                {fieldErrors["seller-field-shop-location"] ? (
+                  <p
+                    id="seller-field-shop-location-error"
+                    className="text-sm font-medium text-destructive"
+                    role="alert"
+                  >
+                    {fieldErrors["seller-field-shop-location"]}
+                  </p>
+                ) : null}
+                {gpsError ? <p className="text-sm text-destructive">{gpsError}</p> : null}
+                <div className="pt-1">
+                  <div className="flex items-start gap-2.5">
+                    <Checkbox
+                      id="seller-confirm-use-current-location"
+                      checked={confirmUseCurrentLocation}
+                      disabled={submitting || !locationSelected}
+                      onCheckedChange={(v) => {
+                        if (!locationSelected) {
+                          void requireLocationSelected()
+                          return
+                        }
+                        const checked = v === true
+                        setConfirmUseCurrentLocation(checked)
+                        if (checked) {
+                          setFieldErrors((prev) => ({
+                            ...prev,
+                            "seller-field-confirm-location": undefined,
+                          }))
+                          setErr(null)
+                        }
+                      }}
+                      aria-invalid={fieldErrors["seller-field-confirm-location"] ? "true" : undefined}
+                      aria-describedby={
+                        fieldErrors["seller-field-confirm-location"]
+                          ? "seller-field-confirm-location-error"
+                          : undefined
+                      }
+                      className={cn(
+                        "mt-0.5 h-4 w-4 shrink-0 rounded-[4px] border-2 bg-white shadow-none",
+                        "border-[#334155] transition-colors duration-200 ease-out",
+                        "focus-visible:ring-2 focus-visible:ring-emerald-500/35 focus-visible:ring-offset-1",
+                        "data-[state=checked]:border-emerald-600 data-[state=checked]:bg-emerald-600 data-[state=checked]:text-white",
+                        "[&_svg]:h-3 [&_svg]:w-3 [&_svg]:stroke-[3]",
+                        !locationSelected ? "opacity-50" : "",
+                        fieldErrors["seller-field-confirm-location"]
+                          ? "border-destructive focus-visible:ring-destructive/30"
+                          : "",
+                      )}
+                    />
+                    <Label
+                      htmlFor="seller-confirm-use-current-location"
+                      className={cn(
+                        "min-w-0 flex-1 text-[13px] font-normal leading-snug text-[#17324d]",
+                        locationSelected ? "cursor-pointer" : "cursor-not-allowed opacity-60",
+                      )}
+                    >
+                      {pickLang(L.confirmUseCurrentLocation, lang)}
+                    </Label>
+                  </div>
+                  {fieldErrors["seller-field-confirm-location"] ? (
+                    <p
+                      id="seller-field-confirm-location-error"
+                      className="mt-1.5 text-sm font-medium text-destructive"
+                      role="alert"
+                    >
+                      {fieldErrors["seller-field-confirm-location"]}
+                    </p>
+                  ) : null}
+                </div>
+                {/* Coordinates kept in form state only — not shown in the UI */}
+                <input type="hidden" name="latitude" value={business.latitude ?? ""} readOnly />
+                <input type="hidden" name="longitude" value={business.longitude ?? ""} readOnly />
               </div>
             </CardContent>
           </Card>
