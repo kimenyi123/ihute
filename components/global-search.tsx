@@ -17,6 +17,7 @@ import { searchNearbyProducts, NearbyProduct } from "@/lib/location-search-api"
 import { DistanceBadge } from "@/components/distance-badge"
 import { Badge } from "@/components/ui/badge"
 import { lineSellingPriceFromProductRow } from "@/lib/package-price"
+import { sellerDisplayName, sellerDisplayNameFromProduct } from "@/lib/seller-display-name"
 
 export interface GlobalResult {
   type?: "product" | "supplier"
@@ -683,7 +684,11 @@ export function GlobalSearch({
 
   const onSubmitSupplier = (s: GlobalResult) => {
     const supplierAccount = s.supplier_account || s.item_seller_account
-    const supplierName = s.supplier_name || supplierAccount || ""
+    const supplierName = sellerDisplayName({
+      supplierName: s.supplier_name,
+      supplierAccount: supplierAccount,
+      fallback: "",
+    })
     const params = new URLSearchParams({
       ...(supplierName ? { q: supplierName } : {}),
       supplier: supplierAccount || "",
@@ -1058,7 +1063,10 @@ export function GlobalSearch({
                           {/* Supplier header */}
                           <div className="text-[11px] font-medium text-gray-600 px-2 py-1 bg-gray-50 rounded flex items-center gap-1">
                             <Store className="h-3 w-3" />
-                            {firstProduct.supplier_name || supplierId}
+                            {sellerDisplayNameFromProduct({
+                              ...firstProduct,
+                              supplier_account: supplierId,
+                            })}
                             {firstProduct.supplier_location && (
                               <span className="text-gray-500">• {firstProduct.supplier_location}</span>
                             )}
