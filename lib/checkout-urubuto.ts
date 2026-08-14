@@ -65,6 +65,8 @@ export async function initiateCheckoutUrubutoPay(payload: {
   payerCode?: string
   cartId?: string
   clientReference?: string
+  /** IHUTE order id — used as merchant reference (IHUTE-ORDER-{id}) for webhook writeback. */
+  orderId?: number
 }): Promise<UrubutoCheckoutPayResult> {
   const paymentMethod: UrubutoCheckoutPaymentMethod = payload.paymentMethod ?? "WALLET"
   try {
@@ -77,6 +79,10 @@ export async function initiateCheckoutUrubutoPay(payload: {
       payerCode: payload.payerCode,
       cartId: payload.cartId,
       clientReference: payload.clientReference,
+    }
+    if (payload.orderId && payload.orderId > 0) {
+      body.orderId = payload.orderId
+      body.ihute_order_id = payload.orderId
     }
     if (paymentMethod === "WALLET") {
       body.phone_number = normalizeUrubutoPhone(payload.phone_number)
