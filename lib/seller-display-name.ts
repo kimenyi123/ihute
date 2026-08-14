@@ -8,6 +8,28 @@ export function looksLikeIshyigaAccount(value?: string | null): boolean {
   return /^[A-Z]{2,5}\d{6,}$/i.test(s)
 }
 
+/** `/shop-with-me/{slug}` must be the shop nickname, never OWNER or account id. */
+export function shopWithMePathSegment(opts: {
+  nickname?: string | null
+  cheapestShopNickname?: string | null
+  owner?: string | null
+  supplierName?: string | null
+  supplierAccount?: string | null
+}): string | undefined {
+  const owner = (opts.owner ?? opts.supplierName ?? "").trim().toLowerCase()
+  const account = (opts.supplierAccount ?? "").trim().toLowerCase()
+  for (const raw of [opts.nickname, opts.cheapestShopNickname]) {
+    const nick = (raw ?? "").trim()
+    if (!nick) continue
+    const lower = nick.toLowerCase()
+    if (owner && lower === owner) continue
+    if (account && lower === account) continue
+    if (looksLikeIshyigaAccount(nick)) continue
+    return lower
+  }
+  return undefined
+}
+
 export function sellerDisplayName(opts: {
   owner?: string | null
   supplierName?: string | null
