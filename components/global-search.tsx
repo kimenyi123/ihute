@@ -645,7 +645,7 @@ export function GlobalSearch({
           setLoading(false)
         }
       }
-      }, 300)
+      }, 150)
     }, 0)
 
     return () => {

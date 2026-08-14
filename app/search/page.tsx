@@ -11,13 +11,13 @@ import { Button } from "@/components/ui/button"
 import { filterSuppliersByRelevance } from "@/lib/search-utils"
 import { shouldRunTextSearch } from "@/lib/search-query-min"
 import { getTranslations } from "@/lib/keyword-mapping"
-import { MapPin, Store } from "lucide-react"
+import { MapPin, Store, Search } from "lucide-react"
 import { useTableCommandStore } from "@/lib/table-command-store"
 import { useLocationStoreEnhanced } from "@/lib/location-store-enhanced"
 import { LocationBadge } from "@/components/location-badge"
 import { ProductCard } from "@/components/product-card"
 import { ProductQuickView, type QuickViewProduct } from "@/components/product-quick-view"
-import { ShopScopedSearch } from "@/components/shop-scoped-search"
+import { Input } from "@/components/ui/input"
 import { fetchSearchSuggestions } from "@/lib/search-suggestions"
 import { usePriceDropToasts } from "@/lib/use-price-drop-toasts"
 import {
@@ -727,7 +727,7 @@ export default function SearchPage() {
 
   // Quick search: 200ms debounce so backend is hit fast (like shop-with-me)
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedQ(q.trim()), 200)
+    const t = setTimeout(() => setDebouncedQ(q.trim()), 150)
     return () => clearTimeout(t)
   }, [q])
 
@@ -914,7 +914,7 @@ export default function SearchPage() {
       try {
         const url = `/api/fetchSuggestions?supplierProducts=${encodeURIComponent(
           selectedShop.supplier_account,
-        )}&limit=10000&Currency=RWF`
+        )}&limit=240&Currency=RWF`
         const res = await fetch(url, { cache: "no-store" })
         const raw = res.ok ? await res.json() : null
         const data = normalizeSupplierProductsResponse(
@@ -1757,17 +1757,29 @@ export default function SearchPage() {
                             </Button>
                           </div>
                         </div>
-                        <ShopScopedSearch
-                          id="supplier-catalog-search"
-                          value={supplierSearch}
-                          onChange={setSupplierSearch}
-                          shopName={focusedSupplierLabel}
-                          isSearching={
-                            loadingSupplierSearch ||
-                            (shouldRunTextSearch(supplierSearch) &&
-                              supplierSearch.trim() !== debouncedSupplierSearch)
-                          }
-                        />
+                        <div className="relative flex-1">
+                          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                          <Input
+                            id="supplier-catalog-search"
+                            type="search"
+                            placeholder="Search products..."
+                            value={supplierSearch}
+                            onChange={(e) => setSupplierSearch(e.target.value)}
+                            className="pl-10"
+                            aria-label={
+                              focusedSupplierLabel
+                                ? `Search products in ${focusedSupplierLabel}`
+                                : "Search products in this shop"
+                            }
+                          />
+                          {loadingSupplierSearch ||
+                          (shouldRunTextSearch(supplierSearch) &&
+                            supplierSearch.trim() !== debouncedSupplierSearch) ? (
+                            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground animate-pulse">
+                              …
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
                     </div>
                   </div>
