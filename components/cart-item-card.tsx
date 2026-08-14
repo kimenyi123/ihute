@@ -10,6 +10,7 @@ import { Minus, Plus, Trash2 } from "lucide-react"
 import { getProductImageCandidates, isValidImageUrl, NO_IMAGE_URL } from "@/lib/image-utils"
 import { normalizeProductImagePublicUrl, resolvePublicAssetUrl } from "@/lib/public-asset-url"
 import { DEFAULT_CART_CURRENCY, itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
+import { sellerDisplayName } from "@/lib/seller-display-name"
 
 const PLACEHOLDER = "/placeholder.svg?height=64&width=64"
 
@@ -95,7 +96,10 @@ export function CartItemCard({ item }: { item: CartItem }) {
         <div className="flex-1 min-w-0">
           <div className="font-medium text-sm sm:text-base truncate">{item.name}</div>
           <div className="text-[11px] sm:text-xs text-muted-foreground truncate">
-            {item.supplierName}
+            {sellerDisplayName({
+              supplierName: item.supplierName,
+              supplierAccount: item.supplierId,
+            })}
             {item.supplierLocation ? ` · ${item.supplierLocation}` : ""}
           </div>
           <div className="text-xs sm:text-sm mt-1">

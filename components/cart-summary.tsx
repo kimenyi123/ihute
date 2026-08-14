@@ -43,6 +43,7 @@ import { orderErrorMessageWithProductNames } from "@/lib/order-error-display"
 import { readShopOrderContext } from "@/lib/ihute-shop-order-context"
 import { trackCheckoutSubmit } from "@/lib/activity-tracker"
 import { flushCartToServer } from "@/lib/flush-cart-server"
+import { sellerDisplayName, looksLikeIshyigaAccount } from "@/lib/seller-display-name"
 import {
   fetchSellerUrubutoEligibility,
   fetchCheckoutUrubutoStatus,
@@ -251,6 +252,7 @@ function CartSummaryBody() {
   // ✅ Get tableInfo from cart store
   const tableInfo = useCartStore((s) => s.tableInfo)
   const stampRequiresPrescription = useCartStore((s) => s.stampRequiresPrescription)
+  const setSupplierDisplayName = useCartStore((s) => s.setSupplierDisplayName)
 
   const [busy, setBusy] = useState<string | null>(null)
   const [orderIds, setOrderIds] = useState<Record<string, string>>({})
@@ -476,9 +478,24 @@ function CartSummaryBody() {
           if (!data?.ok || !data?.profile) {
             throw new Error("Profile not available")
           }
-          const p = data.profile as { momo?: string; phone?: string }
+          const p = data.profile as {
+            momo?: string
+            phone?: string
+            owner?: string
+            businessName?: string
+            name?: string
+            nickname?: string
+          }
           const momo = String(p.momo ?? "").trim()
           const tel = String(p.phone ?? "").trim()
+          const ownerName = sellerDisplayName({
+            owner: p.owner ?? p.businessName ?? p.name,
+            nickname: p.nickname,
+            supplierAccount: account,
+          })
+          if (ownerName && ownerName !== "Supplier") {
+            setSupplierDisplayName(account, ownerName)
+          }
           if (momo) setSupplierMomoFallback((prev) => ({ ...prev, [account]: momo }))
           if (tel) {
             setSupplierAccountTel((prev) => ({ ...prev, [account]: tel }))
@@ -501,10 +518,16 @@ function CartSummaryBody() {
       if (!account) return
       const alreadyHaveTel = Boolean((supplierAccountTel[account] ?? "").trim())
       const alreadyHaveMomo = Boolean((supplierMomoFallback[account] ?? "").trim())
-      if (alreadyHaveTel && alreadyHaveMomo) return
+      const displayName = sellerDisplayName({
+        supplierName: g.supplierName,
+        supplierAccount: account,
+        fallback: "",
+      })
+      const needOwner = !displayName || looksLikeIshyigaAccount(g.supplierName)
+      if (alreadyHaveTel && alreadyHaveMomo && !needOwner) return
       fetchSupplierProfile(account)
     })
-  }, [groups, supplierAccountTel, supplierMomoFallback])
+  }, [groups, supplierAccountTel, supplierMomoFallback, setSupplierDisplayName])
 
   // Prefetch shared guest pool account (ISHYIGA_ACCOUNT) so checkout is fast and order servlet can resolve buyer
   useEffect(() => {
@@ -1646,7 +1669,10 @@ function CartSummaryBody() {
             <Card key={g.supplierId} className="border-2">
               <CardHeader className="pb-2 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
                 <CardTitle className="text-base flex-1 min-w-0 break-words">
-                  {g.supplierName}
+                  {sellerDisplayName({
+                    supplierName: g.supplierName,
+                    supplierAccount: g.supplierId,
+                  })}
                   {g.supplierLocation ? (
                     <span className="text-muted-foreground font-normal block sm:inline"> — {g.supplierLocation}</span>
                   ) : null}
@@ -2402,7 +2428,10 @@ function CartSummaryBody() {
             return (
               <div className="space-y-4">
                 <div className="rounded-lg border border-violet-200 bg-violet-50/80 p-3 text-sm">
-                  <p className="font-medium text-violet-950">{g.supplierName}</p>
+                  <p className="font-medium text-violet-950">{sellerDisplayName({
+                    supplierName: g.supplierName,
+                    supplierAccount: g.supplierId,
+                  })}</p>
                   <p className="text-muted-foreground mt-1">
                     Amount: <strong>{g.subtotal.toLocaleString()} RWF</strong>
                   </p>
@@ -2520,7 +2549,10 @@ function CartSummaryBody() {
             return (
               <div className="space-y-4">
                 <div className="rounded-lg border border-teal-200 bg-teal-50/80 p-3 text-sm">
-                  <p className="font-medium text-teal-950">{g.supplierName}</p>
+                  <p className="font-medium text-teal-950">{sellerDisplayName({
+                    supplierName: g.supplierName,
+                    supplierAccount: g.supplierId,
+                  })}</p>
                   <p className="text-muted-foreground mt-1">
                     Amount: <strong>{g.subtotal.toLocaleString()} RWF</strong>
                   </p>
@@ -2604,7 +2636,10 @@ function CartSummaryBody() {
                     </div>
                     <div className="flex items-start justify-between gap-2 text-sm">
                       <span className="text-muted-foreground shrink-0">Seller</span>
-                      <span className="font-semibold text-right leading-snug">{g.supplierName}</span>
+                      <span className="font-semibold text-right leading-snug">{sellerDisplayName({
+                        supplierName: g.supplierName,
+                        supplierAccount: g.supplierId,
+                      })}</span>
                     </div>
                     <div className="rounded-lg border border-amber-100 bg-white/70 px-3 py-2">
                       <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-900/70">Seller phone (tracking)</p>

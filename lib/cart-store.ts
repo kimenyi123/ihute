@@ -119,6 +119,8 @@ type CartState = {
   mergeDuplicateCartLines: () => void
   /** Stamp Rx-required on matching cart lines (itemCode / niki / id). */
   stampRequiresPrescription: (codes: string[]) => void
+  /** Replace displayed shop name (account_seller.owner) for all lines of a seller. */
+  setSupplierDisplayName: (supplierId: string, supplierName: string) => void
 
   // ✅ NEW: Table management
   setTableInfo: (info: TableInfo | null) => void
@@ -601,6 +603,21 @@ export const useCartStore = create<CartState>()(
           }
           if (merged.length === items.length) return state
           return { items: merged }
+        }),
+
+      setSupplierDisplayName: (supplierId, supplierName) =>
+        set((state) => {
+          const sid = (supplierId ?? "").toString().trim()
+          const name = (supplierName ?? "").toString().trim()
+          if (!sid || !name) return state
+          let changed = false
+          const items = state.items.map((it) => {
+            if ((it.supplierId ?? "").toString().trim() !== sid) return it
+            if ((it.supplierName ?? "").trim() === name) return it
+            changed = true
+            return { ...it, supplierName: name }
+          })
+          return changed ? { items } : state
         }),
 
       stampRequiresPrescription: (codes) =>
