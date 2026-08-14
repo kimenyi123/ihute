@@ -74,6 +74,17 @@ export function getBackendBase(): string {
   }
 }
 
+/** Tomcat context from {@link getBackendBase} (e.g. Trading, Trading_beta, Trading_dev) — never hardcoded. */
+export function getJavaWarContext(): string {
+  try {
+    const path = new URL(getBackendBase()).pathname.replace(/\/+$/, "")
+    const seg = path.split("/").filter(Boolean)[0]
+    return seg || "Trading"
+  } catch {
+    return "Trading"
+  }
+}
+
 /** Cached when {@link warmJavaBackendBase} finds Tomcat (see port/context sweep). */
 let resolvedJavaBackendBase: string | null = null
 let warmJavaBackendInFlight: Promise<void> | null = null
@@ -478,7 +489,7 @@ export function getGrandmaListSuppliersBrowseUrlFallback(): string | null {
   return `${getBackendBaseForProxy()}/Api/grandma/suppliers/browse`
 }
 
-/** Account profile (account_signup): GET by email/account, PUT to update. */
+/** Account profile (account_seller; momo coalesced with account_signup): GET by email/account, PUT to update. */
 export function getAccountProfileUrl(): string {
   return process.env.JAVA_ACCOUNT_PROFILE_URL || `${getBackendBaseForProxy()}/Api/AccountProfile`
 }

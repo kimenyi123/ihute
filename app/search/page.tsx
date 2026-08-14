@@ -94,6 +94,7 @@ type Product = {
   FAMILLE?: string
   item_fabricant?: string
   relevance_score?: number
+  requiresPrescription?: boolean
 }
 
 type SearchResult = {
@@ -354,6 +355,10 @@ function toCardProduct(p: Product & { search_priority?: string; contains_ingredi
     IMAGE_URL: (p as any).IMAGE_URL,
     searchPriority: (p.search_priority === "direct" || p.search_priority === "contains" ? p.search_priority : undefined) as "direct" | "contains" | undefined,
     containsIngredient: typeof p.contains_ingredient === "string" ? p.contains_ingredient : undefined,
+    requiresPrescription: Boolean(
+      (p as { requires_prescription?: unknown; requiresPrescription?: unknown }).requires_prescription
+        ?? (p as { requiresPrescription?: unknown }).requiresPrescription,
+    ),
     ...(itemEmballage ? { itemEmballage } : {}),
     ...(itemStateRaw ? { item_state: itemStateRaw } : {}),
     ...(expiryLabel ? { expiryLabel } : {}),
@@ -631,6 +636,7 @@ export default function SearchPage() {
       famille: (p as any).famille ?? (p as any).FAMILLE,
       momo: p.momo || (p as any)?.seller_momo || "",
       ...(itemEmballage ? { itemEmballage } : {}),
+      ...(p.requiresPrescription ? { requiresPrescription: true } : {}),
     }
 
     // Check if we're in a table command context

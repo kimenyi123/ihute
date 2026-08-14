@@ -39,7 +39,10 @@ type Stats = {
   unflaggedInDrugBuckets: number
   pendingReviewReason: number
   pharmacistReviewed: number
+  rxRequired?: number
 }
+
+type QueueFilter = "pending" | "rx" | "reviewed"
 
 function Hint({ label, tip }: { label: ReactNode; tip: string }) {
   return (
@@ -72,9 +75,10 @@ export default function PrescriptionReviewPage() {
   const [q, setQ] = useState("")
   const [qDraft, setQDraft] = useState("")
   const [famille, setFamille] = useState("ALL")
-  const [filter, setFilter] = useState<"pending" | "reviewed">("pending")
+  const [filter, setFilter] = useState<QueueFilter>("pending")
   const [loading, setLoading] = useState(true)
   const [busyCode, setBusyCode] = useState<string | null>(null)
+  const [clearing, setClearing] = useState(false)
   const [stats, setStats] = useState<Stats | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -148,6 +152,35 @@ export default function PrescriptionReviewPage() {
     }
   }
 
+  async function clearNonPharmacy() {
+    setClearing(true)
+    try {
+      const res = await fetchAdminProtectedApi("/api/admin/prescription-review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clearNonPharmacy: true }),
+      })
+      const json = await res.json()
+      if (!res.ok || !json.ok) {
+        throw new Error(json.error || `Clear failed (${res.status})`)
+      }
+      toast({
+        title: "Non-pharmacy Rx flags cleared",
+        description: `Catalog ${json.nikiUpdated ?? 0} · stock ${json.stockUpdated ?? 0}. Grocery items will no longer ask for a photo at checkout.`,
+        duration: 4000,
+      })
+      void load()
+    } catch (e) {
+      toast({
+        title: "Could not clear flags",
+        description: e instanceof Error ? e.message : "Unknown error",
+        variant: "destructive",
+      })
+    } finally {
+      setClearing(false)
+    }
+  }
+
   const totalPages = Math.max(1, Math.ceil(total / limit))
 
   return (
@@ -159,14 +192,24 @@ export default function PrescriptionReviewPage() {
             Prescription review
           </h2>
           <p className="mt-1 max-w-2xl text-sm text-slate-600">
-            Pharmacist queue for catalog items the auto-classifier left unflagged. Your choice
-            updates checkout (buyers must upload Rx when marked required) and WhatsApp order flow.
+            Pharmacist queue for pharmacy drug categories only (GENERIC/SPEC HUMAN DRUGS, DRUGS,
+            vaccines, hormones, PSE/PGE/PGA/PSA). Food, drinks, biscuits, and cosmetics are excluded.
           </p>
         </div>
-        <Button type="button" variant="outline" onClick={() => void load()} disabled={loading}>
-          <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          Refresh
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => void clearNonPharmacy()}
+            disabled={loading || clearing}
+          >
+            {clearing ? "Clearing…" : "Unflag grocery / non-pharmacy"}
+          </Button>
+          <Button type="button" variant="outline" onClick={() => void load()} disabled={loading}>
+            <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       <div className="rounded-lg border border-sky-100 bg-sky-50/80 px-4 py-3 text-sm text-slate-700">
@@ -189,7 +232,7 @@ export default function PrescriptionReviewPage() {
       </div>
 
       {stats ? (
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Card>
             <CardHeader className="pb-2">
               <CardDescription>
@@ -210,6 +253,17 @@ export default function PrescriptionReviewPage() {
                 />
               </CardDescription>
               <CardTitle className="text-2xl tabular-nums">{stats.pendingReviewReason}</CardTitle>
+            </CardHeader>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardDescription>
+                <Hint
+                  label="Prescribed (Rx on)"
+                  tip="Catalog items with requires_prescription = 1. Buyers must attach a photo at checkout. Use this tab to turn Rx off."
+                />
+              </CardDescription>
+              <CardTitle className="text-2xl tabular-nums">{stats.rxRequired ?? 0}</CardTitle>
             </CardHeader>
           </Card>
           <Card>
@@ -276,21 +330,29 @@ export default function PrescriptionReviewPage() {
               ))}
             </SelectContent>
           </Select>
-          <Select
-            value={filter}
-            onValueChange={(v) => {
-              setFilter(v as "pending" | "reviewed")
-              setPage(1)
-            }}
-          >
-            <SelectTrigger className="w-[180px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="pending">Needs review</SelectItem>
-              <SelectItem value="reviewed">Already reviewed</SelectItem>
-            </SelectContent>
-          </Select>
+          <div className="flex flex-wrap gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
+            {(
+              [
+                { id: "pending", label: "Needs review" },
+                { id: "rx", label: "Prescribed drugs" },
+                { id: "reviewed", label: "Already reviewed" },
+              ] as const
+            ).map((tab) => (
+              <Button
+                key={tab.id}
+                type="button"
+                size="sm"
+                variant={filter === tab.id ? "default" : "ghost"}
+                className={filter === tab.id ? "" : "text-slate-600"}
+                onClick={() => {
+                  setFilter(tab.id)
+                  setPage(1)
+                }}
+              >
+                {tab.label}
+              </Button>
+            ))}
+          </div>
         </CardContent>
       </Card>
 
@@ -298,10 +360,11 @@ export default function PrescriptionReviewPage() {
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
           {error}
           <div className="mt-1 text-xs text-red-700">
-            Use the same MySQL as kaos <code>MySQLConnector</code>: set{" "}
-            <code>GQ_MYSQL_*</code> (or copy kaos <code>DB_URL</code> / <code>DB_USER</code> /{" "}
-            <code>DB_PASS</code>) on the frontend host to the marketplace DB (e.g.{" "}
-            <code>chaos_dev</code>) with access to <code>niki.niki_items</code>.
+            This page uses kaos <code>AdminServlet</code> → <code>MySQLConnector</code> on
+            whichever Tomcat WAR <code>JAVA_BACKEND_BASE</code> / <code>BACKEND_URL</code> points
+            to (same as search — not a hardcoded WAR name). Redeploy that WAR if
+            prescription-review actions are missing. Next.js <code>GQ_MYSQL_*</code> is only a
+            local fallback.
           </div>
         </div>
       ) : null}
@@ -319,7 +382,9 @@ export default function PrescriptionReviewPage() {
             {loading ? " · loading…" : ""}
             {filter === "pending"
               ? " · decide each row; pending_review reasons are sorted first"
-              : " · read-only history of pharmacist decisions"}
+              : filter === "rx"
+                ? " · medicines currently requiring a prescription; OTC turns the requirement off"
+                : " · pharmacist decisions; you can still switch Rx / OTC"}
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
@@ -390,42 +455,41 @@ export default function PrescriptionReviewPage() {
                     </Tooltip>
                   </TableCell>
                   <TableCell className="text-right">
-                    {filter === "pending" ? (
-                      <div className="flex justify-end gap-2">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              size="sm"
-                              className="bg-emerald-600 hover:bg-emerald-700"
-                              disabled={busyCode === it.nikiCode}
-                              onClick={() => void decide(it.nikiCode, "rx")}
-                            >
-                              <Check className="mr-1 h-3.5 w-3.5" />
-                              Rx
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>Require prescription at checkout</TooltipContent>
-                        </Tooltip>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={busyCode === it.nikiCode}
-                              onClick={() => void decide(it.nikiCode, "otc")}
-                            >
-                              <X className="mr-1 h-3.5 w-3.5" />
-                              OTC
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>No prescription required</TooltipContent>
-                        </Tooltip>
-                      </div>
-                    ) : (
-                      <Badge variant={it.requiresPrescription ? "default" : "secondary"}>
-                        {it.requiresPrescription ? "Rx" : "OTC"}
-                      </Badge>
-                    )}
+                    <div className="flex items-center justify-end gap-2">
+                      {filter !== "pending" ? (
+                        <Badge variant={it.requiresPrescription ? "default" : "secondary"}>
+                          {it.requiresPrescription ? "Rx" : "OTC"}
+                        </Badge>
+                      ) : null}
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            size="sm"
+                            className="bg-emerald-600 hover:bg-emerald-700"
+                            disabled={busyCode === it.nikiCode || Boolean(it.requiresPrescription)}
+                            onClick={() => void decide(it.nikiCode, "rx")}
+                          >
+                            <Check className="mr-1 h-3.5 w-3.5" />
+                            Rx on
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Require prescription photo at checkout</TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={busyCode === it.nikiCode || (filter !== "pending" && !it.requiresPrescription)}
+                            onClick={() => void decide(it.nikiCode, "otc")}
+                          >
+                            <X className="mr-1 h-3.5 w-3.5" />
+                            Rx off
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>No prescription required (OTC)</TooltipContent>
+                      </Tooltip>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}

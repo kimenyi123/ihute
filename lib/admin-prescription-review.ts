@@ -4,7 +4,7 @@
  * Catalog rows are read from qualified `niki.niki_items` (override via NIKI_MYSQL_DATABASE).
  */
 import mysql, { type Pool, type RowDataPacket, type ResultSetHeader } from "mysql2/promise"
-import { DRUG_FAMILLES } from "@/lib/prescription-review-constants"
+import { pharmacyCategorySql } from "@/lib/prescription-review-constants"
 import {
   getKaosAlignedMysqlConfig,
   kaosAlignedMysqlConfigHint,
@@ -52,17 +52,17 @@ export type PrescriptionReviewItem = {
 export type ListPrescriptionReviewArgs = {
   q?: string
   famille?: string
-  /** pending = unflagged in drug buckets; all_unflagged = same; reviewed = pharmacist:* */
-  filter?: "pending" | "all_unflagged" | "reviewed"
+  /** pending = unflagged in drug buckets; rx = already marked prescription; reviewed = pharmacist:* */
+  filter?: "pending" | "all_unflagged" | "reviewed" | "rx"
   page?: number
   limit?: number
 }
 
-function familleInClause(): { sql: string; params: string[] } {
-  const params = [...DRUG_FAMILLES]
-  const sql = params.map(() => "?").join(", ")
-  return { sql, params }
-}
+const PHARMACY_SQL = pharmacyCategorySql("f.famille", "n.category_id")
+const PHARMACY_STOCK_FAMILLE = `COALESCE(
+  MAX(CASE WHEN ${pharmacyCategorySql("FAMILLE", "NULL")} THEN UPPER(TRIM(FAMILLE)) END),
+  UPPER(TRIM(MAX(NULLIF(TRIM(FAMILLE), ''))))
+)`
 
 export async function listPrescriptionReviewCandidates(
   args: ListPrescriptionReviewArgs,
@@ -76,24 +76,16 @@ export async function listPrescriptionReviewCandidates(
 
   const niki = nikiDb()
   const mkt = marketplaceDb()
-  const fam = familleInClause()
 
-  const where: string[] = []
+  const where: string[] = [PHARMACY_SQL]
   const params: unknown[] = []
 
   if (filter === "reviewed") {
     where.push(`COALESCE(n.prescription_reason, '') LIKE 'pharmacist:%'`)
+  } else if (filter === "rx") {
+    where.push(`COALESCE(n.requires_prescription, 0) = 1`)
   } else {
-    // Only bind famille params when the IN (?) clause is present (reviewed filter has neither).
-    params.push(...fam.params)
     where.push(`COALESCE(n.requires_prescription, 0) = 0`)
-    where.push(`(
-      f.famille IN (${fam.sql})
-      OR f.famille LIKE 'GENERIC HUMAN DRUG%'
-      OR f.famille LIKE 'SPEC HUMAN DRUG%'
-      OR f.famille LIKE 'SPECIFIC HUMAN DRUG%'
-    )`)
-    // avoid re-showing seed/backfill locks that somehow stayed at 0
     where.push(`COALESCE(n.prescription_reason, '') NOT LIKE 'seed:%'`)
     where.push(`COALESCE(n.prescription_reason, '') NOT LIKE 'backfill:keyword:%'`)
   }
@@ -115,7 +107,7 @@ export async function listPrescriptionReviewCandidates(
     LEFT JOIN (
       SELECT
         NIKI_CODE AS niki_code,
-        UPPER(TRIM(MAX(NULLIF(TRIM(FAMILLE), '')))) AS famille,
+        ${PHARMACY_STOCK_FAMILLE} AS famille,
         COUNT(DISTINCT SELLER_ISHYIGA_ACCOUNT) AS stock_sellers
       FROM \`${mkt}\`.seller_add_stock
       WHERE NIKI_CODE IS NOT NULL AND TRIM(NIKI_CODE) <> ''
@@ -215,45 +207,78 @@ export async function decidePrescriptionReview(
   }
 }
 
+export async function clearNonPharmacyRxFlags(): Promise<{
+  ok: true
+  nikiUpdated: number
+  stockUpdated: number
+}> {
+  const niki = nikiDb()
+  const mkt = marketplaceDb()
+  const pharmacy = pharmacyCategorySql("f.famille", "n.category_id")
+  const pharmacyStock = pharmacyCategorySql("s.FAMILLE", "n.category_id")
+
+  const [nikiRes] = await dbPool().execute<ResultSetHeader>(
+    `UPDATE \`${niki}\`.niki_items n
+     LEFT JOIN (
+       SELECT NIKI_CODE AS niki_code,
+              ${PHARMACY_STOCK_FAMILLE} AS famille
+       FROM \`${mkt}\`.seller_add_stock
+       WHERE NIKI_CODE IS NOT NULL AND TRIM(NIKI_CODE) <> ''
+       GROUP BY NIKI_CODE
+     ) f ON f.niki_code = n.niki_code
+     SET n.requires_prescription = 0,
+         n.prescription_reason = LEFT(CONCAT('backfill:non-pharmacy-unflag:', COALESCE(n.prescription_reason, '')), 255)
+     WHERE COALESCE(n.requires_prescription, 0) = 1
+       AND NOT ${pharmacy}`,
+  )
+
+  const [stockRes] = await dbPool().execute<ResultSetHeader>(
+    `UPDATE \`${mkt}\`.seller_add_stock s
+     LEFT JOIN \`${niki}\`.niki_items n ON (n.niki_code = s.NIKI_CODE OR n.niki_code = s.ITEM_CODE)
+     SET s.requires_prescription = 0
+     WHERE COALESCE(s.requires_prescription, 0) = 1
+       AND NOT ${pharmacyStock}`,
+  )
+
+  return {
+    ok: true,
+    nikiUpdated: Number(nikiRes.affectedRows) || 0,
+    stockUpdated: Number(stockRes.affectedRows) || 0,
+  }
+}
+
 export async function prescriptionReviewStats(): Promise<{
   unflaggedInDrugBuckets: number
   pendingReviewReason: number
   pharmacistReviewed: number
+  rxRequired: number
 }> {
   const niki = nikiDb()
   const mkt = marketplaceDb()
-  const fam = familleInClause()
 
   const [rows] = await dbPool().query<RowDataPacket[]>(
     `
     SELECT
-      SUM(
-        COALESCE(n.requires_prescription, 0) = 0
-        AND (
-          f.famille IN (${fam.sql})
-          OR f.famille LIKE 'GENERIC HUMAN DRUG%'
-          OR f.famille LIKE 'SPEC HUMAN DRUG%'
-          OR f.famille LIKE 'SPECIFIC HUMAN DRUG%'
-        )
-      ) AS unflaggedInDrugBuckets,
-      SUM(COALESCE(n.prescription_reason, '') LIKE 'pending_review:%') AS pendingReviewReason,
-      SUM(COALESCE(n.prescription_reason, '') LIKE 'pharmacist:%') AS pharmacistReviewed
+      SUM(COALESCE(n.requires_prescription, 0) = 0 AND ${PHARMACY_SQL}) AS unflaggedInDrugBuckets,
+      SUM(COALESCE(n.prescription_reason, '') LIKE 'pending_review:%' AND ${PHARMACY_SQL}) AS pendingReviewReason,
+      SUM(COALESCE(n.prescription_reason, '') LIKE 'pharmacist:%' AND ${PHARMACY_SQL}) AS pharmacistReviewed,
+      SUM(COALESCE(n.requires_prescription, 0) = 1 AND ${PHARMACY_SQL}) AS rxRequired
     FROM \`${niki}\`.niki_items n
     LEFT JOIN (
       SELECT NIKI_CODE AS niki_code,
-             UPPER(TRIM(MAX(NULLIF(TRIM(FAMILLE), '')))) AS famille
+             ${PHARMACY_STOCK_FAMILLE} AS famille
       FROM \`${mkt}\`.seller_add_stock
       WHERE NIKI_CODE IS NOT NULL AND TRIM(NIKI_CODE) <> ''
       GROUP BY NIKI_CODE
     ) f ON f.niki_code = n.niki_code
     `,
-    fam.params,
   )
 
   return {
     unflaggedInDrugBuckets: Number(rows[0]?.unflaggedInDrugBuckets || 0),
     pendingReviewReason: Number(rows[0]?.pendingReviewReason || 0),
     pharmacistReviewed: Number(rows[0]?.pharmacistReviewed || 0),
+    rxRequired: Number(rows[0]?.rxRequired || 0),
   }
 }
 
