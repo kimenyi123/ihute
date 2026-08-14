@@ -261,7 +261,7 @@ function LoginPageInner() {
           loginMode="emailOnly"
           uiVariant="ihute"
           forgotHref="/forgot-password/web-form"
-          registerHref="/register/web-form"
+          registerHref="/register/web-form?role=buyer"
           showRememberMe={!adminLoginIntent}
         />
 

@@ -5,7 +5,7 @@ Grandma is the Next.js surface under `/grandma`. Sign-in is the shared app page 
 ## Backend / APIs (Kaos Java, deployed WAR)
 
 - **Auth:** `POST …/Kaos/user-auth` (`action=login`, etc.) — proxied from Next as `/api/auth/login`.
-- **Shop catalog / search:** `GET …/Kaos/fetchSuggestions` (`listSuppliersWithProducts`, `globalSearch`, …) — Grandma calls via `getBackendBase()` from `lib/backend-config.ts`.
+- **Shop catalog / search:** `GET …/Kaos/fetchSuggestions` plus production Grandma search `GET /api/grandma/search` (MySQL on `account_signup` + `seller_add_stock`; optional indexes in `sql/grandma_search_indexes.sql`).
 - **Grandma REST:** buyers, sellers, stock, inventory, temp items — URLs from `lib/backend-config.ts` / env (`GRANDMA_*`, `JAVA_AUTH_URL`, etc.).
 
 ## Database
@@ -16,7 +16,8 @@ Grandma is the Next.js surface under `/grandma`. Sign-in is the shared app page 
 ## Shared app UI (not Grandma-themed)
 
 - **`/login`** — single sign-in (`IshyigaLoginCard`) for buyers, sellers, and admins; use `?redirect=/grandma` from Grandma when you need to land back in the shop space after auth.
-- **`/forgot-password`**, **`/register`**, **`/onboarding/crazy-shopping`** — linked from login / Grandma as configured in `lib/grandma-urls.ts` (`GRANDMA_OUTBOUND`).
+- **`/forgot-password`** (Grandma surface: `/forgot-password/grandma`) — password reset linked from Grandma login.
+- **Registration is path-owned:** Main → `/register/web-form`; Grandma → `/grandma/register-form` (`GRANDMA_PATHS.registerForm`). No host-based register branching.
 
 ## Grandma-owned routes in `GRANDMA_PATHS` (`lib/grandma-urls.ts`).
 - Components under `app/grandma/*`, `components/grandma-*`.

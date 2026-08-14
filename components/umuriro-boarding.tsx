@@ -862,7 +862,7 @@ export function UmuriroBoarding() {
                 </Button>
                 <p className="text-center text-xs text-[#6f8399]">{pickLang(UMURIRO_UI.needBuyerAccount, lang)}</p>
                 <Button type="button" variant="outline" className="w-full border-[#dbe7f3]" asChild>
-                  <Link href="/register/buyer">{pickLang(UMURIRO_UI.createBuyer, lang)}</Link>
+                  <Link href="/grandma/register-form?role=buyer">{pickLang(UMURIRO_UI.createBuyer, lang)}</Link>
                 </Button>
               </div>
               <DialogFooter className="sm:justify-stretch">

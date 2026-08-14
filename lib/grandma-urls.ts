@@ -11,13 +11,15 @@ export const GRANDMA_PATHS = {
   buyerOrders: "/grandma/orders",
   /** Grandma sign-in entry — use `?redirect=` (e.g. `/grandma`) to return after login. */
   login: "/grandma/login",
+  /** Dedicated Grandma registration (not main `/register/web-form`). */
+  registerForm: "/grandma/register-form",
 } as const
 
 /** Pages outside the Grandma UI that we link to (shared app or external). */
 export const GRANDMA_OUTBOUND = {
   forgotPassword: "/forgot-password",
-  /** Seller onboarding entry (adjust to your real URL). */
-  registerSeller: "/onboarding/crazy-shopping",
+  /** Seller registration — Grandma-owned route (query selects seller boarding). */
+  registerSeller: "/grandma/register-form?role=seller",
   /** Quick MoMo / USSD flow (Umuriro boarding). */
   umuriro: "/register/umuriro",
 } as const
@@ -25,6 +27,20 @@ export const GRANDMA_OUTBOUND = {
 /** Drives `/grandma/login` “Register” link: last MODE choice in settings (buyer vs seller intent). */
 export const GRANDMA_SIGNUP_ROLE_LS_KEY = "grandma:signupRole" as const
 export type GrandmaSignupRole = "buyer" | "seller"
+
+/** Canonical Grandma register URL. Extra query keys (e.g. shopId, step) are preserved. */
+export function grandmaRegisterFormHref(
+  role: GrandmaSignupRole = "buyer",
+  extra?: Record<string, string>,
+): string {
+  const params = new URLSearchParams({ role })
+  if (extra) {
+    for (const [k, v] of Object.entries(extra)) {
+      if (v != null && String(v).trim() !== "") params.set(k, String(v))
+    }
+  }
+  return `${GRANDMA_PATHS.registerForm}?${params.toString()}`
+}
 
 export function readGrandmaSignupRole(): GrandmaSignupRole {
   if (typeof window === "undefined") return "buyer"

@@ -129,7 +129,7 @@ export default function WebForgotPasswordPage() {
             )}
 
             <div className="mt-6 flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs font-medium text-[#1897e0]">
-              <Link href="/register/buyer" className="hover:underline">
+              <Link href="/register/web-form?role=buyer" className="hover:underline">
                 Register
               </Link>
               <Link href="/login" className="hover:underline">

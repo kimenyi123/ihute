@@ -32,6 +32,41 @@ export const L = {
   cellule: { en: "Cellule", rw: "Akagari", fr: "Cellule" },
   village: { en: "Village (umudugudu)", rw: "Umudugudu", fr: "Village" },
   street: { en: "Street / details", rw: "Umuhanda/Andi makuru", fr: "Rue / d\u00e9tails" },
+  shopLocation: {
+    en: "Shop Location",
+    rw: "Aho iduka riherereye",
+    fr: "Emplacement de la boutique",
+  },
+  useCurrentLocation: {
+    en: "Use my current location",
+    rw: "Koresha aho ndi ubu",
+    fr: "Utiliser ma position actuelle",
+  },
+  locationStatus: {
+    en: "Location status",
+    rw: "Imiterere y\u2019ahantu",
+    fr: "\u00c9tat de la localisation",
+  },
+  locationCaptured: {
+    en: "Location captured",
+    rw: "Ahantu hafashwe",
+    fr: "Position enregistr\u00e9e",
+  },
+  locationCapturing: {
+    en: "Getting your location\u2026",
+    rw: "Turimo gufata aho uri\u2026",
+    fr: "Localisation en cours\u2026",
+  },
+  locationNotCaptured: {
+    en: "Not captured yet \u2014 tap the button above (helps Near Me buyers find you).",
+    rw: "Ntabwo hafashwe \u2014 kanda hejuru (bifasha abaguzi ba Near Me kubona iduka).",
+    fr: "Pas encore captur\u00e9e \u2014 appuyez ci-dessus (aide Near Me \u00e0 vous trouver).",
+  },
+  confirmUseCurrentLocation: {
+    en: "I agree to use my current location as my shop location.",
+    rw: "Nemeye gukoresha aho ndi ubu nk\u2019aho iduka ryanjye riherereye.",
+    fr: "J\u2019accepte d\u2019utiliser ma position actuelle comme emplacement de ma boutique.",
+  },
   logo: { en: "Shop logo (optional)", rw: "Ikirango cy\u2019iduka", fr: "Logo (optionnel)" },
   email: { en: "Email (login)", rw: "Imeri", fr: "E-mail (connexion)" },
   password: { en: "Password", rw: "Ijambo ry\u2019ibanga", fr: "Mot de passe" },
@@ -43,7 +78,7 @@ export const L = {
   },
 } satisfies Record<string, Tri>
 
-/** Buyer registration at `/register/buyer` (location labels reuse `L` where applicable). */
+/** Buyer registration at `/grandma/register-form` (location labels reuse `L` where applicable). */
 export const BUYER_UI = {
   pageTitle: { en: "Buyer", rw: "Umuguzi", fr: "Acheteur" },
   /** Header subtitle \u2014 matches seller shell tone */
@@ -467,6 +502,11 @@ export const SELLER_UI = {
     rw: "Kode NIKI\u2026",
     fr: "Code NIKI\u2026",
   },
+  gpsMissingConfirm: {
+    en: "Shop GPS was not captured. Near Me buyers may not find you by distance. Continue without GPS?",
+    rw: "GPS y\u2019iduka ntiyafashwe. Abaguzi ba Near Me bashobora kutakubona. Ukomeze nta GPS?",
+    fr: "Le GPS de la boutique n\u2019a pas \u00e9t\u00e9 captur\u00e9. Near Me risque de ne pas vous trouver. Continuer sans GPS ?",
+  },
 } satisfies Record<string, Tri>
 
 export const ERR = {
@@ -562,6 +602,41 @@ export const ERR = {
     en: "Each selected item needs quantity \u2265 1 and sale price \u2265 1 RWF (see the fields under the item).",
     rw: "Buri gicuruzwa ukeneye ingano \u2265 1 n\u2019igiciro cy\u2019igurisha \u2265 1 RWF (reba hepfo y\u2019icyo gicuruzwa).",
     fr: "Chaque article : quantit\u00e9 \u2265 1 et prix de vente \u2265 1 RWF (voir sous l\u2019article).",
+  },
+  gpsUnsupported: {
+    en: "This device or browser does not support GPS.",
+    rw: "Iyi telefoni / browser ntabwo ishyigikira GPS.",
+    fr: "Cet appareil ou navigateur ne prend pas en charge le GPS.",
+  },
+  gpsPermissionDenied: {
+    en: "Location permission denied. Enable location for this site in browser settings, then try again.",
+    rw: "Uruhushya rw\u2019ahantu rwanze. Emera ahantu muri browser, ongera ugerageze.",
+    fr: "Permission de localisation refus\u00e9e. Autorisez la localisation dans le navigateur, puis r\u00e9essayez.",
+  },
+  confirmUseCurrentLocationRequired: {
+    en: "You must confirm that you agree to use your current location before continuing.",
+    rw: "Ugomba kwemeza ko wemera gukoresha aho uri ubu mbere yo gukomeza.",
+    fr: "Vous devez confirmer que vous acceptez d\u2019utiliser votre position actuelle avant de continuer.",
+  },
+  currentLocationRequired: {
+    en: "Please select your current location first.",
+    rw: "Banza uhitemo aho uri ubu.",
+    fr: "Veuillez d\u2019abord s\u00e9lectionner votre position actuelle.",
+  },
+  gpsUnavailable: {
+    en: "Location unavailable. Move outdoors or check GPS, then try again.",
+    rw: "Ahantu ntabwo haboneka. Gerageza hanze cyangwa kora GPS, ongera ugerageze.",
+    fr: "Position indisponible. Sortez ou v\u00e9rifiez le GPS, puis r\u00e9essayez.",
+  },
+  gpsTimeout: {
+    en: "Location request timed out. Try again.",
+    rw: "Gufata ahantu byarangiye nta bisubizo. Ongera ugerageze.",
+    fr: "D\u00e9lai de localisation d\u00e9pass\u00e9. R\u00e9essayez.",
+  },
+  gpsOutsideRwanda: {
+    en: "Captured location looks outside Rwanda. Stand at the shop and try again.",
+    rw: "Ahantu hafashwe asa n\u2019aho hatari mu Rwanda. Gerageza uri ku iduka.",
+    fr: "La position captur\u00e9e semble hors du Rwanda. Essayez depuis la boutique.",
   },
   step3: {
     en: "Each line needs quantity \u2265 1 and sale price \u2265 1 RWF.",

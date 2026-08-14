@@ -37,6 +37,11 @@ export type IshyigaLoginCardProps = {
   defaultPhone?: string
   /** @deprecated Use `defaultPhone` */
   defaultPhoneOrEmail?: string
+  /**
+   * Explicit project-owned register URL (required for a register link).
+   * Main: `/register/web-form` — Grandma: `/grandma/register-form?...`
+   * No shared `/register/buyer|seller` aliases.
+   */
   registerHref?: string
   /** Link label under the form (e.g. “Register as seller” when `registerHref` points to seller signup). */
   registerLinkText?: string
@@ -64,7 +69,7 @@ export function IshyigaLoginCard({
   submitLabel = "Sign in",
   defaultPhone,
   defaultPhoneOrEmail,
-  registerHref = "/register/buyer",
+  registerHref,
   registerLinkText,
   forgotHref = "/forgot-password",
   showLogo = true,
@@ -225,14 +230,16 @@ export function IshyigaLoginCard({
             {loading ? "Signing in…" : submitLabel}
           </Button>
         </form>
-        <div className="mt-6 space-y-2 text-center">
-          <p className="text-sm text-muted-foreground">
-            Don&apos;t have an account?{" "}
-            <Link href={registerHref} className="font-medium text-[#1897e0] hover:underline">
-              {registerLinkText ?? "Register here"}
-            </Link>
-          </p>
-        </div>
+        {registerHref ? (
+          <div className="mt-6 space-y-2 text-center">
+            <p className="text-sm text-muted-foreground">
+              Don&apos;t have an account?{" "}
+              <Link href={registerHref} className="font-medium text-[#1897e0] hover:underline">
+                {registerLinkText ?? "Register here"}
+              </Link>
+            </p>
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   )

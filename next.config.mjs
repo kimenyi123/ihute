@@ -8,6 +8,32 @@ const nextConfig = {
   /** Monorepo: lockfile may exist in parent (`Ihute-new-v/`); pin Turbopack root to this app. */
   turbopack: {
     root: path.resolve(__dirname),
+    /**
+     * Prescription upload (and similar) server routes intentionally use fs under
+     * public/uploads/prescriptions. Turbopack 16.2 still emits a false-positive
+     * "whole project NFT" warning for that pattern even with statically scoped joins.
+     * This suppresses only that diagnostic — it does not disable NFT tracing.
+     */
+    ignoreIssue: [
+      {
+        path: '**/next.config.*',
+        title: 'Encountered unexpected file in NFT list',
+      },
+    ],
+  },
+  /**
+   * Keep runtime upload I/O; do not ship the git tree / mobile project into the
+   * prescription-upload serverless trace when Turbopack over-approximates cwd fs use.
+   */
+  outputFileTracingExcludes: {
+    '/api/orders/prescription-upload': [
+      './.git/**',
+      './android/**',
+      './ios/**',
+      './.data/**',
+      './public/uploads/products/**',
+      './public/uploads/shops/**',
+    ],
   },
   typescript: {
     ignoreBuildErrors: false,
