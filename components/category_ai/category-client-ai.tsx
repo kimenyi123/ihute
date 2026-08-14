@@ -74,33 +74,13 @@ export function CategoryClientAI({
       }
       setSectorListPayload(null);
       try {
-        const listUrl = `/api/sector-list-suppliers?sector=${encodeURIComponent(sid)}&Currency=RWF&limit=${LIST_SECTOR_SUPPLIERS_LIMIT}`;
-        const legacyListUrl = `/api/fetchSuggestions?listSuppliersWithProducts=${encodeURIComponent(sid)}&Currency=RWF&limit=${LIST_SECTOR_SUPPLIERS_LIMIT}`;
-        const [stats, listRes, legacyListRes] = await Promise.all([
+        const listUrl = `/api/sector-list-suppliers?sector=${encodeURIComponent(sid)}&Currency=RWF&limit=${LIST_SECTOR_SUPPLIERS_LIMIT}&productsPerSeller=0`;
+        const [stats, listRes] = await Promise.all([
           fetchSectorStatsFromApi(sid),
           fetch(listUrl, { cache: "no-store" }),
-          fetch(legacyListUrl, { cache: "no-store" }),
         ]);
         const rawPrimary: unknown = listRes.ok ? await listRes.json() : [];
-        const rawLegacy: unknown = legacyListRes.ok ? await legacyListRes.json() : [];
-        const arrPrimary = normalizeListSuppliersPayload(rawPrimary);
-        const arrLegacy = normalizeListSuppliersPayload(rawLegacy);
-        const mergedRows = arrPrimary.length >= arrLegacy.length ? [...arrPrimary] : [...arrLegacy];
-        const seenSellerKeys = new Set(
-          mergedRows
-            .map((x) => {
-              const rec = x as Record<string, unknown>;
-              return String(rec.seller_account ?? rec.ACC ?? rec.ISHYIGA_ACCOUNT ?? "").trim().toLowerCase();
-            })
-            .filter(Boolean),
-        );
-        for (const row of arrPrimary.length >= arrLegacy.length ? arrLegacy : arrPrimary) {
-          const rec = row as Record<string, unknown>;
-          const key = String(rec.seller_account ?? rec.ACC ?? rec.ISHYIGA_ACCOUNT ?? "").trim().toLowerCase();
-          if (!key || seenSellerKeys.has(key)) continue;
-          seenSellerKeys.add(key);
-          mergedRows.push(row);
-        }
+        const mergedRows = normalizeListSuppliersPayload(rawPrimary);
         const mapped = mapListSuppliersWithProductsToShops(mergedRows);
         if (cancelled) return;
         setSectorListPayload(mergedRows);

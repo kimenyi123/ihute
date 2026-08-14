@@ -680,7 +680,7 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
   const sharedAppliedRef = useRef<string>("");
   const currentSeller = selectedSeller ? sellers.find((s) => s.ISHYIGA_ACCOUNT === selectedSeller) : null;
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedProductSearch(productSearchQuery.trim()), 200);
+    const t = setTimeout(() => setDebouncedProductSearch(productSearchQuery.trim()), 150);
     return () => clearTimeout(t);
   }, [productSearchQuery]);
 

@@ -86,7 +86,7 @@ function formatItemLine(item: TableCommandLineItem): string {
   const total = lineTotalRwf(item)
   const label = item.name.replace(/\s+/g, " ").trim()
   const qty = Number(item.qty) || 1
-  return `• ${label}\n  Qty ${qty} · ${total.toLocaleString()} RWF`
+  return `${label} ${qty} ${total.toLocaleString()}`
 }
 
 type PersonBatch = { person: string; items: TableCommandLineItem[] }
@@ -155,7 +155,7 @@ export function buildTableCommandWhatsAppLines(items: TableCommandLineItem[]): s
 
   for (const person of persons) {
     const rounds = batches.filter((b) => b.person === person)
-    out.push(`*Ordered by: ${person}*`)
+    out.push(person)
     rounds.forEach((round, roundIdx) => {
       if (roundIdx > 0) out.push(roundSeparatorLabel(roundIdx + 1))
       for (const item of round.items) {
@@ -299,7 +299,7 @@ function formatReceiptMoney(amount: number): string {
 function formatReceiptItemLine(item: OrderReceiptLine): string {
   const qty = Number(item.qty) || 1
   const name = item.name.replace(/\s+/g, " ").trim()
-  return `• ${name}\n  Qty ${qty} · ${item.total.toLocaleString()} RWF`
+  return `${name} ${qty} ${item.total.toLocaleString()}`
 }
 
 function waSection(title: string): string {
@@ -406,6 +406,41 @@ export function buildOrderReceiptViewModel(args: {
 }
 
 export function buildOrderWhatsAppMessageFromViewModel(vm: OrderReceiptViewModel): string {
+  if (vm.isTableCommand && vm.guestGroups.length > 0) {
+    const lines: string[] = []
+    lines.push("Order", "")
+    lines.push(waLabelValue("Shop", vm.shop))
+    lines.push(waLabelValue("Location", vm.location || ""))
+    lines.push(waLabelValue("Order ID", vm.orderId))
+    lines.push("")
+
+    for (const group of vm.guestGroups) {
+      lines.push(group.guest)
+      for (const round of group.rounds) {
+        if (round.roundLabel) lines.push(`— ${round.roundLabel} —`)
+        for (const item of round.lines) {
+          lines.push(formatReceiptItemLine(item))
+        }
+      }
+      lines.push("")
+    }
+
+    lines.push(waMoneyLine("Total", vm.total))
+    lines.push(waMoneyLine("Discount", vm.discount))
+    lines.push(waMoneyLine("Paid", vm.paid))
+    lines.push("")
+    lines.push(waLabelValue("Paid at", vm.paidAt))
+    if (vm.reference) lines.push(waLabelValue("Message", vm.reference))
+    lines.push(waLabelValue("My phone", vm.myPhone || ""))
+    if (vm.prescriptionImageUrl) {
+      lines.push("", waSection("Prescription"), vm.prescriptionImageUrl)
+    }
+    if (vm.followLink) {
+      lines.push(waLabelValue("Follow", vm.followLink))
+    }
+    return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim()
+  }
+
   const lines: string[] = []
 
   lines.push(waSection("ORDER RECEIPT"), "")
@@ -426,23 +461,10 @@ export function buildOrderWhatsAppMessageFromViewModel(vm: OrderReceiptViewModel
 
   lines.push("", waSection("Items"), "")
 
-  if (vm.isTableCommand && vm.guestGroups.length > 0) {
-    for (const group of vm.guestGroups) {
-      lines.push(waSection(`Ordered by: ${group.guest}`))
-      for (const round of group.rounds) {
-        if (round.roundLabel) lines.push(`— ${round.roundLabel} —`)
-        if (round.startedAtLabel) lines.push(`_${round.startedAtLabel}_`)
-        for (const item of round.lines) {
-          lines.push(formatReceiptItemLine(item))
-        }
-      }
-      lines.push("")
-    }
-  } else {
-    for (const item of vm.flatItems) {
-      lines.push(formatReceiptItemLine(item))
-      lines.push("")
-    }
+  for (const item of vm.flatItems) {
+    lines.push(`• ${item.name.replace(/\s+/g, " ").trim()}`)
+    lines.push(`  Qty ${Number(item.qty) || 1} · ${item.total.toLocaleString()} RWF`)
+    lines.push("")
   }
 
   lines.push(waSection("Summary"), "")

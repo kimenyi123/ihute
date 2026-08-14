@@ -12,7 +12,6 @@ import {
   countTier1HitsForProducts,
 } from '@/lib/shop-with-me-tier-cache';
 import { shouldRunTextSearch } from '@/lib/search-query-min';
-import { enrichShopProductsWithOrderSales } from '@/lib/shop-item-order-sales';
 
 /** Shorter Redis TTL when productSearch is present (fresh search results). */
 const SEARCH_CACHE_TTL_SEC = 30;
@@ -79,9 +78,6 @@ async function finalizeShopResponse(
   routeStartMs: number,
 ): Promise<NextResponse> {
   normalizeBrandAndCategory(data);
-  await enrichShopProductsWithOrderSales(data);
-  await enrichWithImages(data);
-
   if (!productSearch.trim()) {
     writeTierCachesFromJavaResponse(winningVariant, data);
     const allProducts: Record<string, unknown>[] = [];
@@ -279,7 +275,6 @@ export async function GET(request: NextRequest) {
     try {
       const data = JSON.parse(cached);
       normalizeBrandAndCategory(data);
-      await enrichShopProductsWithOrderSales(data);
       if (!hasSearch) {
         const allProducts: Record<string, unknown>[] = [];
         for (const seller of data.sellers ?? []) {
@@ -312,7 +307,6 @@ export async function GET(request: NextRequest) {
       if (tierData) {
         console.log('[API shop-with-me] Two-tier cache hit for', variant);
         normalizeBrandAndCategory(tierData);
-        await enrichShopProductsWithOrderSales(tierData);
         const tierProducts =
           ((tierData.sellers as Array<{ products?: Record<string, unknown>[] }>)?.[0]?.products) ?? [];
         warmTier1FromProducts(tierProducts);
@@ -332,7 +326,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const base = getShopWithMeUrl().replace(/\?.*$/, '').replace(/\/+$/, '');
-    const variants = nicknameLookupVariants(originalNickname);
+    const variants = hasSearch ? [originalNickname] : nicknameLookupVariants(originalNickname);
     const headersBase: Record<string, string> = { Accept: 'application/json' };
     if (productSearch.trim()) {
       headersBase['X-Product-Search'] = productSearch.trim();
