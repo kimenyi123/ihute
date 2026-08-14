@@ -1,5 +1,5 @@
 import type { RowDataPacket } from "mysql2/promise"
-import { getSearchAnalyticsPool } from "@/lib/mysql-search-analytics"
+import { getMarketplacePoolForDb, getSearchAnalyticsPool } from "@/lib/mysql-search-analytics"
 import type { ShopAnalyticsBundle } from "@/lib/shop-analytics-types"
 
 const SHOP_WITH_ME_ORDER_WHERE = `
@@ -24,21 +24,7 @@ function num(v: unknown): number {
 
 type Row = RowDataPacket & Record<string, unknown>
 
-async function q<T extends Row>(sql: string, params: unknown[] = []): Promise<T[]> {
-  const pool = getSearchAnalyticsPool()
-  if (!pool) return []
-  const [rows] = await pool.execute<T[]>(sql, params)
-  return rows
-}
-
-async function sellerNickname(seller: string): Promise<string> {
-  if (!seller) return ""
-  const rows = await q<Row>(
-    `SELECT COALESCE(NULLIF(TRIM(nickname), ''), '') AS n FROM account_seller WHERE ishyiga_account = ? LIMIT 1`,
-    [seller],
-  )
-  return nz(rows[0]?.n)
-}
+type QueryFn = <T extends Row>(sql: string, params?: unknown[]) => Promise<T[]>
 
 function shopPayloadFilter(nickname: string): { sql: string; params: string[] } {
   if (!nickname) return { sql: "", params: [] }
@@ -54,7 +40,7 @@ function shopPayloadFilter(nickname: string): { sql: string; params: string[] } 
 
 const DEFAULT_RATE = 0.001
 
-async function commissionRate(): Promise<number> {
+async function commissionRate(q: QueryFn): Promise<number> {
   const env = process.env.KAOS_PLATFORM_COMMISSION_RATE?.trim()
   if (env) {
     const v = Number(env)
@@ -73,13 +59,29 @@ export async function fetchShopAnalyticsFromMysql(
   environment: string,
   sellerAccount: string,
   compareCsv: string,
+  db = "",
 ): Promise<ShopAnalyticsBundle> {
+  const schema = (db || "").trim()
+  const pool = schema ? getMarketplacePoolForDb(schema) : getSearchAnalyticsPool()
+  const q: QueryFn = async (sql, params = []) => {
+    if (!pool) return []
+    const [rows] = await pool.execute(sql, params)
+    return rows as never
+  }
+
   const fromTs = `${from} 00:00:00`
   const toTs = `${to} 23:59:59`
   const seller = nz(sellerAccount)
   const sellerSql = seller ? " AND ot.SELLER_ISHYIGA_ACCOUNT = ?" : ""
   const sellerParam = seller ? [seller] : []
-  const nickname = await sellerNickname(seller)
+  let nickname = ""
+  if (seller) {
+    const nickRows = await q<Row>(
+      `SELECT COALESCE(NULLIF(TRIM(nickname), ''), '') AS n FROM account_seller WHERE ishyiga_account = ? LIMIT 1`,
+      [seller],
+    )
+    nickname = nz(nickRows[0]?.n)
+  }
   const envClause = environment ? " AND environment = ?" : ""
   const envParams = environment ? [environment] : []
   const shopFilter = shopPayloadFilter(nickname)
@@ -195,7 +197,7 @@ export async function fetchShopAnalyticsFromMysql(
     }),
   )
 
-  const rate = await commissionRate()
+  const rate = await commissionRate(q)
   const commission = gmv * rate
 
   const searchRows = await q<Row>(
@@ -211,10 +213,12 @@ export async function fetchShopAnalyticsFromMysql(
     `SELECT ot.ID_ORDER, ot.order_number, ot.heure, ot.AMOUNT, ot.ORDER_STATUS, ot.PAYMENT_STATUS,
             ot.BUYER_NAMES, ot.BUYER_EMAIL, ot.SELLER_NAMES, ot.SELLER_ISHYIGA_ACCOUNT,
             ot.CONDITIONS, ot.DELIVERY_LOCATION,
-            COALESCE(s.tin, '') AS seller_tin, COALESCE(s.momo, '') AS seller_momo,
+            COALESCE(s.tin, '') AS seller_tin,
+            COALESCE(NULLIF(TRIM(s.momo),''), NULLIF(TRIM(su.momo),''), '') AS seller_momo,
             COALESCE(s.email, '') AS seller_email
      FROM order_transaction ot
      LEFT JOIN account_seller s ON s.ishyiga_account = ot.SELLER_ISHYIGA_ACCOUNT
+     LEFT JOIN account_signup su ON su.ISHYIGA_ACCOUNT = ot.SELLER_ISHYIGA_ACCOUNT
      WHERE ${SHOP_WITH_ME_ORDER_WHERE} AND ot.heure >= ? AND ot.heure <= ?${sellerSql}
      ORDER BY ot.heure DESC LIMIT 500`,
     [fromTs, toTs, ...sellerParam],

@@ -30,6 +30,7 @@ import {
 import { unitMeaningfulForDisplay } from "@/lib/product-unit-display"
 import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price"
 import { itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
+import { sellerDisplayName } from "@/lib/seller-display-name"
 
 /** Suffix after price: `N pcs` from `item_emballage` (pack size), not currency — default N=1 when omitted. */
 function formatPcsFromItemEmballage(raw: unknown): string | null {
@@ -236,6 +237,10 @@ export function ProductCard({
     distanceLabel,
     itemEmballage,
   } = product
+  const shopLabel = sellerDisplayName({
+    supplierName,
+    supplierAccount: supplierId,
+  })
 
   const displayPrice = useMemo(() => {
     return generalSellingPrice(
@@ -398,7 +403,7 @@ export function ProductCard({
         unit,
         image,
         supplierId: (supplierId || "unknown").toString().trim(),
-        supplierName: supplierName || "Supplier",
+        supplierName: shopLabel,
         supplierLocation,
         momo,
         selectedUnit: unit,
@@ -509,7 +514,7 @@ export function ProductCard({
               image,
               description,
               supplierId,
-              supplierName,
+              supplierName: shopLabel,
               supplierLocation,
               momo,
             })
@@ -560,9 +565,9 @@ export function ProductCard({
               </span>
             )}
           </div>
-          {supplierName && (
+          {shopLabel && shopLabel !== "Supplier" && (
             <p className={cn("mt-0.5 text-muted-foreground font-normal", compact ? "text-[10px]" : "text-xs")}>
-              {supplierName.toUpperCase()} <span className="text-amber-500" aria-hidden>⭐⭐⭐</span>
+              {shopLabel.toUpperCase()} <span className="text-amber-500" aria-hidden>⭐⭐⭐</span>
             </p>
           )}
           {product.niki_merge === true &&
@@ -676,7 +681,7 @@ export function ProductCard({
               supplierId={(supplierId || "unknown").toString().trim()}
               name={name}
               currentPrice={displayPrice}
-              supplierName={supplierName}
+              supplierName={shopLabel}
               image={image}
               size={isSpotlight ? "default" : compact ? "sm" : "sm"}
               variant="outline"
@@ -739,7 +744,7 @@ export function ProductCard({
               unit,
               image,
               supplierId: (supplierId || "unknown").toString().trim(),
-              supplierName: supplierName || "Supplier",
+              supplierName: shopLabel,
               supplierLocation,
               momo,
               selectedUnit: unit,

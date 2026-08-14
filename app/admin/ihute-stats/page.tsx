@@ -47,6 +47,15 @@ import {
 } from "recharts"
 import { ShopAnalyticsPanels } from "@/components/admin/shop-analytics-panels"
 import { fetchAdminProtectedApi } from "@/lib/admin-client"
+import {
+  ORDER_MONITOR_DBS,
+  decodeOrderMonitorDb,
+  encodeOrderMonitorDb,
+  orderMonitorDbLabel,
+  readOrderMonitorDb,
+  writeOrderMonitorDb,
+  type OrderMonitorDb,
+} from "@/lib/admin-order-db"
 import type { ShopAnalyticsBundle } from "@/lib/shop-analytics-types"
 import { useAuthStore } from "@/lib/auth-store"
 import { cn } from "@/lib/utils"
@@ -173,6 +182,8 @@ export default function AdminIhuteStatsPage() {
   const [from, setFrom] = useState(() => searchParams.get("from") || isoDateDaysAgo(30))
   const [to, setTo] = useState(() => searchParams.get("to") || todayIso())
   const [environment, setEnvironment] = useState(() => searchParams.get("environment") || "")
+  const [db, setDb] = useState<OrderMonitorDb>("chaos_beta")
+  const [dbReady, setDbReady] = useState(false)
   const [sellerAccount, setSellerAccount] = useState(() => searchParams.get("sellerAccount") || "")
   const [compareSellers, setCompareSellers] = useState<string[]>(() => {
     const raw = searchParams.get("compareSellers") || ""
@@ -195,11 +206,17 @@ export default function AdminIhuteStatsPage() {
   const [pitchSummary, setPitchSummary] = useState("")
   const [currency, setCurrency] = useState("RWF")
 
+  const selectDb = (next: OrderMonitorDb) => {
+    if (next === db) return
+    writeOrderMonitorDb(next)
+    setDb(next)
+  }
+
   const load = useCallback(async () => {
     setLoading(true)
     setError("")
     try {
-      const p = new URLSearchParams({ from, to })
+      const p = new URLSearchParams({ from, to, db: encodeOrderMonitorDb(db) })
       if (environment.trim()) p.set("environment", environment.trim())
       if (sellerAccount.trim()) p.set("sellerAccount", sellerAccount.trim())
       if (compareSellers.length) p.set("compareSellers", compareSellers.join(","))
@@ -250,23 +267,33 @@ export default function AdminIhuteStatsPage() {
     } finally {
       setLoading(false)
     }
-  }, [from, to, environment, sellerAccount, compareSellers])
+  }, [from, to, environment, sellerAccount, compareSellers, db])
 
   useEffect(() => {
-    if (!hasHydrated) return
+    const fromQuery = searchParams.get("db")
+    const initialDb = decodeOrderMonitorDb(fromQuery) ?? readOrderMonitorDb()
+    setDb(initialDb)
+    writeOrderMonitorDb(initialDb)
+    setDbReady(true)
+  }, [searchParams])
+
+  useEffect(() => {
+    if (!hasHydrated || !dbReady) return
     void load()
-  }, [hasHydrated, load])
+  }, [hasHydrated, dbReady, load])
 
   useEffect(() => {
+    if (!dbReady) return
     const p = new URLSearchParams()
     p.set("from", from)
     p.set("to", to)
+    p.set("db", encodeOrderMonitorDb(db))
     if (environment.trim()) p.set("environment", environment.trim())
     if (sellerAccount.trim()) p.set("sellerAccount", sellerAccount.trim())
     if (compareSellers.length) p.set("compareSellers", compareSellers.join(","))
     const qs = p.toString()
     window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname)
-  }, [from, to, environment, sellerAccount, compareSellers])
+  }, [from, to, environment, sellerAccount, compareSellers, db, dbReady])
 
   const sessions = (engagement.uniqueSessions ?? 0) > 0 ? engagement.uniqueSessions! : engagement.sessionStarts ?? 0
   const chartDaily = useMemo(() => toChartDaily(daily.length > 0 ? daily : emptyDailyRange(from, to)), [daily, from, to])
@@ -388,6 +415,32 @@ export default function AdminIhuteStatsPage() {
           </>
         }
       />
+
+      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Database">
+        <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Database</span>
+        {ORDER_MONITOR_DBS.map((opt) => {
+          const active = db === opt.id
+          const isProd = opt.id === "chaos_test"
+          return (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => selectDb(opt.id)}
+              className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+                active
+                  ? isProd
+                    ? "border-emerald-700 bg-emerald-700 text-white"
+                    : "border-slate-900 bg-slate-900 text-white"
+                  : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+              }`}
+              title={opt.label}
+            >
+              {opt.label}
+            </button>
+          )
+        })}
+        <span className="text-xs text-slate-500">Viewing {orderMonitorDbLabel(db)}</span>
+      </div>
 
       <DateRangeControls
         from={from}
@@ -552,7 +605,7 @@ export default function AdminIhuteStatsPage() {
                 {topQrShares.length === 0 ? (
                   <EmptyState
                     title="No QR activity yet"
-                    description="Stats appear when sellers copy their shop QR link or buyers open /shop-with-me/…?src=qr."
+                    description="Shares/scans need activity logging (seller copy link / ?src=qr). QR orders still appear when CONDITIONS include :qr — pick the DB where those orders live."
                   />
                 ) : (
                   <table className="min-w-full text-left text-sm">

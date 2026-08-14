@@ -54,6 +54,7 @@ import {
 import Image from "next/image"
 import { cn } from "@/lib/utils"
 import { getCookieValue } from "@/lib/cookies"
+import { sellerDisplayName, sellerDisplayNameFromProduct } from "@/lib/seller-display-name"
 
 type Shop = {
   supplier_account: string
@@ -94,6 +95,7 @@ type Product = {
   FAMILLE?: string
   item_fabricant?: string
   relevance_score?: number
+  requiresPrescription?: boolean
 }
 
 type SearchResult = {
@@ -341,7 +343,7 @@ function toCardProduct(p: Product & { search_priority?: string; contains_ingredi
     inStock: true,
     rating: 4,
     supplierId: p.supplier_account,
-    supplierName: p.supplier_name || p.supplier_account || "Supplier",
+    supplierName: sellerDisplayNameFromProduct(p),
     supplierLocation: p.supplier_location,
     momo: p.momo,
     itemCode: p.item_code || p.item_key_words,
@@ -354,6 +356,10 @@ function toCardProduct(p: Product & { search_priority?: string; contains_ingredi
     IMAGE_URL: (p as any).IMAGE_URL,
     searchPriority: (p.search_priority === "direct" || p.search_priority === "contains" ? p.search_priority : undefined) as "direct" | "contains" | undefined,
     containsIngredient: typeof p.contains_ingredient === "string" ? p.contains_ingredient : undefined,
+    requiresPrescription: Boolean(
+      (p as { requires_prescription?: unknown; requiresPrescription?: unknown }).requires_prescription
+        ?? (p as { requiresPrescription?: unknown }).requiresPrescription,
+    ),
     ...(itemEmballage ? { itemEmballage } : {}),
     ...(itemStateRaw ? { item_state: itemStateRaw } : {}),
     ...(expiryLabel ? { expiryLabel } : {}),
@@ -444,7 +450,13 @@ function normalizeSupplierProductsResponse(
             item_key_words_kinyarwanda: item.item_key_words_kinyarwanda,
             item_description: item.item_description ?? item.description,
             supplier_account,
-            supplier_name,
+            supplier_name: sellerDisplayName({
+              owner: (item as { OWNER?: string; owner?: string }).OWNER
+                ?? (item as { owner?: string }).owner,
+              supplierName: (item as { supplier_name?: string }).supplier_name ?? supplier_name,
+              nickname: (item as { nickname?: string }).nickname,
+              supplierAccount: supplier_account,
+            }),
             supplier_location: (p as any).supplier_location ?? undefined,
             type: (p as any).type ?? "product",
             // Preserve original backend image fields for KAOS URL construction
@@ -476,7 +488,11 @@ function normalizeSupplierProductsResponse(
           item_key_words_kinyarwanda: q.item_key_words_kinyarwanda,
           item_description: q.item_description ?? q.description,
           supplier_account: q.supplier_account ?? supplier_account,
-          supplier_name: q.supplier_name ?? supplier_name,
+          supplier_name: sellerDisplayNameFromProduct({
+            ...q,
+            supplier_account: q.supplier_account ?? supplier_account,
+            supplier_name: q.supplier_name ?? supplier_name,
+          }),
           supplier_location: q.supplier_location,
           type: q.type ?? "product",
           // Preserve original backend image fields for KAOS URL construction
@@ -509,7 +525,10 @@ function normalizeSupplierProductsResponse(
     return normalizeSupplierProductsResponse(
       rawProducts,
       seller.ISHYIGA_ACCOUNT ?? seller.seller_account ?? supplierAccount,
-      seller.OWNER ?? seller.SELLER_NAMES ?? seller.seller_name ?? supplierName
+      seller.OWNER ?? seller.SELLER_NAMES ?? seller.seller_name ?? sellerDisplayName({
+        supplierName,
+        supplierAccount,
+      })
     )
   }
 
@@ -611,7 +630,7 @@ export default function SearchPage() {
     const price = productLinePrice(p)
     const itemEmballage = normalizeItemEmballageForCart(embRaw)
     const supplierId = (p.supplier_account || "unknown").toString().trim()
-    const supplierName = p.supplier_name || p.supplier_account || "Supplier"
+    const supplierName = sellerDisplayNameFromProduct(p)
     const baseItem = {
       id,
       itemCode: itemCode || id,
@@ -631,6 +650,7 @@ export default function SearchPage() {
       famille: (p as any).famille ?? (p as any).FAMILLE,
       momo: p.momo || (p as any)?.seller_momo || "",
       ...(itemEmballage ? { itemEmballage } : {}),
+      ...(p.requiresPrescription ? { requiresPrescription: true } : {}),
     }
 
     // Check if we're in a table command context
@@ -727,12 +747,39 @@ export default function SearchPage() {
   // Sync selected shop from URL params
   useEffect(() => {
     if (supplierParam) {
+      const fromUrl = sellerDisplayName({
+        supplierName: supplierNameParam,
+        supplierAccount: supplierParam,
+        fallback: "",
+      })
       setSelectedShop({
         supplier_account: supplierParam,
-        supplier_name: supplierNameParam || supplierParam,
+        supplier_name: fromUrl,
         type: "supplier",
         supplier_location: null,
       })
+      if (fromUrl) return
+      let cancelled = false
+      fetch(`/api/account/profile?account=${encodeURIComponent(supplierParam)}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (cancelled || !data?.ok || !data?.profile) return
+          const p = data.profile as { owner?: string; businessName?: string; name?: string; nickname?: string }
+          const name = sellerDisplayName({
+            owner: p.owner ?? p.businessName ?? p.name,
+            nickname: p.nickname,
+            supplierAccount: supplierParam,
+          })
+          setSelectedShop((prev) =>
+            prev && prev.supplier_account === supplierParam
+              ? { ...prev, supplier_name: name || prev.supplier_name }
+              : prev,
+          )
+        })
+        .catch(() => {})
+      return () => {
+        cancelled = true
+      }
     } else {
       setSelectedShop(null)
     }
@@ -887,6 +934,25 @@ export default function SearchPage() {
       cancelled = true
     }
   }, [selectedShop])
+
+  useEffect(() => {
+    if (!selectedShop) return
+    const already = sellerDisplayName({
+      supplierName: selectedShop.supplier_name,
+      supplierAccount: selectedShop.supplier_account,
+      fallback: "",
+    })
+    if (already) return
+    const p = shopProducts[0] ?? searchResult?.products?.[0]
+    if (!p) return
+    const name = sellerDisplayNameFromProduct(p)
+    if (!name || name === "Supplier") return
+    setSelectedShop((prev) =>
+      prev && prev.supplier_account === selectedShop.supplier_account
+        ? { ...prev, supplier_name: name }
+        : prev,
+    )
+  }, [shopProducts, searchResult, selectedShop])
 
   // When user types in "Search in PANGOLIN'S BURROWS", hit backend (fetchSuggestions) so keyword search works
   useEffect(() => {
@@ -1078,7 +1144,7 @@ export default function SearchPage() {
         const first = products[0]
         return {
           supplierId,
-          supplierName: (first?.supplier_name ?? first?.supplier_account ?? supplierId).toString(),
+          supplierName: sellerDisplayNameFromProduct(first ?? {}),
           supplierLocation: first?.supplier_location,
           products,
         }
@@ -1262,8 +1328,10 @@ export default function SearchPage() {
   /** User requested a cleaner search page: hide the top controls strip. */
   const showGlobalSearchTopStrip = false
 
-  const focusedSupplierLabel =
-    selectedShop?.supplier_name ?? supplierNameParam ?? supplierParam ?? ""
+  const focusedSupplierLabel = sellerDisplayName({
+    supplierName: selectedShop?.supplier_name ?? supplierNameParam,
+    supplierAccount: selectedShop?.supplier_account ?? supplierParam,
+  })
 
   const startNewSearch = () => {
     setQ("")
@@ -1495,7 +1563,7 @@ export default function SearchPage() {
                 onClick={handleClearShop}
                 title="Clear supplier filter"
               >
-                🔒 Supplier: {selectedShop.supplier_name} <span className="opacity-60">✕</span>
+                🔒 Supplier: {focusedSupplierLabel} <span className="opacity-60">✕</span>
               </Badge>
             )}
           </div>
@@ -1669,7 +1737,7 @@ export default function SearchPage() {
                             </span>
                             <h2 className="text-balance text-base font-bold leading-tight text-slate-900 sm:text-[17px]">
                               <span className="font-medium text-slate-600">Products from </span>
-                              <span className="text-blue-700">{selectedShop.supplier_name}</span>
+                              <span className="text-blue-700">{focusedSupplierLabel}</span>
                             </h2>
                           </div>
                           <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0 text-[11px] text-slate-500">
@@ -1693,7 +1761,7 @@ export default function SearchPage() {
                           id="supplier-catalog-search"
                           value={supplierSearch}
                           onChange={setSupplierSearch}
-                          shopName={selectedShop.supplier_name}
+                          shopName={focusedSupplierLabel}
                           isSearching={
                             loadingSupplierSearch ||
                             (shouldRunTextSearch(supplierSearch) &&

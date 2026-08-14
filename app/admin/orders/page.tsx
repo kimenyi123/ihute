@@ -24,6 +24,7 @@ import {
   attentionReasonLabel,
   buyerTrackHref,
   formatAdminCurrency,
+  formatOrderCommission,
   formatOrderTime,
   formatOrderTimeRelative,
   getOrderAttentionReasons,
@@ -41,6 +42,7 @@ import {
 import { fetchOrderMonitorStats, type OrderMonitorStats } from "@/lib/admin-order-stats"
 import {
   ORDER_MONITOR_DBS,
+  encodeOrderMonitorDb,
   orderMonitorDbLabel,
   readOrderMonitorDb,
   writeOrderMonitorDb,
@@ -93,6 +95,11 @@ export default function OrdersPage() {
   const [sellerServingCount, setSellerServingCount] = useState(0)
   const [completedCount, setCompletedCount] = useState(0)
   const [totalRevenue, setTotalRevenue] = useState(0)
+  const [platformCommission, setPlatformCommission] = useState(0)
+  const [openRevenue, setOpenRevenue] = useState(0)
+  const [openOrderCount, setOpenOrderCount] = useState(0)
+  const [paidRevenue, setPaidRevenue] = useState(0)
+  const [paidOrderCount, setPaidOrderCount] = useState(0)
   const [chartStats, setChartStats] = useState<OrderMonitorStats | null>(null)
   const [chartsLoading, setChartsLoading] = useState(true)
   const [autoRefresh, setAutoRefresh] = useState(true)
@@ -197,6 +204,11 @@ export default function OrdersPage() {
           }
           if (!silent || data.totalRevenue != null) {
             setTotalRevenue(Number(data.totalRevenue ?? 0) || 0)
+            setPlatformCommission(Number(data.platformCommission ?? 0) || 0)
+            setOpenRevenue(Number(data.openRevenue ?? 0) || 0)
+            setOpenOrderCount(Number(data.openOrderCount ?? 0) || 0)
+            setPaidRevenue(Number(data.paidRevenue ?? 0) || 0)
+            setPaidOrderCount(Number(data.paidOrderCount ?? 0) || 0)
           }
           setLastUpdated(new Date())
         } else {
@@ -319,6 +331,7 @@ export default function OrdersPage() {
       Seller: order.sellerName || "",
       Buyer: order.buyerName || "",
       Amount: order.amount ?? 0,
+      Commission: order.commissionEligible ? Number(order.commissionAmount ?? 0) : 0,
       Status: getStatusLabel(normalizeOrderStatus(order)),
       "Payment status": order.paymentStatus || "OPEN",
       Payment: order.paymentName || "",
@@ -357,12 +370,9 @@ export default function OrdersPage() {
                           : "border-slate-900 bg-slate-900 text-white"
                         : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
                     }`}
-                    title={opt.hint}
+                    title={opt.label}
                   >
                     {opt.label}
-                    <span className={`ml-1.5 font-mono ${active ? "opacity-80" : "text-slate-400"}`}>
-                      {opt.hint}
-                    </span>
                   </button>
                 )
               })}
@@ -437,6 +447,11 @@ export default function OrdersPage() {
         loading={chartsLoading}
         totalRevenue={totalRevenue}
         filteredCount={totalCount}
+        platformCommission={platformCommission}
+        openRevenue={openRevenue}
+        openOrderCount={openOrderCount}
+        paidRevenue={paidRevenue}
+        paidOrderCount={paidOrderCount}
       />
 
       <div className="mb-6 flex items-center justify-between gap-4 border-b border-slate-200 pb-3">
@@ -635,6 +650,7 @@ export default function OrdersPage() {
                     <th className="px-4 py-3">Seller</th>
                     <th className="px-4 py-3">Buyer</th>
                     <th className="px-4 py-3 text-right whitespace-nowrap">Amount</th>
+                    <th className="px-4 py-3 text-right whitespace-nowrap">Commission</th>
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3">Seller served?</th>
                     <th className="px-4 py-3">Payment</th>
@@ -737,7 +753,7 @@ function OrderTableRow({
   const attention = orderNeedsAttention(order)
   const reasons = getOrderAttentionReasons(order)
   const fulfillment = deriveSellerFulfillment(order)
-  const detailHref = `/admin/orders/${order.id}?db=${encodeURIComponent(db)}`
+  const detailHref = `/admin/orders/${order.id}?db=${encodeURIComponent(encodeOrderMonitorDb(db))}`
 
   return (
     <tr
@@ -766,6 +782,9 @@ function OrderTableRow({
       </td>
       <td className="px-4 py-3 text-right font-medium tabular-nums text-slate-900 whitespace-nowrap">
         {formatAdminCurrency(order.amount)}
+      </td>
+      <td className="px-4 py-3 text-right tabular-nums text-slate-700 whitespace-nowrap">
+        {formatOrderCommission(order)}
       </td>
       <td className="px-4 py-3">
         <span className={getStatusBadgeClass(normalizedStatus)}>{getStatusLabel(normalizedStatus)}</span>
@@ -819,7 +838,7 @@ function OrderCard({
   const attention = orderNeedsAttention(order)
   const normalizedStatus = normalizeOrderStatus(order)
   const fulfillment = deriveSellerFulfillment(order)
-  const detailHref = `/admin/orders/${order.id}?db=${encodeURIComponent(db)}`
+  const detailHref = `/admin/orders/${order.id}?db=${encodeURIComponent(encodeOrderMonitorDb(db))}`
 
   return (
     <div className={`p-4 ${attention ? "border-l-2 border-l-slate-900" : ""}`}>
@@ -832,6 +851,9 @@ function OrderCard({
         </div>
         <p className="font-semibold tabular-nums text-slate-900">{formatAdminCurrency(order.amount)}</p>
       </div>
+      <p className="mt-1 text-right text-xs text-slate-500">
+        Commission {formatOrderCommission(order)}
+      </p>
       <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-600">
         <div>
           <span className="text-slate-400">Seller</span>
@@ -905,7 +927,7 @@ function OrderActions({
 }) {
   return (
     <Link
-      href={`/admin/orders/${order.id}?db=${encodeURIComponent(db)}`}
+      href={`/admin/orders/${order.id}?db=${encodeURIComponent(encodeOrderMonitorDb(db))}`}
       className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-emerald-700 whitespace-nowrap"
     >
       <Eye className="h-4 w-4" />

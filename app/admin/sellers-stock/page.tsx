@@ -30,6 +30,15 @@ import {
   todayIso,
 } from "@/components/admin/activity-analytics-shell"
 import { fetchAdminProtectedApi } from "@/lib/admin-client"
+import {
+  ORDER_MONITOR_DBS,
+  decodeOrderMonitorDb,
+  encodeOrderMonitorDb,
+  orderMonitorDbLabel,
+  readOrderMonitorDb,
+  writeOrderMonitorDb,
+  type OrderMonitorDb,
+} from "@/lib/admin-order-db"
 import { useAuthStore } from "@/lib/auth-store"
 
 type SellerStockRow = {
@@ -95,6 +104,8 @@ export default function AdminSellersStockPage() {
   const [from] = useState(() => searchParams.get("from") || isoDateDaysAgo(30))
   const [to] = useState(() => searchParams.get("to") || todayIso())
   const [environment] = useState(() => searchParams.get("environment") || "")
+  const [db, setDb] = useState<OrderMonitorDb>("chaos_beta")
+  const [dbReady, setDbReady] = useState(false)
   const [sellerAccount, setSellerAccount] = useState(() => searchParams.get("sellerAccount") || "")
   const [summary, setSummary] = useState<SellersStockPayload>({})
   const [loading, setLoading] = useState(false)
@@ -115,6 +126,13 @@ export default function AdminSellersStockPage() {
     return () => clearTimeout(t)
   }, [searchInput])
 
+  const selectDb = (next: OrderMonitorDb) => {
+    if (next === db) return
+    writeOrderMonitorDb(next)
+    setDb(next)
+    setPage(1)
+  }
+
   const load = useCallback(async () => {
     setLoading(true)
     setError("")
@@ -123,6 +141,7 @@ export default function AdminSellersStockPage() {
         onlyWithStock: sellerAccount.trim() ? "0" : "1",
         page: String(page),
         pageSize: String(PAGE_SIZE),
+        db: encodeOrderMonitorDb(db),
       })
       if (sellerAccount.trim()) p.set("sellerAccount", sellerAccount.trim())
       if (q) p.set("q", q)
@@ -143,24 +162,33 @@ export default function AdminSellersStockPage() {
     } finally {
       setLoading(false)
     }
-  }, [sellerAccount, page, q])
+  }, [sellerAccount, page, q, db])
 
   useEffect(() => {
-    if (!hasHydrated) return
+    const initialDb = decodeOrderMonitorDb(searchParams.get("db")) ?? readOrderMonitorDb()
+    setDb(initialDb)
+    writeOrderMonitorDb(initialDb)
+    setDbReady(true)
+  }, [searchParams])
+
+  useEffect(() => {
+    if (!hasHydrated || !dbReady) return
     void load()
-  }, [hasHydrated, load])
+  }, [hasHydrated, dbReady, load])
 
   useEffect(() => {
+    if (!dbReady) return
     const p = new URLSearchParams()
     p.set("from", from)
     p.set("to", to)
+    p.set("db", encodeOrderMonitorDb(db))
     if (environment.trim()) p.set("environment", environment.trim())
     if (sellerAccount.trim()) p.set("sellerAccount", sellerAccount.trim())
     if (page > 1) p.set("page", String(page))
     if (q) p.set("q", q)
     const qs = p.toString()
     window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname)
-  }, [from, to, environment, sellerAccount, page, q])
+  }, [from, to, environment, sellerAccount, page, q, db, dbReady])
 
   const sellerMode = Boolean(sellerAccount.trim())
   const sellers = summary.sellers || []
@@ -220,6 +248,34 @@ export default function AdminSellersStockPage() {
           </>
         }
       />
+
+      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Database">
+        <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Database</span>
+        {ORDER_MONITOR_DBS.map((opt) => {
+          const active = db === opt.id
+          const isProd = opt.id === "chaos_test"
+          return (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => selectDb(opt.id)}
+              className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+                active
+                  ? isProd
+                    ? "border-emerald-700 bg-emerald-700 text-white"
+                    : "border-slate-900 bg-slate-900 text-white"
+                  : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+              }`}
+              title={opt.label}
+            >
+              {opt.label}
+            </button>
+          )
+        })}
+        <span className="text-xs text-slate-500">
+          Viewing {orderMonitorDbLabel(db)} seller directory (Redis catalogs are shared)
+        </span>
+      </div>
 
       {error ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{error}</div>

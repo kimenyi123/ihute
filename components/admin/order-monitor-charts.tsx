@@ -28,6 +28,11 @@ type OrderMonitorChartsProps = {
   loading: boolean
   totalRevenue?: number
   filteredCount?: number
+  platformCommission?: number
+  openRevenue?: number
+  openOrderCount?: number
+  paidRevenue?: number
+  paidOrderCount?: number
 }
 
 function ChartShell({
@@ -90,7 +95,17 @@ function CountTooltip({
   )
 }
 
-export function OrderMonitorCharts({ stats, loading, totalRevenue, filteredCount }: OrderMonitorChartsProps) {
+export function OrderMonitorCharts({
+  stats,
+  loading,
+  totalRevenue,
+  filteredCount,
+  platformCommission,
+  openRevenue,
+  openOrderCount,
+  paidRevenue,
+  paidOrderCount,
+}: OrderMonitorChartsProps) {
   const trend = stats?.dailyTrend ?? []
   const statusData = stats?.statusBreakdown ?? []
   const paymentData = stats?.paymentBreakdown ?? []
@@ -129,6 +144,32 @@ export function OrderMonitorCharts({ stats, loading, totalRevenue, filteredCount
     },
   ]
 
+  const moneyKpis = [
+    {
+      label: "Open GMV",
+      value: openRevenue != null ? formatAdminCurrency(openRevenue) : "—",
+      hint:
+        openOrderCount != null
+          ? `${openOrderCount.toLocaleString()} unpaid · no commission`
+          : "Unpaid (non-cancelled)",
+    },
+    {
+      label: "Paid GMV",
+      value: paidRevenue != null ? formatAdminCurrency(paidRevenue) : totalRevenue != null ? formatAdminCurrency(totalRevenue) : "—",
+      hint:
+        paidOrderCount != null
+          ? `${paidOrderCount.toLocaleString()} paid orders`
+          : filteredCount != null
+            ? `${filteredCount.toLocaleString()} in filter`
+            : "PAID payment status",
+    },
+    {
+      label: "Paid commission",
+      value: platformCommission != null ? formatAdminCurrency(platformCommission) : "—",
+      hint: "AMOUNT × platform rate on PAID only",
+    },
+  ]
+
   return (
     <div className="mb-8 space-y-4">
       <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 lg:grid-cols-4">
@@ -136,6 +177,16 @@ export function OrderMonitorCharts({ stats, loading, totalRevenue, filteredCount
           <div key={kpi.label} className="bg-white px-4 py-4">
             <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{kpi.label}</p>
             <p className="mt-1 text-xl font-semibold tabular-nums text-slate-900">{kpi.value}</p>
+            {kpi.hint ? <p className="mt-1 text-[11px] leading-snug text-slate-500">{kpi.hint}</p> : null}
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 sm:grid-cols-3">
+        {moneyKpis.map((kpi) => (
+          <div key={kpi.label} className="bg-white px-4 py-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{kpi.label}</p>
+            <p className="mt-1 text-lg font-semibold tabular-nums text-slate-900">{kpi.value}</p>
             {kpi.hint ? <p className="mt-1 text-[11px] leading-snug text-slate-500">{kpi.hint}</p> : null}
           </div>
         ))}

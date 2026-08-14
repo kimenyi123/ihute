@@ -42,6 +42,8 @@ export type QuickViewProduct = ProductImageSource & {
   FAMILLE?: string
   item_key_words?: string
   item_code?: string
+  requiresPrescription?: boolean
+  requires_prescription?: boolean
 }
 
 type ProductQuickViewProps = {

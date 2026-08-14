@@ -1,10 +1,9 @@
 /**
  * Heuristic parsing of pasted MTN MoMo (or similar) SMS bodies to find RWF amounts
- * and compare with the Quick Shop / Umuriro order total.
+ * and compare with the Quick Shop / Umuriro / Grandma order total.
  *
- * Browsers cannot read SMS inboxes; the buyer pastes the confirmation message here.
- *
- * Enhanced: also validates transaction date/time freshness and merchant code match.
+ * Browsers cannot read SMS inboxes; the buyer must paste the **full** confirmation SMS —
+ * a bare TxId alone is rejected.
  */
 
 function parseMoneyToken(raw: string): number | null {
@@ -14,7 +13,7 @@ function parseMoneyToken(raw: string): number | null {
   return n
 }
 
-/** Collect plausible RWF amounts from free-form SMS (MTN-style "800 RWF", "RWF 800", \u2026). */
+/** Collect plausible RWF amounts from free-form SMS (MTN-style "800 RWF", "RWF 800", …). */
 export function extractRwfAmountCandidatesFromText(text: string): number[] {
   const s = String(text ?? "").replace(/\u00a0/g, " ")
   const found = new Set<number>()
@@ -35,12 +34,26 @@ export function extractRwfAmountCandidatesFromText(text: string): number[] {
   return [...found].sort((a, b) => a - b)
 }
 
+export type MoMoSmsRejectReason =
+  | "none"
+  | "amount_mismatch"
+  | "no_amount"
+  | "expired_sms"
+  | "wrong_merchant"
+  | "no_txid"
+  | "bare_txid"
+  | "incomplete_sms"
+
 export type MoMoSmsMatchResult = {
   matched: boolean
   /** Amount that matched the order (within tolerance), if any */
   amount: number | null
   /** MTN TxId / transaction id when present in pasted SMS */
   txId: string | null
+  /** Free-form reference / note / motif when present in the SMS */
+  referenceNote: string | null
+  /** ISO timestamp from SMS when parsed */
+  paidAtIso: string | null
   /** All amounts seen in the SMS (debug / UX) */
   candidates: number[]
   /** Whether the transaction date/time is recent enough */
@@ -56,10 +69,44 @@ export type MoMoSmsMatchResult = {
   /** Payment recipient merchant code when available from the SMS */
   receiverCode?: string | null
   /** Reason for rejection */
-  rejectReason: "none" | "amount_mismatch" | "no_amount" | "expired_sms" | "wrong_merchant" | "no_txid"
+  rejectReason: MoMoSmsRejectReason
 }
 
-/** MTN MoMo confirmation SMS \u2014 e.g. `TxId:28066831087*S*Your payment of\u2026` */
+/** True when the paste is only a transaction id (no SMS body). */
+export function looksLikeBareTxId(text: string): boolean {
+  const s = String(text ?? "").trim()
+  if (!s) return false
+  // Digits only, or TxId:digits with nothing else meaningful
+  if (/^\d{6,20}$/.test(s)) return true
+  if (/^TxId\s*:\s*\d{6,20}$/i.test(s)) return true
+  if (/^(?:Txn|Transaction)\s*(?:ID|Id)?\s*[:#]?\s*\d{6,20}$/i.test(s)) return true
+  return false
+}
+
+/**
+ * Full MoMo confirmation SMS usually has currency, a narrative verb, and a timestamp.
+ * Reject short pastes that are not a confirmation body.
+ */
+export function looksLikeFullPaymentSms(text: string): boolean {
+  const s = String(text ?? "").replace(/\u00a0/g, " ").trim()
+  if (!s || looksLikeBareTxId(s)) return false
+  if (s.length < 40) return false
+  const hasMoney = /(?:RWF|FRW|Frw|frw)/i.test(s)
+  const hasNarrative =
+    /(?:payment of|transferred to|was completed|successful|you have sent|umeha|kwishyura)/i.test(s)
+  const hasStamp =
+    /\d{4}[-/]\d{1,2}[-/]\d{1,2}/.test(s) ||
+    /\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}/.test(s) ||
+    /\d{1,2}:\d{2}/.test(s)
+  // Strong signal: money + (story or time)
+  if (hasMoney && (hasNarrative || hasStamp)) return true
+  // Longer MTN blobs often start with *165*S* or *EN#
+  if (/^\*?16[0-9]\*?S?\*/i.test(s) && hasMoney) return true
+  if (/^\*?EN#/i.test(s) && hasMoney) return true
+  return false
+}
+
+/** MTN MoMo confirmation SMS — e.g. `TxId:28066831087*S*Your payment of…` */
 export function extractMoMoTxIdFromSms(text: string): string | null {
   const s = String(text ?? "")
   const patterns = [
@@ -76,7 +123,29 @@ export function extractMoMoTxIdFromSms(text: string): string | null {
   return null
 }
 
-export function extractMoMoPhonePaymentDetailsFromSms(text: string): { receiverName: string; receiverPhone: string } | null {
+/** Optional buyer note / motif / message field when carriers include one. */
+export function extractMoMoReferenceNoteFromSms(text: string): string | null {
+  const s = String(text ?? "").replace(/\u00a0/g, " ")
+  const patterns = [
+    /\b(?:note|message|motif|reason|memo)\s*[:\-]\s*([^\n.*]{2,80})/i,
+    /\b(?:for|ref(?:erence)?)\s*[:\-]\s*([A-Za-z][^\n.*]{1,80})/i,
+  ]
+  for (const re of patterns) {
+    const m = s.match(re)
+    const note = m?.[1]?.trim().replace(/\s+/g, " ")
+    if (!note) continue
+    // Avoid capturing "for 1500 RWF" style money clauses
+    if (/^\d[\d\s,.]*\s*(?:RWF|FRW)?$/i.test(note)) continue
+    if (/^(?:RWF|FRW)\b/i.test(note)) continue
+    return note.slice(0, 120)
+  }
+  return null
+}
+
+export function extractMoMoPhonePaymentDetailsFromSms(text: string): {
+  receiverName: string
+  receiverPhone: string
+} | null {
   const s = String(text ?? "")
   const pattern = /transferred to\s+([^\n\r(]+?)\s*\((\d{9,})\)\s*at\s+/i
   const m = s.match(pattern)
@@ -87,7 +156,10 @@ export function extractMoMoPhonePaymentDetailsFromSms(text: string): { receiverN
   }
 }
 
-export function extractMoMoCodePaymentDetailsFromSms(text: string): { receiverName: string; receiverCode: string } | null {
+export function extractMoMoCodePaymentDetailsFromSms(text: string): {
+  receiverName: string
+  receiverCode: string
+} | null {
   const s = String(text ?? "")
   const pattern = /Your payment of\s+[\d\s,.]+\s*(?:RWF|FRW|Frw|frw)\s+to\s+(.+?)\s+(\d{3,})(?:\s+(?:was\s+completed\s+at|was\s+successful\b|on\b|,|\.|$))?/i
   const m = s.match(pattern)
@@ -127,18 +199,18 @@ export function extractDateFromMoMoSms(text: string): Date | null {
   // dd/mm/yyyy or dd-mm-yyyy
   const dmyMatch = s.match(patterns[1])
   if (dmyMatch) {
-    const day = parseInt(dmyMatch[1])
-    const month = parseInt(dmyMatch[2]) - 1
-    const year = parseInt(dmyMatch[3])
+    const day = parseInt(dmyMatch[1], 10)
+    const month = parseInt(dmyMatch[2], 10) - 1
+    const year = parseInt(dmyMatch[3], 10)
     const timeStr = dmyMatch[4]
     const d = new Date(year, month, day)
     const timeParts = timeStr.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?/i)
     if (timeParts) {
-      let hours = parseInt(timeParts[1])
-      const mins = parseInt(timeParts[2])
+      let hours = parseInt(timeParts[1], 10)
+      const mins = parseInt(timeParts[2], 10)
       if (timeParts[4]?.toUpperCase() === "PM" && hours < 12) hours += 12
       if (timeParts[4]?.toUpperCase() === "AM" && hours === 12) hours = 0
-      d.setHours(hours, mins, parseInt(timeParts[3] || "0"))
+      d.setHours(hours, mins, parseInt(timeParts[3] || "0", 10))
     }
     if (!Number.isNaN(d.getTime())) return d
   }
@@ -174,14 +246,15 @@ const DEFAULT_MAX_AGE_MINUTES = 15
 
 /**
  * Enhanced MoMo SMS matching:
+ * 0. Full SMS body required (not a bare TxId)
  * 1. Amount must match order total (within tolerance)
- * 2. TxId must be present (proves it's a real confirmation)
+ * 2. TxId must be present (needed for local uniqueness + GQ)
  * 3. Transaction date must be recent (within maxAgeMinutes)
  * 4. Merchant code must match (if provided)
  *
- * @param toleranceRwf \u2014 allow \u00b11\u20132 RWF for rounding/fees (default 2)
- * @param merchantCode \u2014 the shop's MoMo merchant code (digits from USSD)
- * @param maxAgeMinutes \u2014 max allowed age of SMS (default 15 min)
+ * @param toleranceRwf — allow ±1–2 RWF for rounding/fees (default 2)
+ * @param merchantCode — the shop's MoMo merchant code (digits from USSD)
+ * @param maxAgeMinutes — max allowed age of SMS (default 15 min)
  */
 export function matchMoMoSmsToOrderTotal(
   sms: string,
@@ -190,31 +263,81 @@ export function matchMoMoSmsToOrderTotal(
   merchantCode?: string,
   maxAgeMinutes = DEFAULT_MAX_AGE_MINUTES,
 ): MoMoSmsMatchResult {
-  const candidates = extractRwfAmountCandidatesFromText(sms)
   const txId = extractMoMoTxIdFromSms(sms)
+  const referenceNote = extractMoMoReferenceNoteFromSms(sms)
   const phonePaymentDetails = extractMoMoPhonePaymentDetailsFromSms(sms)
   const codePaymentDetails = extractMoMoCodePaymentDetailsFromSms(sms)
   const parsedDateObj = extractDateFromMoMoSms(sms)
   const parsedDate = parsedDateObj ? parsedDateObj.toISOString() : null
+  const paidAtIso = parsedDate
+  const candidates = extractRwfAmountCandidatesFromText(sms)
 
-  const base: Pick<MoMoSmsMatchResult, "candidates" | "txId" | "parsedDate" | "receiverName" | "receiverPhone" | "receiverCode"> = {
+  const base: Pick<
+    MoMoSmsMatchResult,
+    | "candidates"
+    | "txId"
+    | "referenceNote"
+    | "paidAtIso"
+    | "parsedDate"
+    | "receiverName"
+    | "receiverPhone"
+    | "receiverCode"
+  > = {
     candidates,
     txId,
+    referenceNote,
+    paidAtIso,
     parsedDate,
     receiverName: phonePaymentDetails?.receiverName ?? codePaymentDetails?.receiverName ?? null,
     receiverPhone: phonePaymentDetails?.receiverPhone ?? null,
     receiverCode: codePaymentDetails?.receiverCode ?? null,
   }
 
-  if (!Number.isFinite(orderTotalRwf) || orderTotalRwf < 1) {
-    return { ...base, matched: false, amount: null, dateValid: null, merchantCodeValid: null, rejectReason: "no_amount" }
+  if (looksLikeBareTxId(sms)) {
+    return {
+      ...base,
+      matched: false,
+      amount: null,
+      dateValid: null,
+      merchantCodeValid: null,
+      rejectReason: "bare_txid",
+    }
   }
 
-  // 1. Check amount match
+  if (!looksLikeFullPaymentSms(sms)) {
+    return {
+      ...base,
+      matched: false,
+      amount: null,
+      dateValid: null,
+      merchantCodeValid: null,
+      rejectReason: "incomplete_sms",
+    }
+  }
+
+  if (!Number.isFinite(orderTotalRwf) || orderTotalRwf < 1) {
+    return {
+      ...base,
+      matched: false,
+      amount: null,
+      dateValid: null,
+      merchantCodeValid: null,
+      rejectReason: "no_amount",
+    }
+  }
+
+  // 1. Check amount match against order total
   const hit = candidates.find((n) => Math.abs(n - orderTotalRwf) <= toleranceRwf)
   if (hit == null) {
     if (!candidates.length) {
-      return { ...base, matched: false, amount: null, dateValid: null, merchantCodeValid: null, rejectReason: "no_amount" }
+      return {
+        ...base,
+        matched: false,
+        amount: null,
+        dateValid: null,
+        merchantCodeValid: null,
+        rejectReason: "no_amount",
+      }
     }
     return {
       ...base,
@@ -226,9 +349,8 @@ export function matchMoMoSmsToOrderTotal(
     }
   }
 
-  // 2. TxId must be present for a genuine confirmation unless this is a recognized phone- or merchant-code-based format.
-  const allowNoTxId = Boolean(codePaymentDetails || phonePaymentDetails)
-  if (!txId && !allowNoTxId) {
+  // 2. TxId required — uniqueness + GQ proof
+  if (!txId) {
     return {
       ...base,
       matched: false,
@@ -291,4 +413,17 @@ export function matchMoMoSmsToOrderTotal(
     merchantCodeValid,
     rejectReason: "none",
   }
+}
+
+/** Normalized rail for order_transaction.BANK / ebm.rw bank field. */
+export function normalizePaymentBank(
+  paymentNameOrBank: string,
+): "momo" | "airtel" | "urubuto" | "azampay" | "cash" | "other" {
+  const m = String(paymentNameOrBank || "").toLowerCase()
+  if (m.includes("airtel")) return "airtel"
+  if (m.includes("urubuto")) return "urubuto"
+  if (m.includes("azampay")) return "azampay"
+  if (m.includes("momo") || m === "mtn") return "momo"
+  if (m.includes("cash") || m.includes("delivery") || m.includes("table")) return "cash"
+  return "other"
 }

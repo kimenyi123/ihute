@@ -117,6 +117,10 @@ type CartState = {
   removeGroupBySeller: (supplierId: string) => void
   /** Merge duplicate lines (same supplier + same product code or name) into one line with summed qty */
   mergeDuplicateCartLines: () => void
+  /** Stamp Rx-required on matching cart lines (itemCode / niki / id). */
+  stampRequiresPrescription: (codes: string[]) => void
+  /** Replace displayed shop name (account_seller.owner) for all lines of a seller. */
+  setSupplierDisplayName: (supplierId: string, supplierName: string) => void
 
   // ✅ NEW: Table management
   setTableInfo: (info: TableInfo | null) => void
@@ -313,6 +317,7 @@ export const useCartStore = create<CartState>()(
               sellerPhone: first.sellerPhone ?? item.sellerPhone,
               itemEmballage: first.itemEmballage ?? item.itemEmballage,
               item_state: first.item_state ?? item.item_state,
+              requiresPrescription: Boolean(first.requiresPrescription || item.requiresPrescription),
               expiryLabel: first.expiryLabel ?? item.expiryLabel,
             }
             return {
@@ -467,6 +472,7 @@ export const useCartStore = create<CartState>()(
               sellerPhone: first.sellerPhone ?? item.sellerPhone,
               itemEmballage: first.itemEmballage ?? item.itemEmballage,
               item_state: first.item_state ?? item.item_state,
+              requiresPrescription: Boolean(first.requiresPrescription || item.requiresPrescription),
               expiryLabel: first.expiryLabel ?? item.expiryLabel,
             }
             return {
@@ -588,6 +594,7 @@ export const useCartStore = create<CartState>()(
                 famille: cur.famille ?? it.famille,
                 itemEmballage: cur.itemEmballage ?? it.itemEmballage,
                 item_state: cur.item_state ?? it.item_state,
+                requiresPrescription: Boolean(cur.requiresPrescription || it.requiresPrescription),
                 expiryLabel: cur.expiryLabel ?? it.expiryLabel,
               }
             } else {
@@ -596,6 +603,41 @@ export const useCartStore = create<CartState>()(
           }
           if (merged.length === items.length) return state
           return { items: merged }
+        }),
+
+      setSupplierDisplayName: (supplierId, supplierName) =>
+        set((state) => {
+          const sid = (supplierId ?? "").toString().trim()
+          const name = (supplierName ?? "").toString().trim()
+          if (!sid || !name) return state
+          let changed = false
+          const items = state.items.map((it) => {
+            if ((it.supplierId ?? "").toString().trim() !== sid) return it
+            if ((it.supplierName ?? "").trim() === name) return it
+            changed = true
+            return { ...it, supplierName: name }
+          })
+          return changed ? { items } : state
+        }),
+
+      stampRequiresPrescription: (codes) =>
+        set((state) => {
+          const setCodes = new Set(
+            (codes || []).map((c) => String(c || "").trim().toUpperCase()).filter(Boolean),
+          )
+          let changed = false
+          const items = state.items.map((it) => {
+            const keys = [it.itemCode, it.item_key_words, it.id]
+              .map((v) => String(v || "").trim().toUpperCase())
+              .filter(Boolean)
+            const hit = keys.some((k) => setCodes.has(k))
+            if (Boolean(it.requiresPrescription) !== hit) {
+              changed = true
+              return { ...it, requiresPrescription: hit }
+            }
+            return it
+          })
+          return changed ? { items } : state
         }),
 
       // ✅ NEW: Table management functions
