@@ -365,6 +365,7 @@ function toCardProduct(p: Product & { search_priority?: string; contains_ingredi
     ...(expiryLabel ? { expiryLabel } : {}),
     brand: (p as any).item_fabricant ?? (p as any).id_fabricant ?? (p as any).brand,
     shop_count: (p as any).shop_count,
+    nickname: (p as any).nickname ?? (p as any).NICKNAME ?? (p as any).seller_nickname ?? (p as any).supplier_nickname,
     cheapest_shop_nickname: (p as any).cheapest_shop_nickname,
     niki_merge: (p as any).niki_merge === true ? true : undefined,
   }

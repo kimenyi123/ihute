@@ -30,7 +30,7 @@ import {
 import { unitMeaningfulForDisplay } from "@/lib/product-unit-display"
 import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price"
 import { itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
-import { sellerDisplayName } from "@/lib/seller-display-name"
+import { sellerDisplayName, shopWithMePathSegment } from "@/lib/seller-display-name"
 
 /** Suffix after price: `N pcs` from `item_emballage` (pack size), not currency — default N=1 when omitted. */
 function formatPcsFromItemEmballage(raw: unknown): string | null {
@@ -92,6 +92,8 @@ type Product = {
   /** Cross-shop dedupe: available at N shops (main /search only, NIKI merge) */
   shop_count?: number
   cheapest_shop_nickname?: string
+  /** Shop-with-me slug — never OWNER / supplier display name */
+  nickname?: string
   niki_merge?: boolean
   /** From NIKI / stock — Rx photo required at checkout */
   requiresPrescription?: boolean
@@ -241,6 +243,16 @@ export function ProductCard({
     supplierName,
     supplierAccount: supplierId,
   })
+  const shopWithMeHref = (() => {
+    const slug = shopWithMePathSegment({
+      nickname: product.nickname,
+      cheapestShopNickname: product.cheapest_shop_nickname,
+      owner: shopLabel,
+      supplierName,
+      supplierAccount: supplierId,
+    })
+    return slug ? `/shop-with-me/${encodeURIComponent(slug)}` : undefined
+  })()
 
   const displayPrice = useMemo(() => {
     return generalSellingPrice(
@@ -573,9 +585,10 @@ export function ProductCard({
           {product.niki_merge === true &&
             typeof product.shop_count === "number" &&
             product.shop_count > 1 &&
-            product.cheapest_shop_nickname && (
+            shopWithMeHref && (
             <Link
-              href={`/shop-with-me/${encodeURIComponent(product.cheapest_shop_nickname)}`}
+              href={shopWithMeHref}
+              onClick={(e) => e.stopPropagation()}
               className={cn(
                 "mt-1 inline-flex rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-800 hover:bg-blue-100",
               )}

@@ -33,25 +33,24 @@ function priceOf(p: Record<string, unknown>): number {
 
 
 function shopNicknameOf(p: Record<string, unknown>): string {
-
-  return String(
-
-    p.nickname ??
-
-      p.NICKNAME ??
-
-      p.seller_nickname ??
-
-      p.supplier_nickname ??
-
-      p.supplier_name ??
-
-      p.supplier_account ??
-
-      "",
-
-  ).trim()
-
+  const owner = String(p.owner ?? p.OWNER ?? p.supplier_name ?? "").trim().toLowerCase()
+  const account = String(p.supplier_account ?? "").trim().toLowerCase()
+  const candidates = [
+    p.nickname,
+    p.NICKNAME,
+    p.seller_nickname,
+    p.supplier_nickname,
+    p.cheapest_shop_nickname,
+  ]
+  for (const raw of candidates) {
+    const nick = String(raw ?? "").trim()
+    if (!nick) continue
+    const lower = nick.toLowerCase()
+    if (owner && lower === owner) continue
+    if (account && lower === account) continue
+    return nick
+  }
+  return ""
 }
 
 
