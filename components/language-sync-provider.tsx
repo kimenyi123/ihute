@@ -12,6 +12,7 @@ import { useLanguageStore } from "@/lib/language-store"
  */
 export function LanguageSyncProvider({ children }: { children: React.ReactNode }) {
   const language = useLanguageStore((s) => s.language)
+  const hasHydrated = useLanguageStore((s) => s.hasHydrated)
   const setLanguage = useLanguageStore((s) => s.setLanguage)
   const hydrate = useLanguageStore((s) => s.hydrate)
 
@@ -28,9 +29,10 @@ export function LanguageSyncProvider({ children }: { children: React.ReactNode }
   }, [hydrate, setLanguage])
 
   useEffect(() => {
+    if (!hasHydrated) return
     document.documentElement.lang = language
     document.documentElement.dir = "ltr"
-  }, [language])
+  }, [language, hasHydrated])
 
   return <>{children}</>
 }

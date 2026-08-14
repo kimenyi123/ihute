@@ -9,6 +9,14 @@ import {
   isMysqlUnreachableError,
 } from "@/lib/onboarding-mysql"
 import { isValidLatLng } from "@/lib/geo-haversine"
+import { encodeGeohash, normalizeGpsAccuracyForDb } from "@/lib/grandma-seller-gps"
+import {
+  toClientGpsPersistStatus,
+  type GrandmaGpsPersistClientStatus,
+} from "@/lib/grandma-seller-gps-client-status"
+
+export type { GrandmaGpsPersistClientStatus }
+export { toClientGpsPersistStatus }
 
 export type SellerGpsPersistInput = {
   ishyigaAccount: string
@@ -19,26 +27,24 @@ export type SellerGpsPersistInput = {
 
 export type SellerGpsPersistResult =
   | { ok: true; updatedSeller: number; updatedSignup: number }
-  | { ok: false; skipped?: boolean; error: string }
+  | { ok: false; skipped: boolean; error: string }
 
 export async function persistGrandmaSellerGps(
   input: SellerGpsPersistInput,
 ): Promise<SellerGpsPersistResult> {
   const account = String(input.ishyigaAccount ?? "").trim()
-  if (!account) return { ok: false, error: "missing ishyigaAccount" }
+  if (!account) return { ok: false, skipped: false, error: "missing ishyigaAccount" }
   if (!isValidLatLng(input.latitude, input.longitude)) {
-    return { ok: false, error: "invalid latitude/longitude" }
+    return { ok: false, skipped: false, error: "invalid latitude/longitude" }
   }
   if (!getOnboardingMysqlConfig()) {
-    return { ok: false, skipped: true, error: "MySQL not configured" }
+    return { ok: false, skipped: true, error: "ONBOARDING_MYSQL_* is not configured" }
   }
 
   const lat = Number(input.latitude)
   const lng = Number(input.longitude)
-  const accuracy =
-    input.gpsAccuracy != null && Number.isFinite(Number(input.gpsAccuracy))
-      ? Math.round(Number(input.gpsAccuracy) * 100) / 100
-      : null
+  const accuracy = normalizeGpsAccuracyForDb(input.gpsAccuracy)
+  const geohash = encodeGeohash(lat, lng, 8)
 
   let conn
   try {
@@ -47,30 +53,40 @@ export async function persistGrandmaSellerGps(
       `UPDATE account_seller
        SET supplier_latitude = ?,
            supplier_longitude = ?,
+           supplier_geohash = ?,
            gps_accuracy = COALESCE(?, gps_accuracy),
            gps_last_updated = CURRENT_TIMESTAMP,
            location_source = 'AUTO'
        WHERE ishyiga_account = ?`,
-      [lat, lng, accuracy, account],
+      [lat, lng, geohash || null, accuracy, account],
     )
     const [signupResult] = await conn.execute(
       `UPDATE account_signup
        SET supplier_latitude = ?,
            supplier_longitude = ?,
+           supplier_geohash = ?,
            gps_accuracy = COALESCE(?, gps_accuracy),
-           gps_last_updated = CURRENT_TIMESTAMP
+           gps_last_updated = CURRENT_TIMESTAMP,
+           location_source = 'AUTO'
        WHERE ISHYIGA_ACCOUNT = ?`,
-      [lat, lng, accuracy, account],
+      [lat, lng, geohash || null, accuracy, account],
     )
     const updatedSeller = Number((sellerResult as { affectedRows?: number }).affectedRows ?? 0)
     const updatedSignup = Number((signupResult as { affectedRows?: number }).affectedRows ?? 0)
+    if (updatedSeller === 0 && updatedSignup === 0) {
+      return {
+        ok: false,
+        skipped: false,
+        error: "no matching account_seller/account_signup rows updated",
+      }
+    }
     return { ok: true, updatedSeller, updatedSignup }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     if (isMysqlUnreachableError(e)) {
-      return { ok: false, skipped: true, error: `MySQL unreachable: ${msg}` }
+      return { ok: false, skipped: false, error: `MySQL unreachable: ${msg}` }
     }
-    return { ok: false, error: msg }
+    return { ok: false, skipped: false, error: msg }
   } finally {
     try {
       await conn?.end()

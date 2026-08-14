@@ -16,6 +16,7 @@ import Image from "next/image"
 import { FileSpreadsheet, ArrowLeft, ArrowRight, CheckCircle } from "lucide-react"
 import { RWANDA_DISTRICTS } from "@/lib/constants"
 import { GPSCapture } from "@/components/gps-capture"
+import { GRANDMA_REGISTRATION_CATEGORY_VALUES } from "@/lib/seller-category-sector"
 
 type FormRole = "buyer" | "seller" | "rider"
 
@@ -30,10 +31,7 @@ export type RegisterAccountFormProps = {
   backHref?: string
 }
 
-const BUSINESS_SECTORS = [
-  "pharmacy", "liquor store", "boutique", "bar/restaurant",
-  "supermarket", "coffee shop", "pizzeria", "electronics",
-]
+const BUSINESS_SECTORS = GRANDMA_REGISTRATION_CATEGORY_VALUES
 
 const DELIVERY_MODES = [
   { value: "delivery", label: "Delivery (we deliver to customers)" },

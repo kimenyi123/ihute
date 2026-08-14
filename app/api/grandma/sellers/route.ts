@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server"
 import { getGrandmaSellerApiUrl, getProxyTimeoutMs } from "@/lib/backend-config"
-import { persistGrandmaSellerGps } from "@/lib/grandma-seller-gps-persist"
-import { isValidLatLng } from "@/lib/geo-haversine"
+import {
+  persistGrandmaSellerGps,
+  toClientGpsPersistStatus,
+  type GrandmaGpsPersistClientStatus,
+} from "@/lib/grandma-seller-gps-persist"
+import { extractGpsFromRegistrationBody } from "@/lib/grandma-seller-gps-payload"
+import { isPlaceholderGrandmaShopName } from "@/lib/seller-category-sector"
 
 export const runtime = "nodejs"
 
@@ -13,6 +18,18 @@ export async function POST(req: Request) {
 
   try {
     const body = (await req.json()) as Record<string, unknown>
+    const companyName = String(body.companyName ?? body.owner ?? "").trim()
+    if (isPlaceholderGrandmaShopName(companyName)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "A real shop name is required",
+          code: "INVALID_SHOP_NAME",
+          rid,
+        },
+        { status: 400 },
+      )
+    }
     let res: Response
     try {
       res = await fetch(url, {
@@ -63,31 +80,51 @@ export async function POST(req: Request) {
         ? { ...(json as Record<string, unknown>) }
         : ({ ok: false } as Record<string, unknown>)
 
-    // Best-effort: write GPS onto existing supplier_* columns so Near Me works
-    // even if CreateSellerServlet ignores latitude/longitude in the JSON body.
-    let gpsPersist: unknown = undefined
+    // Secondary sync onto account_signup + account_seller (Near Me reads account_signup).
+    // Primary insert path is Java CreateSellerServlet (must also write signup GPS).
+    let gpsPersist: GrandmaGpsPersistClientStatus | undefined
     const ishyiga = String(base.ishyigaAccount ?? "").trim()
-    const lat = body.latitude != null ? Number(body.latitude) : NaN
-    const lng = body.longitude != null ? Number(body.longitude) : NaN
-    if (res.ok && base.ok && ishyiga && isValidLatLng(lat, lng)) {
-      const accuracy =
-        body.gpsAccuracy != null && Number.isFinite(Number(body.gpsAccuracy))
-          ? Number(body.gpsAccuracy)
-          : null
-      const persist = await persistGrandmaSellerGps({
-        ishyigaAccount: ishyiga,
-        latitude: lat,
-        longitude: lng,
-        gpsAccuracy: accuracy,
-      })
-      gpsPersist = persist
-      if (!persist.ok && !persist.skipped) {
-        console.warn(`[RID ${rid}] Grandma seller GPS persist failed:`, persist.error)
-      } else if (persist.ok) {
-        console.log(
-          `[RID ${rid}] Grandma seller GPS persisted seller=${persist.updatedSeller} signup=${persist.updatedSignup}`,
+    const extracted = extractGpsFromRegistrationBody(body)
+    const hasGpsPayload = extracted != null
+
+    if (res.ok && base.ok && hasGpsPayload && extracted) {
+      if (!ishyiga) {
+        gpsPersist = {
+          ok: false,
+          skipped: false,
+          reason: "GPS persistence failed",
+        }
+        console.warn(
+          `[Grandma GPS] GPS persistence failed rid=${rid} reason=missing_ishyiga_account`,
         )
+      } else {
+        console.log(
+          `[Grandma GPS] captured rid=${rid} lat=${extracted.latitude} lng=${extracted.longitude} accuracy=${extracted.gpsAccuracy ?? "n/a"}`,
+        )
+        const persist = await persistGrandmaSellerGps({
+          ishyigaAccount: ishyiga,
+          latitude: extracted.latitude,
+          longitude: extracted.longitude,
+          gpsAccuracy: extracted.gpsAccuracy,
+        })
+        gpsPersist = toClientGpsPersistStatus(persist)
+
+        if (persist.ok) {
+          console.log(
+            `[Grandma GPS] GPS persisted successfully rid=${rid} ishyigaAccount=${ishyiga} sellerRows=${persist.updatedSeller} signupRows=${persist.updatedSignup}`,
+          )
+        } else if (persist.skipped) {
+          console.warn(
+            `[Grandma GPS] GPS persistence skipped rid=${rid} ishyigaAccount=${ishyiga} reason=ONBOARDING_MYSQL_*_not_configured`,
+          )
+        } else {
+          console.warn(
+            `[Grandma GPS] GPS persistence failed rid=${rid} ishyigaAccount=${ishyiga} error=${persist.error}`,
+          )
+        }
       }
+    } else if (res.ok && base.ok && !hasGpsPayload) {
+      console.warn(`[Grandma GPS] no valid GPS in registration payload rid=${rid}`)
     }
 
     const payload = { ...base, rid, ...(gpsPersist ? { gpsPersist } : {}) }

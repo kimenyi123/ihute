@@ -33,6 +33,31 @@ export function tokenizeSearchQuery(raw: string): string[] {
     .filter((t) => t.length >= 1)
 }
 
+/**
+ * MySQL BOOLEAN MODE queries for candidate retrieval (uses existing
+ * FULLTEXT idx_fulltext_product). Stem query is separate so `milkk` still
+ * finds `milk` rows without requiring both terms (AND) to be present.
+ */
+export function buildGrandmaFulltextBooleanQueries(qRaw: string): string[] {
+  const tokens = tokenizeSearchQuery(qRaw)
+  const out: string[] = []
+  const seen = new Set<string>()
+  const add = (q: string) => {
+    const t = q.trim()
+    if (!t || seen.has(t)) return
+    seen.add(t)
+    out.push(t)
+  }
+  const primary = tokens.filter((t) => t.length >= 3).map((t) => `+${t}*`).join(" ")
+  add(primary)
+  const stems = tokens
+    .filter((t) => t.length >= 5)
+    .map((t) => t.slice(0, -1))
+    .filter((s) => s.length >= 3)
+  add([...new Set(stems)].map((s) => `+${s}*`).join(" "))
+  return out
+}
+
 /** Levenshtein distance (bounded for short tokens). */
 export function levenshtein(a: string, b: string): number {
   if (a === b) return 0
@@ -63,13 +88,17 @@ function scoreField(query: string, fieldRaw: string, weights: {
   const field = normalizeSearchText(fieldRaw)
   if (!query || !field) return { score: 0, tier: "none" }
   if (field === query) return { score: weights.exact, tier: "exact" }
-  if (field.startsWith(query)) return { score: weights.prefix, tier: "prefix" }
-  if (field.includes(query)) return { score: weights.contains, tier: "contains" }
 
   const tokens = field.split(" ")
   for (const tok of tokens) {
     if (tok === query) return { score: weights.exact - 5, tier: "exact" }
+  }
+  if (field.startsWith(query)) return { score: weights.prefix, tier: "prefix" }
+  for (const tok of tokens) {
     if (tok.startsWith(query)) return { score: weights.prefix - 5, tier: "prefix" }
+  }
+  if (field.includes(query)) return { score: weights.contains, tier: "contains" }
+  for (const tok of tokens) {
     if (query.length >= 3 && tok.length >= 3 && levenshtein(query, tok) <= 1) {
       return { score: Math.max(8, weights.contains - 8), tier: "fuzzy" }
     }
@@ -122,13 +151,13 @@ export function rankGrandmaSearchHit(
     })
   }
 
-  consider("shopName", row.shopName, { exact: 100, prefix: 80, contains: 55 })
-  consider("sellerName", row.sellerName, { exact: 95, prefix: 75, contains: 50 })
+  consider("product", row.productBlob, { exact: 100, prefix: 82, contains: 55 })
+  consider("shopName", row.shopName, { exact: 90, prefix: 70, contains: 45 })
+  consider("sellerName", row.sellerName, { exact: 86, prefix: 66, contains: 42 })
   consider("brand", row.brand, { exact: 70, prefix: 55, contains: 35 })
-  consider("category", row.category, { exact: 60, prefix: 45, contains: 30 })
-  consider("description", row.description, { exact: 50, prefix: 40, contains: 25 }, "description")
-  consider("tags", row.tags, { exact: 45, prefix: 35, contains: 22 }, "tags")
-  consider("product", row.productBlob, { exact: 85, prefix: 65, contains: 40 })
+  consider("category", row.category, { exact: 55, prefix: 40, contains: 28 })
+  consider("description", row.description, { exact: 45, prefix: 32, contains: 18 }, "description")
+  consider("tags", row.tags, { exact: 40, prefix: 28, contains: 16 }, "tags")
 
   // Multi-token AND bonus when all tokens appear somewhere in combined haystack
   const tokens = tokenizeSearchQuery(queryRaw)
@@ -197,6 +226,19 @@ export function splitHighlightMarkers(snippet: string): Array<{ text: string; hi
 export const GRANDMA_NEAR_ME_RADIUS_OPTIONS_KM = [1, 5, 10, 25, 50] as const
 export const GRANDMA_NEAR_ME_DEFAULT_RADIUS_KM = 1
 export const GRANDMA_SEARCH_DEFAULT_PAGE_SIZE = 30
+/** Drop SQL hits whose only match is a weak description/tag substring. */
+export const GRANDMA_SEARCH_MIN_SCORE = 30
+
+export function isRelevantGrandmaSearchHit(
+  score: number,
+  queryRaw: string,
+  tier: GrandmaMatchTier = "none",
+): boolean {
+  if (!normalizeSearchText(queryRaw)) return true
+  if (score < GRANDMA_SEARCH_MIN_SCORE) return false
+  if (tier === "description" || tier === "tags" || tier === "none") return false
+  return true
+}
 
 /** Small slack so float Haversine values on the boundary are not dropped. */
 export const GRANDMA_NEAR_ME_RADIUS_EPSILON_KM = 0.05
@@ -216,16 +258,46 @@ export function shopWithinNearMeRadius(
   return distanceKm <= opts.radiusKm + GRANDMA_NEAR_ME_RADIUS_EPSILON_KM
 }
 
-/** Parse `radiusKm` query the same way as GET /api/grandma/search. */
+/**
+ * Parse `radiusKm` the same way as GET /api/grandma/search.
+ * - `all` → no distance cap (null)
+ * - omitted / empty → official default (1 km)
+ * - invalid / ≤0 → official default (1 km)
+ */
 export function parseGrandmaSearchRadiusKm(
   radiusRaw: string | null | undefined,
   defaultKm: number = GRANDMA_NEAR_ME_DEFAULT_RADIUS_KM,
 ): number | null {
   const raw = String(radiusRaw ?? "").trim()
-  if (raw === "" || raw.toLowerCase() === "all") return null
+  if (raw.toLowerCase() === "all") return null
+  if (raw === "") return defaultKm
   const n = Number(raw)
   if (!Number.isFinite(n) || n <= 0) return defaultKm
   return n
+}
+
+/**
+ * SQL LIKE patterns for Grandma text search.
+ * Includes the normalized query plus a 1-extra-trailing-character stem so
+ * typos like "milkk" can retrieve "milk" rows (ranking still uses Levenshtein).
+ */
+export function buildGrandmaSearchLikePatterns(qRaw: string): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  const add = (p: string) => {
+    if (!p || seen.has(p)) return
+    seen.add(p)
+    out.push(p)
+  }
+  const norm = normalizeSearchText(qRaw)
+  if (norm) add(`%${norm.replace(/\s+/g, "%")}%`)
+  for (const t of tokenizeSearchQuery(qRaw)) {
+    if (t.length >= 4) {
+      const stem = t.slice(0, -1)
+      if (stem.length >= 3) add(`%${stem}%`)
+    }
+  }
+  return out.slice(0, 4)
 }
 
 export function maxFiniteDistanceKm(distances: Array<number | null | undefined>): number | null {
