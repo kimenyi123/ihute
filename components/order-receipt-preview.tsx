@@ -73,7 +73,7 @@ export function OrderReceiptPreview({ receipt }: { receipt: OrderReceiptViewMode
                 className="overflow-hidden rounded-xl border border-slate-200 bg-white"
               >
                 <div className="border-b border-slate-100 bg-slate-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-600">
-                  Ordered by: {group.guest}
+                  {group.guest}
                 </div>
                 <div className="divide-y divide-slate-100">
                   {group.rounds.map((round, roundIdx) => (

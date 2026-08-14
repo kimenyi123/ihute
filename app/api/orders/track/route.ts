@@ -10,7 +10,8 @@ import {
   resolvePublicTokenToOrderId,
 } from "@/lib/order-tracking-token"
 import { mapBackendOrderStatusToTrack, type TrackOrderStatus } from "@/lib/order-status-map"
-import { resolveTableCommandLinePerson } from "@/lib/table-command-whatsapp"
+import { resolveTableCommandLinePerson, isTableCommandOrder } from "@/lib/table-command-whatsapp"
+import { aggregateOrderItemsByCodeAndPrice } from "@/lib/aggregate-order-items"
 
 function rid() {
   return Math.random().toString(36).slice(2, 12)
@@ -260,6 +261,9 @@ export async function POST(req: NextRequest) {
         BUYER_OWNER: buyerData.OWNER,
         BUYER_PHONE: buyerData.PHONE || orderData.BUYER_PHONE,
         DELIVERY_LOCATION: orderData.DELIVERY_LOCATION,
+        IS_TABLE_COMMAND: orderData.IS_TABLE_COMMAND,
+        TABLE_NAME: orderData.TABLE_NAME,
+        TABLE_LOCATION: orderData.TABLE_LOCATION,
         DELIVERY_NAME: orderData.DELIVERY_NAME || orderData.deliveryName,
         DELIVERY_AMOUNT: Number(orderData.DELIVERY_AMOUNT ?? orderData.deliveryAmount ?? 0),
         AMOUNT: orderData.AMOUNT,
@@ -269,10 +273,14 @@ export async function POST(req: NextRequest) {
         REKISIYO_STATUS: orderData.REKISIYO_STATUS,
         CREATED_AT: orderData.CREATED_AT,
         UPDATED_AT: orderData.UPDATED_AT,
+        PRESCRIPTION_REQUIRED: orderData.PRESCRIPTION_REQUIRED ?? orderData.prescriptionRequired,
+        PRESCRIPTION_IMAGE_URL: orderData.PRESCRIPTION_IMAGE_URL ?? orderData.prescriptionImageUrl,
         items: itemsData.map((item: any) => ({
           ITEM_NAME: item.ITEM_NAME,
           QTY: item.QUANTITY,
           UNIT_PRICE: item.UNIT_PRICE,
+          UNITY_PRICE: item.UNITY_PRICE ?? item.unity_price ?? item.UNIT_PRICE,
+          REQUEST_PRICE: item.REQUEST_PRICE ?? item.request_price ?? item.UNIT_PRICE,
           UNIT: item.UNIT,
           ORDERED_BY: item.ORDERED_BY ?? item.orderedBy,
           ID_LIST: item.ID_LIST ?? item.lineId ?? item.id_list,
@@ -322,7 +330,7 @@ export async function POST(req: NextRequest) {
       data.BUYER_OWNER ?? data.BUYER_NAME ?? data.buyerName ?? "",
     ).trim()
 
-    const itemsArray = Array.isArray(data.items)
+    const rawItemsArray = Array.isArray(data.items)
       ? data.items.map((item: any) => {
           const qty = Number(item.QUANTITY ?? item.qty ?? item.QTY ?? 1) || 1
           const unity = Number(item.UNITY_PRICE ?? item.unity_price ?? item.UNIT_PRICE ?? item.unitPrice ?? 0)
@@ -355,6 +363,12 @@ export async function POST(req: NextRequest) {
           lineCreatedAt: item.lineCreatedAt ?? item.HEURE ?? item.heure,
         }})
       : []
+    const isTable = isTableCommandOrder({
+      IS_TABLE_COMMAND: Boolean(data.IS_TABLE_COMMAND ?? data.table_command),
+      TABLE_NAME: String(data.TABLE_NAME ?? data.table_name ?? ""),
+      buyerLocation: String(data.DELIVERY_LOCATION ?? data.BUYER_LOCATION ?? ""),
+    })
+    const itemsArray = isTable ? rawItemsArray : aggregateOrderItemsByCodeAndPrice(rawItemsArray)
     const totalAmount = Number(data.AMOUNT ?? data.total ?? 0)
     const currency = (data.CURRENCY || "RWF").toString().trim()
 
@@ -398,6 +412,25 @@ export async function POST(req: NextRequest) {
       ORDER_STATUS: orderStatusDisplay,
       REKISIYO_STATUS: data.REKISIYO_STATUS,
       REFERENCE: data.REFERENCE,
+      PAYMENT_ID: data.PAYMENT_ID || data.paymentId || undefined,
+      paymentId: data.PAYMENT_ID || data.paymentId || undefined,
+      BANK_TRANSACTION_ID: data.BANK_TRANSACTION_ID || data.bankTransactionId || undefined,
+      BANK: data.BANK || data.bank || undefined,
+      BANK_AMOUNT: data.BANK_AMOUNT ?? data.bankAmount,
+      PAID_AT: data.PAID_AT || data.paidAt || undefined,
+      RAW_PAYMENT_SMS: data.RAW_PAYMENT_SMS || data.rawPaymentSms || undefined,
+      PRESCRIPTION_REQUIRED: Boolean(
+        data.PRESCRIPTION_REQUIRED ?? data.prescriptionRequired,
+      ),
+      prescriptionRequired: Boolean(
+        data.PRESCRIPTION_REQUIRED ?? data.prescriptionRequired,
+      ),
+      PRESCRIPTION_IMAGE_URL: String(
+        data.PRESCRIPTION_IMAGE_URL ?? data.prescriptionImageUrl ?? "",
+      ).trim() || undefined,
+      prescriptionImageUrl: String(
+        data.PRESCRIPTION_IMAGE_URL ?? data.prescriptionImageUrl ?? "",
+      ).trim() || undefined,
       DELIVERY_NAME: data.DELIVERY_NAME || data.deliveryName,
       AMOUNT: totalAmount,
       SERVED_AMOUNT: Number(data.SERVED_AMOUNT ?? data.servedAmount ?? data.AMOUNT_SERVED ?? 0),
@@ -415,9 +448,17 @@ export async function POST(req: NextRequest) {
 
     const clientMeta = getOrderMeta(String(orderId))
     if (clientMeta?.buyerDeliveryAddress) {
-      ;(order as Record<string, unknown>).buyerLocation = clientMeta.buyerDeliveryAddress
-      ;(order as Record<string, unknown>).DELIVERY_LOCATION = clientMeta.buyerDeliveryAddress
-      ;(order as Record<string, unknown>).BUYER_LOCATION = clientMeta.buyerDeliveryAddress
+      const existingLoc = String(
+        (order as Record<string, unknown>).DELIVERY_LOCATION ??
+          (order as Record<string, unknown>).buyerLocation ??
+          "",
+      )
+      const keepTableLoc = existingLoc.toLowerCase().includes("table:")
+      if (!keepTableLoc) {
+        ;(order as Record<string, unknown>).buyerLocation = clientMeta.buyerDeliveryAddress
+        ;(order as Record<string, unknown>).DELIVERY_LOCATION = clientMeta.buyerDeliveryAddress
+        ;(order as Record<string, unknown>).BUYER_LOCATION = clientMeta.buyerDeliveryAddress
+      }
     }
     if (clientMeta?.sellerPaymentAck) {
       ;(order as Record<string, unknown>).sellerPaymentAck = clientMeta.sellerPaymentAck
