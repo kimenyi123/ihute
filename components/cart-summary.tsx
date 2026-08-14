@@ -17,12 +17,13 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { RadioOptionCard } from "@/components/ui/radio-option-card"
 import { Label } from "@/components/ui/label"
 import { formatPaymentMethod } from "@/lib/payment-utils"
-import { buildOrderWhatsAppMessage } from "@/lib/table-command-whatsapp"
+import { buildOrderWhatsAppMessage, resolveMomoTxIdForReceipt, absolutePublicAssetUrl, publicSiteBaseUrl } from "@/lib/table-command-whatsapp"
+import { matchMoMoSmsToOrderTotal } from "@/lib/momo-payment-sms-match"
 import { useToast } from "@/components/ui/use-toast"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog"
-import { Copy, PhoneCall, CheckCircle2, RotateCcw, MessageCircle, Truck, CreditCard, Wallet, Beer, Users, Lock, Tag, MapPin, Link2 } from "lucide-react"
+import { Copy, PhoneCall, CheckCircle2, RotateCcw, MessageCircle, Truck, CreditCard, Wallet, Beer, Users, Lock, Tag, MapPin, Link2, Smartphone } from "lucide-react"
 import { isBarOrRestaurant } from "@/lib/constants"
 import { useTableCommandStore, getOrCreateGuestName } from "@/lib/table-command-store"
 import { GUEST_POOL_EMAIL, getGuestBuyerAccount, ensureGuestPoolBuyerAccount } from "@/lib/guest-checkout"
@@ -37,6 +38,7 @@ import {
 import { TableCommandDialog } from "@/components/table-command-dialog"
 import { TableCommandShareModal } from "@/components/table-command-share-modal"
 import { CartSuggestionsPopup } from "@/components/cart-suggestions-popup"
+import { PrescriptionUpload } from "@/components/prescription-upload"
 import { orderErrorMessageWithProductNames } from "@/lib/order-error-display"
 import { readShopOrderContext } from "@/lib/ihute-shop-order-context"
 import { trackCheckoutSubmit } from "@/lib/activity-tracker"
@@ -47,6 +49,14 @@ import {
   initiateCheckoutUrubutoPay,
   URUBUTO_CHECKOUT_CARD_TYPE,
 } from "@/lib/checkout-urubuto"
+import {
+  azamPayPhoneHint,
+  fetchAzamPayEligibility,
+  initiateCheckoutAzamPayPay,
+  isValidAzamPayMtnOrAirtel,
+  normalizeAzamPayPhone,
+  waitForAzamPayCompletion,
+} from "@/lib/checkout-azampay"
 import { isValidUrubutoMtnOrAirtel, normalizeUrubutoPhone, urubutoPhoneHint } from "@/lib/urubuto-phone"
 import { isUrubutoCheckoutPreviewForSeller } from "@/lib/urubuto-checkout-preview"
 import {
@@ -240,21 +250,34 @@ function CartSummaryBody() {
   const setPaymentStatus = useCartStore((s) => s.setPaymentStatus)
   // ✅ Get tableInfo from cart store
   const tableInfo = useCartStore((s) => s.tableInfo)
+  const stampRequiresPrescription = useCartStore((s) => s.stampRequiresPrescription)
 
   const [busy, setBusy] = useState<string | null>(null)
   const [orderIds, setOrderIds] = useState<Record<string, string>>({})
+  /** MoMo/Urubuto TxIds keyed by supplier for WhatsApp receipts */
+  const [orderPaymentProof, setOrderPaymentProof] = useState<Record<string, string>>({})
   const [orderPhones, setOrderPhones] = useState<Record<string, string>>({})
 
   // Payment method selection dialog
   const [paymentMethodOpen, setPaymentMethodOpen] = useState(false)
   const [selectedSeller, setSelectedSeller] = useState<string | null>(null)
-  const [paymentMethod, setPaymentMethod] = useState<"momo" | "airtel" | "cod" | "urubuto">("momo")
+  const [paymentMethod, setPaymentMethod] = useState<"momo" | "airtel" | "cod" | "urubuto" | "azampay">("cod")
   const [urubutoEligibleBySeller, setUrubutoEligibleBySeller] = useState<Record<string, boolean>>({})
+  const [azamPayEligibleBySeller, setAzamPayEligibleBySeller] = useState<Record<string, boolean>>({})
   const [urubutoOpen, setUrubutoOpen] = useState(false)
   const [urubutoForSeller, setUrubutoForSeller] = useState<string | null>(null)
   const [urubutoPhone, setUrubutoPhone] = useState("")
   const [urubutoChannel, setUrubutoChannel] = useState<"wallet" | "card">("wallet")
   const [urubutoCardUrl, setUrubutoCardUrl] = useState<string | null>(null)
+  const [azamPayOpen, setAzamPayOpen] = useState(false)
+  const [azamPayForSeller, setAzamPayForSeller] = useState<string | null>(null)
+  const [azamPayPhone, setAzamPayPhone] = useState("")
+  /** Per-seller pending Rx upload (multi-seller cart = one photo per pharmacy order). */
+  const [prescriptionBySeller, setPrescriptionBySeller] = useState<
+    Record<string, { pendingKey: string; publicUrl: string }>
+  >({})
+  /** Final Rx URL after createOrder (prefer this for WhatsApp). */
+  const [orderPrescriptionUrls, setOrderPrescriptionUrls] = useState<Record<string, string>>({})
 
   // Anonymous checkout mode
   const [checkoutMode, setCheckoutMode] = useState<"login" | "anonymous">(isAuthenticated ? "login" : "anonymous")
@@ -262,6 +285,34 @@ function CartSummaryBody() {
   const [anonymousName, setAnonymousName] = useState("")
 
   const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  useEffect(() => {
+    const codes = Array.from(
+      new Set(
+        cartItems
+          .flatMap((it) => [it.itemCode, it.item_key_words, it.id])
+          .map((c) => String(c || "").trim())
+          .filter(Boolean),
+      ),
+    ).slice(0, 80)
+    if (codes.length === 0) return
+    let cancelled = false
+    void fetch("/api/orders/rx-required", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ codes }),
+    })
+      .then((r) => r.json())
+      .then((data: { ok?: boolean; codes?: unknown }) => {
+        if (cancelled || !data?.ok || !Array.isArray(data.codes)) return
+        const rxCodes = data.codes.map((c) => String(c || "").trim()).filter(Boolean)
+        stampRequiresPrescription(rxCodes)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [cartItems, stampRequiresPrescription])
 
   const waitForUrubutoCompletion = async (transactionId: string) => {
     for (let attempt = 0; attempt < 12; attempt += 1) {
@@ -353,7 +404,8 @@ function CartSummaryBody() {
   const [momoPaymentProvider, setMomoPaymentProvider] = useState<"mtn" | "airtel">("mtn")
   const [momoAwaitingProof, setMomoAwaitingProof] = useState(false)
   const [momoProofDraft, setMomoProofDraft] = useState("")
-  // From GET /api/account/profile (account_signup): MoMo when missing on cart; TEL as canonical seller phone
+  const [momoPayerPhone, setMomoPayerPhone] = useState("")
+  // From GET /api/account/profile (seller+signup coalesced momo): fallback when missing on cart; TEL as seller phone
   const [supplierMomoFallback, setSupplierMomoFallback] = useState<Record<string, string>>({})
   const [supplierAccountTel, setSupplierAccountTel] = useState<Record<string, string>>({})
 
@@ -470,6 +522,27 @@ function CartSummaryBody() {
     })
   }, [paymentMethodOpen, selectedSeller])
 
+  // AzamPay: platform credentials (+ optional seller allowlist)
+  useEffect(() => {
+    if (!paymentMethodOpen || !selectedSeller) return
+    const seller = selectedSeller.trim()
+    if (!seller || azamPayEligibleBySeller[seller] !== undefined) return
+    void fetchAzamPayEligibility(seller).then((r) => {
+      setAzamPayEligibleBySeller((prev) => ({ ...prev, [seller]: r.eligible }))
+    })
+  }, [paymentMethodOpen, selectedSeller])
+
+  // Never keep a selection on a wallet method the seller cannot accept
+  useEffect(() => {
+    if (!paymentMethodOpen || !selectedSeller) return
+    const g = groups.find((x) => x.supplierId === selectedSeller)
+    if (!g) return
+    const hasUssdTarget = Boolean(getMomoForGroup(g))
+    if ((paymentMethod === "momo" || paymentMethod === "airtel") && !hasUssdTarget) {
+      setPaymentMethod("cod")
+    }
+  }, [paymentMethodOpen, selectedSeller, paymentMethod, groups, supplierMomoFallback])
+
   const discountPercent = appliedPromo?.percent ?? 0
   const discountAmount = Math.round((grandTotal * discountPercent) / 100)
   const totalAfterDiscount = grandTotal - discountAmount
@@ -579,7 +652,7 @@ function CartSummaryBody() {
       const isPaid = paymentState === "paid"
       const inTableForSeller =
         isTableCheckout && (activeSession?.locationId === g.supplierId || tableInfo?.shopId === g.supplierId)
-      const siteBase = (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://ihute.rw").replace(/\/Trading\/?$/, "")
+      const siteBase = publicSiteBaseUrl()
       const trackLink = orderId ? `${siteBase}/track-order/${encodeURIComponent(orderId)}` : undefined
       const guestName = guestNameForTable()
       const message = orderId
@@ -609,6 +682,12 @@ function CartSummaryBody() {
             myPhone: myPhone,
             link: trackLink,
             isTableCommand: inTableForSeller,
+            momoTxId: resolveMomoTxIdForReceipt(null, orderPaymentProof[g.supplierId]),
+            // Rx URL whenever we have one (don't require cart flag — name-hint upload may lack DB seed)
+            prescriptionImageUrl: absolutePublicAssetUrl(
+              orderPrescriptionUrls[g.supplierId] ||
+                prescriptionBySeller[g.supplierId]?.publicUrl,
+            ),
           })
         : buildWhatsAppMessageStyled({
             shop: g.supplierName,
@@ -626,7 +705,7 @@ function CartSummaryBody() {
       const href = phone ? waHrefFor(phone, message) : ""
       return { supplierId: g.supplierId, phone, message, href }
     })
-  }, [groups, orderIds, orderPhones, myPhone, getPaymentStatus, isInTableCommand, activeSession, anonymousName])
+  }, [groups, orderIds, orderPhones, orderPaymentProof, orderPrescriptionUrls, prescriptionBySeller, myPhone, getPaymentStatus, isInTableCommand, activeSession, anonymousName])
 
   const buildGroupShareLink = (g: ReturnType<typeof getGroupsBySeller>[number]) => {
     const shopSlug = slugifyShopName(g.supplierName || g.supplierId || "shop");
@@ -665,6 +744,24 @@ function CartSummaryBody() {
     )
   }
 
+  /** Prefer an actually available method — never leave selection on disabled MoMo/Airtel. */
+  const pickAvailablePaymentMethod = (
+    supplierId: string,
+    preferUrubuto?: boolean,
+  ): "momo" | "airtel" | "cod" | "urubuto" | "azampay" => {
+    if (isInTableCommand()) return "cod"
+    const g = groups.find((x) => x.supplierId === supplierId)
+    const hasUssdTarget = g ? Boolean(getMomoForGroup(g)) : false
+    const urubuto =
+      preferUrubuto === true ||
+      urubutoEligibleBySeller[supplierId] === true ||
+      isUrubutoCheckoutPreviewForSeller(supplierId)
+    if (urubuto) return "urubuto"
+    if (azamPayEligibleBySeller[supplierId] === true) return "azampay"
+    if (hasUssdTarget) return "momo"
+    return "cod"
+  }
+
   // Open payment method selection
   const proceedToPaymentForSeller = (supplierId: string) => {
     const g = groups.find((x) => x.supplierId === supplierId)
@@ -678,13 +775,43 @@ function CartSummaryBody() {
           : ""
         : user?.phone || "",
     )
+    setAzamPayPhone(
+      checkoutMode === "anonymous"
+        ? isInTableCommand()
+          ? anonymousPhone
+          : ""
+        : user?.phone || "",
+    )
+    // Set immediately so the dialog never opens with a disabled method selected
+    setPaymentMethod(pickAvailablePaymentMethod(supplierId))
+    setPaymentMethodOpen(true)
     void fetchSellerUrubutoEligibility(supplierId).then((r) => {
       const preview = isUrubutoCheckoutPreviewForSeller(supplierId)
       const show = r.eligible || preview
       setUrubutoEligibleBySeller((prev) => ({ ...prev, [supplierId]: r.eligible }))
-      setPaymentMethod(isInTableCommand() ? "cod" : show ? "urubuto" : hasUssdTarget ? "momo" : "cod")
+      // Upgrade to Urubuto when eligible; never re-select an unavailable wallet method
+      setPaymentMethod((prev) => {
+        if (isInTableCommand()) return "cod"
+        if (show) return "urubuto"
+        if (prev === "urubuto") {
+          if (azamPayEligibleBySeller[supplierId]) return "azampay"
+          return hasUssdTarget ? "momo" : "cod"
+        }
+        if ((prev === "momo" || prev === "airtel") && !hasUssdTarget) return "cod"
+        return prev
+      })
     })
-    setPaymentMethodOpen(true)
+    void fetchAzamPayEligibility(supplierId).then((r) => {
+      setAzamPayEligibleBySeller((prev) => ({ ...prev, [supplierId]: r.eligible }))
+      setPaymentMethod((prev) => {
+        if (isInTableCommand()) return "cod"
+        // Do not override Urubuto selection; only upgrade from COD/MoMo when AzamPay is available
+        if (prev === "urubuto") return prev
+        if (r.eligible && (prev === "cod" || prev === "momo" || prev === "airtel")) return "azampay"
+        if (prev === "azampay" && !r.eligible) return hasUssdTarget ? "momo" : "cod"
+        return prev
+      })
+    })
   }
 
   const openPaymentMethod = (supplierId: string) => {
@@ -735,24 +862,53 @@ function CartSummaryBody() {
       return
     }
 
-    if (paymentMethod === "cod") {
+    const g = groups.find((x) => x.supplierId === selectedSeller)
+    const hasUssdTarget = g ? Boolean(getMomoForGroup(g)) : false
+    const urubutoLive =
+      urubutoEligibleBySeller[selectedSeller] === true ||
+      isUrubutoCheckoutPreviewForSeller(selectedSeller)
+    const azamPayLive = azamPayEligibleBySeller[selectedSeller] === true
+
+    // Coerce away from unavailable wallet methods (e.g. default was still MoMo)
+    let method = paymentMethod
+    if ((method === "momo" || method === "airtel") && !hasUssdTarget) {
+      method = "cod"
+      setPaymentMethod("cod")
+    } else if (method === "urubuto" && !urubutoLive) {
+      method = azamPayLive ? "azampay" : hasUssdTarget ? "momo" : "cod"
+      setPaymentMethod(method)
+    } else if (method === "azampay" && !azamPayLive) {
+      method = hasUssdTarget ? "momo" : "cod"
+      setPaymentMethod(method)
+    }
+
+    if (method === "cod") {
       setPaymentMethodOpen(false)
       setCodForSeller(selectedSeller)
       setDeliveryLocation(checkoutMode === "anonymous" ? (tableInfo?.customerAddress || "") : user?.location || "")
       setContactPhone(checkoutMode === "anonymous" ? anonymousPhone : user?.phone || "")
       setCodOpen(true)
       setSelectedSeller(null)
-    } else if (paymentMethod === "urubuto") {
+    } else if (method === "urubuto") {
       setPaymentMethodOpen(false)
       setUrubutoForSeller(selectedSeller)
       setUrubutoOpen(true)
       setSelectedSeller(null)
+    } else if (method === "azampay") {
+      setPaymentMethodOpen(false)
+      setAzamPayForSeller(selectedSeller)
+      setAzamPayOpen(true)
+      setSelectedSeller(null)
     } else {
       setPaymentMethodOpen(false)
       setMomoForSeller(selectedSeller)
-      setMomoPaymentProvider(paymentMethod === "airtel" ? "airtel" : "mtn")
+      setMomoPaymentProvider(method === "airtel" ? "airtel" : "mtn")
       setMomoAwaitingProof(false)
       setMomoProofDraft("")
+      setMomoPayerPhone(
+        contactPhone.trim() ||
+          (checkoutMode === "anonymous" ? anonymousPhone.trim() : user?.phone?.trim() || "")
+      )
       setMomoOpen(true)
       setSelectedSeller(null)
     }
@@ -764,6 +920,7 @@ function CartSummaryBody() {
     sellerTel: string | null,
     paymentName: string,
     trackToken?: string,
+    paymentProof?: { paymentId?: string; reference?: string },
   ): URLSearchParams {
     const tableGuestName = isTableCheckout ? guestNameForTable() : ""
     const params = new URLSearchParams({
@@ -781,6 +938,20 @@ function CartSummaryBody() {
     })
     if (tableGuestName) params.set("buyerName", tableGuestName)
     if (trackToken) params.set("trackToken", trackToken)
+
+    // MoMo / Airtel / Urubuto TxId on WhatsApp receipt (order-success reads momoTxId)
+    const txCandidate = String(paymentProof?.paymentId || paymentProof?.reference || "").trim()
+    const isDigital =
+      /MOMO|AIRTEL|URUBUTO|AZAMPAY/i.test(paymentName) &&
+      txCandidate &&
+      !/^(MOMO_|AIRTEL_|COD_|URUBUTO-PENDING|AZAMPAY-PENDING|PAY_)/i.test(txCandidate)
+    if (isDigital) params.set("momoTxId", txCandidate)
+
+    const rxUrl = String(
+      orderPrescriptionUrls[g.supplierId] || prescriptionBySeller[g.supplierId]?.publicUrl || "",
+    ).trim()
+    if (rxUrl) params.set("prescriptionUrl", rxUrl)
+
     return params
   }
 
@@ -788,15 +959,30 @@ function CartSummaryBody() {
   const placeOrder = async (
     g: ReturnType<typeof getGroupsBySeller>[number],
     opts: {
-      paymentName: "PAID_MTN_MOMO" | "PAID_AIRTEL_MOMO" | "PAID_URUBUTO" | "PAY_ON_DELIVERY" | "PAY_AT_TABLE";
+      paymentName: "PAID_MTN_MOMO" | "PAID_AIRTEL_MOMO" | "PAID_URUBUTO" | "PAID_AZAMPAY" | "PAY_ON_DELIVERY" | "PAY_AT_TABLE";
       buyerPhone?: string;
       buyerLocation?: string;
       reference?: string;
       paymentId?: string;
       paymentStatus?: "pending" | "paid";
+      phoneRegisteredOnOrder?: string;
+      /** Full pasted MoMo/Airtel SMS body (required for MoMo PAID). */
+      rawPaymentSms?: string;
+      /** When true, creates the order but does not navigate away (used for Urubuto/AzamPay RTP after order id exists). */
+      skipRedirect?: boolean;
     }
-  ) => {
-    if (!requireLogin()) return
+  ): Promise<{ orderId: string | null; ok: boolean }> => {
+    if (!requireLogin()) return { orderId: null, ok: false }
+    const needsRx = g.items.some((it) => Boolean(it.requiresPrescription))
+    const rx = prescriptionBySeller[g.supplierId]
+    if (needsRx && !rx?.publicUrl) {
+      toast({
+        title: "Prescription required",
+        description: "Upload a prescription photo for this seller before placing the order.",
+        variant: "destructive",
+      })
+      return { orderId: null, ok: false }
+    }
     const sid = (g.supplierId ?? "").trim()
     const checkoutGen = (checkoutGenRef.current[sid] = (checkoutGenRef.current[sid] ?? 0) + 1)
     paymentPollGenRef.current[sid] = (paymentPollGenRef.current[sid] ?? 0) + 1
@@ -821,10 +1007,12 @@ function CartSummaryBody() {
           ...(it.itemEmballage
             ? { item_emballage: it.itemEmballage, ITEM_EMBALLAGE: it.itemEmballage }
             : {}),
+          ...(it.requiresPrescription ? { requiresPrescription: true } : {}),
         }
       })
 
       const paymentId = opts.paymentId || `${opts.paymentName}_${Date.now()}`
+      const paymentProof = { paymentId, reference: opts.reference || paymentId }
 
       console.log("[cart/order] Placing order:", {
         paymentName: opts.paymentName,
@@ -884,7 +1072,15 @@ function CartSummaryBody() {
           paymentName: opts.paymentName,
           paymentId: paymentId,
           reference: opts.reference || "",
+          phoneRegisteredOnOrder: opts.phoneRegisteredOnOrder || "",
           ...(opts.paymentStatus ? { paymentStatus: opts.paymentStatus } : {}),
+          ...(opts.rawPaymentSms ? { rawPaymentSms: opts.rawPaymentSms } : {}),
+          ...(rx?.publicUrl
+            ? {
+                prescriptionImageUrl: rx.publicUrl,
+                prescriptionPendingKey: rx.pendingKey,
+              }
+            : {}),
           currency: "RWF",
           items,
           // Table command information
@@ -912,12 +1108,30 @@ function CartSummaryBody() {
           itemCount: items.length,
           paymentName: opts.paymentName,
         })
-        if (checkoutGenRef.current[sid] !== checkoutGen) return
         const orderId = json.orderId ? String(json.orderId) : null
         const sellerTel = json.sellerTel ? String(json.sellerTel) : null
+        if (checkoutGenRef.current[sid] !== checkoutGen) return { orderId, ok: true }
 
         if (orderId) setOrderIds(m => ({ ...m, [g.supplierId]: orderId }))
         if (sellerTel) setOrderPhones(m => ({ ...m, [g.supplierId]: sellerTel }))
+        {
+          const rxFinal = String(json.prescriptionImageUrl || rx?.publicUrl || "").trim()
+          if (rxFinal) {
+            setOrderPrescriptionUrls((m) => ({ ...m, [g.supplierId]: rxFinal }))
+          }
+        }
+        {
+          const tx = String(
+            json.bankTransactionId || paymentProof.paymentId || paymentProof.reference || "",
+          ).trim()
+          if (
+            tx &&
+            /MOMO|AIRTEL|URUBUTO|AZAMPAY/i.test(opts.paymentName) &&
+            !/^(MOMO_|AIRTEL_|COD_|URUBUTO-PENDING|AZAMPAY-PENDING|PAY_)/i.test(tx)
+          ) {
+            setOrderPaymentProof((m) => ({ ...m, [g.supplierId]: tx }))
+          }
+        }
         markCheckoutSuccess(sid, opts.paymentName, opts.paymentStatus)
 
         // Track successful purchase for all items in this seller group (best-effort)
@@ -955,13 +1169,14 @@ function CartSummaryBody() {
           })
           setShareModalOpen(true)
           await clearSubmittedSupplier(g.supplierId)
-          return
+          return { orderId, ok: true }
         }
 
         if (
           (opts.paymentName === "PAID_MTN_MOMO" ||
             opts.paymentName === "PAID_AIRTEL_MOMO" ||
-            opts.paymentName === "PAID_URUBUTO") &&
+            opts.paymentName === "PAID_URUBUTO" ||
+            opts.paymentName === "PAID_AZAMPAY") &&
           orderId
         ) {
           pollPayment(orderId, g.supplierId)
@@ -985,6 +1200,9 @@ function CartSummaryBody() {
         // Bar/resto table: every guest goes to order-success (track link), cart cleared for this seller.
         if (isTableCheckout && currentOrderIsBarTable) {
           await clearSubmittedSupplier(g.supplierId)
+          if (opts.skipRedirect) {
+            return { orderId, ok: true }
+          }
           if (orderId) {
             const params = buildOrderSuccessParams(
               orderId,
@@ -992,17 +1210,22 @@ function CartSummaryBody() {
               sellerTel,
               opts.paymentName,
               json.trackToken ? String(json.trackToken) : undefined,
+              paymentProof,
             )
             params.set("fromTable", "1")
             router.push(`/order-success?${params.toString()}`)
           } else {
             alert(`Order added to table "${activeSession?.tableName ?? "table"}". Add more items or send the complete table order.`)
           }
-          return
+          return { orderId, ok: true }
         }
 
         // Remove only the supplier that was just submitted.
         await clearSubmittedSupplier(g.supplierId)
+
+        if (opts.skipRedirect) {
+          return { orderId, ok: true }
+        }
 
         // Redirect to order success page with WhatsApp details
         if (orderId) {
@@ -1012,6 +1235,7 @@ function CartSummaryBody() {
             sellerTel,
             opts.paymentName,
             json.trackToken ? String(json.trackToken) : undefined,
+            paymentProof,
           )
           router.push(`/order-success?${params.toString()}`)
         } else if (checkoutMode === "login" || isAuthenticated) {
@@ -1020,6 +1244,7 @@ function CartSummaryBody() {
           router.push("/")
         }
         router.refresh()
+        return { orderId, ok: true }
       } else {
         trackCheckoutSubmit("failed", {
           shopNickname: shopCtx?.shopNickname,
@@ -1047,6 +1272,7 @@ function CartSummaryBody() {
           description: `${errMsg}${target}${hint}`.trim(),
           duration: 20_000,
         })
+        return { orderId: null, ok: false }
       }
     } catch (error) {
       console.error("Order creation error:", error)
@@ -1059,6 +1285,7 @@ function CartSummaryBody() {
         description: "Please try again. If it keeps failing, check that Tomcat is running and JAVA_BACKEND_BASE matches your port.",
         duration: 12_000,
       })
+      return { orderId: null, ok: false }
     } finally {
       setBusy(null)
     }
@@ -1113,31 +1340,172 @@ function CartSummaryBody() {
     }
 
     if (!momoAwaitingProof) {
+      const payerPhone = normalizeUrubutoPhone(momoPayerPhone.trim())
+      if (!payerPhone || !isValidUrubutoMtnOrAirtel(payerPhone)) {
+        alert("Enter the valid MTN or Airtel phone number you are paying from.")
+        return
+      }
+      setMomoPayerPhone(payerPhone)
       setMomoAwaitingProof(true)
       return
     }
 
     const proof = momoProofDraft.trim()
     if (!proof) {
-      alert("Please enter your MoMo transaction reference or proof of payment (as shown on your receipt).")
+      alert("Paste the full MoMo confirmation SMS (not only the TxId).")
+      return
+    }
+    const smsMatch = matchMoMoSmsToOrderTotal(proof, Math.round(g.subtotal), 2)
+    if (!smsMatch.matched || !smsMatch.txId) {
+      const msg =
+        smsMatch.rejectReason === "bare_txid"
+          ? "Paste the full MoMo SMS, not only the TxId."
+          : smsMatch.rejectReason === "amount_mismatch"
+            ? `SMS amount (${smsMatch.amount ?? "—"}) does not match this order (${Math.round(g.subtotal)} RWF).`
+            : smsMatch.rejectReason === "incomplete_sms"
+              ? "Paste the complete MoMo confirmation SMS from your phone."
+              : smsMatch.rejectReason === "expired_sms"
+                ? "SMS must include a recent payment timestamp (within 15 minutes)."
+                : smsMatch.rejectReason === "no_txid"
+                  ? "MoMo SMS must include a TxId."
+                  : "Could not match this SMS to your order total."
+      alert(msg)
       return
     }
 
     await placeOrder(g, {
       paymentName: momoPaymentProvider === "airtel" ? "PAID_AIRTEL_MOMO" : "PAID_MTN_MOMO",
-      reference: proof,
-      paymentId: proof,
+      reference: smsMatch.txId,
+      paymentId: smsMatch.txId,
+      paymentStatus: "paid",
+      rawPaymentSms: proof,
+      phoneRegisteredOnOrder: normalizeUrubutoPhone(momoPayerPhone.trim()),
     })
     setMomoOpen(false)
     setMomoForSeller(null)
     setMomoAwaitingProof(false)
     setMomoProofDraft("")
+    setMomoPayerPhone("")
   }
 
   const resetUrubutoDialog = () => {
     setUrubutoForSeller(null)
     setUrubutoChannel("wallet")
     setUrubutoCardUrl(null)
+  }
+
+  const resetAzamPayDialog = () => {
+    setAzamPayForSeller(null)
+  }
+
+  const confirmAzamPayPayment = async () => {
+    if (!azamPayForSeller) return
+    const g = groups.find((x) => x.supplierId === azamPayForSeller)
+    if (!g) {
+      setAzamPayOpen(false)
+      resetAzamPayDialog()
+      return
+    }
+    if (!azamPayEligibleBySeller[g.supplierId]) {
+      alert("AzamPay is not available right now. Try UrubutoPay or MoMo with SMS proof.")
+      return
+    }
+
+    const phone = normalizeAzamPayPhone(azamPayPhone.trim())
+    if (!phone) {
+      alert("Enter your MoMo number (MTN or Airtel). It is saved on the order for invoice verification.")
+      return
+    }
+    if (!isValidAzamPayMtnOrAirtel(phone)) {
+      alert(azamPayPhoneHint())
+      return
+    }
+
+    const payerNames =
+      checkoutMode === "anonymous"
+        ? anonymousName.trim() || "Guest"
+        : user?.name || "Customer"
+
+    setBusy(g.supplierId)
+    try {
+      const pendingRef = `AZAMPAY-PENDING-${Date.now()}`
+      const created = await placeOrder(g, {
+        paymentName: "PAID_AZAMPAY",
+        reference: pendingRef,
+        paymentId: pendingRef,
+        buyerPhone: phone,
+        phoneRegisteredOnOrder: phone,
+        paymentStatus: "pending",
+        skipRedirect: true,
+      })
+      const orderId = created.orderId
+      const orderIdNum = Number(orderId)
+      if (!created.ok || !orderId || !Number.isFinite(orderIdNum) || orderIdNum <= 0) {
+        if (created.ok) {
+          alert("Order was created but no valid order id was returned. Open track order and try again.")
+        }
+        return
+      }
+
+      const pay = await initiateCheckoutAzamPayPay({
+        orderId: orderIdNum,
+        amount: g.subtotal,
+        msisdn: phone,
+        fullName: payerNames,
+      })
+      const pgRef = pay.pgReferenceId?.trim()
+      const refId = pay.referenceId?.trim()
+      if (!pay.ok || (!pgRef && !refId)) {
+        alert(
+          pay.error ||
+            "Order was created but AzamPay could not be started. Open track order and try again, or pay via MoMo and paste proof.",
+        )
+        const params = buildOrderSuccessParams(orderId, g, null, "PAID_AZAMPAY")
+        router.push(`/order-success?${params.toString()}`)
+        return
+      }
+
+      toast({
+        title: "Payment request sent",
+        description: "Confirm on your phone. We are checking AzamPay status…",
+        duration: 3500,
+      })
+      const outcome = await waitForAzamPayCompletion({
+        pgReferenceId: pgRef,
+        referenceId: refId,
+        orderId,
+      })
+      const paymentCompleted = outcome === "success"
+
+      setAzamPayOpen(false)
+      resetAzamPayDialog()
+      toast({
+        title:
+          paymentCompleted
+            ? "Payment successful"
+            : outcome === "failure"
+              ? "Payment failed"
+              : "Order placed, payment pending",
+        description: paymentCompleted
+          ? "AzamPay confirmed — your order is PAID (verified for fiscal invoice)."
+          : outcome === "failure"
+            ? "The MoMo prompt was declined or failed. You can try again with a new payment."
+            : "If you already approved the MoMo prompt, payment will mark PAID automatically (no SMS paste needed).",
+        duration: 6000,
+      })
+
+      pollPayment(orderId, g.supplierId)
+      const proofId = pgRef || refId
+      const azamProof = proofId ? { paymentId: proofId, reference: proofId } : undefined
+      if (proofId) {
+        setOrderPaymentProof((m) => ({ ...m, [g.supplierId]: proofId }))
+      }
+      const params = buildOrderSuccessParams(orderId, g, null, "PAID_AZAMPAY", undefined, azamProof)
+      if (isTableCheckout) params.set("fromTable", "1")
+      router.push(`/order-success?${params.toString()}`)
+    } finally {
+      setBusy(null)
+    }
   }
 
   const confirmUrubutoPayment = async () => {
@@ -1159,11 +1527,12 @@ function CartSummaryBody() {
 
     const isCard = urubutoChannel === "card"
     const phone = normalizeUrubutoPhone(urubutoPhone.trim())
-    if (!isCard && !phone) {
-      alert("Enter your MoMo number (MTN or Airtel).")
+    // Phone is required for both wallet RTP and card — anchors phone_registered_on_order (GQ OTP).
+    if (!phone) {
+      alert("Enter your MoMo number (MTN or Airtel). It is saved on the order for invoice verification.")
       return
     }
-    if (!isCard && !isValidUrubutoMtnOrAirtel(phone)) {
+    if (!isValidUrubutoMtnOrAirtel(phone)) {
       alert(urubutoPhoneHint())
       return
     }
@@ -1175,10 +1544,28 @@ function CartSummaryBody() {
     const payerEmail = checkoutMode === "anonymous" ? GUEST_POOL_EMAIL : user?.email || ""
     const payerCode =
       checkoutMode === "anonymous" ? undefined : user?.ishyigaAccount?.trim() || undefined
-    const cartId = `IHUTE-CART-${g.supplierId}-${Date.now()}`
 
     setBusy(g.supplierId)
     try {
+      // 1) Create order first so ihute_order_id can be the Urubuto merchant reference.
+      //    Phone is stored as phone_registered_on_order (GQ OTP / proof anchor).
+      const pendingRef = `URUBUTO-PENDING-${Date.now()}`
+      const created = await placeOrder(g, {
+        paymentName: "PAID_URUBUTO",
+        reference: pendingRef,
+        paymentId: pendingRef,
+        buyerPhone: phone || undefined,
+        phoneRegisteredOnOrder: phone || undefined,
+        paymentStatus: "pending",
+        skipRedirect: true,
+      })
+      const orderId = created.orderId
+      if (!created.ok || !orderId) {
+        return
+      }
+
+      // 2) Initiate request-to-pay against phone_registered_on_order with IHUTE-ORDER-{id} as clientReference.
+      const clientReference = `IHUTE-ORDER-${orderId}`
       const pay = await initiateCheckoutUrubutoPay({
         sellerAccount: g.supplierId,
         amount: g.subtotal,
@@ -1188,13 +1575,19 @@ function CartSummaryBody() {
         payer_names: payerNames,
         payer_email: payerEmail,
         payerCode,
-        cartId,
-        clientReference: cartId,
+        cartId: clientReference,
+        clientReference,
+        orderId: Number(orderId),
       })
       const txnId = pay.transactionId?.trim()
       const cardUrl = pay.cardProcessingUrl?.trim()
       if (!pay.ok || (!txnId && !cardUrl)) {
-        alert(pay.error || "Could not start UrubutoPay. Try another method or contact the seller.")
+        alert(
+          pay.error ||
+            "Order was created but UrubutoPay could not be started. Open track order and try again, or pay via MoMo and paste proof.",
+        )
+        const params = buildOrderSuccessParams(orderId, g, null, "PAID_URUBUTO")
+        router.push(`/order-success?${params.toString()}`)
         return
       }
 
@@ -1203,34 +1596,36 @@ function CartSummaryBody() {
         setUrubutoCardUrl(cardUrl)
       }
 
-      const reference = txnId || `URUBUTO-CARD-${Date.now()}`
       let paymentCompleted = false
       if (!isCard && txnId) {
         toast({
           title: "Payment request sent",
-          description: "Approve the MoMo prompt on your phone. We are checking the payment now.",
+          description: "Approve the MoMo prompt on your phone. We are confirming with UrubutoPay…",
           duration: 3500,
         })
         paymentCompleted = await waitForUrubutoCompletion(txnId)
       }
-      await placeOrder(g, {
-        paymentName: "PAID_URUBUTO",
-        reference,
-        paymentId: reference,
-        buyerPhone: phone || undefined,
-        paymentStatus: paymentCompleted ? "paid" : "pending",
-      })
+
       setUrubutoOpen(false)
       resetUrubutoDialog()
       toast({
         title: paymentCompleted ? "Payment successful" : isCard ? "Card payment started" : "Order placed, payment pending",
         description: paymentCompleted
-          ? "Your UrubutoPay payment was received successfully."
+          ? "UrubutoPay confirmed — your order is PAID (verified for fiscal invoice)."
           : isCard
-            ? "Complete the payment in the secure Urubuto tab."
-            : "If you already approved the MoMo prompt, the seller dashboard will refresh shortly.",
+            ? "Complete the payment in the secure Urubuto tab. Confirmation arrives via webhook."
+            : "If you already approved the MoMo prompt, payment will mark PAID automatically (no SMS paste needed).",
         duration: 6000,
       })
+
+      pollPayment(orderId, g.supplierId)
+      const urubutoProof = txnId ? { paymentId: txnId, reference: txnId } : undefined
+      if (txnId) {
+        setOrderPaymentProof((m) => ({ ...m, [g.supplierId]: txnId }))
+      }
+      const params = buildOrderSuccessParams(orderId, g, null, "PAID_URUBUTO", undefined, urubutoProof)
+      if (isTableCheckout) params.set("fromTable", "1")
+      router.push(`/order-success?${params.toString()}`)
     } finally {
       setBusy(null)
     }
@@ -1279,11 +1674,43 @@ function CartSummaryBody() {
                 </div>
                 <Separator />
 
+                {g.items.some((it) => Boolean(it.requiresPrescription)) ? (
+                  <PrescriptionUpload
+                    pendingKey={prescriptionBySeller[g.supplierId]?.pendingKey}
+                    buyerEmail={
+                      checkoutMode === "anonymous" ? GUEST_POOL_EMAIL : user?.email || undefined
+                    }
+                    disabled={busy === g.supplierId || status === "paid"}
+                    onUploaded={({ pendingKey, publicUrl }) => {
+                      setPrescriptionBySeller((m) => ({
+                        ...m,
+                        [g.supplierId]: { pendingKey, publicUrl },
+                      }))
+                    }}
+                    onCleared={() => {
+                      setPrescriptionBySeller((m) => {
+                        const next = { ...m }
+                        delete next[g.supplierId]
+                        return next
+                      })
+                    }}
+                  />
+                ) : null}
+
                 {/* Primary checkout: if user already dismissed suggestions this session, go straight to payment */}
                 <Button
                   className="w-full"
                   size="lg"
                   onClick={() => {
+                    const needsRx = g.items.some((it) => Boolean(it.requiresPrescription))
+                    if (needsRx && !prescriptionBySeller[g.supplierId]?.publicUrl) {
+                      toast({
+                        title: "Prescription required",
+                        description: "Upload a prescription photo before checkout.",
+                        variant: "destructive",
+                      })
+                      return
+                    }
                     setPendingCheckoutSupplierId(g.supplierId)
                     if (shouldSkipSuggestions()) {
                       openPaymentMethod(g.supplierId)
@@ -1291,7 +1718,11 @@ function CartSummaryBody() {
                       setSuggestionsPopupOpen(true)
                     }
                   }}
-                  disabled={busy === g.supplierId}
+                  disabled={
+                    busy === g.supplierId
+                    || (g.items.some((it) => Boolean(it.requiresPrescription))
+                      && !prescriptionBySeller[g.supplierId]?.publicUrl)
+                  }
                 >
                   <CreditCard className="h-4 w-4 mr-2" />
                   Proceed to Checkout
@@ -1594,7 +2025,7 @@ function CartSummaryBody() {
           {/* Payment method selection */}
           <RadioGroup
             value={paymentMethod}
-            onValueChange={(v) => setPaymentMethod(v as "momo" | "airtel" | "cod" | "urubuto")}
+            onValueChange={(v) => setPaymentMethod(v as "momo" | "airtel" | "cod" | "urubuto" | "azampay")}
             className="gap-3"
           >
             <div className="space-y-3">
@@ -1603,6 +2034,7 @@ function CartSummaryBody() {
                 const hasUssdTarget = g ? Boolean(getMomoForGroup(g)) : false
                 const urubutoPreview = isUrubutoCheckoutPreviewForSeller(selectedSeller)
                 const urubutoLive = urubutoEligibleBySeller[selectedSeller] === true || urubutoPreview
+                const azamPayLive = azamPayEligibleBySeller[selectedSeller] === true
 
                 return (
                   <>
@@ -1619,6 +2051,24 @@ function CartSummaryBody() {
                             <div className="font-medium">UrubutoPay</div>
                             <div className="text-sm text-muted-foreground">
                               MoMo wallet or card via Urubuto — payment goes to this shop
+                            </div>
+                          </div>
+                        </div>
+                      </RadioOptionCard>
+                    )}
+
+                    {azamPayLive && (
+                      <RadioOptionCard
+                        value="azampay"
+                        id="azampay"
+                        selected={paymentMethod === "azampay"}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Smartphone className="h-5 w-5 text-teal-700" />
+                          <div>
+                            <div className="font-medium">Pay with MoMo (AzamPay)</div>
+                            <div className="text-sm text-muted-foreground">
+                              MTN or Airtel — confirm on your phone, no SMS paste
                             </div>
                           </div>
                         </div>
@@ -1683,8 +2133,8 @@ function CartSummaryBody() {
           </div>
 
           <DialogFooter className="flex-shrink-0 gap-2 border-t bg-background px-6 py-4">
-            <Button variant="outline" onClick={() => setPaymentMethodOpen(false)}>Cancel</Button>
-            <Button onClick={proceedWithPayment}>Continue</Button>
+            <Button type="button" variant="outline" onClick={() => setPaymentMethodOpen(false)}>Cancel</Button>
+            <Button type="button" onClick={proceedWithPayment}>Continue</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1941,8 +2391,8 @@ function CartSummaryBody() {
             <DialogTitle>Pay with UrubutoPay</DialogTitle>
             <DialogDescription>
               {urubutoChannel === "card"
-                ? "You will open a secure card page to complete payment for this shop."
-                : "Approve the MoMo prompt on your phone. Payment is collected for the seller via their Urubuto merchant account."}
+                ? "Complete card payment via Urubuto. No SMS paste — confirmation is automatic."
+                : "Approve the MoMo prompt on your phone. No SMS paste — Urubuto confirms payment automatically."}
             </DialogDescription>
           </DialogHeader>
           {urubutoForSeller && (() => {
@@ -1978,28 +2428,29 @@ function CartSummaryBody() {
                     </span>
                   </RadioOptionCard>
                 </RadioGroup>
-                {urubutoChannel === "wallet" ? (
-                  <div className="space-y-2">
-                    <Label htmlFor="urubuto-phone">Your MoMo number</Label>
-                    <Input
-                      id="urubuto-phone"
-                      value={urubutoPhone}
-                      onChange={(e) => setUrubutoPhone(e.target.value)}
-                      onBlur={() => {
-                        const normalized = normalizeUrubutoPhone(urubutoPhone)
-                        if (normalized) setUrubutoPhone(normalized)
-                      }}
-                      placeholder="0788123456 or +250788123456"
-                      inputMode="tel"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      {urubutoPhoneHint()}. We will format it as 2507… for UrubutoPay.
-                      {normalizedPhone && normalizedPhone !== urubutoPhone.replace(/\s/g, "") ? (
-                        <span className="block text-violet-700">Will send to: {normalizedPhone}</span>
-                      ) : null}
-                    </p>
-                  </div>
-                ) : (
+                <div className="space-y-2">
+                  <Label htmlFor="urubuto-phone">Your MoMo number</Label>
+                  <Input
+                    id="urubuto-phone"
+                    value={urubutoPhone}
+                    onChange={(e) => setUrubutoPhone(e.target.value)}
+                    onBlur={() => {
+                      const normalized = normalizeUrubutoPhone(urubutoPhone)
+                      if (normalized) setUrubutoPhone(normalized)
+                    }}
+                    placeholder="0788123456 or +250788123456"
+                    inputMode="tel"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {urubutoChannel === "wallet"
+                      ? `${urubutoPhoneHint()}. We send a request-to-pay to this number and save it on the order for fiscal invoice OTP.`
+                      : `${urubutoPhoneHint()}. Saved on the order for fiscal invoice OTP (card payment opens in a new tab).`}
+                    {normalizedPhone && normalizedPhone !== urubutoPhone.replace(/\s/g, "") ? (
+                      <span className="block text-violet-700">Will use: {normalizedPhone}</span>
+                    ) : null}
+                  </p>
+                </div>
+                {urubutoChannel === "card" ? (
                   <div className="space-y-3">
                     <div className="rounded-lg border border-blue-200 bg-blue-50/80 p-3 text-sm text-blue-900 space-y-2">
                       <p className="font-medium flex items-center gap-2">
@@ -2007,7 +2458,7 @@ function CartSummaryBody() {
                         Secure card payment
                       </p>
                       <p className="text-blue-800/90 text-xs leading-relaxed">
-                        After you continue, a new tab opens for Urubuto&apos;s card checkout. Complete payment there, then return here — your order is placed automatically.
+                        After you continue, a new tab opens for Urubuto&apos;s card checkout. Complete payment there — confirmation arrives via webhook (no SMS paste).
                       </p>
                       <div className="rounded-md border border-blue-200 bg-white px-3 py-2 text-xs text-slate-600">
                         Card type: BK Arena prepaid card (Urubuto secure checkout)
@@ -2024,7 +2475,7 @@ function CartSummaryBody() {
                       </Button>
                     )}
                   </div>
-                )}
+                ) : null}
               </div>
             )
           })()}
@@ -2047,6 +2498,71 @@ function CartSummaryBody() {
         </DialogContent>
       </Dialog>
 
+      {/* AzamPay MoMo checkout dialog */}
+      <Dialog
+        open={azamPayOpen}
+        onOpenChange={(open) => {
+          setAzamPayOpen(open)
+          if (!open) resetAzamPayDialog()
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Pay with MoMo (AzamPay)</DialogTitle>
+            <DialogDescription>
+              Approve the MoMo prompt on your phone. No SMS paste — AzamPay confirms payment automatically.
+            </DialogDescription>
+          </DialogHeader>
+          {azamPayForSeller && (() => {
+            const g = groups.find((x) => x.supplierId === azamPayForSeller)
+            if (!g) return null
+            const normalizedPhone = normalizeAzamPayPhone(azamPayPhone)
+            return (
+              <div className="space-y-4">
+                <div className="rounded-lg border border-teal-200 bg-teal-50/80 p-3 text-sm">
+                  <p className="font-medium text-teal-950">{g.supplierName}</p>
+                  <p className="text-muted-foreground mt-1">
+                    Amount: <strong>{g.subtotal.toLocaleString()} RWF</strong>
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="azampay-phone">Your MoMo number</Label>
+                  <Input
+                    id="azampay-phone"
+                    value={azamPayPhone}
+                    onChange={(e) => setAzamPayPhone(e.target.value)}
+                    onBlur={() => {
+                      const normalized = normalizeAzamPayPhone(azamPayPhone)
+                      if (normalized) setAzamPayPhone(normalized)
+                    }}
+                    placeholder="0788123456 or +250788123456"
+                    inputMode="tel"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {azamPayPhoneHint()}. We send a request-to-pay to this number and save it on the order.
+                    {normalizedPhone && normalizedPhone !== azamPayPhone.replace(/\s/g, "") ? (
+                      <span className="block text-teal-700">Will use: {normalizedPhone}</span>
+                    ) : null}
+                  </p>
+                </div>
+              </div>
+            )
+          })()}
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => { setAzamPayOpen(false); resetAzamPayDialog() }}>
+              Cancel
+            </Button>
+            <Button
+              className="bg-teal-700 hover:bg-teal-800"
+              onClick={() => void confirmAzamPayPayment()}
+              disabled={busy === azamPayForSeller}
+            >
+              {busy === azamPayForSeller ? "Confirm on your phone…" : "Send payment request"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* MoMo payment dialog */}
       <Dialog
         open={momoOpen}
@@ -2056,6 +2572,7 @@ function CartSummaryBody() {
             setMomoForSeller(null)
             setMomoAwaitingProof(false)
             setMomoProofDraft("")
+            setMomoPayerPhone("")
           }
         }}
       >
@@ -2100,6 +2617,25 @@ function CartSummaryBody() {
                         </p>
                       )}
                     </div>
+                  </div>
+
+                  <div className="space-y-2 rounded-xl border bg-background p-4">
+                    <Label htmlFor="momo-payer-phone" className="text-sm font-semibold">
+                      Phone number you are paying from
+                    </Label>
+                    <Input
+                      id="momo-payer-phone"
+                      type="tel"
+                      inputMode="tel"
+                      autoComplete="tel"
+                      value={momoPayerPhone}
+                      onChange={(e) => setMomoPayerPhone(e.target.value)}
+                      placeholder="e.g. 0788 123 456"
+                      disabled={momoAwaitingProof}
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      This number is saved on the order at checkout and cannot be changed during an invoice request.
+                    </p>
                   </div>
 
                   {hasUssdTarget && (
@@ -2156,26 +2692,26 @@ function CartSummaryBody() {
                     <p className="text-xs text-blue-950 leading-relaxed">
                       <strong>Note:</strong>{" "}
                       {momoAwaitingProof
-                        ? "Enter the transaction reference from your MoMo SMS or receipt, then place your order."
-                        : "After you pay, tap “I’ve paid” and enter your proof of payment so we can match it to your order."}
+                        ? "Paste the full MoMo confirmation SMS (amount must match this order). A bare TxId is not accepted."
+                        : "After you pay, tap “I’ve paid” and paste the full MoMo SMS so we can match it to your order."}
                     </p>
                   </div>
 
                   {momoAwaitingProof && (
                     <div className="rounded-xl border-2 border-emerald-200/90 bg-gradient-to-b from-emerald-50/90 to-white p-4 space-y-2 shadow-sm ring-1 ring-emerald-100/80">
                       <Label htmlFor="momo-proof" className="text-sm font-semibold text-emerald-950">
-                        Proof of payment
+                        Paste full MoMo SMS
                       </Label>
                       <Textarea
                         id="momo-proof"
                         value={momoProofDraft}
                         onChange={(e) => setMomoProofDraft(e.target.value)}
-                        placeholder="e.g. MTN transaction ID, reference, or receipt number"
-                        rows={3}
-                        className="resize-none font-mono text-sm min-h-[88px] border-emerald-200 focus-visible:ring-emerald-500"
+                        placeholder="Paste the entire confirmation SMS from MTN/Airtel (includes TxId, amount, and time)"
+                        rows={5}
+                        className="resize-none font-mono text-sm min-h-[120px] border-emerald-200 focus-visible:ring-emerald-500"
                       />
                       <p className="text-[11px] text-muted-foreground leading-relaxed">
-                        This reference is stored with your order so the seller can verify your MoMo transfer.
+                        We extract TxId, amount, and time from the SMS and store them on your order. Do not paste only the TxId.
                       </p>
                     </div>
                   )}
@@ -2207,6 +2743,7 @@ function CartSummaryBody() {
                   setMomoForSeller(null)
                   setMomoAwaitingProof(false)
                   setMomoProofDraft("")
+                  setMomoPayerPhone("")
                 }}
               >
                 Cancel
@@ -2253,13 +2790,7 @@ function CartSummaryBody() {
             }
             // User chose individual ordering - proceed with regular checkout flow
             if (tableCommandSeller) {
-              const g = groups.find(x => x.supplierId === tableCommandSeller.id)
-              if (g) {
-                const hasUssdTarget = Boolean(getMomoForGroup(g))
-                setSelectedSeller(tableCommandSeller.id)
-                setPaymentMethod(hasUssdTarget ? "momo" : "cod")
-                setPaymentMethodOpen(true)
-              }
+              proceedToPaymentForSeller(tableCommandSeller.id)
             }
           }}
           locationId={tableCommandSeller.id}

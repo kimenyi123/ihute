@@ -1,28 +1,82 @@
 import mysql, { type Pool, type RowDataPacket } from "mysql2/promise"
+import { isOrderMonitorDb, type OrderMonitorDb } from "@/lib/admin-order-db"
 
 let pool: Pool | null = null
+const poolsByDb = new Map<string, Pool>()
 
-function mysqlConfigured(): boolean {
-  const host = process.env.ONBOARDING_MYSQL_HOST || process.env.FORGOT_PASSWORD_MYSQL_HOST
-  const user = process.env.ONBOARDING_MYSQL_USER || process.env.FORGOT_PASSWORD_MYSQL_USER
-  const database = process.env.ONBOARDING_MYSQL_DATABASE || process.env.FORGOT_PASSWORD_MYSQL_DATABASE
-  return Boolean(host && user && database)
+function baseMysqlCreds(): {
+  host: string
+  user: string
+  password: string
+  database: string
+} | null {
+  const host =
+    process.env.GQ_MYSQL_HOST ||
+    process.env.ONBOARDING_MYSQL_HOST ||
+    process.env.FORGOT_PASSWORD_MYSQL_HOST ||
+    process.env.MYSQL_HOST
+  const user =
+    process.env.GQ_MYSQL_USER ||
+    process.env.ONBOARDING_MYSQL_USER ||
+    process.env.FORGOT_PASSWORD_MYSQL_USER ||
+    process.env.MYSQL_USER
+  const database =
+    process.env.GQ_MYSQL_DATABASE ||
+    process.env.ONBOARDING_MYSQL_DATABASE ||
+    process.env.FORGOT_PASSWORD_MYSQL_DATABASE ||
+    process.env.MYSQL_DATABASE
+  if (!host || !user || !database) return null
+  const password =
+    process.env.GQ_MYSQL_PASSWORD ??
+    process.env.ONBOARDING_MYSQL_PASSWORD ??
+    process.env.FORGOT_PASSWORD_MYSQL_PASSWORD ??
+    process.env.MYSQL_PASSWORD ??
+    ""
+  return { host, user, password, database }
 }
 
 export function getSearchAnalyticsPool(): Pool | null {
-  if (!mysqlConfigured()) return null
+  const creds = baseMysqlCreds()
+  if (!creds) return null
   if (!pool) {
     pool = mysql.createPool({
-      host: process.env.ONBOARDING_MYSQL_HOST || process.env.FORGOT_PASSWORD_MYSQL_HOST,
-      user: process.env.ONBOARDING_MYSQL_USER || process.env.FORGOT_PASSWORD_MYSQL_USER,
-      password: process.env.ONBOARDING_MYSQL_PASSWORD ?? process.env.FORGOT_PASSWORD_MYSQL_PASSWORD ?? "",
-      database: process.env.ONBOARDING_MYSQL_DATABASE || process.env.FORGOT_PASSWORD_MYSQL_DATABASE,
+      host: creds.host,
+      user: creds.user,
+      password: creds.password,
+      database: creds.database,
       waitForConnections: true,
       connectionLimit: 4,
       queueLimit: 0,
     })
   }
   return pool
+}
+
+/**
+ * Same host/user as search analytics, but connected to an Order Monitor schema
+ * (`chaos_beta` / `chaos_test` / `chaos_dev`) — shared picker with /admin/orders.
+ */
+export function getMarketplacePoolForDb(db: string | null | undefined): Pool | null {
+  const creds = baseMysqlCreds()
+  if (!creds) return null
+  const schema = (db || "").trim().toLowerCase()
+  if (!isOrderMonitorDb(schema)) {
+    return getSearchAnalyticsPool()
+  }
+  let p = poolsByDb.get(schema)
+  if (!p) {
+    p = mysql.createPool({
+      host: creds.host,
+      user: creds.user,
+      password: creds.password,
+      database: schema as OrderMonitorDb,
+      waitForConnections: true,
+      connectionLimit: 4,
+      queueLimit: 0,
+    })
+    poolsByDb.set(schema, p)
+  }
+  return p
 }
 
 export function normalizeSearchTerm(term: string): string {

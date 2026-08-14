@@ -20,6 +20,9 @@ export type AdminMonitorOrder = {
   servedAmount?: number
   servedQtyTotal?: number
   sellerFulfillment?: SellerFulfillment
+  commissionRate?: number
+  commissionEligible?: boolean
+  commissionAmount?: number
 }
 
 /** Whether the seller has acted on the order (served items / moved status). */
@@ -111,6 +114,15 @@ export function formatAdminCurrency(amount: number): string {
     currencyDisplay: "code",
     minimumFractionDigits: 0,
   }).format(amount)
+}
+
+/** Commission displays as — when unpaid; RWF when PAID-eligible. */
+export function formatOrderCommission(order: Pick<AdminMonitorOrder, "commissionEligible" | "commissionAmount" | "paymentStatus">): string {
+  const eligible =
+    order.commissionEligible === true ||
+    (order.commissionEligible == null && String(order.paymentStatus ?? "").toUpperCase() === "PAID")
+  if (!eligible) return "—"
+  return formatAdminCurrency(Number(order.commissionAmount ?? 0) || 0)
 }
 
 export function formatOrderTime(ts: string): string {

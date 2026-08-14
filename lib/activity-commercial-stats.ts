@@ -1,5 +1,5 @@
 import type { RowDataPacket } from "mysql2/promise"
-import { getSearchAnalyticsPool } from "@/lib/mysql-search-analytics"
+import { getMarketplacePoolForDb, getSearchAnalyticsPool } from "@/lib/mysql-search-analytics"
 import { fetchShopAnalyticsFromMysql } from "@/lib/shop-analytics-mysql"
 
 const SHOP_WITH_ME_ORDER_WHERE = `
@@ -43,8 +43,12 @@ function fmtRwf(n: number): string {
 
 type Row = RowDataPacket & Record<string, unknown>
 
-async function q<T extends Row>(sql: string, params: unknown[] = []): Promise<T[]> {
-  const pool = getSearchAnalyticsPool()
+async function qForDb<T extends Row>(
+  db: string | undefined,
+  sql: string,
+  params: unknown[] = [],
+): Promise<T[]> {
+  const pool = db ? getMarketplacePoolForDb(db) : getSearchAnalyticsPool()
   if (!pool) return []
   const [rows] = await pool.execute<T[]>(sql, params)
   return rows
@@ -56,9 +60,13 @@ export async function fetchCommercialStatsFromMysql(
   environment = "",
   sellerAccount = "",
   compareSellers = "",
+  db = "",
 ): Promise<Record<string, unknown> | null> {
-  const pool = getSearchAnalyticsPool()
+  const schema = (db || "").trim()
+  const pool = schema ? getMarketplacePoolForDb(schema) : getSearchAnalyticsPool()
   if (!pool || !nz(from) || !nz(to)) return null
+
+  const q = <T extends Row>(sql: string, params: unknown[] = []) => qForDb<T>(schema || undefined, sql, params)
 
   const fromTs = `${from} 00:00:00`
   const toTs = `${to} 23:59:59`
@@ -102,10 +110,10 @@ export async function fetchCommercialStatsFromMysql(
   }
 
   const sessionRows = await q<Row>(
-    `SELECT COUNT(DISTINCT session_id) AS c
+    `SELECT COUNT(DISTINCT actor_session_id) AS c
      FROM activity_events
      WHERE created_at >= ? AND created_at <= ?${envClause}
-       AND session_id IS NOT NULL AND session_id != ''`,
+       AND actor_session_id IS NOT NULL AND actor_session_id != ''`,
     [fromTs, toTs, ...envParams],
   )
   engagement.uniqueSessions = num(sessionRows[0]?.c)
@@ -381,28 +389,72 @@ export async function fetchCommercialStatsFromMysql(
      LIMIT 5000`,
     [fromTs, toTs, ...envParams],
   )
-  const qrByNick = new Map<string, { shareCount: number; scanCount: number; qrOrderCount: number }>()
+  const qrByNick = new Map<
+    string,
+    { shareCount: number; scanCount: number; qrOrderCount: number; sellerAccount: string }
+  >()
   for (const row of qrEventRows) {
     const payload = nz(row.payload)
     const nickMatch = payload.match(/"shopNickname"\s*:\s*"([^"]+)"/i)
     const pathMatch = payload.match(/\/shop-with-me\/([^/? "'\\]+)/i)
     const nick = (nickMatch?.[1] || pathMatch?.[1] || "").trim().toLowerCase()
     if (!nick) continue
-    const cur = qrByNick.get(nick) || { shareCount: 0, scanCount: 0, qrOrderCount: 0 }
+    const cur = qrByNick.get(nick) || { shareCount: 0, scanCount: 0, qrOrderCount: 0, sellerAccount: "" }
     if (nz(row.stage) === "qr_share") cur.shareCount += 1
     else cur.scanCount += 1
     qrByNick.set(nick, cur)
   }
-  for (const row of recentRows) {
-    const conditions = nz(row.CONDITIONS)
-    if (!conditionsFromQr(conditions)) continue
-    const nick = shopNicknameFromConditions(conditions)
+
+  // QR-attributed orders (not limited to "recent" list — fills Most shared QR even when activity_events is empty)
+  const qrOrderAggRows = await q<Row>(
+    `SELECT ot.SELLER_ISHYIGA_ACCOUNT AS seller_account,
+            ot.CONDITIONS AS conditions,
+            COUNT(*) AS order_count
+     FROM order_transaction ot
+     WHERE ${SHOP_WITH_ME_ORDER_WHERE}
+       AND ot.heure >= ? AND ot.heure <= ?${sellerSql}
+       AND (
+         COALESCE(ot.CONDITIONS, '') LIKE '%:qr]%'
+         OR LOWER(COALESCE(ot.CONDITIONS, '')) LIKE '%"fromqr":true%'
+         OR LOWER(COALESCE(ot.CONDITIONS, '')) LIKE '%"acquisitionsource":"qr"%'
+       )
+     GROUP BY ot.SELLER_ISHYIGA_ACCOUNT, ot.CONDITIONS
+     LIMIT 5000`,
+    [fromTs, toTs, ...sellerParam],
+  )
+  for (const row of qrOrderAggRows) {
+    const conditions = nz(row.conditions)
+    let nick = shopNicknameFromConditions(conditions)
+    const sellerAcc = nz(row.seller_account)
+    if (!nick && sellerAcc) {
+      // fallback: use seller nickname from account map later under sellerAccount key
+      nick = `__acc:${sellerAcc.toLowerCase()}`
+    }
     if (!nick) continue
-    const cur = qrByNick.get(nick) || { shareCount: 0, scanCount: 0, qrOrderCount: 0 }
-    cur.qrOrderCount += 1
+    const cur = qrByNick.get(nick) || {
+      shareCount: 0,
+      scanCount: 0,
+      qrOrderCount: 0,
+      sellerAccount: sellerAcc,
+    }
+    cur.qrOrderCount += num(row.order_count)
+    if (sellerAcc) cur.sellerAccount = sellerAcc
     qrByNick.set(nick, cur)
   }
-  const nickList = Array.from(qrByNick.keys())
+
+  const nickList = Array.from(qrByNick.keys()).filter((n) => !n.startsWith("__acc:"))
+  const accList = Array.from(
+    new Set(
+      Array.from(qrByNick.values())
+        .map((v) => v.sellerAccount)
+        .filter(Boolean)
+        .concat(
+          Array.from(qrByNick.keys())
+            .filter((n) => n.startsWith("__acc:"))
+            .map((n) => n.slice(6)),
+        ),
+    ),
+  )
   const nickSellerRows =
     nickList.length > 0
       ? await q<Row>(
@@ -414,19 +466,70 @@ export async function fetchCommercialStatsFromMysql(
           nickList,
         )
       : []
+  const accSellerRows =
+    accList.length > 0
+      ? await q<Row>(
+          `SELECT ishyiga_account,
+                  LOWER(TRIM(COALESCE(NULLIF(TRIM(nickname), ''), ''))) AS nick,
+                  COALESCE(NULLIF(TRIM(OWNER), ''),
+                    TRIM(CONCAT(COALESCE(FIRSTNAME, ''), ' ', COALESCE(LASTNAME, '')))) AS seller_name
+           FROM account_seller
+           WHERE ishyiga_account IN (${accList.map(() => "?").join(",")})`,
+          accList,
+        )
+      : []
   const nickMeta = new Map(
     nickSellerRows.map((r) => [
       nz(r.nick),
       { sellerAccount: nz(r.ishyiga_account), sellerName: nz(r.seller_name) },
     ]),
   )
+  const accMeta = new Map(
+    accSellerRows.map((r) => [
+      nz(r.ishyiga_account).toLowerCase(),
+      { shopNickname: nz(r.nick), sellerName: nz(r.seller_name), sellerAccount: nz(r.ishyiga_account) },
+    ]),
+  )
+
+  // Merge __acc: placeholders into real nicknames when possible
+  for (const [key, counts] of Array.from(qrByNick.entries())) {
+    if (!key.startsWith("__acc:")) continue
+    const acc = key.slice(6)
+    const meta = accMeta.get(acc)
+    const realNick = meta?.shopNickname
+    qrByNick.delete(key)
+    if (realNick) {
+      const cur = qrByNick.get(realNick) || {
+        shareCount: 0,
+        scanCount: 0,
+        qrOrderCount: 0,
+        sellerAccount: meta.sellerAccount,
+      }
+      cur.qrOrderCount += counts.qrOrderCount
+      cur.shareCount += counts.shareCount
+      cur.scanCount += counts.scanCount
+      cur.sellerAccount = cur.sellerAccount || meta.sellerAccount
+      qrByNick.set(realNick, cur)
+    } else {
+      qrByNick.set(acc, { ...counts, sellerAccount: counts.sellerAccount || acc })
+    }
+  }
+
   let topQrShares = Array.from(qrByNick.entries())
-    .map(([shopNickname, counts]) => ({
-      shopNickname,
-      ...counts,
-      sellerAccount: nickMeta.get(shopNickname)?.sellerAccount || "",
-      sellerName: nickMeta.get(shopNickname)?.sellerName || "",
-    }))
+    .map(([shopNickname, counts]) => {
+      const meta = nickMeta.get(shopNickname) || accMeta.get(counts.sellerAccount.toLowerCase())
+      return {
+        shopNickname: shopNickname.startsWith("__acc:") ? "" : shopNickname,
+        shareCount: counts.shareCount,
+        scanCount: counts.scanCount,
+        qrOrderCount: counts.qrOrderCount,
+        sellerAccount:
+          counts.sellerAccount ||
+          (meta && "sellerAccount" in meta ? meta.sellerAccount : "") ||
+          "",
+        sellerName: (meta && "sellerName" in meta ? meta.sellerName : "") || "",
+      }
+    })
     .sort(
       (a, b) =>
         b.shareCount + b.scanCount * 2 + b.qrOrderCount * 3 - (a.shareCount + a.scanCount * 2 + a.qrOrderCount * 3),
@@ -439,7 +542,7 @@ export async function fetchCommercialStatsFromMysql(
       [seller],
     )
     const sn = nz(sellerNickRows[0]?.shop_nickname).toLowerCase()
-    if (sn) topQrShares = topQrShares.filter((r) => r.shopNickname === sn)
+    if (sn) topQrShares = topQrShares.filter((r) => r.shopNickname === sn || r.sellerAccount === seller)
   }
 
   const sellerOptionRows = await q<Row>(
@@ -484,12 +587,13 @@ export async function fetchCommercialStatsFromMysql(
 
   const pitchSummary = `IHUTE ${from} to ${to}: ${num(engagement.pageViews).toLocaleString()} page views, ${sessions.toLocaleString()} sessions, ${orders.orderCount.toLocaleString()} total orders (${fmtRwf(orders.gmvTotal)} RWF GMV). Shop-with-me: ${shopWithMe.orderCount.toLocaleString()} orders (${fmtRwf(shopWithMe.gmvTotal)} RWF), ${shopWithMe.shopPageViews.toLocaleString()} shop page views, ${shopWithMe.activeSellers} active shop sellers.`
 
-  const analytics = await fetchShopAnalyticsFromMysql(from, to, environment, seller, compareSellers)
+  const analytics = await fetchShopAnalyticsFromMysql(from, to, environment, seller, compareSellers, schema)
 
   return {
     ok: true,
     currency: "RWF",
     sellerAccount: seller,
+    db: schema || undefined,
     engagement,
     orders,
     shopWithMe,

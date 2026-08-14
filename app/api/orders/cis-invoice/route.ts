@@ -4,7 +4,14 @@ import { getOrdersUrl } from "@/lib/backend-config"
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-/** Proxy CIS → IHUTE fiscal invoice sync (SDC/MRC). */
+/**
+ * Proxy CIS → IHUTE fiscal invoice sync (SDC/MRC).
+ *
+ * The backend WAR context (Trading / Trading_dev / Trading_beta / etc.) is determined by
+ * JAVA_BACKEND_BASE or BACKEND_URL in .env — there is NO hardcoded WAR path here.
+ * If logs show "Trading_dev", that WAR context came from the CIS device's own URL, not ours.
+ * To retarget a different WAR, change JAVA_BACKEND_BASE in the server .env.
+ */
 export async function POST(req: NextRequest) {
   let body: Record<string, unknown> = {}
   try {

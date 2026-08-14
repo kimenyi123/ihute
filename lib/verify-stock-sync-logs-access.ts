@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getBackendBase } from "@/lib/backend-config"
+import { getAdminServletUrl } from "@/lib/backend-config"
 
 const STOCK_SYNC_LOGS_API_SECRET = process.env.STOCK_SYNC_LOGS_API_SECRET?.trim() || ""
 
@@ -52,7 +52,7 @@ async function verifyAdminServlet(adminEmail: string, adminToken: string | undef
   if (tok) form.set("adminToken", tok)
 
   try {
-    const url = `${getBackendBase()}/AdminServlet`
+    const url = getAdminServletUrl()
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
@@ -120,7 +120,10 @@ export async function assertStockSyncLogsAccess(req: NextRequest): Promise<NextR
   const ok = await verifyAdminServlet(headerEmail, headerToken || undefined)
   if (!ok) {
     return NextResponse.json(
-      { ok: false, error: "Admin verification failed. Sign in again or check backend connectivity." },
+      {
+        ok: false,
+        error: `Admin verification failed via ${getAdminServletUrl()}. Sign in again, or set JAVA_BACKEND_BASE / BACKEND_URL to this site's Tomcat WAR (same context as search).`,
+      },
       { status: 401 },
     )
   }
