@@ -29,7 +29,7 @@ import { L, pickLang, SELLER_UI, UMURIRO_UI } from "@/lib/seller-register-i18n"
 import { useAuthStore } from "@/lib/auth-store"
 import { getShopPublicUrl } from "@/lib/shop-public-url"
 import { filterProductsByRelevance } from "@/lib/search-utils"
-import { shopCategoryToSectorSlug } from "@/lib/seller-category-sector"
+import { shopCategoryToSectorSlug, GRANDMA_REGISTRATION_CATEGORY_VALUES } from "@/lib/seller-category-sector"
 import { isValidRwandaMobileE164, normalizeRwandaMobileE164 } from "@/lib/rwanda-phone"
 import { cn } from "@/lib/utils"
 import { GRANDMA_PATHS } from "@/lib/grandma-urls"
@@ -46,16 +46,7 @@ const LS_KEY = "ihute:umuriro:lastShop"
 /** MTN merchant pay codes are usually 5–6 digits. */
 const MIN_MOMO_USSD_DIGITS = 5
 
-const SHOP_CATEGORIES = [
-  "pharmacy",
-  "liquor store",
-  "boutique",
-  "bar/restaurant",
-  "supermarket",
-  "coffee shop",
-  "pizzeria",
-  "electronics",
-].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
+const SHOP_CATEGORIES = GRANDMA_REGISTRATION_CATEGORY_VALUES
 
 const cardClass =
   "min-w-0 w-full max-w-full overflow-x-hidden rounded-2xl border-[#dbe7f3] bg-white shadow-[0_8px_18px_rgba(24,151,224,.08)]"

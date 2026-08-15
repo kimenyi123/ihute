@@ -42,20 +42,11 @@ import type { Language } from "@/lib/language-store"
 import { useLanguageStore } from "@/lib/language-store"
 import { LanguageSelector } from "@/components/language-selector"
 import { DELIVERY_MODES, ERR, L, pickLang, SELLER_UI } from "@/lib/seller-register-i18n"
-import { shopCategoryToSectorSlug } from "@/lib/seller-category-sector"
+import { shopCategoryToSectorSlug, GRANDMA_REGISTRATION_CATEGORY_VALUES, grandmaCategoryLabel, resolveGrandmaCategory, isPlaceholderGrandmaShopName } from "@/lib/seller-category-sector"
 import { classifyBrowserGpsError, isShopGpsInRwanda } from "@/lib/grandma-seller-gps"
+import { buildGrandmaSellerGpsPayload } from "@/lib/grandma-seller-gps-payload"
 
-const BUSINESS_CATEGORIES = [
-  "pharmacy",
-  "liquor store",
-  "boutique",
-  "bar/restaurant",
-  "supermarket",
-  "coffee shop",
-  "pizzeria",
-  "electronics",
-].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
-
+const BUSINESS_CATEGORIES = GRANDMA_REGISTRATION_CATEGORY_VALUES
 function numPrice(v: unknown): number {
   if (typeof v === "number" && Number.isFinite(v)) return v
   const n = String(v ?? "")
@@ -153,7 +144,10 @@ function validateSellerField(fieldId: string, value: string, lang: Language): st
   const trimmed = String(value ?? "").trim()
   switch (fieldId) {
     case "seller-field-companyName":
-      return trimmed ? undefined : pickLang(ERR.missingCompanyName, lang)
+      if (!trimmed || isPlaceholderGrandmaShopName(trimmed)) {
+        return pickLang(ERR.missingCompanyName, lang)
+      }
+      return undefined
     case "seller-field-password":
       return trimmed.length >= 6 ? undefined : pickLang(ERR.missingPassword, lang)
     case "seller-field-phone":
@@ -291,6 +285,7 @@ export function CrazyShoppingBoarding() {
   const [lines, setLines] = useState<ShopLineDraft[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [doneMsg, setDoneMsg] = useState<string | null>(null)
+  const [gpsPersistWarn, setGpsPersistWarn] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string | undefined>>({})
   const [gpsCapturing, setGpsCapturing] = useState(false)
@@ -306,6 +301,7 @@ export function CrazyShoppingBoarding() {
   const isStep1Valid = useMemo(() => {
     return (
       !!business.companyName.trim() &&
+      !isPlaceholderGrandmaShopName(business.companyName) &&
       business.password.trim().length >= 6 &&
       isValidPhone(business.phone) &&
       !!business.ownerName.trim() &&
@@ -757,6 +753,7 @@ export function CrazyShoppingBoarding() {
     setErr(null)
     setSubmitting(true)
     setDoneMsg(null)
+    setGpsPersistWarn(null)
     try {
       const prov = provinceById(business.province)
       const locationSummary = [
@@ -796,12 +793,14 @@ export function CrazyShoppingBoarding() {
         Number.isFinite(business.latitude) &&
         Number.isFinite(business.longitude)
       ) {
-        regBody.latitude = business.latitude
-        regBody.longitude = business.longitude
-        if (business.gpsAccuracy != null && Number.isFinite(business.gpsAccuracy)) {
-          regBody.gpsAccuracy = business.gpsAccuracy
+        const gpsFields = buildGrandmaSellerGpsPayload({
+          latitude: business.latitude,
+          longitude: business.longitude,
+          gpsAccuracy: business.gpsAccuracy,
+        })
+        if (gpsFields) {
+          Object.assign(regBody, gpsFields)
         }
-        regBody.location_source = "AUTO"
       }
       const regRes = await fetch("/api/grandma/sellers", {
         method: "POST",
@@ -813,6 +812,7 @@ export function CrazyShoppingBoarding() {
         error?: string
         code?: string
         ishyigaAccount?: string
+        gpsPersist?: { ok?: boolean; skipped?: boolean; reason?: string | null }
       }
       if (!regRes.ok || !regJson?.ok) {
         if (regJson?.code === "NICKNAME_EXISTS") {
@@ -827,6 +827,11 @@ export function CrazyShoppingBoarding() {
       if (!ishyiga) {
         throw new Error("Registration succeeded but no ishyiga account was returned")
       }
+      // Account create succeeded; GPS sync is secondary — warn without failing registration.
+      const gpsSyncFailed = regJson.gpsPersist != null && regJson.gpsPersist.ok === false
+      const gpsWarnMsg = gpsSyncFailed
+        ? pickLang(SELLER_UI.gpsPersistIncomplete, lang)
+        : null
 
       const bulkLines = lines.filter((row) => String(row.nikiCode ?? "").trim().length > 0)
       const tempLines = lines.filter((row) => !String(row.nikiCode ?? "").trim())
@@ -927,6 +932,7 @@ export function CrazyShoppingBoarding() {
       }
       msg += ` Seller account: ${ishyiga}.`
       setDoneMsg(msg)
+      setGpsPersistWarn(gpsWarnMsg)
 
       login({
         id: business.email.trim(),
@@ -951,7 +957,8 @@ export function CrazyShoppingBoarding() {
         setSearchQ("")
         setSearchHits([])
         setCategoryPreview([])
-      }, 900)
+        setGpsPersistWarn(null)
+      }, gpsWarnMsg ? 4500 : 900)
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "Submit error")
     } finally {
@@ -1018,6 +1025,14 @@ export function CrazyShoppingBoarding() {
           <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50/95 px-3 py-2 text-sm text-emerald-900 shadow-sm">
             <Check className="h-4 w-4 shrink-0" />
             {doneMsg}
+          </div>
+        )}
+        {gpsPersistWarn && (
+          <div
+            className="rounded-xl border border-amber-200 bg-amber-50/95 px-3 py-2 text-sm text-amber-950 shadow-sm"
+            role="status"
+          >
+            {gpsPersistWarn}
           </div>
         )}
 
@@ -1236,7 +1251,7 @@ export function CrazyShoppingBoarding() {
                   <SelectContent>
                     {BUSINESS_CATEGORIES.map((s) => (
                       <SelectItem key={s} value={s}>
-                        {s}
+                        {grandmaCategoryLabel(resolveGrandmaCategory(s), lang)}
                       </SelectItem>
                     ))}
                   </SelectContent>

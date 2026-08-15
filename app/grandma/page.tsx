@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils"
 import {
   LayoutDashboard,
   Loader2,
+  Search,
   MessageSquare,
   Phone,
   SlidersHorizontal,
@@ -52,12 +53,13 @@ import {
   computeIhutePlatformFeeRwf,
   stripShopMomoLabel,
 } from "@/lib/grandma-order-billing"
-import { GRANDMA_CATEGORY_TO_SECTOR_SLUG } from "@/lib/seller-category-sector"
+import { GRANDMA_CATEGORY_TO_SECTOR_SLUG, displayGrandmaShopName, grandmaCategoryLabel, grandmaNavCategories, grandmaOthersChildCategories, isOthersChildCategory, isOthersHubCategory, resolveGrandmaCategory } from "@/lib/seller-category-sector"
 import { fetchSectorStatsFromApi, productCountFromSupplierRow } from "@/lib/fetch-suggestions-helpers"
+import { filterProductsByRelevance } from "@/lib/search-utils"
 import { useAuthStore } from "@/lib/auth-store"
 import { useOrdersStore } from "@/lib/orders-store"
 import { grandmaUserCanUseSellerWorkspace } from "@/lib/auth-login-client"
-import { useLanguageStore } from "@/lib/language-store"
+import { useHydratedLanguage, useLanguageStore } from "@/lib/language-store"
 import { GrandmaSellerDashboard } from "@/components/grandma-seller-dashboard"
 import { GrandmaSellerItemsPanel } from "@/components/grandma-seller-items-panel"
 import { downloadExcel, grandmaOrdersToExcelRows } from "@/lib/grandma-excel-export"
@@ -76,15 +78,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { matchMoMoSmsToOrderTotal, type MoMoSmsMatchResult } from "@/lib/momo-payment-sms-match"
 import { Button } from "@/components/ui/button"
 
-export type Category =
-  | "Boutique"
-  | "Supermarket"
-  | "Pharmacy"
-  | "Restaurant"
-  | "Liquor Store"
-  | "Bakery"
-  | "Veterinary"
-  | "Others"
+export type Category = import("@/lib/grandma-categories").GrandmaCategoryLabel
 
 type Product = {
   id: number
@@ -204,6 +198,27 @@ type ShopEntry = {
   /** «matched» highlight snippet from Grandma search */
   matchSnippet?: string
   matchedProductSample?: string
+}
+
+type HomeGlobalItemHit = {
+  key: string
+  name: string
+  price: number
+  image?: string
+  supplierAccount: string
+  supplierName: string
+  shopId: string
+  shopName: string
+  shopCategory: Category
+}
+
+type HomeGlobalShopHit = {
+  id: string
+  name: string
+  category: Category
+  tagline: string
+  matchedProduct?: string
+  sellerAccount: string
 }
 
 function GrandmaHighlightText({ snippet, fallback }: { snippet?: string; fallback: string }) {
@@ -502,6 +517,13 @@ const GRANDMA_LABELS: Record<
     sortDistance: string
     sectorPanelShops: string
     sectorPanelItems: string
+    homeSearchPlaceholder: string
+    homeSearchHint: string
+    homeSearchItems: string
+    homeSearchShops: string
+    homeSearchNoResults: string
+    homeSearchClear: string
+    homeSearchAtShop: string
     footerHome: string
     footerShops: string
     footerItems: string
@@ -674,6 +696,13 @@ const GRANDMA_LABELS: Record<
       "Choose a shop in {cat}. Favorites and shops you used before are listed first.{sort}",
     sectorPanelShops: "shops",
     sectorPanelItems: "items",
+    homeSearchPlaceholder: "Search any item — see the shop that has it",
+    homeSearchHint: "Type a product name. We list every match and the boutique it is in.",
+    homeSearchItems: "Items",
+    homeSearchShops: "Shops",
+    homeSearchNoResults: "No items or shops match that search.",
+    homeSearchClear: "Clear",
+    homeSearchAtShop: "at {shop}",
     footerHome: "Home",
     footerShops: "Shops",
     footerItems: "Items",
@@ -847,6 +876,13 @@ const GRANDMA_LABELS: Record<
     sortDistance: " Bitondetswe hakurikijwe intera.",
     shopsIntro: "Hitamo iduka muri {cat}. Ayo uhitamo kenshi ni yo abanza.{sort}",
     sectorPanelShops: "amaduka",
+    homeSearchPlaceholder: "Shakisha igicuruzwa — ubone iduka ririmo",
+    homeSearchHint: "Andika izina ry'igicuruzwa. Tugaragaza buri kintu n'iduka (butike) ririmo.",
+    homeSearchItems: "Ibicuruzwa",
+    homeSearchShops: "Amaduka / Butike",
+    homeSearchNoResults: "Nta bicuruzwa cyangwa amaduka bihuye n'ayo magambo.",
+    homeSearchClear: "Siba",
+    homeSearchAtShop: "kuri {shop}",
     sectorPanelItems: "Umubare wibicuruzwa ",
     footerHome: "Ahabanza",
     footerShops: "Amaduka",
@@ -1021,6 +1057,13 @@ const GRANDMA_LABELS: Record<
     shopsIntro: "Choisissez un magasin dans {cat}. Favoris et commandes passées en premier.{sort}",
     sectorPanelShops: "magasins",
     sectorPanelItems: "articles",
+    homeSearchPlaceholder: "Cherchez un article — voyez la boutique",
+    homeSearchHint: "Tapez un produit. Chaque résultat montre le magasin où il se trouve.",
+    homeSearchItems: "Articles",
+    homeSearchShops: "Boutiques",
+    homeSearchNoResults: "Aucun article ni boutique ne correspond.",
+    homeSearchClear: "Effacer",
+    homeSearchAtShop: "chez {shop}",
     footerHome: "Accueil",
     footerShops: "Magasins",
     footerItems: "Articles",
@@ -1526,53 +1569,202 @@ const SHOP_FILTER_TABS: { id: ShopFilterTab; label: string }[] = [
   { id: "onsale", label: "On sale" },
 ]
 
-const CATEGORIES: { name: Category; icon: string }[] = [
-  { name: "Boutique", icon: "🏪" },
-  { name: "Supermarket", icon: "🛒" },
-  { name: "Pharmacy", icon: "💊" },
-  { name: "Restaurant", icon: "🍽️" },
-  { name: "Liquor Store", icon: "🍺" },
-  { name: "Bakery", icon: "🥖" },
-  { name: "Veterinary", icon: "🐾" },
-  { name: "Others", icon: "◻️" },
-]
+const CATEGORIES: { name: Category; icon: string }[] = grandmaNavCategories().map((c) => ({
+  name: c.label as Category,
+  icon: c.icon,
+}))
 
-/** Display names for the category grid + headers — follows Settings → Language */
-const CATEGORY_LABELS: Record<GrandmaLang, Record<Category, string>> = {
-  en: {
-    Boutique: "Boutique",
-    Supermarket: "Supermarket",
-    Pharmacy: "Pharmacy",
-    Restaurant: "Restaurant",
-    "Liquor Store": "Liquor Store",
-    Bakery: "Bakery",
-    Veterinary: "Veterinary",
-    Others: "Others",
-  },
-  rw: {
-    Boutique: "Butike",
-    Supermarket: "Alimantasiyo",
-    Pharmacy: "Farumasi",
-    Restaurant: "Resitora",
-    "Liquor Store": "Inzoga",
-    Bakery: "Imikati",
-    Veterinary: "Amatungo",
-    Others: "Ibindi",
-  },
-  fr: {
-    Boutique: "Boutique",
-    Supermarket: "Supermarché",
-    Pharmacy: "Pharmacie",
-    Restaurant: "Restaurant",
-    "Liquor Store": "Boissons",
-    Bakery: "Boulangerie",
-    Veterinary: "Vétérinaire",
-    Others: "Autres",
-  },
+const OTHERS_CHILD_CATEGORIES: { name: Category; icon: string }[] = grandmaOthersChildCategories().map((c) => ({
+  name: c.label as Category,
+  icon: c.icon,
+}))
+
+const ALL_SECTOR_COUNT_CATEGORIES = [...CATEGORIES, ...OTHERS_CHILD_CATEGORIES]
+
+function asGrandmaCategory(raw: unknown): Category {
+  return resolveGrandmaCategory(raw) as Category
+}
+
+function grandmaSearchFailureMessage(
+  lang: GrandmaLang,
+  opts: { code?: string | null; network?: boolean; status?: number },
+): string {
+  if (opts.network) {
+    return lang === "rw"
+      ? "Ntabwo twashoboye kugera kuri seriveri. Gerageza kongera."
+      : lang === "fr"
+        ? "Impossible de joindre le serveur de recherche. Réessayez."
+        : "Could not reach search. Check your connection and try again."
+  }
+  const code = String(opts.code || "")
+  if (code === "INVALID_CATEGORY") {
+    return lang === "rw"
+      ? "Icyiciro ntikizwi. Hitamo icyiciro gikuwe ku rupapuro rw'ahabanza."
+      : lang === "fr"
+        ? "Catégorie inconnue. Choisissez une catégorie de l’accueil."
+        : "Unknown category. Pick a category from the home screen."
+  }
+  if (code === "MYSQL_NOT_CONFIGURED" || code === "MYSQL_QUERY_FAILED" || code === "SEARCH_ERROR" || opts.status === 503) {
+    return lang === "rw"
+      ? "Gushakisha ntibishoboka noneho. Seriveri ya MySQL ntabwo yateguwe neza."
+      : lang === "fr"
+        ? "Recherche indisponible (base MySQL non configurée)."
+        : "Search is unavailable right now (database not configured)."
+  }
+  if (code === "GEO_REQUIRED" || code === "GEO_INVALID") {
+    return lang === "rw"
+      ? "GPS si yo. Emeza aho uri cyangwa kuzimya Near me."
+      : lang === "fr"
+        ? "Position GPS invalide. Autorisez la localisation ou désactivez Near me."
+        : "Invalid GPS. Allow location or turn off Near me."
+  }
+  return lang === "rw"
+    ? "Gushakisha byanze. Gerageza kongera."
+    : lang === "fr"
+      ? "La recherche a échoué. Réessayez."
+      : "Search failed. Try again."
+}
+
+function parseHomeGlobalItemHits(json: Record<string, unknown>, q: string, limit: number): HomeGlobalItemHit[] {
+  const raw = Array.isArray(json.products) ? json.products : []
+  const products = raw.filter((p): p is Record<string, unknown> => !!p && typeof p === "object")
+  const ranked = filterProductsByRelevance(products, q, 15)
+  const pool = ranked
+  const out: HomeGlobalItemHit[] = []
+  const seen = new Set<string>()
+  for (const p of pool) {
+    const name = String(p.item_commercial_name ?? p.item_name ?? p.ITEM_NAME ?? "").trim()
+    if (!name) continue
+    const supplierAccount = normalizeSellerKeyFromSearch(
+      p.supplier_account ??
+        p.SELLER_ISHYIGA_ACCOUNT ??
+        p.supplierAccount ??
+        p.ISHYIGA_ACCOUNT ??
+        p.seller_account ??
+        p.SELLER_ACCOUNT,
+    )
+    const niki = String(p.niki_code ?? p.NIKI_CODE ?? p.item_code ?? "").trim()
+    const key = `${supplierAccount}::${niki || name}::${name}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    const img = getProductImageSrc(p as Parameters<typeof getProductImageSrc>[0])
+    const supplierName = String(
+      p.supplier_name ?? p.seller_name ?? p.NICKNAME ?? p.nickname ?? p.supplier_nickname ?? supplierAccount,
+    ).trim()
+    out.push({
+      key,
+      name,
+      price: numPriceish(p.final_selling_price ?? p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? p.price),
+      image: img && !img.includes("no_image") ? img : undefined,
+      supplierAccount,
+      supplierName,
+      shopId: supplierAccount ? `supplier_${supplierAccount}` : "",
+      shopName: supplierName,
+      shopCategory: asGrandmaCategory(p.bus_category_id ?? p.category ?? p.famille),
+    })
+    if (out.length >= limit) break
+  }
+  return out
+}
+
+function shopsFromSuggestionsJson(json: Record<string, unknown>): HomeGlobalShopHit[] {
+  const out: HomeGlobalShopHit[] = []
+  const seen = new Set<string>()
+  for (const arr of [json.suppliersByProduct, json.suppliersByName]) {
+    const rows = Array.isArray(arr) ? arr : []
+    for (const s of rows) {
+      if (!s || typeof s !== "object") continue
+      const o = s as Record<string, unknown>
+      const sellerAccount = normalizeSellerKeyFromSearch(
+        o.supplier_account ?? o.SELLER_ISHYIGA_ACCOUNT ?? o.supplierAccount ?? o.ISHYIGA_ACCOUNT ?? o.seller_account,
+      )
+      if (!sellerAccount || seen.has(sellerAccount)) continue
+      seen.add(sellerAccount)
+      out.push({
+        id: `supplier_${sellerAccount}`,
+        name: String(o.supplier_name ?? o.seller_name ?? o.NICKNAME ?? sellerAccount).trim(),
+        category: asGrandmaCategory(o.category ?? o.PREFERRED_CATEGORIES),
+        tagline: String(o.supplier_location ?? "").trim(),
+        matchedProduct: String(o.item_commercial_name ?? "").trim() || undefined,
+        sellerAccount,
+      })
+    }
+  }
+  return out
+}
+
+function resolveHomeItemShop(
+  hit: HomeGlobalItemHit,
+  liveShops: ShopEntry[],
+  shopHits: HomeGlobalShopHit[],
+): HomeGlobalItemHit {
+  const acct = hit.supplierAccount.toUpperCase()
+  if (!acct) return hit
+  const fromLive = liveShops.find(
+    (s) => sellerAccountFromGrandmaShopId(s.id).toUpperCase() === acct,
+  )
+  const fromHits = shopHits.find((s) => s.sellerAccount === acct)
+  const shopName = fromLive?.name || fromHits?.name || hit.shopName || hit.supplierName
+  const shopCategory = fromLive?.category || fromHits?.category || hit.shopCategory
+  const shopId =
+    fromLive?.id ||
+    fromHits?.id ||
+    (acct ? `supplier_${acct}__${shopCategory.replace(/\s+/g, "_")}` : hit.shopId)
+  return { ...hit, shopId, shopName, shopCategory }
+}
+
+function shopsFromItemHits(items: HomeGlobalItemHit[]): HomeGlobalShopHit[] {
+  const out: HomeGlobalShopHit[] = []
+  const seen = new Set<string>()
+  for (const p of items) {
+    const acct = p.supplierAccount
+    if (!acct || seen.has(acct)) continue
+    seen.add(acct)
+    out.push({
+      id: p.shopId || `supplier_${acct}`,
+      name: p.shopName || p.supplierName || acct,
+      category: p.shopCategory,
+      tagline: p.name,
+      matchedProduct: p.name,
+      sellerAccount: acct,
+    })
+  }
+  return out
+}
+
+function parseHomeGlobalShopHits(
+  shops: Array<{
+    id?: string
+    sellerAccount?: string
+    name?: string
+    category?: string
+    tagline?: string
+    matchedProductSample?: string
+  }>,
+  limit: number,
+): HomeGlobalShopHit[] {
+  const out: HomeGlobalShopHit[] = []
+  const seen = new Set<string>()
+  for (const hit of shops) {
+    const sellerAccount = normalizeSellerKeyFromSearch(hit.sellerAccount ?? hit.id)
+    const id = String(hit.id || (sellerAccount ? `supplier_${sellerAccount}` : "")).trim()
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    out.push({
+      id,
+      name: String(hit.name || sellerAccount || "Shop").trim(),
+      category: asGrandmaCategory(hit.category),
+      tagline: String(hit.tagline || "").trim(),
+      matchedProduct: hit.matchedProductSample,
+      sellerAccount,
+    })
+    if (out.length >= limit) break
+  }
+  return out
 }
 
 function categoryLabel(cat: Category, lang: GrandmaLang): string {
-  return CATEGORY_LABELS[lang][cat]
+  return grandmaCategoryLabel(cat, lang)
 }
 
 const INITIAL_PRODUCTS: Product[] = [
@@ -2273,13 +2465,22 @@ export default function GrandmaPage() {
   const [category, setCategory] = useState<Category>("Boutique")
   const [search, setSearch] = useState("")
   const [shopSearch, setShopSearch] = useState("")
+  const [othersHubOpen, setOthersHubOpen] = useState(false)
+  const [homeSearch, setHomeSearch] = useState("")
+  const [homeSearchOpen, setHomeSearchOpen] = useState(false)
+  const [homeSearchCommitted, setHomeSearchCommitted] = useState(false)
+  const [homeSearchLoading, setHomeSearchLoading] = useState(false)
+  const [homeItemHits, setHomeItemHits] = useState<HomeGlobalItemHit[]>([])
+  const [homeShopHits, setHomeShopHits] = useState<HomeGlobalShopHit[]>([])
   /** Seller accounts (uppercase) returned by global product search — shops are included if they sell matching items. */
   const [shopProductSearchAccounts, setShopProductSearchAccounts] = useState<string[]>([])
   const [shopProductSearchLoading, setShopProductSearchLoading] = useState(false)
   /** Production search API results (null = use legacy browse list). */
   const [backendSearchShops, setBackendSearchShops] = useState<ShopEntry[] | null>(null)
   const [backendSearchLoading, setBackendSearchLoading] = useState(false)
+  const [backendSearchError, setBackendSearchError] = useState<string | null>(null)
   const [backendEmptyReason, setBackendEmptyReason] = useState<string | null>(null)
+  const [homeSearchError, setHomeSearchError] = useState<string | null>(null)
   const [searchSuggestions, setSearchSuggestions] = useState<string[]>([])
   const [showSearchSuggestions, setShowSearchSuggestions] = useState(false)
   const [searchHasMore, setSearchHasMore] = useState(false)
@@ -2307,7 +2508,7 @@ export default function GrandmaPage() {
   const [fulfillmentMode, setFulfillmentMode] = useState<FulfillmentMode>("delivery")
   const [appMode, setAppMode] = useState<AppMode>("buyer")
   const [sellerView, setSellerView] = useState<SellerView>("home")
-  const language = useLanguageStore((s) => s.language) as GrandmaLang
+  const language = useHydratedLanguage() as GrandmaLang
   const setLanguage = useLanguageStore((s) => s.setLanguage)
   const [preferredShopIds, setPreferredShopIds] = useState<string[]>([])
   const [selectedPayment, setSelectedPayment] = useState<PaymentId>("momo")
@@ -2386,7 +2587,7 @@ export default function GrandmaPage() {
     setHomeSectorItemsLoading(true)
     void (async () => {
       const next: Partial<Record<Category, number>> = {}
-      for (const c of CATEGORIES) {
+      for (const c of ALL_SECTOR_COUNT_CATEGORIES) {
         if (cancelled) break
         const slug = GRANDMA_CATEGORY_TO_SECTOR_SLUG[c.name]
         const s = await fetchSectorStatsFromApi(slug)
@@ -2446,6 +2647,123 @@ export default function GrandmaPage() {
     }
   }, [shopSearch, category])
 
+  /** Home Google-style search: items via Java catalog + shops via Grandma MySQL. */
+  useEffect(() => {
+    if (page !== 1) return
+    let cancelled = false
+    const q = homeSearch.trim()
+    if (q.length < 2) {
+      setHomeItemHits([])
+      setHomeShopHits([])
+      setHomeSearchLoading(false)
+      setHomeSearchCommitted(false)
+      setHomeSearchError(null)
+      return
+    }
+    setHomeSearchLoading(true)
+    const ac = new AbortController()
+    const tid = setTimeout(() => {
+      if (cancelled) return
+      void (async () => {
+        try {
+          const itemParams = new URLSearchParams({
+            globalSearch: q,
+            limit: "200",
+            Currency: "RWF",
+            locateShops: "1",
+          })
+          const shopParams = new URLSearchParams({
+            q,
+            suggest: "1",
+            page: "1",
+            pageSize: "40",
+          })
+          if (isValidLatLng(locationData?.latitude, locationData?.longitude)) {
+            shopParams.set("lat", String(locationData!.latitude))
+            shopParams.set("lng", String(locationData!.longitude))
+            if (useLocationSort) {
+              shopParams.set("nearMe", "1")
+              if (nearMeRadiusKm == null) shopParams.set("radiusKm", "all")
+              else shopParams.set("radiusKm", String(nearMeRadiusKm))
+            }
+          }
+          const [itemRes, shopRes] = await Promise.all([
+            fetch(`/api/fetchSuggestions?${itemParams}`, { signal: ac.signal, cache: "no-store" }),
+            fetch(`/api/grandma/search?${shopParams}`, { signal: ac.signal, cache: "no-store" }),
+          ])
+          let items: HomeGlobalItemHit[] = []
+          let shopsFromCatalog: HomeGlobalShopHit[] = []
+          if (itemRes.ok) {
+            const json = (await itemRes.json()) as Record<string, unknown>
+            items = parseHomeGlobalItemHits(json, q, 80)
+            shopsFromCatalog = shopsFromSuggestionsJson(json)
+          }
+          let shops: HomeGlobalShopHit[] = []
+          let shopSearchFailed = false
+          if (shopRes.ok) {
+            const json = (await shopRes.json().catch(() => null)) as {
+              ok?: boolean
+              shops?: Array<{
+                id?: string
+                sellerAccount?: string
+                name?: string
+                category?: string
+                tagline?: string
+                matchedProductSample?: string
+              }>
+              code?: string
+            } | null
+            if (json?.ok) shops = parseHomeGlobalShopHits(json.shops ?? [], 40)
+            else shopSearchFailed = true
+          } else {
+            shopSearchFailed = true
+          }
+          const live = allAvailableShopsRef.current
+          const mergedShops = [...shops, ...shopsFromCatalog]
+          items = items.map((hit) => resolveHomeItemShop(hit, live, mergedShops))
+          const shopsSellingItems = shopsFromItemHits(items)
+          const byAcct = new Map<string, HomeGlobalShopHit>()
+          for (const s of [...mergedShops, ...shopsSellingItems]) {
+            if (s.sellerAccount && !byAcct.has(s.sellerAccount)) byAcct.set(s.sellerAccount, s)
+          }
+          if (!cancelled) {
+            setHomeItemHits(items)
+            setHomeShopHits([...byAcct.values()])
+            setHomeSearchCommitted(true)
+            if (shopSearchFailed && items.length === 0 && byAcct.size === 0) {
+              setHomeSearchError(
+                grandmaSearchFailureMessage(language, { status: shopRes.status }),
+              )
+            } else {
+              setHomeSearchError(null)
+            }
+          }
+        } catch {
+          if (!cancelled && !ac.signal.aborted) {
+            setHomeItemHits([])
+            setHomeShopHits([])
+            setHomeSearchError(grandmaSearchFailureMessage(language, { network: true }))
+          }
+        } finally {
+          if (!cancelled && !ac.signal.aborted) setHomeSearchLoading(false)
+        }
+      })()
+    }, 280)
+    return () => {
+      cancelled = true
+      clearTimeout(tid)
+      ac.abort()
+    }
+  }, [
+    homeSearch,
+    page,
+    locationData?.latitude,
+    locationData?.longitude,
+    useLocationSort,
+    nearMeRadiusKm,
+    language,
+  ])
+
   /** Production Grandma search: MySQL-backed ranking + Near Me radius (falls back to legacy client filter). */
   useEffect(() => {
     let cancelled = false
@@ -2455,11 +2773,15 @@ export default function GrandmaPage() {
     if (!needsSearch) {
       setBackendSearchShops(null)
       setBackendEmptyReason(null)
+      setBackendSearchError(null)
       setSearchSuggestions([])
       setBackendSearchLoading(false)
       setSearchHasMore(false)
       return
     }
+
+    setBackendSearchLoading(true)
+    setBackendSearchError(null)
 
     if (nearMe) {
       const lat = locationData?.latitude
@@ -2499,12 +2821,14 @@ export default function GrandmaPage() {
           if (q) params.set("q", q)
           if (sector) params.set("sector", sector)
           params.set("category", category)
-          if (nearMe && isValidLatLng(locationData?.latitude, locationData?.longitude)) {
-            params.set("nearMe", "1")
+          if (isValidLatLng(locationData?.latitude, locationData?.longitude)) {
             params.set("lat", String(locationData!.latitude))
             params.set("lng", String(locationData!.longitude))
-            if (nearMeRadiusKm == null) params.set("radiusKm", "all")
-            else params.set("radiusKm", String(nearMeRadiusKm))
+            if (nearMe) {
+              params.set("nearMe", "1")
+              if (nearMeRadiusKm == null) params.set("radiusKm", "all")
+              else params.set("radiusKm", String(nearMeRadiusKm))
+            }
           }
           const requestUrl = `/api/grandma/search?${params}`
           const res = await fetch(requestUrl, {
@@ -2535,11 +2859,17 @@ export default function GrandmaPage() {
           } | null
 
           if (!res.ok || !json?.ok) {
-            // Keep legacy client filtering when MySQL search unavailable
             if (!cancelled) {
-              setBackendSearchShops(null)
+              setBackendSearchShops([])
               setSearchSuggestions([])
               setBackendEmptyReason(null)
+              setSearchHasMore(false)
+              setBackendSearchError(
+                grandmaSearchFailureMessage(language, {
+                  code: json?.code,
+                  status: res.status,
+                }),
+              )
             }
             return
           }
@@ -2552,7 +2882,7 @@ export default function GrandmaPage() {
           const mapped: ShopEntry[] = (json.shops ?? []).map((hit) => {
             const acct = String(hit.sellerAccount || "").toUpperCase()
             const prev = existingByAccount.get(acct)
-            const cat = (hit.category as Category) || category
+            const cat = asGrandmaCategory(hit.category) || category
             let distanceKm =
               hit.distanceKm != null && Number.isFinite(hit.distanceKm)
                 ? hit.distanceKm
@@ -2595,7 +2925,14 @@ export default function GrandmaPage() {
           })
 
           if (!cancelled) {
-            setBackendSearchShops(mapped)
+            setBackendSearchError(null)
+            setBackendSearchShops((prev) => {
+              if (searchPage > 1 && prev && prev.length) {
+                const seen = new Set(prev.map((s) => s.id))
+                return [...prev, ...mapped.filter((s) => !seen.has(s.id))]
+              }
+              return mapped
+            })
             setSearchSuggestions(json.suggestions ?? [])
             setSearchHasMore(Boolean(json.hasMore))
             setBackendEmptyReason(json.emptyReason ?? null)
@@ -2607,7 +2944,8 @@ export default function GrandmaPage() {
           }
         } catch {
           if (!cancelled && !ac.signal.aborted) {
-            setBackendSearchShops(null)
+            setBackendSearchShops([])
+            setBackendSearchError(grandmaSearchFailureMessage(language, { network: true }))
           }
         } finally {
           if (!cancelled && !ac.signal.aborted) setBackendSearchLoading(false)
@@ -2628,6 +2966,7 @@ export default function GrandmaPage() {
     locationData?.latitude,
     locationData?.longitude,
     searchPage,
+    language,
   ])
 
   useEffect(() => {
@@ -2702,7 +3041,7 @@ export default function GrandmaPage() {
   /** Home grid counts: shops from browse rows, items from full `sectorStats` totals. */
   const grandmaHomeSectorCounts = useMemo(() => {
     const next = {} as Record<Category, { shops: number; items: number }>
-    for (const { name } of CATEGORIES) {
+    for (const { name } of ALL_SECTOR_COUNT_CATEGORIES) {
       next[name] = { shops: 0, items: 0 }
     }
     for (const s of allAvailableShops) {
@@ -2711,7 +3050,7 @@ export default function GrandmaPage() {
       bucket.shops += 1
       bucket.items += s.stockLineCount ?? 0
     }
-    for (const { name } of CATEGORIES) {
+    for (const { name } of ALL_SECTOR_COUNT_CATEGORIES) {
       const fullItems = homeSectorItemsByCategory[name]
       if (Number.isFinite(fullItems)) {
         // Prefer full DB item totals so card "ibintu" matches what users see in category flows.
@@ -3086,7 +3425,7 @@ export default function GrandmaPage() {
         const transformedShops = uniqueSuppliers.map((supplier: any, index: number) => {
           const baseId = String(supplier.ISHYIGA_ACCOUNT ?? supplier.seller_account ?? supplier.id ?? supplier.SELLER_ISHYIGA_ACCOUNT ?? "")
           const catTag = String(supplier.fetchedCategory ?? "Others").replace(/\s+/g, "_")
-          const uniqueId = baseId ? `supplier_${baseId}__${catTag}` : `supplier_unknown_${Math.random()}`
+          const uniqueId = baseId ? `supplier_${baseId}__${catTag}` : `supplier_unknown_${index}`
           
           // Prefer backend-provided distance if available (various possible field names),
           // otherwise keep the demo/mock fallback.
@@ -3113,7 +3452,11 @@ export default function GrandmaPage() {
 
           return {
             id: uniqueId,
-            name: supplier.seller_name || supplier.seller_account || baseId,
+            name: displayGrandmaShopName(
+              String(supplier.nickname ?? supplier.NICKNAME ?? ""),
+              String(supplier.seller_name ?? supplier.OWNER ?? ""),
+              String(baseId),
+            ) || String(supplier.seller_name || supplier.seller_account || baseId),
             category: supplier.fetchedCategory as Category,
             tagline: "Local supplier",
             favorite: false,
@@ -3963,10 +4306,10 @@ export default function GrandmaPage() {
 
   /** Shown under the home title when signed in — hidden for guests (no placeholder name). */
   const buyerHeaderName = useMemo(() => {
-    if (!isAuthenticated) return ""
+    if (!authHasHydrated || !isAuthenticated) return ""
     const n = grandmaBuyerSession?.name?.trim()
     return n || ""
-  }, [isAuthenticated, grandmaBuyerSession?.name])
+  }, [authHasHydrated, isAuthenticated, grandmaBuyerSession?.name])
 
   const shopsInCategory = useMemo(() => {
     console.log('=== shopsInCategory called ===')
@@ -4501,16 +4844,7 @@ export default function GrandmaPage() {
       setSearch("")
       const gc = p.grandmaCategory
       if (gc) {
-        const cats: Category[] = [
-          "Boutique",
-          "Supermarket",
-          "Pharmacy",
-          "Restaurant",
-          "Liquor Store",
-          "Bakery",
-          "Veterinary",
-          "Others",
-        ]
+        const cats = [...CATEGORIES, ...OTHERS_CHILD_CATEGORIES].map((c) => c.name)
         const hit = cats.find((c) => c.toLowerCase() === gc.trim().toLowerCase())
         if (hit) setCategory(hit)
       }
@@ -4568,7 +4902,68 @@ export default function GrandmaPage() {
     setPage(3)
   }, [pendingReorder, productsLoading, selectedShopId, selectedShop, apiProducts, products, applyGrandmaProductQty])
 
-  const goToPage = (p: PageId) => setPage(p)
+  const goToPage = (p: PageId) => {
+    if (p === 1) {
+      /* keep othersHubOpen so Back from a nested category can return to Ibindi */
+    } else if (p !== 2 && p !== 3) {
+      setOthersHubOpen(false)
+    }
+    setPage(p)
+  }
+
+  const openCategoryFromHome = (name: Category) => {
+    setSearch("")
+    setShopSearch("")
+    setHomeSearch("")
+    setHomeSearchCommitted(false)
+    setShopTab(null)
+    setSelectedShopId(null)
+    if (isOthersHubCategory(name)) {
+      setOthersHubOpen(true)
+      setPage(1)
+      return
+    }
+    setCategory(name)
+    if (isOthersChildCategory(name)) setOthersHubOpen(true)
+    else setOthersHubOpen(false)
+    goToPage(isAllPreferred ? 3 : 2)
+  }
+
+  const openHomeSearchShop = useCallback(
+    (shopId: string, cat: Category, itemQuery?: string) => {
+      const acct = sellerAccountFromGrandmaShopId(shopId)
+      const shop =
+        allAvailableShops.find((s) => s.id === shopId || sameGrandmaSeller(s.id, shopId)) ||
+        (acct
+          ? allAvailableShops.find(
+              (s) => sellerAccountFromGrandmaShopId(s.id).toUpperCase() === acct.toUpperCase(),
+            )
+          : undefined)
+      const nextCat = shop?.category || cat
+      const nextId =
+        shop?.id || (acct ? `supplier_${acct}__${nextCat.replace(/\s+/g, "_")}` : shopId)
+      setCategory(nextCat)
+      setSelectedShopId(nextId)
+      setSearch(itemQuery?.trim() || "")
+      setShopSearch("")
+      setHomeSearchOpen(false)
+      setPage(3)
+    },
+    [allAvailableShops],
+  )
+
+  const openHomeSearchItem = useCallback(
+    (p: HomeGlobalItemHit) => {
+      if (p.shopId || p.supplierAccount) {
+        openHomeSearchShop(p.shopId || `supplier_${p.supplierAccount}`, p.shopCategory, p.name)
+        return
+      }
+      setShopSearch(p.name)
+      setHomeSearchOpen(false)
+      setPage(2)
+    },
+    [openHomeSearchShop],
+  )
 
   const goGrandmaHome = useCallback(() => {
     setAppMode("buyer")
@@ -5053,6 +5448,11 @@ export default function GrandmaPage() {
         .page{display:none;padding:14px;}
         .page.active{display:block}
         .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+        .others-hub-head{display:flex;align-items:flex-start;gap:12px;margin:0 0 14px;}
+        .others-hub-back{border:none;background:transparent;color:#1897e0;font-size:14px;font-weight:800;cursor:pointer;padding:4px 0;flex-shrink:0;}
+        .others-hub-title{font-size:18px;font-weight:800;line-height:1.2;}
+        .others-hub-sub{font-size:12px;color:var(--muted);margin-top:2px;}
+        .others-hub-more{display:block;width:100%;margin-top:12px;padding:14px 16px;text-align:left;font-size:14px;font-weight:800;cursor:pointer;color:var(--text);}
         .card{background:var(--card);border-radius:16px;border:1px solid var(--line);box-shadow:0 8px 18px rgba(24,151,224,.08);}
         .cat-card{padding:14px 10px 16px;text-align:center;cursor:pointer;display:flex;flex-direction:column;align-items:center;min-height:120px;}
         .cat-icon{font-size:34px;margin-bottom:8px;}
@@ -5061,6 +5461,23 @@ export default function GrandmaPage() {
         .cat-card-footer strong{font-weight:800;color:var(--text);}
         .search{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:12px;box-shadow:0 8px 18px rgba(24,151,224,.08);}
         .search input{border:none;outline:none;width:100%;font-size:16px;background:transparent;}
+        .home-gsearch{position:relative;margin:0 0 14px;}
+        .home-gsearch-bar{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid #dfe1e5;border-radius:24px;padding:10px 12px 10px 16px;box-shadow:0 1px 6px rgba(32,33,36,.12);}
+        .home-gsearch-bar:focus-within{box-shadow:0 1px 6px rgba(32,33,36,.28);border-color:transparent;}
+        .home-gsearch-bar input{border:none;outline:none;width:100%;font-size:16px;background:transparent;color:var(--text);}
+        .home-gsearch-hint{margin:8px 4px 0;font-size:12px;color:var(--muted);line-height:1.35;}
+        .home-gsearch-clear{border:none;background:transparent;color:var(--muted);font-size:18px;line-height:1;cursor:pointer;padding:4px 6px;}
+        .home-gsearch-drop{position:absolute;left:0;right:0;top:calc(100% - 4px);z-index:50;background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:0 8px 24px rgba(24,151,224,.16);max-height:min(62vh,420px);overflow:auto;padding:6px 0;}
+        .home-gsearch-sec{padding:6px 12px 4px;font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);}
+        .home-gsearch-row{display:flex;align-items:center;gap:10px;width:100%;border:none;background:transparent;text-align:left;padding:10px 14px;cursor:pointer;color:var(--text);}
+        .home-gsearch-row:hover,.home-gsearch-row:focus{background:#f1f8ff;outline:none;}
+        .home-gsearch-thumb{width:36px;height:36px;border-radius:10px;background:#f1f8ff;border:1px solid var(--line);object-fit:contain;flex-shrink:0;}
+        .home-gsearch-emoji{width:36px;height:36px;border-radius:10px;background:#f1f8ff;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;}
+        .home-gsearch-name{font-weight:700;font-size:14px;line-height:1.25;}
+        .home-gsearch-meta{font-size:12px;color:var(--muted);margin-top:2px;}
+        .home-gsearch-empty{padding:16px 14px;font-size:13px;color:var(--muted);}
+        .home-gsearch-results{display:flex;flex-direction:column;gap:10px;margin-bottom:12px;}
+        .home-gsearch-results .shop-row,.home-gsearch-results .product-row{cursor:pointer;}
         .reorder-btn{border:none;background:#e8f3ff;color:var(--blue-dark);border-radius:10px;padding:8px 10px;font-weight:700;cursor:pointer;}
         .shop-top-trio{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;}
         .shop-trio-btn{border:none;background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 6px;font-weight:700;font-size:11px;cursor:pointer;color:var(--text);line-height:1.25;}
@@ -5293,11 +5710,14 @@ export default function GrandmaPage() {
               }`}
               id="pageTitle"
             >
-              <span className="title-text">{title}</span>
-              {appMode === "buyer" && buyerHeaderName ? (
+              <span className="title-text" suppressHydrationWarning>
+                {title}
+              </span>
+              {appMode === "buyer" && authHasHydrated && buyerHeaderName ? (
                 <span className="buyer-header-name">{buyerHeaderName}</span>
               ) : null}
               {appMode === "seller" &&
+              authHasHydrated &&
               isAuthenticated &&
               sellerHeaderSubline &&
               sellerHeaderSubline.trim() !== title.trim() ? (
@@ -5785,6 +6205,316 @@ export default function GrandmaPage() {
 
       {/* Page 1 — sector grid (buyer home) */}
       <section className={`page ${page === 1 ? "active" : ""}`} id="page1">
+        <div className="home-gsearch">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              if (homeSearch.trim().length >= 2) {
+                setHomeSearchCommitted(true)
+                setHomeSearchOpen(false)
+              }
+            }}
+          >
+            <div className="home-gsearch-bar">
+              <button
+                type="submit"
+                className="home-gsearch-submit"
+                aria-label={tPay.homeSearchPlaceholder}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  padding: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  cursor: "pointer",
+                  flexShrink: 0,
+                }}
+              >
+                <Search className="h-5 w-5" style={{ color: "#5f6368" }} aria-hidden />
+              </button>
+              <input
+                value={homeSearch}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setHomeSearch(v)
+                  setHomeSearchOpen(true)
+                  setHomeSearchCommitted(false)
+                  setHomeSearchError(null)
+                  if (v.trim().length >= 2) setHomeSearchLoading(true)
+                  else setHomeSearchLoading(false)
+                }}
+                onFocus={() => setHomeSearchOpen(true)}
+                onBlur={() => setTimeout(() => setHomeSearchOpen(false), 180)}
+                placeholder={tPay.homeSearchPlaceholder}
+                aria-label={tPay.homeSearchPlaceholder}
+                autoComplete="off"
+                enterKeyHint="search"
+              />
+              {homeSearchLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" style={{ color: "#1897e0" }} aria-hidden />
+              ) : null}
+              {homeSearch.trim() ? (
+                <button
+                  type="button"
+                  className="home-gsearch-clear"
+                  aria-label={tPay.homeSearchClear}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    setHomeSearch("")
+                    setHomeItemHits([])
+                    setHomeShopHits([])
+                    setHomeSearchCommitted(false)
+                  }}
+                >
+                  ×
+                </button>
+              ) : null}
+            </div>
+          </form>
+          {!homeSearch.trim() ? <p className="home-gsearch-hint">{tPay.homeSearchHint}</p> : null}
+          {homeSearchOpen && homeSearch.trim().length >= 2 && !homeSearchCommitted ? (
+            <div className="home-gsearch-drop" role="listbox">
+              {homeSearchLoading && homeItemHits.length === 0 && homeShopHits.length === 0 ? (
+                <div className="home-gsearch-empty">
+                  {language === "rw" ? "Turimo gushakisha…" : language === "fr" ? "Recherche…" : "Searching…"}
+                </div>
+              ) : homeSearchError ? (
+                <div className="home-gsearch-empty" style={{ color: "#b42318" }}>{homeSearchError}</div>
+              ) : homeItemHits.length === 0 && homeShopHits.length === 0 ? (
+                <div className="home-gsearch-empty">{tPay.homeSearchNoResults}</div>
+              ) : (
+                <>
+                  {homeItemHits.length > 0 ? (
+                    <>
+                      <div className="home-gsearch-sec">{tPay.homeSearchItems}</div>
+                      {homeItemHits.slice(0, 10).map((p) => (
+                        <button
+                          key={p.key}
+                          type="button"
+                          className="home-gsearch-row"
+                          role="option"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => openHomeSearchItem(p)}
+                        >
+                          {p.image ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={p.image} alt="" className="home-gsearch-thumb" />
+                          ) : (
+                            <span className="home-gsearch-emoji" aria-hidden>
+                              🛒
+                            </span>
+                          )}
+                          <span>
+                            <span className="home-gsearch-name">{p.name}</span>
+                            <span className="home-gsearch-meta">
+                              {p.price > 0 ? `${p.price.toLocaleString()} RWF · ` : ""}
+                              {p.shopName
+                                ? tPay.homeSearchAtShop.replace("{shop}", p.shopName)
+                                : tPay.homeSearchItems}
+                            </span>
+                          </span>
+                        </button>
+                      ))}
+                    </>
+                  ) : null}
+                  {homeShopHits.length > 0 ? (
+                    <>
+                      <div className="home-gsearch-sec">{tPay.homeSearchShops}</div>
+                      {homeShopHits.slice(0, 6).map((s) => (
+                        <button
+                          key={`shop-${s.id}`}
+                          type="button"
+                          className="home-gsearch-row"
+                          role="option"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => openHomeSearchShop(s.id, s.category)}
+                        >
+                          <span className="home-gsearch-emoji" aria-hidden>
+                            🏪
+                          </span>
+                          <span>
+                            <span className="home-gsearch-name">{s.name}</span>
+                            <span className="home-gsearch-meta">
+                              {categoryLabel(s.category, language)}
+                              {s.matchedProduct ? ` · ${s.matchedProduct}` : s.tagline ? ` · ${s.tagline}` : ""}
+                            </span>
+                          </span>
+                        </button>
+                      ))}
+                    </>
+                  ) : null}
+                </>
+              )}
+            </div>
+          ) : null}
+        </div>
+
+        {homeSearchCommitted && homeSearch.trim().length >= 2 ? (
+          <div className="home-gsearch-results">
+            {homeSearchLoading && homeItemHits.length === 0 && homeShopHits.length === 0 ? (
+              <div className="card note">
+                {language === "rw" ? "Turimo gushakisha…" : language === "fr" ? "Recherche…" : "Searching…"}
+              </div>
+            ) : homeSearchError ? (
+              <div className="card note" style={{ color: "#b42318" }}>{homeSearchError}</div>
+            ) : homeItemHits.length === 0 && homeShopHits.length === 0 ? (
+              <div className="card note">{tPay.homeSearchNoResults}</div>
+            ) : (
+              <>
+                {homeItemHits.length > 0 ? (
+                  <>
+                    <div className="home-gsearch-sec" style={{ paddingLeft: 4 }}>
+                      {tPay.homeSearchItems}
+                    </div>
+                    {homeItemHits.map((p) => (
+                      <div
+                        key={`res-item-${p.key}`}
+                        className="shop-row"
+                        onClick={() => openHomeSearchItem(p)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault()
+                            openHomeSearchItem(p)
+                          }
+                        }}
+                      >
+                        <div className="shop-avatar" aria-hidden>
+                          {p.image ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={p.image} alt="" />
+                          ) : (
+                            "🛒"
+                          )}
+                        </div>
+                        <div className="shop-row-meta">
+                          <div className="shop-row-name">{p.name}</div>
+                          <div className="shop-row-tag">
+                            {p.price > 0 ? `${p.price.toLocaleString()} RWF · ` : ""}
+                            {p.shopName
+                              ? tPay.homeSearchAtShop.replace("{shop}", p.shopName)
+                              : tPay.homeSearchItems}
+                            {p.shopCategory ? ` · ${categoryLabel(p.shopCategory, language)}` : ""}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                ) : null}
+                {homeShopHits.length > 0 ? (
+                  <>
+                    <div className="home-gsearch-sec" style={{ paddingLeft: 4 }}>
+                      {tPay.homeSearchShops}
+                    </div>
+                    {homeShopHits.map((s) => (
+                      <div
+                        key={`res-shop-${s.id}`}
+                        className="shop-row"
+                        onClick={() => openHomeSearchShop(s.id, s.category)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault()
+                            openHomeSearchShop(s.id, s.category)
+                          }
+                        }}
+                      >
+                        <div className="shop-avatar" aria-hidden>
+                          🏪
+                        </div>
+                        <div className="shop-row-meta">
+                          <div className="shop-row-name">{s.name}</div>
+                          <div className="shop-row-tag">
+                            {categoryLabel(s.category, language)}
+                            {s.matchedProduct ? ` · ${s.matchedProduct}` : s.tagline ? ` · ${s.tagline}` : ""}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                ) : null}
+              </>
+            )}
+          </div>
+        ) : othersHubOpen ? (
+        <div>
+          <div className="others-hub-head">
+            <button
+              type="button"
+              className="others-hub-back"
+              onClick={() => setOthersHubOpen(false)}
+            >
+              ← {language === "rw" ? "Ahabanza" : language === "fr" ? "Accueil" : "Home"}
+            </button>
+            <div>
+              <div className="others-hub-title">{categoryLabel("Others", language)}</div>
+              <div className="others-hub-sub">
+                {language === "rw"
+                  ? "Hitamo icyiciro"
+                  : language === "fr"
+                    ? "Choisissez une catégorie"
+                    : "Choose a category"}
+              </div>
+            </div>
+          </div>
+          <div className="grid">
+            {OTHERS_CHILD_CATEGORIES.map((c) => {
+              const stat = grandmaHomeSectorCounts[c.name]
+              return (
+                <div
+                  key={c.name}
+                  className="card cat-card"
+                  onClick={() => openCategoryFromHome(c.name)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter" && e.key !== " ") return
+                    e.preventDefault()
+                    openCategoryFromHome(c.name)
+                  }}
+                >
+                  <div className="cat-icon">{c.icon}</div>
+                  <div className="cat-name">{categoryLabel(c.name, language)}</div>
+                  <div className="cat-card-footer">
+                    {allShopsLoading || homeSectorItemsLoading ? (
+                      <span>…</span>
+                    ) : (
+                      <>
+                        <strong>{stat?.shops ?? 0}</strong> {tPay.sectorPanelShops}
+                        <span aria-hidden> · </span>
+                        <strong>{stat?.items ?? 0}</strong> {tPay.sectorPanelItems}
+                      </>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <button
+            type="button"
+            className="card others-hub-more"
+            onClick={() => {
+              setSearch("")
+              setShopSearch("")
+              setHomeSearch("")
+              setHomeSearchCommitted(false)
+              setShopTab(null)
+              setSelectedShopId(null)
+              setCategory("Others")
+              setOthersHubOpen(false)
+              goToPage(isAllPreferred ? 3 : 2)
+            }}
+          >
+            {language === "rw"
+              ? "Reba andi maduka"
+              : language === "fr"
+                ? "Voir les autres commerces"
+                : "See other shops"}
+          </button>
+        </div>
+        ) : (
         <div className="grid">
           {CATEGORIES.map((c) => {
             const stat = grandmaHomeSectorCounts[c.name]
@@ -5792,30 +6522,18 @@ export default function GrandmaPage() {
               <div
                 key={c.name}
                 className="card cat-card"
-                onClick={() => {
-                  setCategory(c.name)
-                  setSearch("")
-                  setShopSearch("")
-                  setShopTab(null)
-                  setSelectedShopId(null)
-                  // Business flow: if ALL is selected, go straight to items
-                  goToPage(isAllPreferred ? 3 : 2)
-                }}
+                onClick={() => openCategoryFromHome(c.name)}
                 role="button"
                 tabIndex={0}
                 onKeyDown={(e) => {
                   if (e.key !== "Enter" && e.key !== " ") return
                   e.preventDefault()
-                  setCategory(c.name)
-                  setSearch("")
-                  setShopSearch("")
-                  setShopTab(null)
-                  setSelectedShopId(null)
-                  goToPage(isAllPreferred ? 3 : 2)
+                  openCategoryFromHome(c.name)
                 }}
               >
                 <div className="cat-icon">{c.icon}</div>
                 <div className="cat-name">{categoryLabel(c.name, language)}</div>
+                {isOthersHubCategory(c.name) ? null : (
                 <div className="cat-card-footer">
                   {allShopsLoading || homeSectorItemsLoading ? (
                     <span>…</span>
@@ -5827,14 +6545,29 @@ export default function GrandmaPage() {
                     </>
                   )}
                 </div>
+                )}
               </div>
             )
           })}
         </div>
+        )}
       </section>
 
       {/* Page 2 — pick a shop for this category */}
       <section className={`page ${page === 2 ? "active" : ""}`} id="page2-shops">
+        {isOthersChildCategory(category) ? (
+          <button
+            type="button"
+            className="others-hub-back"
+            style={{ marginBottom: 10 }}
+            onClick={() => {
+              setOthersHubOpen(true)
+              setPage(1)
+            }}
+          >
+            ← {categoryLabel("Others", language)}
+          </button>
+        ) : null}
         <p className="note" style={{ marginTop: 0, marginBottom: 12 }}>
           Choose a shop in <strong>{categoryLabel(category, language)}</strong>. Favorites and shops you used before are listed first.
           {useLocationSort ? " Sorted by distance." : ""}
@@ -5937,20 +6670,44 @@ export default function GrandmaPage() {
           </p>
         ) : null}
 
-        <div className="search" style={{ position: "relative" }}>
-          <span aria-hidden>🔎</span>
+        <form
+          className="search"
+          style={{ position: "relative" }}
+          onSubmit={(e) => {
+            e.preventDefault()
+            setSearchPage(1)
+            setShowSearchSuggestions(false)
+          }}
+        >
+          <button
+            type="submit"
+            aria-label="Search shops or products"
+            style={{
+              border: "none",
+              background: "transparent",
+              padding: 0,
+              cursor: "pointer",
+              fontSize: 18,
+              lineHeight: 1,
+              flexShrink: 0,
+            }}
+          >
+            🔎
+          </button>
           <input
             value={shopSearch}
             onChange={(e) => {
               setShopSearch(e.target.value)
               setShowSearchSuggestions(true)
               setSearchPage(1)
+              if (e.target.value.trim().length >= 1) setBackendSearchLoading(true)
             }}
             onFocus={() => setShowSearchSuggestions(true)}
             onBlur={() => setTimeout(() => setShowSearchSuggestions(false), 180)}
             placeholder="Search shops or products (e.g. milk, bread)"
             aria-label="Search shops or products"
             aria-autocomplete="list"
+            enterKeyHint="search"
           />
           {backendSearchLoading || shopProductSearchLoading ? (
             <Loader2 className="h-4 w-4 animate-spin" style={{ color: "#1897e0" }} aria-hidden />
@@ -6003,7 +6760,7 @@ export default function GrandmaPage() {
               ))}
             </ul>
           ) : null}
-        </div>
+        </form>
 
         <div className="shop-filter-row" role="tablist" aria-label="Shop filters">
           {SHOP_FILTER_TABS.map((t) => (
@@ -6039,7 +6796,11 @@ export default function GrandmaPage() {
               {allShopsError}
             </div>
           ) : null}
-          {!allShopsLoading && !shopsLoading && !shopsError && visibleShops.length === 0 ? (
+          {!allShopsLoading && !shopsLoading && !shopsError && backendSearchError ? (
+            <div className="card note" style={{ color: "#b42318" }}>
+              {backendSearchError}
+            </div>
+          ) : !allShopsLoading && !shopsLoading && !shopsError && visibleShops.length === 0 ? (
             <div className="card note">
               {!GRANDMA_SHOW_DEMO_SHOPS && allAvailableShops.length === 0 ? (
                 <p style={{ marginBottom: 10, color: "#5a6b7a", fontSize: "0.92rem" }}>{GRANDMA_NO_LIVE_SHOPS_HINT}</p>
@@ -6105,7 +6866,13 @@ export default function GrandmaPage() {
                   </p>
                 )
               ) : (
-                <p style={{ margin: 0 }}>No shops match. Try another filter or search.</p>
+                <p style={{ margin: 0 }}>
+                  {language === "rw"
+                    ? `Nta duka riri mu ${categoryLabel(category, language)} noneho.`
+                    : language === "fr"
+                      ? `Aucun commerce LIVE dans ${categoryLabel(category, language)} pour le moment.`
+                      : `No LIVE shops in ${categoryLabel(category, language)} yet.`}
+                </p>
               )}
             </div>
           ) : null}
@@ -6184,6 +6951,27 @@ export default function GrandmaPage() {
               </div>
             ))
           ) : null}
+          {searchHasMore && !backendSearchError && visibleShops.length > 0 ? (
+            <button
+              type="button"
+              className="reorder-btn"
+              style={{ margin: "12px auto", display: "block" }}
+              disabled={backendSearchLoading}
+              onClick={() => setSearchPage((p) => p + 1)}
+            >
+              {backendSearchLoading
+                ? language === "rw"
+                  ? "Turimo gushakisha…"
+                  : language === "fr"
+                    ? "Chargement…"
+                    : "Loading…"
+                : language === "rw"
+                  ? "Ongera amaduka"
+                  : language === "fr"
+                    ? "Charger plus"
+                    : "Load more shops"}
+            </button>
+          ) : null}
         </div>
       </section>
 
@@ -6219,18 +7007,38 @@ export default function GrandmaPage() {
             Showing best offers across shops (cheapest, then closest). Tap an item to choose the shop and add to cart.
           </div>
         ) : null}
-        <div className="search">
-          <span aria-hidden>🔎</span>
+        <form
+          className="search"
+          onSubmit={(e) => {
+            e.preventDefault()
+          }}
+        >
+          <button
+            type="submit"
+            aria-label="Search item"
+            style={{
+              border: "none",
+              background: "transparent",
+              padding: 0,
+              cursor: "pointer",
+              fontSize: 18,
+              lineHeight: 1,
+              flexShrink: 0,
+            }}
+          >
+            🔎
+          </button>
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search item"
             aria-label="Search item"
+            enterKeyHint="search"
           />
-          <button className="reorder-btn" onClick={() => alert("Old orders / reorder")}>
+          <button type="button" className="reorder-btn" onClick={() => alert("Old orders / reorder")}>
             ↻
           </button>
-        </div>
+        </form>
 
         <div className="product-list" id="productList">
           {productsLoading ? (
@@ -7464,7 +8272,10 @@ export default function GrandmaPage() {
       </section>
 
       <div className={cn("footer", showSupplierDashboardNav && "footer--supplier-6")}>
-        <button type="button" className={page === 1 ? "active" : ""} onClick={() => goToPage(1)}>
+        <button type="button" className={page === 1 ? "active" : ""} onClick={() => {
+          setOthersHubOpen(false)
+          goToPage(1)
+        }}>
           🏠<span>{settingsUi.footerHome}</span>
         </button>
         <button type="button" className={page === 2 ? "active" : ""} onClick={() => goToPage(2)}>

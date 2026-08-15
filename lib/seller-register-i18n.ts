@@ -464,6 +464,11 @@ export const SELLER_UI = {
   next: { en: "Next", rw: "Komeza", fr: "Suivant" },
   submit: { en: "Submit draft", rw: "Ohereza", fr: "Envoyer" },
   saving: { en: "Saving\u2026", rw: "Birimo kubika\u2026", fr: "Enregistrement\u2026" },
+  gpsPersistIncomplete: {
+    en: "Your shop was registered successfully, but its location could not be saved completely. Please try updating your shop location again.",
+    rw: "Iduka ryanditswe neza, ariko ahantu ntihabitswe neza. Ongera ugerageze gushyira aho iduka riherereye.",
+    fr: "Votre boutique a \u00e9t\u00e9 enregistr\u00e9e, mais sa position n\u2019a pas pu \u00eatre enregistr\u00e9e compl\u00e8tement. Veuillez r\u00e9essayer de mettre \u00e0 jour l\u2019emplacement.",
+  },
   searchProvince: { en: "Search province\u2026", rw: "Shakisha intara\u2026", fr: "Chercher province\u2026" },
   searchDistrict: { en: "Search district\u2026", rw: "Shakisha akarere\u2026", fr: "Chercher district\u2026" },
   selectProvinceFirst: {
@@ -516,9 +521,9 @@ export const ERR = {
     fr: "Remplissez nom, t\u00e9l\u00e9phone, cat\u00e9gorie, province, district, secteur, cellule et village.",
   },
   missingCompanyName: {
-    en: "Enter the shop name.",
-    rw: "Andika izina ry\u2019iduka.",
-    fr: "Indiquez le nom de la boutique.",
+    en: "Enter a real shop name (not empty or “null”).",
+    rw: "Andika izina ry\u2019iduka nyaryo (ntuandike null).",
+    fr: "Indiquez un vrai nom de boutique (pas vide ni « null »).",
   },
   missingPhone: {
     en: "Enter a phone number.",

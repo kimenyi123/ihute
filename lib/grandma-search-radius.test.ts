@@ -24,11 +24,15 @@ test("parseGrandmaSearchRadiusKm: numeric options including 1", () => {
   assert.equal(parseGrandmaSearchRadiusKm("50"), 50)
 })
 
-test("parseGrandmaSearchRadiusKm: all / empty → null (no distance cap)", () => {
+test("parseGrandmaSearchRadiusKm: all → null (no distance cap)", () => {
   assert.equal(parseGrandmaSearchRadiusKm("all"), null)
   assert.equal(parseGrandmaSearchRadiusKm("ALL"), null)
-  assert.equal(parseGrandmaSearchRadiusKm(""), null)
-  assert.equal(parseGrandmaSearchRadiusKm(null), null)
+})
+
+test("parseGrandmaSearchRadiusKm: omitted/empty → default 1 km (same as frontend Near Me)", () => {
+  assert.equal(parseGrandmaSearchRadiusKm(""), GRANDMA_NEAR_ME_DEFAULT_RADIUS_KM)
+  assert.equal(parseGrandmaSearchRadiusKm(null), GRANDMA_NEAR_ME_DEFAULT_RADIUS_KM)
+  assert.equal(parseGrandmaSearchRadiusKm(undefined), 1)
 })
 
 test("parseGrandmaSearchRadiusKm: invalid → default 1 km", () => {

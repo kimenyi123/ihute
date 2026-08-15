@@ -232,6 +232,39 @@ async function main() {
 
   console.log("\n=== 5. Connection OK — continuing full E2E suite ===\n")
 
+  await timed("10e. Required search/GPS columns exist", async () => {
+    const conn = await mysql.createConnection(connOpts)
+    const [signupCols] = await conn.query<any[]>("SHOW COLUMNS FROM account_signup")
+    const [sellerCols] = await conn.query<any[]>("SHOW COLUMNS FROM account_seller")
+    const [stockCols] = await conn.query<any[]>("SHOW COLUMNS FROM seller_add_stock")
+    await conn.end()
+    const signup = new Set(signupCols.map((c) => String(c.Field)))
+    const seller = new Set(sellerCols.map((c) => String(c.Field)))
+    const stock = new Set(stockCols.map((c) => String(c.Field)))
+    const needSignup = [
+      "TYPE",
+      "STATUS",
+      "ISHYIGA_ACCOUNT",
+      "OWNER",
+      "PREFEREDCATEGORIES",
+      "DEPARTMENT",
+      "supplier_latitude",
+      "supplier_longitude",
+      "supplier_geohash",
+      "gps_accuracy",
+    ]
+    const needStock = ["ITEM_NAME", "STATUS", "QUANTITY", "SELLER_ISHYIGA_ACCOUNT"]
+    const missingSignup = needSignup.filter((c) => !signup.has(c))
+    const missingStock = needStock.filter((c) => !stock.has(c))
+    const missingSellerGps = ["supplier_latitude", "supplier_longitude"].filter((c) => !seller.has(c))
+    if (missingSignup.length || missingStock.length || missingSellerGps.length) {
+      throw new Error(
+        `missing signup=${missingSignup.join(",")} stock=${missingStock.join(",")} sellerGps=${missingSellerGps.join(",")}`,
+      )
+    }
+    return `signup=${signup.size} seller=${seller.size} stock=${stock.size}`
+  })
+
   await timed("10a. Check geo indexes on account_signup", async () => {
     const conn = await mysql.createConnection(connOpts)
     const [idx] = await conn.query<any[]>("SHOW INDEX FROM account_signup")
@@ -267,6 +300,31 @@ async function main() {
     return `with_gps=${n}`
   })
 
+  // Read-only diagnostic: registration succeeded but GPS never landed on account_signup.
+  // Does NOT modify rows. High counts usually mean ONBOARDING_MYSQL_* was missing at signup
+  // and/or CreateSellerServlet ignored latitude/longitude.
+  await timed("10d. LIVE sellers missing GPS (diagnostic)", async () => {
+    const conn = await mysql.createConnection(connOpts)
+    const [rows] = await conn.query<any[]>(`
+    SELECT COUNT(*) AS missing_gps FROM account_signup
+    WHERE TYPE='SELLER' AND STATUS='LIVE'
+      AND (supplier_latitude IS NULL OR supplier_longitude IS NULL)`)
+    const [samples] = await conn.query<any[]>(`
+    SELECT ISHYIGA_ACCOUNT AS acct, OWNER AS name
+    FROM account_signup
+    WHERE TYPE='SELLER' AND STATUS='LIVE'
+      AND (supplier_latitude IS NULL OR supplier_longitude IS NULL)
+    ORDER BY ID DESC
+    LIMIT 5`)
+    await conn.end()
+    const n = Number(rows[0].missing_gps)
+    const sample = samples
+      .map((r) => `${String(r.acct || "").trim()}:${String(r.name || "").trim().slice(0, 24)}`)
+      .filter(Boolean)
+      .join(" | ")
+    return `missing_gps=${n}${sample ? ` samples=${sample}` : ""} (read-only; not fixed)`
+  })
+
   let productToken = "milk"
   await timed("3a. Discover real product token", async () => {
     const conn = await mysql.createConnection(connOpts)
@@ -297,6 +355,25 @@ async function main() {
     return `shops=${r.shops.length} total=${r.total} top=${r.shops[0].name} score=${r.shops[0].score}`
   })
 
+  await timed("3b. Keyword milk returns shops that sell milk", async () => {
+    const r = await runGrandmaSearch({ q: "milk", page: 1, pageSize: 20 })
+    if (!r.ok) throw new Error(`${r.code}: ${r.error}`)
+    if (!r.shops.length) throw new Error("No shops for q=milk")
+    const sample = r.shops.find((s) => /milk/i.test(s.matchedProductSample || s.name || ""))
+    if (!sample) {
+      throw new Error(
+        `milk shops=${r.shops.length} but none had milk in name/product (top=${r.shops[0].name} product=${r.shops[0].matchedProductSample})`,
+      )
+    }
+    return `shops=${r.shops.length} top=${sample.name} product=${sample.matchedProductSample || ""}`
+  })
+
+  await timed("3c. Sector pharmacy search", async () => {
+    const r = await runGrandmaSearch({ sector: "pharmacy", pageSize: 10 })
+    if (!r.ok) throw new Error(`${r.code}: ${r.error}`)
+    return `shops=${r.shops.length} total=${r.total} cats=${[...new Set(r.shops.map((s) => s.category))].join(",")}`
+  })
+
   await timed("4. Autocomplete suggestions", async () => {
     const prefix = productToken.slice(0, Math.min(3, productToken.length))
     const r = await runGrandmaSearch({ q: prefix, suggest: true, pageSize: 5 })
@@ -312,6 +389,7 @@ async function main() {
         : productToken + "x"
     const r = await runGrandmaSearch({ q: typo, pageSize: 10 })
     if (!r.ok) throw new Error(`${r.code}: ${r.error}`)
+    if (!r.shops.length) throw new Error(`No shops for typo ${typo} (fuzzy SQL stem should retrieve ${productToken})`)
     return `typo=${typo} shops=${r.shops.length} tiers=${[...new Set(r.shops.map((s) => s.matchTier))].join(",")}`
   })
 

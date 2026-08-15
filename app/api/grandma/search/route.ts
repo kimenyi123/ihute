@@ -5,7 +5,10 @@ import {
   parseGrandmaSearchRadiusKm,
 } from "@/lib/grandma-search"
 import { isValidLatLng } from "@/lib/geo-haversine"
-import { GRANDMA_CATEGORY_TO_SECTOR_SLUG } from "@/lib/seller-category-sector"
+import {
+  GRANDMA_CATEGORY_TO_SECTOR_SLUG,
+  isKnownGrandmaCategoryInput,
+} from "@/lib/seller-category-sector"
 
 export const runtime = "nodejs"
 
@@ -17,7 +20,7 @@ export const runtime = "nodejs"
  * - sector | category: Grandma sector slug or label
  * - lat, lng: buyer coordinates
  * - nearMe: 1 to enable geo filter/sort
- * - radiusKm: default 1; omit or `all` for no radius cap when nearMe
+ * - radiusKm: when nearMe, omit/empty → 1 km; `all` → no radius cap
  * - page, pageSize
  * - suggest: 1 to include autocomplete suggestions
  */
@@ -32,6 +35,19 @@ export async function GET(req: NextRequest) {
       sector =
         GRANDMA_CATEGORY_TO_SECTOR_SLUG[category as keyof typeof GRANDMA_CATEGORY_TO_SECTOR_SLUG] ||
         category.toLowerCase().replace(/\s+/g, "-")
+    }
+
+    const categoryOrSector = sector || category
+    if (categoryOrSector && !isKnownGrandmaCategoryInput(categoryOrSector)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Unknown category",
+          code: "INVALID_CATEGORY",
+          rid,
+        },
+        { status: 400 },
+      )
     }
 
     const latRaw = sp.get("lat")
@@ -51,24 +67,24 @@ export async function GET(req: NextRequest) {
         : GRANDMA_SEARCH_DEFAULT_PAGE_SIZE
     const suggest = sp.get("suggest") === "1" || sp.get("suggest") === "true"
 
-    if (nearMe && !isValidLatLng(lat, lng)) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "nearMe requires valid lat and lng",
-          code: "GEO_REQUIRED",
-          rid,
-        },
-        { status: 400 },
-      )
-    }
-
     if (latRaw != null && latRaw !== "" && lngRaw != null && lngRaw !== "" && !isValidLatLng(lat, lng)) {
       return NextResponse.json(
         {
           ok: false,
           error: "Invalid latitude or longitude",
           code: "GEO_INVALID",
+          rid,
+        },
+        { status: 400 },
+      )
+    }
+
+    if (nearMe && !isValidLatLng(lat, lng)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "nearMe requires valid lat and lng",
+          code: "GEO_REQUIRED",
           rid,
         },
         { status: 400 },

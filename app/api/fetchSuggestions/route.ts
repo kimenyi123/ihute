@@ -38,18 +38,24 @@ function applyGlobalSearchDedupe(
   parsed: { products?: unknown[] },
   globalSearchQ: string | undefined,
   redisHit: boolean,
+  keepAllShops = false,
 ): void {
   if (!globalSearchQ || !parsed?.products) return
   const safeTerm = globalSearchQ.trim().replace(/"/g, "'")
   const rawResults = parsed.products.length
   parsed.products = dedupeSearchProductsByItemCodeAndSellingPrice(parsed.products) as typeof parsed.products
   const afterLot = parsed.products?.length ?? 0
-  parsed.products = dedupeCrossShopByItemCode(parsed.products ?? []) as typeof parsed.products
-  const afterCross = parsed.products?.length ?? 0
+  let afterCross = afterLot
+  if (!keepAllShops) {
+    parsed.products = dedupeCrossShopByItemCode(parsed.products ?? []) as typeof parsed.products
+    afterCross = parsed.products?.length ?? 0
+  }
   console.log(
-    `[cache][global] term="${safeTerm}" redis_hit=${redisHit} raw_results=${rawResults} after_lot_dedupe=${afterLot} after_crossshop_dedupe=${afterCross}`,
+    `[cache][global] term="${safeTerm}" redis_hit=${redisHit} locateShops=${keepAllShops} raw_results=${rawResults} after_lot_dedupe=${afterLot} after_crossshop_dedupe=${afterCross}`,
   )
-  logCrossShopDedupeDetails(parsed.products ?? [], globalSearchQ)
+  if (!keepAllShops) {
+    logCrossShopDedupeDetails(parsed.products ?? [], globalSearchQ)
+  }
   if (rawResults !== afterCross) {
     console.log(
       "[fetchSuggestions] Cross-shop dedupe:",
@@ -130,8 +136,13 @@ async function forward(req: NextRequest) {
   // Category, brand, price: frontend sends category, brand, priceMin, priceMax; backend can filter by them.
   // See docs/backend-category-price-filters.md for SQL/API guidance.
   incoming.searchParams.forEach((v, k) => target.searchParams.append(k, v))
+  target.searchParams.delete("locateShops")
+  target.searchParams.delete("keepAllShops")
 
   // Redis first (this app): check our response cache before calling backend (DB)
+  const keepAllShops =
+    incoming.searchParams.get("locateShops") === "1" ||
+    incoming.searchParams.get("keepAllShops") === "1"
   const cacheKey = buildCacheKey("fetchSuggestions", paramsToRecord(incoming.searchParams))
   const cached = skipSuggestionsCache ? null : await getCached(cacheKey)
   if (cached) {
@@ -141,7 +152,7 @@ async function forward(req: NextRequest) {
       const globalSearchQ = incoming.searchParams.get("globalSearch")?.trim()
       // Drop expired lots first so dedupe never picks an expired row as representative when a valid batch exists.
       stripExpiredFromFetchSuggestionsBody(parsed)
-      applyGlobalSearchDedupe(parsed, globalSearchQ, true)
+      applyGlobalSearchDedupe(parsed, globalSearchQ, true, keepAllShops)
       enrichFetchSuggestionsProducts(parsed)
       return new Response(JSON.stringify(parsed), {
         status: 200,
@@ -335,7 +346,7 @@ async function forward(req: NextRequest) {
     stripExpiredFromFetchSuggestionsBody(parsed ?? {})
 
     const globalSearchQ = incoming.searchParams.get("globalSearch")?.trim()
-    applyGlobalSearchDedupe(parsed ?? {}, globalSearchQ, false)
+    applyGlobalSearchDedupe(parsed ?? {}, globalSearchQ, false, keepAllShops)
 
     enrichFetchSuggestionsProducts(parsed ?? {})
 
