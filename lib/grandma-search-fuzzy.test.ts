@@ -30,3 +30,8 @@ test("FULLTEXT milk query uses prefix BOOLEAN", () => {
   assert.ok(q.some((x) => x.includes("+milk*")), String(q))
   assert.equal(q.some((x) => x === "+mil*"), false, String(q))
 })
+
+test("collapsed chappatti is offered as a FULLTEXT candidate", () => {
+  const q = buildGrandmaFulltextBooleanQueries("chappatti")
+  assert.ok(q.some((x) => x.includes("chapati")), String(q))
+})

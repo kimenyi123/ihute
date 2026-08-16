@@ -4,6 +4,12 @@ import { getOnboardingMysqlConfigStatus } from "@/lib/onboarding-mysql"
 import {
   GRANDMA_SEARCH_DEFAULT_PAGE_SIZE,
   parseGrandmaSearchRadiusKm,
+  grandmaSearchRadiusParamError,
+  GRANDMA_PUBLIC_SEARCH_UNAVAILABLE,
+  GRANDMA_PUBLIC_NEARME_UNAVAILABLE,
+  GRANDMA_PUBLIC_GPS_PERMISSION,
+  GRANDMA_PUBLIC_INVALID_SEARCH,
+  GRANDMA_PUBLIC_INVALID_RADIUS,
 } from "@/lib/grandma-search"
 import { isValidLatLng } from "@/lib/geo-haversine"
 import {
@@ -27,6 +33,8 @@ export const runtime = "nodejs"
  */
 export async function GET(req: NextRequest) {
   const rid = crypto.randomUUID()
+  const started = Date.now()
+  let nearMe = false
   try {
     const sp = req.nextUrl.searchParams
     const q = sp.get("q")?.trim() ?? ""
@@ -40,12 +48,11 @@ export async function GET(req: NextRequest) {
 
     const categoryOrSector = sector || category
     if (categoryOrSector && !isKnownGrandmaCategoryInput(categoryOrSector)) {
+      console.warn(`[api/grandma/search] ${rid} INVALID_CATEGORY`)
       return NextResponse.json(
         {
           ok: false,
-          error: "Unknown category",
-          code: "INVALID_CATEGORY",
-          rid,
+          error: GRANDMA_PUBLIC_INVALID_SEARCH,
         },
         { status: 400 },
       )
@@ -55,8 +62,19 @@ export async function GET(req: NextRequest) {
     const lngRaw = sp.get("lng")
     const lat = latRaw != null && latRaw !== "" ? Number(latRaw) : undefined
     const lng = lngRaw != null && lngRaw !== "" ? Number(lngRaw) : undefined
-    const nearMe = sp.get("nearMe") === "1" || sp.get("nearMe") === "true"
+    nearMe = sp.get("nearMe") === "1" || sp.get("nearMe") === "true"
     const radiusRaw = sp.get("radiusKm")
+    const radiusErr = grandmaSearchRadiusParamError(radiusRaw)
+    if (radiusErr) {
+      console.warn(`[api/grandma/search] ${rid} INVALID_RADIUS`)
+      return NextResponse.json(
+        {
+          ok: false,
+          error: GRANDMA_PUBLIC_INVALID_RADIUS,
+        },
+        { status: 400 },
+      )
+    }
     const radiusKm = parseGrandmaSearchRadiusKm(radiusRaw)
 
     const pageRaw = Number(sp.get("page") || 1)
@@ -69,24 +87,22 @@ export async function GET(req: NextRequest) {
     const suggest = sp.get("suggest") === "1" || sp.get("suggest") === "true"
 
     if (latRaw != null && latRaw !== "" && lngRaw != null && lngRaw !== "" && !isValidLatLng(lat, lng)) {
+      console.warn(`[api/grandma/search] ${rid} GEO_INVALID`)
       return NextResponse.json(
         {
           ok: false,
-          error: "Invalid latitude or longitude",
-          code: "GEO_INVALID",
-          rid,
+          error: GRANDMA_PUBLIC_GPS_PERMISSION,
         },
         { status: 400 },
       )
     }
 
     if (nearMe && !isValidLatLng(lat, lng)) {
+      console.warn(`[api/grandma/search] ${rid} GEO_REQUIRED`)
       return NextResponse.json(
         {
           ok: false,
-          error: "nearMe requires valid lat and lng",
-          code: "GEO_REQUIRED",
-          rid,
+          error: GRANDMA_PUBLIC_GPS_PERMISSION,
         },
         { status: 400 },
       )
@@ -106,23 +122,35 @@ export async function GET(req: NextRequest) {
     })
 
     if (!result.ok) {
-      const mysqlConfig =
+      const mysqlStatus =
         result.code === "MYSQL_NOT_CONFIGURED" ? getOnboardingMysqlConfigStatus() : undefined
-      if (mysqlConfig) {
-        console.warn(`[api/grandma/search] ${rid} MYSQL_NOT_CONFIGURED`, mysqlConfig)
+      const ms = Date.now() - started
+      if (mysqlStatus) {
+        console.warn(`[api/grandma/search] ${rid} MYSQL_NOT_CONFIGURED ms=${ms} qLen=${q.length} nearMe=${nearMe}`, mysqlStatus)
+      } else {
+        console.warn(`[api/grandma/search] ${rid} ${result.code} ms=${ms} qLen=${q.length} nearMe=${nearMe}`)
       }
+      const unavailable =
+        result.code === "MYSQL_NOT_CONFIGURED" || result.code === "MYSQL_QUERY_FAILED"
       return NextResponse.json(
-        { ...result, rid, ...(mysqlConfig ? { mysqlConfig } : {}) },
-        { status: result.code === "MYSQL_NOT_CONFIGURED" ? 503 : 500 },
+        {
+          ok: false,
+          error: nearMe ? GRANDMA_PUBLIC_NEARME_UNAVAILABLE : GRANDMA_PUBLIC_SEARCH_UNAVAILABLE,
+        },
+        { status: unavailable ? 503 : 500 },
       )
     }
 
-    return NextResponse.json({ ...result, rid })
+    const ms = Date.now() - started
+    console.info(
+      `[api/grandma/search] ${rid} ok total=${result.total} shops=${result.shops.length} ms=${ms} qLen=${q.length} nearMe=${nearMe}`,
+    )
+    return NextResponse.json(result)
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
-    console.error(`[api/grandma/search] ${rid}`, msg)
+    console.error(`[api/grandma/search] ${rid} SEARCH_ERROR`, msg.slice(0, 160))
     return NextResponse.json(
-      { ok: false, error: "Search temporarily unavailable", code: "SEARCH_ERROR", rid },
+      { ok: false, error: nearMe ? GRANDMA_PUBLIC_NEARME_UNAVAILABLE : GRANDMA_PUBLIC_SEARCH_UNAVAILABLE },
       { status: 500 },
     )
   }

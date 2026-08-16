@@ -3,6 +3,7 @@ import assert from "node:assert/strict"
 import {
   GRANDMA_NEAR_ME_DEFAULT_RADIUS_KM,
   GRANDMA_NEAR_ME_RADIUS_OPTIONS_KM,
+  grandmaSearchRadiusParamError,
   maxFiniteDistanceKm,
   parseGrandmaSearchRadiusKm,
   shopWithinNearMeRadius,
@@ -55,6 +56,17 @@ test("shopWithinNearMeRadius filters by radius and excludes unknown distance", (
   assert.equal(shopWithinNearMeRadius(Infinity, { nearMe: true, radiusKm: 1 }), false)
   assert.equal(shopWithinNearMeRadius(null, { nearMe: true, radiusKm: 1 }), false)
   assert.equal(shopWithinNearMeRadius(100, { nearMe: false, radiusKm: 1 }), true)
+})
+
+test("grandmaSearchRadiusParamError: empty/all/valid OK, junk and <=0 are invalid", () => {
+  assert.equal(grandmaSearchRadiusParamError(null), null)
+  assert.equal(grandmaSearchRadiusParamError(""), null)
+  assert.equal(grandmaSearchRadiusParamError("all"), null)
+  assert.equal(grandmaSearchRadiusParamError("1"), null)
+  assert.equal(grandmaSearchRadiusParamError("5"), null)
+  assert.equal(grandmaSearchRadiusParamError("nope"), "INVALID_RADIUS")
+  assert.equal(grandmaSearchRadiusParamError("0"), "INVALID_RADIUS")
+  assert.equal(grandmaSearchRadiusParamError("-3"), "INVALID_RADIUS")
 })
 
 test("maxFiniteDistanceKm ignores non-finite", () => {

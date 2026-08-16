@@ -29,6 +29,7 @@ export const MYSQL_HAVERSINE_KM = `(
 )`
 
 export function isValidLatLng(lat: unknown, lng: unknown): lat is number {
+  if (lat == null || lng == null) return false
   const la = typeof lat === "number" ? lat : Number(lat)
   const lo = typeof lng === "number" ? lng : Number(lng)
   return (
