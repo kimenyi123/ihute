@@ -529,6 +529,7 @@ const GRANDMA_LABELS: Record<
     footerItems: string
     footerSummary: string
     footerPay: string
+    footerSupport: string
     footerDashboard: string
     footerDashboardShort: string
     sectionLogistics: string
@@ -708,6 +709,7 @@ const GRANDMA_LABELS: Record<
     footerItems: "Items",
     footerSummary: "Summary",
     footerPay: "Pay",
+    footerSupport: "Support",
     footerDashboard: "Open supplier dashboard",
     footerDashboardShort: "Dashboard",
     sectionLogistics: "Shipment · Logistics",
@@ -889,6 +891,7 @@ const GRANDMA_LABELS: Record<
     footerItems: "Umubare Ibicuruzwa",
     footerSummary: "Incamake",
     footerPay: "Ishyura",
+    footerSupport: "Ubufasha",
     footerDashboard: "Ikibaho cy'iduka",
     footerDashboardShort: "Ikibaho",
     sectionLogistics: "Amafaranaga Yokubikugezaho ",
@@ -1069,6 +1072,7 @@ const GRANDMA_LABELS: Record<
     footerItems: "Articles",
     footerSummary: "Récapitulatif",
     footerPay: "Payer",
+    footerSupport: "Assistance",
     footerDashboard: "Ouvrir le tableau vendeur",
     footerDashboardShort: "Tableau",
     sectionLogistics: "Livraison · Logistique",
@@ -5601,12 +5605,12 @@ export default function GrandmaPage() {
         .courier-modal-row.selected{border-color:var(--blue);background:#eef6fc;}
         .courier-modal-rank{font-size:12px;font-weight:800;color:var(--muted);width:22px;flex-shrink:0;}
         .stars{color:#f4b400;font-weight:700;}
-        .footer{position:fixed;left:50%;transform:translateX(-50%);bottom:0;width:100%;max-width:430px;background:rgba(255,255,255,.96);border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:2px;padding:10px 6px calc(18px + env(safe-area-inset-bottom));z-index:20;}
-        .footer.footer--supplier-6{grid-template-columns:repeat(6,minmax(0,1fr));}
-        .footer button{border:none;background:none;color:var(--muted);font-size:10px;display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;min-width:0;padding:4px 2px;}
+        .footer{position:fixed;left:50%;transform:translateX(-50%);bottom:0;width:100%;max-width:430px;background:rgba(255,255,255,.96);border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:2px;padding:10px 6px calc(18px + env(safe-area-inset-bottom));z-index:20;}
+        .footer.footer--supplier-7{grid-template-columns:repeat(7,minmax(0,1fr));}
+        .footer button{border:none;background:none;color:var(--muted);font-size:9px;display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;min-width:0;padding:4px 2px;}
         .footer button.active{color:var(--blue-dark);font-weight:700;}
-        .footer .footer-dash-icon{width:22px;height:22px;color:var(--blue-dark);}
-        .footer.footer--supplier-6 button{font-size:9px;}
+        .footer .footer-dash-icon,.footer .footer-support-icon{width:20px;height:20px;color:currentColor;}
+        .footer.footer--supplier-7 button{font-size:8px;}
         .seller-mode .page,.seller-mode .footer{display:none!important;}
         .seller-screen{padding:14px;}
         .seller-shop-head{display:flex;align-items:flex-start;justify-content:space-between;padding:12px 14px;margin-bottom:10px;gap:12px;}
@@ -5764,6 +5768,15 @@ export default function GrandmaPage() {
   </div>
 ) : null}
           
+          <button
+            className="more-btn"
+            onClick={() => router.push(GRANDMA_PATHS.support)}
+            aria-label={settingsUi.footerSupport}
+            title={settingsUi.footerSupport}
+            type="button"
+          >
+            <MessageSquare className="h-[18px] w-[18px]" aria-hidden />
+          </button>
           <button
             className="more-btn"
             onClick={() => setSettingsOpen(true)}
@@ -8271,7 +8284,7 @@ export default function GrandmaPage() {
         </p>
       </section>
 
-      <div className={cn("footer", showSupplierDashboardNav && "footer--supplier-6")}>
+      <div className={cn("footer", showSupplierDashboardNav && "footer--supplier-7")}>
         <button type="button" className={page === 1 ? "active" : ""} onClick={() => {
           setOthersHubOpen(false)
           goToPage(1)
@@ -8289,6 +8302,15 @@ export default function GrandmaPage() {
         </button>
         <button type="button" className={page === 5 ? "active" : ""} onClick={() => goToPage(5)}>
           💳<span>{settingsUi.footerPay}</span>
+        </button>
+        <button
+          type="button"
+          aria-label={settingsUi.footerSupport}
+          title={settingsUi.footerSupport}
+          onClick={() => router.push(GRANDMA_PATHS.support)}
+        >
+          <MessageSquare className="footer-support-icon" aria-hidden />
+          <span>{settingsUi.footerSupport}</span>
         </button>
         {showSupplierDashboardNav ? (
           <button

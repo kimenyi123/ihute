@@ -1,12 +1,33 @@
+/**
+ * Local debug helper: print EBM invoice / notification rows for one seller.
+ * Requires ONBOARDING_MYSQL_* in the environment (or .env.local via your shell).
+ * Do not hardcode credentials in this file.
+ *
+ *   npx tsx scripts/debug-ebm-seller.mjs ALS834893728
+ */
 import mysql from "mysql2/promise"
 
 const seller = process.argv[2] || "ALS834893728"
+const host = process.env.ONBOARDING_MYSQL_HOST?.trim()
+const user = process.env.ONBOARDING_MYSQL_USER?.trim()
+const database = process.env.ONBOARDING_MYSQL_DATABASE?.trim()
+const password = process.env.ONBOARDING_MYSQL_PASSWORD ?? ""
+const portRaw = process.env.ONBOARDING_MYSQL_PORT?.trim()
+const port = portRaw ? Number(portRaw) : 3306
+
+if (!host || !user || !database) {
+  console.error(
+    "Set ONBOARDING_MYSQL_HOST, ONBOARDING_MYSQL_USER, and ONBOARDING_MYSQL_DATABASE (and PASSWORD) before running this script.",
+  )
+  process.exit(1)
+}
+
 const conn = await mysql.createConnection({
-  host: process.env.ONBOARDING_MYSQL_HOST || "64.225.66.239",
-  port: Number(process.env.ONBOARDING_MYSQL_PORT || 3306),
-  user: process.env.ONBOARDING_MYSQL_USER || "algodev",
-  password: process.env.ONBOARDING_MYSQL_PASSWORD || "AlgoCloud2050##@@!!2009",
-  database: process.env.ONBOARDING_MYSQL_DATABASE || "chaos_test",
+  host,
+  port: Number.isFinite(port) && port > 0 ? port : 3306,
+  user,
+  password,
+  database,
   connectTimeout: 10000,
 })
 
@@ -42,7 +63,6 @@ const [forSeller] = await conn.query(
 console.log(`for seller ${seller}:`, JSON.stringify(forSeller, null, 2))
 
 const sellerMatch = `UPPER(TRIM(COALESCE(e.seller_account, ''))) = UPPER(TRIM(?))`
-const unread = `(n.icyabaye IS NULL OR n.icyabaye != 'READ' OR n.icyabaye = 'UNREAD')`
 const [repoSuccess] = await conn.query(
   `SELECT e.order_id
    FROM ebm_invoices e

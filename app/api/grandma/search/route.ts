@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { runGrandmaSearch } from "@/lib/grandma-search-mysql"
+import { getOnboardingMysqlConfigStatus } from "@/lib/onboarding-mysql"
 import {
   GRANDMA_SEARCH_DEFAULT_PAGE_SIZE,
   parseGrandmaSearchRadiusKm,
@@ -105,8 +106,13 @@ export async function GET(req: NextRequest) {
     })
 
     if (!result.ok) {
+      const mysqlConfig =
+        result.code === "MYSQL_NOT_CONFIGURED" ? getOnboardingMysqlConfigStatus() : undefined
+      if (mysqlConfig) {
+        console.warn(`[api/grandma/search] ${rid} MYSQL_NOT_CONFIGURED`, mysqlConfig)
+      }
       return NextResponse.json(
-        { ...result, rid },
+        { ...result, rid, ...(mysqlConfig ? { mysqlConfig } : {}) },
         { status: result.code === "MYSQL_NOT_CONFIGURED" ? 503 : 500 },
       )
     }
