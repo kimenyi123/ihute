@@ -1,17 +1,20 @@
 /**
- * Shared MySQL config for onboarding, EBM, admin_grandma, notifications, etc.
+ * Shared MySQL config for onboarding, EBM, Grandma Search, notifications, etc.
  *
  * Resolution order (first complete set wins — HOST + USER + DATABASE required):
  * 1. ONBOARDING_MYSQL_*
  * 2. EBM_MYSQL_*
  * 3. FORGOT_PASSWORD_MYSQL_*
  * 4. SUPPLIER_STOCK_MYSQL_*
- * 5. MYSQL_*
+ * 5. GQ_MYSQL_*          (existing marketplace / order MySQL namespace)
+ * 6. MYSQL_*
+ * 7. DB_URL + DB_USER + DB_PASS  (kaos Tomcat EnvLoader / MySQLConnector shape)
  *
  * Schema name is never hardcoded; each deploy host sets it in that clone's .env.
  */
 import type { Connection, ConnectionOptions } from "mysql2/promise"
 import mysql from "mysql2/promise"
+import { parseKaosJdbcMysqlUrl } from "@/lib/kaos-mysql-config"
 
 export type OnboardingMysqlConfig = {
   host: string
@@ -68,23 +71,33 @@ const MYSQL_ENV_PREFIXES = [
   "EBM_MYSQL",
   "FORGOT_PASSWORD_MYSQL",
   "SUPPLIER_STOCK_MYSQL",
+  "GQ_MYSQL",
 ] as const
 
 export type OnboardingMysqlEnvSource =
   | (typeof MYSQL_ENV_PREFIXES)[number]
   | "MYSQL"
+  | "DB_URL"
 
 export type EnvFieldPresence = "present" | "missing"
+
+type PrefixPresence = {
+  host: EnvFieldPresence
+  user: EnvFieldPresence
+  database: EnvFieldPresence
+  port: EnvFieldPresence | "default"
+  password: EnvFieldPresence
+}
 
 /** Presence-only status. Never includes host/user/database/password values. */
 export type OnboardingMysqlConfigStatus = {
   configured: boolean
   source: OnboardingMysqlEnvSource | null
-  onboardingMysql: {
-    host: EnvFieldPresence
+  onboardingMysql: PrefixPresence
+  gqMysql: PrefixPresence
+  kaosJdbc: {
+    url: EnvFieldPresence
     user: EnvFieldPresence
-    database: EnvFieldPresence
-    port: EnvFieldPresence | "default"
     password: EnvFieldPresence
   }
 }
@@ -110,12 +123,41 @@ function configFromPrefix(prefix: string): OnboardingMysqlConfig | null {
   }
 }
 
+function prefixPresence(prefix: string): PrefixPresence {
+  const passwordRaw = process.env[`${prefix}_PASSWORD`]
+  return {
+    host: envNonEmpty(process.env[`${prefix}_HOST`]) ? "present" : "missing",
+    user: envNonEmpty(process.env[`${prefix}_USER`]) ? "present" : "missing",
+    database: envNonEmpty(process.env[`${prefix}_DATABASE`]) ? "present" : "missing",
+    port: envNonEmpty(process.env[`${prefix}_PORT`]) ? "present" : "default",
+    password: passwordRaw === undefined ? "missing" : "present",
+  }
+}
+
+function configFromKaosJdbc(): OnboardingMysqlConfig | null {
+  const envUrl = process.env.DB_URL?.trim()
+  const envUser = process.env.DB_USER?.trim()
+  const envPass = process.env.DB_PASS
+  if (!envUrl || !envUser || envPass === undefined) return null
+  const parsed = parseKaosJdbcMysqlUrl(envUrl)
+  if (!parsed) return null
+  return {
+    host: parsed.host,
+    user: envUser,
+    password: envPass,
+    database: parsed.database,
+    ...(parsed.port ? { port: parsed.port } : {}),
+  }
+}
+
 export function getOnboardingMysqlConfig(): OnboardingMysqlConfig | null {
   for (const prefix of MYSQL_ENV_PREFIXES) {
     const cfg = configFromPrefix(prefix)
     if (cfg) return cfg
   }
-  return configFromPrefix("MYSQL")
+  const generic = configFromPrefix("MYSQL")
+  if (generic) return generic
+  return configFromKaosJdbc()
 }
 
 function resolvedMysqlSource(): OnboardingMysqlEnvSource | null {
@@ -123,6 +165,7 @@ function resolvedMysqlSource(): OnboardingMysqlEnvSource | null {
     if (configFromPrefix(prefix)) return prefix
   }
   if (configFromPrefix("MYSQL")) return "MYSQL"
+  if (configFromKaosJdbc()) return "DB_URL"
   return null
 }
 
@@ -132,16 +175,15 @@ function resolvedMysqlSource(): OnboardingMysqlEnvSource | null {
  */
 export function getOnboardingMysqlConfigStatus(): OnboardingMysqlConfigStatus {
   const source = resolvedMysqlSource()
-  const passwordRaw = process.env.ONBOARDING_MYSQL_PASSWORD
   return {
     configured: source != null,
     source,
-    onboardingMysql: {
-      host: envNonEmpty(process.env.ONBOARDING_MYSQL_HOST) ? "present" : "missing",
-      user: envNonEmpty(process.env.ONBOARDING_MYSQL_USER) ? "present" : "missing",
-      database: envNonEmpty(process.env.ONBOARDING_MYSQL_DATABASE) ? "present" : "missing",
-      port: envNonEmpty(process.env.ONBOARDING_MYSQL_PORT) ? "present" : "default",
-      password: passwordRaw === undefined ? "missing" : "present",
+    onboardingMysql: prefixPresence("ONBOARDING_MYSQL"),
+    gqMysql: prefixPresence("GQ_MYSQL"),
+    kaosJdbc: {
+      url: envNonEmpty(process.env.DB_URL) ? "present" : "missing",
+      user: envNonEmpty(process.env.DB_USER) ? "present" : "missing",
+      password: process.env.DB_PASS === undefined ? "missing" : "present",
     },
   }
 }
@@ -149,12 +191,11 @@ export function getOnboardingMysqlConfigStatus(): OnboardingMysqlConfigStatus {
 /** Human-readable hint when MySQL is missing (for API error messages). */
 export function onboardingMysqlConfigHint(): string {
   return (
-    "Set ONBOARDING_MYSQL_HOST, ONBOARDING_MYSQL_USER, ONBOARDING_MYSQL_PASSWORD, " +
-    "ONBOARDING_MYSQL_DATABASE in the server .env (or .env.local locally) to the same schema as the Java backend " +
-    "(GET {JAVA_BACKEND_BASE}/Kaos/deployment-hint → database). " +
-    "HOST, USER, and DATABASE are required; PORT defaults to 3306. " +
+    "Set the same MySQL schema as the Java backend (GET {JAVA_BACKEND_BASE}/Kaos/deployment-hint → database) " +
+    "in the Next.js server .env: ONBOARDING_MYSQL_HOST/USER/PASSWORD/DATABASE, or existing GQ_MYSQL_*, " +
+    "or MYSQL_*, or Tomcat DB_URL+DB_USER+DB_PASS. HOST, USER, and DATABASE are required; PORT defaults to 3306. " +
     "If the password contains # wrap it in double quotes. " +
-    "On the app VM use ONBOARDING_MYSQL_HOST=127.0.0.1 if MySQL is local. " +
+    "On the app VM use host 127.0.0.1 if MySQL is local. " +
     "Do not copy .env.example placeholders (your_mysql_user / your_kaos_database)."
   )
 }
