@@ -6,7 +6,6 @@ import type { Pool, RowDataPacket } from "mysql2/promise"
 import mysql from "mysql2/promise"
 import {
   getOnboardingMysqlConfig,
-  onboardingMysqlConfigHint,
   toMysqlConnectionOptions,
 } from "@/lib/onboarding-mysql"
 import { MYSQL_HAVERSINE_KM, isValidLatLng } from "@/lib/geo-haversine"
@@ -14,12 +13,16 @@ import {
   normalizeSearchText,
   rankGrandmaSearchHit,
   buildGrandmaSearchLikePatterns,
+  buildGrandmaTypoLikePatterns,
   buildGrandmaFulltextBooleanQueries,
   isRelevantGrandmaSearchHit,
   tokenizeSearchQuery,
+  clampGrandmaSearchQuery,
   type GrandmaMatchTier,
   type GrandmaSearchHighlight,
   GRANDMA_SEARCH_DEFAULT_PAGE_SIZE,
+  GRANDMA_SEARCH_CANDIDATE_CAP,
+  GRANDMA_PUBLIC_SEARCH_UNAVAILABLE,
 } from "@/lib/grandma-search"
 import {
   GRANDMA_CATEGORY_TO_SECTOR_SLUG,
@@ -100,7 +103,7 @@ function guessCategoryLabel(categories: string, department: string, shopName = "
 
 type WhereBuilt = { sql: string; binds: unknown[] }
 
-const TEXT_CANDIDATE_CAP = 250
+const TEXT_CANDIDATE_CAP = GRANDMA_SEARCH_CANDIDATE_CAP
 
 function sectorFilter(sector: string): WhereBuilt {
   const pats = sector ? grandmaSectorLikePatterns(sector) : []
@@ -154,7 +157,7 @@ async function collectTextSearchAccounts(
   const ftPromise = shopShaped
     ? Promise.resolve({ ok: true, rows: [] as RowDataPacket[] })
     : (async () => {
-    const ftQueries = buildGrandmaFulltextBooleanQueries(params.qRaw)
+    const ftQueries = buildGrandmaFulltextBooleanQueries(params.qRaw).slice(0, 3)
     try {
       const parts = await Promise.all(
         ftQueries.map(async (ft) => {
@@ -189,24 +192,55 @@ async function collectTextSearchAccounts(
       if (acct) found.add(acct)
       if (acct && name && !samples.has(acct.toUpperCase())) samples.set(acct.toUpperCase(), name)
     }
-    if (!ftResult.ok && found.size === 0) {
-      const likePats = likes.slice(0, 2)
-      const likeOr = likePats.map(() => `LOWER(s.ITEM_NAME) LIKE ?`).join(" OR ")
-      const [likeRows] = await p.query<RowDataPacket[]>(
-        `SELECT a.ISHYIGA_ACCOUNT AS acct
-         FROM account_signup a
-         WHERE a.TYPE = 'SELLER' AND a.STATUS = 'LIVE'
-           ${sectorAnd}
-           AND EXISTS (
-             SELECT 1 FROM seller_add_stock s
-             WHERE s.SELLER_ISHYIGA_ACCOUNT = a.ISHYIGA_ACCOUNT
-               AND s.STATUS = 'ACTIVE' AND s.QUANTITY > 0
+    if (found.size === 0) {
+      const likePats = likes.slice(0, 4)
+      if (likePats.length) {
+        const likeOr = likePats.map(() => `LOWER(s.ITEM_NAME) LIKE ?`).join(" OR ")
+        try {
+          const [likeRows] = await p.query<RowDataPacket[]>(
+            `SELECT s.SELLER_ISHYIGA_ACCOUNT AS acct, MIN(s.ITEM_NAME) AS name
+             FROM seller_add_stock s
+             WHERE s.STATUS = 'ACTIVE' AND s.QUANTITY > 0
                AND (${likeOr})
-           )
-         LIMIT ${TEXT_CANDIDATE_CAP}`,
-        [...sector.binds, ...likePats],
-      )
-      addAccts(found, likeRows)
+             GROUP BY s.SELLER_ISHYIGA_ACCOUNT
+             LIMIT ${TEXT_CANDIDATE_CAP}`,
+            likePats,
+          )
+          for (const r of likeRows) {
+            const acct = String(r.acct ?? "").trim()
+            const name = String(r.name ?? "").trim()
+            if (acct) found.add(acct)
+            if (acct && name && !samples.has(acct.toUpperCase())) samples.set(acct.toUpperCase(), name)
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    if (found.size === 0) {
+      const typoPats = buildGrandmaTypoLikePatterns(params.qRaw).slice(0, 6)
+      if (typoPats.length) {
+        const likeOr = typoPats.map(() => `LOWER(s.ITEM_NAME) LIKE ?`).join(" OR ")
+        try {
+          const [typoRows] = await p.query<RowDataPacket[]>(
+            `SELECT s.SELLER_ISHYIGA_ACCOUNT AS acct, MIN(s.ITEM_NAME) AS name
+             FROM seller_add_stock s
+             WHERE s.STATUS = 'ACTIVE' AND s.QUANTITY > 0
+               AND (${likeOr})
+             GROUP BY s.SELLER_ISHYIGA_ACCOUNT
+             LIMIT ${TEXT_CANDIDATE_CAP}`,
+            typoPats,
+          )
+          for (const r of typoRows) {
+            const acct = String(r.acct ?? "").trim()
+            const name = String(r.name ?? "").trim()
+            if (acct) found.add(acct)
+            if (acct && name && !samples.has(acct.toUpperCase())) samples.set(acct.toUpperCase(), name)
+          }
+        } catch {
+          /* ignore */
+        }
+      }
     }
   }
 
@@ -257,10 +291,10 @@ export async function runGrandmaSearch(
 ): Promise<GrandmaSearchResult | { ok: false; error: string; code: string }> {
   const p = getPool()
   if (!p) {
-    return { ok: false, error: onboardingMysqlConfigHint(), code: "MYSQL_NOT_CONFIGURED" }
+    return { ok: false, error: GRANDMA_PUBLIC_SEARCH_UNAVAILABLE, code: "MYSQL_NOT_CONFIGURED" }
   }
 
-  const qRaw = String(params.q ?? "").trim()
+  const qRaw = clampGrandmaSearchQuery(String(params.q ?? "").trim())
   const page = Math.max(1, Number(params.page) || 1)
   const pageSize = Math.min(100, Math.max(1, Number(params.pageSize) || GRANDMA_SEARCH_DEFAULT_PAGE_SIZE))
   const nearMe = Boolean(params.nearMe)
@@ -329,7 +363,8 @@ export async function runGrandmaSearch(
     })
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
-    return { ok: false, error: msg, code: "MYSQL_QUERY_FAILED" }
+    console.warn("[grandma-search-mysql] MYSQL_QUERY_FAILED", msg.slice(0, 160))
+    return { ok: false, error: GRANDMA_PUBLIC_SEARCH_UNAVAILABLE, code: "MYSQL_QUERY_FAILED" }
   }
 }
 
@@ -577,7 +612,7 @@ async function sampleMatchingProductsBatch(
   if (!sellerAccounts.length) return out
   const likeBinds = buildGrandmaSearchLikePatterns(qRaw)
   const likes = likeBinds.length
-    ? likeBinds.slice(0, 2)
+    ? likeBinds.slice(0, 6)
     : [`%${normalizeSearchText(qRaw).replace(/\s+/g, "%")}%`]
   const placeholders = sellerAccounts.map(() => "?").join(",")
   const ftQs = buildGrandmaFulltextBooleanQueries(qRaw)
@@ -615,6 +650,28 @@ async function sampleMatchingProductsBatch(
       [...sellerAccounts, ...likes],
     )
     for (const r of rows) {
+      const acct = String(r.acct ?? "").trim().toUpperCase()
+      const name = String(r.name ?? "").trim()
+      if (acct && name && !out.has(acct)) out.set(acct, name)
+    }
+  } catch {
+    /* ignore */
+  }
+  if (out.size > 0) return out
+  const typoPats = buildGrandmaTypoLikePatterns(qRaw).slice(0, 6)
+  if (!typoPats.length) return out
+  const typoOr = typoPats.map(() => `LOWER(ITEM_NAME) LIKE ?`).join(" OR ")
+  try {
+    const [typoRows] = await p.query<RowDataPacket[]>(
+      `SELECT SELLER_ISHYIGA_ACCOUNT AS acct, ITEM_NAME AS name
+       FROM seller_add_stock
+       WHERE SELLER_ISHYIGA_ACCOUNT IN (${placeholders})
+         AND STATUS = 'ACTIVE' AND QUANTITY > 0
+         AND (${typoOr})
+       LIMIT 400`,
+      [...sellerAccounts, ...typoPats],
+    )
+    for (const r of typoRows) {
       const acct = String(r.acct ?? "").trim().toUpperCase()
       const name = String(r.name ?? "").trim()
       if (acct && name && !out.has(acct)) out.set(acct, name)

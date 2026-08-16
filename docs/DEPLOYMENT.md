@@ -62,17 +62,28 @@ nano /var/www/grandma-ihute/.env
 
 Dev defaults are documented in [`.env.dev.example`](../.env.dev.example) (`PORT=3007`, `Trading_dev` WAR, etc.).
 
-**Grandma Search MySQL (`ONBOARDING_MYSQL_*`)** — required on each clone or `GET /api/grandma/search` returns `MYSQL_NOT_CONFIGURED`. Git pull does **not** merge new keys into an existing `.env`.
+**Grandma Search MySQL** — Next.js must resolve the **same schema Java already uses**. Git pull does **not** merge new keys into an existing `.env`. Do **not** create a second database.
+
+Resolver order (first complete HOST+USER+DATABASE wins): `ONBOARDING_MYSQL_*` → `EBM_MYSQL_*` → `FORGOT_PASSWORD_MYSQL_*` → `SUPPLIER_STOCK_MYSQL_*` → `GQ_MYSQL_*` → `MYSQL_*` → `DB_URL`+`DB_USER`+`DB_PASS`.
+
+If production already has `GQ_MYSQL_*` or Tomcat `DB_*`, **do not** add `ONBOARDING_MYSQL_*` unless those are incomplete.
+
+Bitbucket Pipelines **does not** inject MySQL secrets. Repository variables are SSH only (`DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PASS`). Next.js cannot decrypt Java `Ndumiwe.hisha`.
+
+`scripts/deploy-remote.sh` will, when the Next.js clone `.env` has no complete namespace, import **allowlisted** keys (`DB_URL`/`DB_USER`/`DB_PASS`, `GQ_MYSQL_*`, `MYSQL_*`, …) from the Java Tomcat env file (`/opt/tomcat10/.env` by default) into the PM2 restart environment. Values are never logged. If that file only points at encrypted Java secrets, ops must still copy one complete namespace into `/var/www/ihute-frontend-dev/.env`.
 
 On the DEV host (`/var/www/ihute-frontend-dev/.env`):
 
 1. Confirm Java’s schema (do not guess):  
    `curl -sS https://dev.ihute.rw/Trading_dev/Kaos/deployment-hint` → use the `"database"` field.
-2. Add (or complete) these keys — HOST, USER, and DATABASE are required; PORT defaults to 3306. Quote the password if it contains `#`. Use `127.0.0.1` when MySQL is on the same VM.
+2. Ensure **one** complete namespace above points at that schema. HOST, USER, and DATABASE are required; PORT defaults to 3306. Quote the password if it contains `#`. Use `127.0.0.1` when MySQL is on the same VM.
 3. Do **not** copy `.env.example` placeholders (`your_mysql_user` / `your_kaos_database`).
 4. Do **not** assume a schema name from `.env.dev.example`.
 5. Restart: `pm2 restart ihute-dev --update-env`
-6. Check: `curl -sS "https://dev.ihute.rw/api/grandma/search?q=umuceri&suggest=1"` should include `"ok": true, "source": "mysql"`.
+6. Presence-only check (no secrets): PM2 / deploy logs print present/missing for MySQL keys. The public Grandma search JSON must not include `mysqlConfig`, host, user, schema, or `MYSQL_NOT_CONFIGURED`.
+7. Check: `curl -sS "https://dev.ihute.rw/api/grandma/search?q=&page=1&pageSize=5"` then Near Me  
+   `.../api/grandma/search?q=&nearMe=1&lat=-1.9441&lng=30.0619&radiusKm=1&page=1&pageSize=5`  
+   should include `"ok": true, "source": "mysql"`.
 
 Presence-only check (no secrets): `npx tsx scripts/check-onboarding-mysql-env.ts` from the clone directory.
 
@@ -230,4 +241,4 @@ Use custom pipeline **`deploy`**:
 - **SSH permission denied (pipeline → server)** — check `DEPLOY_USER` / `DEPLOY_PASS`, and that `PasswordAuthentication yes` is set in `sshd_config`.
 - **`git@bitbucket.org: Permission denied (publickey)` on server** — add `BITBUCKET_GIT_USER` + `BITBUCKET_APP_PASSWORD` to that folder’s `.env`, or set up a deploy key (see §3b).
 - **Deploy script not found** — first deploy must use a path that already has the repo; bootstrap with a manual `git pull` on the server once.
-- **Grandma Search `MYSQL_NOT_CONFIGURED`** — Next.js `.env` is missing `ONBOARDING_MYSQL_HOST` + `USER` + `DATABASE` (Java can still be healthy). Add those keys to that clone’s `.env` to match `/Kaos/deployment-hint` → `database`, then `pm2 restart <app> --update-env`. Deploy logs print present/missing only, never passwords.
+- **Grandma Search unavailable / 503** — Next.js process has no complete MySQL namespace (Java can still be healthy). Reuse one existing namespace (`GQ_MYSQL_*` or Tomcat `DB_URL`+`DB_USER`+`DB_PASS`) pointing at `/Kaos/deployment-hint` → `database`, then `pm2 restart ihute-dev --update-env`. Deploy logs print present/missing only, never passwords. Public API `error` is a user-safe message; technical codes stay in server logs.

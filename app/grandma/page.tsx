@@ -30,6 +30,13 @@ import { haversineKm, isValidLatLng } from "@/lib/geo-haversine"
 import {
   GRANDMA_NEAR_ME_DEFAULT_RADIUS_KM,
   GRANDMA_NEAR_ME_RADIUS_OPTIONS_KM,
+  GRANDMA_PUBLIC_GPS_PERMISSION,
+  GRANDMA_PUBLIC_INVALID_RADIUS,
+  GRANDMA_PUBLIC_INVALID_SEARCH,
+  GRANDMA_PUBLIC_NEARME_UNAVAILABLE,
+  GRANDMA_PUBLIC_NO_NEARBY,
+  GRANDMA_PUBLIC_SEARCH_UNAVAILABLE,
+  isTechnicalGrandmaErrorText,
   maxFiniteDistanceKm,
   shopWithinNearMeRadius,
   splitHighlightMarkers,
@@ -1591,42 +1598,79 @@ function asGrandmaCategory(raw: unknown): Category {
 
 function grandmaSearchFailureMessage(
   lang: GrandmaLang,
-  opts: { code?: string | null; network?: boolean; status?: number },
+  opts: { code?: string | null; error?: string | null; network?: boolean; status?: number; nearMe?: boolean },
 ): string {
   if (opts.network) {
     return lang === "rw"
       ? "Ntabwo twashoboye kugera kuri seriveri. Gerageza kongera."
       : lang === "fr"
-        ? "Impossible de joindre le serveur de recherche. Réessayez."
-        : "Could not reach search. Check your connection and try again."
+        ? "Impossible de se connecter pour le moment. Vérifiez votre connexion et réessayez."
+        : "We couldn't connect right now. Please check your connection and try again."
   }
+  const rawError = String(opts.error || "")
   const code = String(opts.code || "")
-  if (code === "INVALID_CATEGORY") {
+  const technical = isTechnicalGrandmaErrorText(rawError) || isTechnicalGrandmaErrorText(code)
+
+  const gps =
+    rawError === GRANDMA_PUBLIC_GPS_PERMISSION ||
+    code === "GEO_REQUIRED" ||
+    code === "GEO_INVALID"
+  const invalidSearch =
+    rawError === GRANDMA_PUBLIC_INVALID_SEARCH ||
+    code === "INVALID_CATEGORY"
+  const invalidRadius =
+    rawError === GRANDMA_PUBLIC_INVALID_RADIUS ||
+    code === "INVALID_RADIUS"
+  const unavailable =
+    rawError === GRANDMA_PUBLIC_SEARCH_UNAVAILABLE ||
+    rawError === GRANDMA_PUBLIC_NEARME_UNAVAILABLE ||
+    code === "MYSQL_NOT_CONFIGURED" ||
+    code === "MYSQL_QUERY_FAILED" ||
+    code === "SEARCH_ERROR" ||
+    opts.status === 503 ||
+    opts.status === 500 ||
+    technical
+
+  if (gps || (opts.nearMe && opts.status === 400 && !invalidSearch && !invalidRadius && !unavailable)) {
     return lang === "rw"
-      ? "Icyiciro ntikizwi. Hitamo icyiciro gikuwe ku rupapuro rw'ahabanza."
+      ? "Ntabwo twabonye aho uri. Emera GPS kugira ngo Near Me ikore."
       : lang === "fr"
-        ? "Catégorie inconnue. Choisissez une catégorie de l’accueil."
-        : "Unknown category. Pick a category from the home screen."
+        ? "Autorisez la localisation pour utiliser Near Me."
+        : GRANDMA_PUBLIC_GPS_PERMISSION
   }
-  if (code === "MYSQL_NOT_CONFIGURED" || code === "MYSQL_QUERY_FAILED" || code === "SEARCH_ERROR" || opts.status === 503) {
+  if (invalidRadius) {
     return lang === "rw"
-      ? "Gushakisha ntibishoboka noneho. Seriveri ya MySQL ntabwo yateguwe neza."
+      ? "Hitamo uruziga rwemewe."
       : lang === "fr"
-        ? "Recherche indisponible (base MySQL non configurée)."
-        : "Search is unavailable right now (database not configured)."
+        ? "Veuillez entrer un rayon de recherche valable."
+        : GRANDMA_PUBLIC_INVALID_RADIUS
   }
-  if (code === "GEO_REQUIRED" || code === "GEO_INVALID") {
+  if (invalidSearch || (opts.status === 400 && !opts.nearMe)) {
     return lang === "rw"
-      ? "GPS si yo. Emeza aho uri cyangwa kuzimya Near me."
+      ? "Andika izina ry'igicuruzwa cyangwa iduka."
       : lang === "fr"
-        ? "Position GPS invalide. Autorisez la localisation ou désactivez Near me."
-        : "Invalid GPS. Allow location or turn off Near me."
+        ? "Veuillez entrer un produit ou un nom de commerce."
+        : GRANDMA_PUBLIC_INVALID_SEARCH
+  }
+  if (unavailable) {
+    if (opts.nearMe || rawError === GRANDMA_PUBLIC_NEARME_UNAVAILABLE) {
+      return lang === "rw"
+        ? "Gushakisha hafi yawe ntibishoboka noneho. Gerageza kongera."
+        : lang === "fr"
+          ? "La recherche à proximité est temporairement indisponible. Réessayez."
+          : GRANDMA_PUBLIC_NEARME_UNAVAILABLE
+    }
+    return lang === "rw"
+      ? "Gushakisha ntibishoboka noneho. Gerageza kongera vuba."
+      : lang === "fr"
+        ? "La recherche est temporairement indisponible. Réessayez dans un moment."
+        : GRANDMA_PUBLIC_SEARCH_UNAVAILABLE
   }
   return lang === "rw"
-    ? "Gushakisha byanze. Gerageza kongera."
+    ? "Hari ikibazo. Gerageza kongera."
     : lang === "fr"
-      ? "La recherche a échoué. Réessayez."
-      : "Search failed. Try again."
+      ? "Une erreur s’est produite. Réessayez."
+      : "Something went wrong. Please try again."
 }
 
 function parseHomeGlobalItemHits(json: Record<string, unknown>, q: string, limit: number): HomeGlobalItemHit[] {
@@ -2793,10 +2837,10 @@ export default function GrandmaPage() {
       if (!isValidLatLng(lat, lng)) {
         setGeoPermissionError(
           language === "rw"
-            ? "Emeza aho uri (GPS) kugira ngo Near me ikore."
+            ? "GPS irafunze. Emera aho uri kugira ngo Near me ikore."
             : language === "fr"
-              ? "Autorisez la localisation (GPS) pour Near me."
-              : "Allow location access so Near me can find nearby shops.",
+              ? "L’accès à la localisation est désactivé. Autorisez-le pour utiliser Near Me."
+              : GRANDMA_PUBLIC_GPS_PERMISSION,
         )
         if (!q) {
           setBackendSearchShops(null)
@@ -2859,6 +2903,7 @@ export default function GrandmaPage() {
             suggestions?: string[]
             hasMore?: boolean
             emptyReason?: string | null
+            error?: string
             code?: string
           } | null
 
@@ -2870,8 +2915,10 @@ export default function GrandmaPage() {
               setSearchHasMore(false)
               setBackendSearchError(
                 grandmaSearchFailureMessage(language, {
+                  error: json?.error,
                   code: json?.code,
                   status: res.status,
+                  nearMe,
                 }),
               )
             }
@@ -6821,11 +6868,17 @@ export default function GrandmaPage() {
               {shopSearch.trim() || useLocationSort ? (
                 backendSearchLoading || shopProductSearchLoading ? (
                   <p style={{ margin: 0 }}>
-                    {language === "rw"
-                      ? "Turimo gushakisha…"
-                      : language === "fr"
-                        ? "Recherche en cours…"
-                        : "Searching…"}
+                    {useLocationSort
+                      ? language === "rw"
+                        ? "Turimo gushakisha amaduka hafi yawe…"
+                        : language === "fr"
+                          ? "Recherche des commerces près de vous…"
+                          : "Finding shops near you..."
+                      : language === "rw"
+                        ? "Turimo gushakisha…"
+                        : language === "fr"
+                          ? "Recherche en cours…"
+                          : "Searching…"}
                   </p>
                 ) : backendEmptyReason === "no_shops_in_radius" ||
                   backendEmptyReason === "no_match_in_radius" ||
@@ -6836,10 +6889,10 @@ export default function GrandmaPage() {
                   <div>
                     <p style={{ margin: "0 0 10px" }}>
                       {language === "rw"
-                        ? `Nta duka riboneka mu ${nearMeRadiusKm ?? "—"} km.`
+                        ? `Nta duka riboneka mu ${nearMeRadiusKm ?? "—"} km. Gerageza kwagura uruziga.`
                         : language === "fr"
-                          ? `Aucun commerce dans un rayon de ${nearMeRadiusKm ?? "—"} km.`
-                          : `No shops found within ${nearMeRadiusKm ?? "—"} km.`}
+                          ? `Aucun commerce dans un rayon de ${nearMeRadiusKm ?? "—"} km. Essayez d’élargir le rayon.`
+                          : GRANDMA_PUBLIC_NO_NEARBY}
                     </p>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                       <button
