@@ -27,10 +27,17 @@ const KEYS = [
   "SUPPLIER_STOCK_MYSQL_USER",
   "SUPPLIER_STOCK_MYSQL_PASSWORD",
   "SUPPLIER_STOCK_MYSQL_DATABASE",
+  "GQ_MYSQL_HOST",
+  "GQ_MYSQL_USER",
+  "GQ_MYSQL_PASSWORD",
+  "GQ_MYSQL_DATABASE",
   "MYSQL_HOST",
   "MYSQL_USER",
   "MYSQL_PASSWORD",
   "MYSQL_DATABASE",
+  "DB_URL",
+  "DB_USER",
+  "DB_PASS",
 ] as const
 
 function snapshotEnv(): Record<string, string | undefined> {
@@ -50,7 +57,7 @@ function clearMysqlEnv(): void {
   for (const k of KEYS) delete process.env[k]
 }
 
-test("status reports missing when ONBOARDING_MYSQL_* is unset", () => {
+test("status reports missing when no MySQL namespace is set", () => {
   const snap = snapshotEnv()
   try {
     clearMysqlEnv()
@@ -63,6 +70,8 @@ test("status reports missing when ONBOARDING_MYSQL_* is unset", () => {
     assert.equal(status.onboardingMysql.database, "missing")
     assert.equal(status.onboardingMysql.port, "default")
     assert.equal(status.onboardingMysql.password, "missing")
+    assert.equal(status.gqMysql.host, "missing")
+    assert.equal(status.kaosJdbc.url, "missing")
     const json = JSON.stringify(status)
     assert.equal(json.includes("secret"), false)
     assert.equal(/:\d{2,}/.test(json), false)
@@ -112,6 +121,82 @@ test("MYSQL_* fallback is used when ONBOARDING_MYSQL_* is incomplete", () => {
     assert.equal(status.source, "MYSQL")
     assert.equal(status.onboardingMysql.user, "missing")
     assert.equal(status.onboardingMysql.database, "missing")
+  } finally {
+    restoreEnv(snap)
+  }
+})
+
+test("GQ_MYSQL_* fallback is used when ONBOARDING_MYSQL_* is absent", () => {
+  const snap = snapshotEnv()
+  try {
+    clearMysqlEnv()
+    process.env.GQ_MYSQL_HOST = "127.0.0.1"
+    process.env.GQ_MYSQL_USER = "gq_user"
+    process.env.GQ_MYSQL_DATABASE = "gq_schema"
+    process.env.GQ_MYSQL_PASSWORD = "not-a-real-secret"
+    const cfg = getOnboardingMysqlConfig()
+    const status = getOnboardingMysqlConfigStatus()
+    assert.ok(cfg)
+    assert.equal(cfg?.database, "gq_schema")
+    assert.equal(cfg?.user, "gq_user")
+    assert.equal(status.configured, true)
+    assert.equal(status.source, "GQ_MYSQL")
+    assert.equal(status.gqMysql.host, "present")
+    assert.equal(status.gqMysql.user, "present")
+    assert.equal(status.gqMysql.database, "present")
+    const json = JSON.stringify(status)
+    assert.equal(json.includes("gq_schema"), false)
+    assert.equal(json.includes("gq_user"), false)
+    assert.equal(json.includes("not-a-real-secret"), false)
+  } finally {
+    restoreEnv(snap)
+  }
+})
+
+test("ONBOARDING_MYSQL_* takes precedence over GQ_MYSQL_*", () => {
+  const snap = snapshotEnv()
+  try {
+    clearMysqlEnv()
+    process.env.ONBOARDING_MYSQL_HOST = "127.0.0.1"
+    process.env.ONBOARDING_MYSQL_USER = "onb_user"
+    process.env.ONBOARDING_MYSQL_DATABASE = "onb_schema"
+    process.env.GQ_MYSQL_HOST = "10.0.0.1"
+    process.env.GQ_MYSQL_USER = "gq_user"
+    process.env.GQ_MYSQL_DATABASE = "gq_schema"
+    const cfg = getOnboardingMysqlConfig()
+    const status = getOnboardingMysqlConfigStatus()
+    assert.equal(cfg?.database, "onb_schema")
+    assert.equal(cfg?.user, "onb_user")
+    assert.equal(status.source, "ONBOARDING_MYSQL")
+  } finally {
+    restoreEnv(snap)
+  }
+})
+
+test("DB_URL + DB_USER + DB_PASS fallback matches kaos JDBC shape", () => {
+  const snap = snapshotEnv()
+  try {
+    clearMysqlEnv()
+    process.env.DB_URL = "jdbc:mysql://127.0.0.1:3306/app_schema?useSSL=false"
+    process.env.DB_USER = "jdbc_user"
+    process.env.DB_PASS = "not-a-real-secret"
+    const cfg = getOnboardingMysqlConfig()
+    const status = getOnboardingMysqlConfigStatus()
+    assert.ok(cfg)
+    assert.equal(cfg?.host, "127.0.0.1")
+    assert.equal(cfg?.port, 3306)
+    assert.equal(cfg?.database, "app_schema")
+    assert.equal(cfg?.user, "jdbc_user")
+    assert.equal(status.configured, true)
+    assert.equal(status.source, "DB_URL")
+    assert.equal(status.kaosJdbc.url, "present")
+    assert.equal(status.kaosJdbc.user, "present")
+    assert.equal(status.kaosJdbc.password, "present")
+    const json = JSON.stringify(status)
+    assert.equal(json.includes("app_schema"), false)
+    assert.equal(json.includes("jdbc_user"), false)
+    assert.equal(json.includes("not-a-real-secret"), false)
+    assert.equal(json.includes("jdbc:mysql"), false)
   } finally {
     restoreEnv(snap)
   }
