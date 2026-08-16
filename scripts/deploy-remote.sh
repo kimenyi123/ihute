@@ -52,6 +52,31 @@ else
   log "WARNING: no .env in $DEPLOY_PATH — copy from .env.dev.example / server secrets before first run"
 fi
 
+# Presence-only MySQL check (never prints values). Grandma Search needs HOST+USER+DATABASE.
+mysql_field() {
+  local v="${1:-}"
+  if [[ -n "${v// }" ]]; then printf 'present'; else printf 'missing'; fi
+}
+log "ONBOARDING_MYSQL_HOST=$(mysql_field "${ONBOARDING_MYSQL_HOST:-}") USER=$(mysql_field "${ONBOARDING_MYSQL_USER:-}") DATABASE=$(mysql_field "${ONBOARDING_MYSQL_DATABASE:-}") PORT=$(mysql_field "${ONBOARDING_MYSQL_PORT:-}") PASSWORD=$(printenv ONBOARDING_MYSQL_PASSWORD >/dev/null 2>&1 && printf present || printf missing)"
+mysql_complete=0
+for prefix in ONBOARDING_MYSQL EBM_MYSQL FORGOT_PASSWORD_MYSQL SUPPLIER_STOCK_MYSQL MYSQL; do
+  h="$(printenv "${prefix}_HOST" 2>/dev/null || true)"
+  u="$(printenv "${prefix}_USER" 2>/dev/null || true)"
+  d="$(printenv "${prefix}_DATABASE" 2>/dev/null || true)"
+  if [[ -n "${h// }" && -n "${u// }" && -n "${d// }" ]]; then
+    mysql_complete=1
+    log "MySQL config complete via ${prefix}_* (schema name not printed)"
+    break
+  fi
+done
+if [[ "$mysql_complete" -eq 0 ]]; then
+  log "WARNING: Grandma Search will return MYSQL_NOT_CONFIGURED."
+  log "  Add ONBOARDING_MYSQL_HOST/USER/PASSWORD/DATABASE to $DEPLOY_PATH/.env"
+  log "  Use the SAME schema as Java: GET {JAVA_BACKEND_BASE}/Kaos/deployment-hint → database"
+  log "  Do not copy .env.example placeholders. Do not overwrite unrelated keys."
+  log "  Then: pm2 restart $PM2_APP_NAME --update-env"
+fi
+
 log "Installing dependencies (include devDependencies for next build)…"
 # .env may set NODE_ENV=production — must not skip devDeps needed by next build.
 unset NODE_ENV

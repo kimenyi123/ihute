@@ -23,6 +23,7 @@ import {
   Store,
   Boxes,
   Pill,
+  MessageSquare,
 } from 'lucide-react'
 import { useAuthStore } from '@/lib/auth-store'
 import { AdminGuard } from '@/components/auth/admin-guard'
@@ -38,6 +39,7 @@ const menuItems = [
   { href: '/admin/prescription-review', label: 'Prescription review', icon: Pill },
   { href: '/admin/content', label: 'Content Manager', icon: Image },
   { href: '/admin/notifications', label: 'Notification Center', icon: Bell },
+  { href: '/admin/client-suggestions', label: 'Client Suggestions', icon: MessageSquare },
   { href: '/admin/analytics', label: 'Analytics & Reports', icon: BarChart3 },
   { href: '/admin/activity-logs', label: 'Visitor Tracking', icon: ScrollText },
   { href: '/admin/ihute-stats', label: 'Shop-with-me Sales', icon: Store },

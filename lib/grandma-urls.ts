@@ -9,6 +9,8 @@ export const GRANDMA_PATHS = {
   appRoot: "/grandma",
   /** Buyer order list inside the Grandma UI (not the main-site Buyer Panel). */
   buyerOrders: "/grandma/orders",
+  /** Client suggestion / support form. */
+  support: "/grandma/support",
   /** Grandma sign-in entry — use `?redirect=` (e.g. `/grandma`) to return after login. */
   login: "/grandma/login",
   /** Dedicated Grandma registration (not main `/register/web-form`). */

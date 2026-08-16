@@ -12,6 +12,7 @@ const GRANDMA_RUNTIME = [
   "lib/onboarding-mysql.ts",
   "app/api/grandma/search/route.ts",
   "app/api/grandma/sellers/route.ts",
+  "scripts/check-onboarding-mysql-env.ts",
 ]
 
 const FORBIDDEN_DB_NAMES = ["chaos_dev", "chaos_theta", "ihute_dev", "chaos_test", "chaos_beta"]
@@ -27,4 +28,19 @@ test("Grandma runtime does not hardcode database names", () => {
       )
     }
   }
+})
+
+test(".env.dev.example does not pin a Kaos schema name", () => {
+  const text = fs.readFileSync(path.join(root, ".env.dev.example"), "utf8")
+  for (const name of FORBIDDEN_DB_NAMES) {
+    assert.equal(
+      new RegExp(`^ONBOARDING_MYSQL_DATABASE=${name}\\s*$`, "m").test(text),
+      false,
+      `.env.dev.example must not assign ONBOARDING_MYSQL_DATABASE=${name}`,
+    )
+  }
+  assert.match(text, /^ONBOARDING_MYSQL_HOST=/m)
+  assert.match(text, /^ONBOARDING_MYSQL_USER=/m)
+  assert.match(text, /^ONBOARDING_MYSQL_DATABASE=/m)
+  assert.match(text, /^ONBOARDING_MYSQL_PORT=/m)
 })

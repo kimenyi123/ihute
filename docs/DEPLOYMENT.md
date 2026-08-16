@@ -62,6 +62,20 @@ nano /var/www/grandma-ihute/.env
 
 Dev defaults are documented in [`.env.dev.example`](../.env.dev.example) (`PORT=3007`, `Trading_dev` WAR, etc.).
 
+**Grandma Search MySQL (`ONBOARDING_MYSQL_*`)** — required on each clone or `GET /api/grandma/search` returns `MYSQL_NOT_CONFIGURED`. Git pull does **not** merge new keys into an existing `.env`.
+
+On the DEV host (`/var/www/ihute-frontend-dev/.env`):
+
+1. Confirm Java’s schema (do not guess):  
+   `curl -sS https://dev.ihute.rw/Trading_dev/Kaos/deployment-hint` → use the `"database"` field.
+2. Add (or complete) these keys — HOST, USER, and DATABASE are required; PORT defaults to 3306. Quote the password if it contains `#`. Use `127.0.0.1` when MySQL is on the same VM.
+3. Do **not** copy `.env.example` placeholders (`your_mysql_user` / `your_kaos_database`).
+4. Do **not** assume a schema name from `.env.dev.example`.
+5. Restart: `pm2 restart ihute-dev --update-env`
+6. Check: `curl -sS "https://dev.ihute.rw/api/grandma/search?q=umuceri&suggest=1"` should include `"ok": true, "source": "mysql"`.
+
+Presence-only check (no secrets): `npx tsx scripts/check-onboarding-mysql-env.ts` from the clone directory.
+
 ### 3b. Bitbucket git pull on the server (fix `Permission denied (publickey)`)
 
 The server clone uses `git@bitbucket.org:...` but has **no SSH key** for Bitbucket. The pipeline SSH password (`DEPLOY_PASS`) only logs into the server — it does **not** authenticate `git pull`.
@@ -216,3 +230,4 @@ Use custom pipeline **`deploy`**:
 - **SSH permission denied (pipeline → server)** — check `DEPLOY_USER` / `DEPLOY_PASS`, and that `PasswordAuthentication yes` is set in `sshd_config`.
 - **`git@bitbucket.org: Permission denied (publickey)` on server** — add `BITBUCKET_GIT_USER` + `BITBUCKET_APP_PASSWORD` to that folder’s `.env`, or set up a deploy key (see §3b).
 - **Deploy script not found** — first deploy must use a path that already has the repo; bootstrap with a manual `git pull` on the server once.
+- **Grandma Search `MYSQL_NOT_CONFIGURED`** — Next.js `.env` is missing `ONBOARDING_MYSQL_HOST` + `USER` + `DATABASE` (Java can still be healthy). Add those keys to that clone’s `.env` to match `/Kaos/deployment-hint` → `database`, then `pm2 restart <app> --update-env`. Deploy logs print present/missing only, never passwords.
