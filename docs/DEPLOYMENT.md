@@ -221,7 +221,9 @@ Bitbucket tracks deployments for: `production`, `staging` (dev), `test` (beta), 
 ### Typical flow
 
 1. Merge to **`master`** → dev.ihute.rw updates automatically.
-2. To promote to beta / grandma / production: **Run pipeline → Custom → `promote`**, then click the manual step you need.
+2. Merge Grandma Search to **`GRANDMA`** → shop.ihute.rw updates automatically (pipeline asserts `app/api/grandma/search/route.ts` exists).
+3. Java Search servlet must be on **`MAPUTO`** (auto-deploys the WAR named by `Ndumiwe.targetEnvironment`). `/Trading/grandma/search` must return JSON before shop Search can succeed.
+4. To promote to beta / production frontend: **Run pipeline → Custom → `promote`**, then click the manual step you need.
 
 ### Deploy any branch to any environment
 

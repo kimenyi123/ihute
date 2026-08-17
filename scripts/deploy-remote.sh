@@ -158,6 +158,14 @@ if [[ "$mysql_complete" -eq 0 ]]; then
   log "  Then: pm2 restart $PM2_APP_NAME --update-env"
 fi
 
+log "Active tree after sync: $(git rev-parse --short HEAD) ($DEPLOY_BRANCH)"
+
+if [[ ! -f app/api/grandma/search/route.ts || ! -f lib/grandma-search-java.ts ]]; then
+  log "ERROR: Grandma Search is missing on this tree (need app/api/grandma/search/route.ts and lib/grandma-search-java.ts)."
+  log "ERROR: refusing to deploy $PM2_APP_NAME from $DEPLOY_BRANCH — shop.ihute.rw would 404 /api/grandma/search."
+  exit 1
+fi
+
 log "Installing dependencies (include devDependencies for next build)…"
 # .env may set NODE_ENV=production — must not skip devDeps needed by next build.
 unset NODE_ENV
