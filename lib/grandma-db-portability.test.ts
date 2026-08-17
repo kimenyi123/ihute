@@ -8,6 +8,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
 const GRANDMA_RUNTIME = [
   "lib/grandma-search-mysql.ts",
+  "lib/grandma-search-java.ts",
   "lib/grandma-seller-gps-persist.ts",
   "lib/onboarding-mysql.ts",
   "app/api/grandma/search/route.ts",

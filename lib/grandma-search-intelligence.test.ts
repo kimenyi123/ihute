@@ -8,6 +8,7 @@ import {
   buildGrandmaFulltextBooleanQueries,
   buildGrandmaSearchLikePatterns,
   buildGrandmaTypoLikePatterns,
+  buildGrandmaPrefixLikePatterns,
   clampGrandmaSearchQuery,
   collapseRepeatedLetters,
   damerauLevenshtein,
@@ -206,8 +207,15 @@ test("phase-1 LIKE includes collapse, join, milk stem, pharmacy prefix, chapti i
   assert.ok(pharm.some((p) => p.includes("pharm")), String(pharm))
   const chapti = buildGrandmaSearchLikePatterns("chapti")
   assert.ok(
-    chapti.some((p) => p.includes("chap_ti") || p.includes("cha_pti") || p.includes("ch_apti")),
+    chapti.some((p) => p.includes("chap_ti") || p.includes("cha_pti") || p.includes("ch_apti") || p === "%chap%"),
     String(chapti),
+  )
+  const chapty = buildGrandmaSearchLikePatterns("chapty")
+  assert.ok(chapty.some((p) => p === "%chap%" || p === "%chapt%"), String(chapty))
+  const chpati = buildGrandmaSearchLikePatterns("chpati")
+  assert.ok(
+    chpati.some((p) => p === "%ch_pati%" || p === "%chpa%" || p.includes("ch_pati")),
+    String(chpati),
   )
 })
 
@@ -221,6 +229,25 @@ test("FULLTEXT still has milkk + milk stem separately", () => {
   const q = buildGrandmaFulltextBooleanQueries("milkk")
   assert.ok(q.some((x) => x.includes("milkk")), String(q))
   assert.ok(q.some((x) => x.includes("milk") && !x.includes("milkk")), String(q))
+})
+
+test("prefix LIKE patterns never lead with % and cover chapati/milk stems", () => {
+  for (const q of ["c", "ch", "cha", "chap", "iphone", "milk"]) {
+    const pats = buildGrandmaPrefixLikePatterns(q)
+    assert.ok(pats.length > 0, q)
+    assert.ok(
+      pats.every((p) => !p.startsWith("%") && p.endsWith("%")),
+      `${q} → ${pats.join(",")}`,
+    )
+    assert.ok(
+      pats.some((p) => p.startsWith(q)),
+      `${q} missing self prefix in ${pats.join(",")}`,
+    )
+  }
+  const milk = buildGrandmaPrefixLikePatterns("milkk")
+  assert.ok(milk.some((p) => p.startsWith("milk")), String(milk))
+  const chap = buildGrandmaPrefixLikePatterns("chapati")
+  assert.ok(chap.includes("chapati%"), String(chap))
 })
 
 test("query clamp bounds length and token count", () => {

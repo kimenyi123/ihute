@@ -1,6 +1,7 @@
 /**
  * Grandma shop search against existing Kaos tables (no new table).
- * Uses account_signup geo columns + seller_add_stock FULLTEXT / LIKE.
+ * Uses account_signup geo columns + seller_add_stock prefix/contains LIKE.
+ * BOOLEAN FULLTEXT prefixes are not used for retrieval (measured 5–16s).
  */
 import type { Pool, RowDataPacket } from "mysql2/promise"
 import mysql from "mysql2/promise"
@@ -13,15 +14,17 @@ import {
   normalizeSearchText,
   rankGrandmaSearchHit,
   buildGrandmaSearchLikePatterns,
+  buildGrandmaPrefixLikePatterns,
   buildGrandmaTypoLikePatterns,
-  buildGrandmaFulltextBooleanQueries,
   isRelevantGrandmaSearchHit,
-  tokenizeSearchQuery,
   clampGrandmaSearchQuery,
-  type GrandmaMatchTier,
-  type GrandmaSearchHighlight,
+  type GrandmaSearchParams,
+  type GrandmaSearchResult,
+  type GrandmaSearchShopHit,
   GRANDMA_SEARCH_DEFAULT_PAGE_SIZE,
   GRANDMA_SEARCH_CANDIDATE_CAP,
+  GRANDMA_FULL_SEARCH_MIN_CHARS,
+  GRANDMA_SUGGEST_LIMIT,
   GRANDMA_PUBLIC_SEARCH_UNAVAILABLE,
 } from "@/lib/grandma-search"
 import {
@@ -32,6 +35,48 @@ import {
 } from "@/lib/seller-category-sector"
 
 let pool: Pool | null = null
+
+export type GrandmaSearchSqlStats = {
+  queries: number
+  slowestMs: number
+  slowestLabel: string
+  candidates: number
+}
+
+let sqlStats: GrandmaSearchSqlStats = {
+  queries: 0,
+  slowestMs: 0,
+  slowestLabel: "",
+  candidates: 0,
+}
+
+export function getGrandmaSearchSqlStats(): GrandmaSearchSqlStats {
+  return { ...sqlStats }
+}
+
+function resetSqlStats() {
+  sqlStats = { queries: 0, slowestMs: 0, slowestLabel: "", candidates: 0 }
+}
+
+async function trackedQuery(
+  p: Pool,
+  label: string,
+  sql: string,
+  binds: unknown[] = [],
+): Promise<RowDataPacket[]> {
+  sqlStats.queries += 1
+  const t0 = Date.now()
+  try {
+    const [rows] = await p.query<RowDataPacket[]>(sql, binds)
+    return rows
+  } finally {
+    const ms = Date.now() - t0
+    if (ms >= sqlStats.slowestMs) {
+      sqlStats.slowestMs = ms
+      sqlStats.slowestLabel = label
+    }
+  }
+}
 
 function getPool(): Pool | null {
   if (pool) return pool
@@ -45,52 +90,7 @@ function getPool(): Pool | null {
   return pool
 }
 
-export type GrandmaSearchShopHit = {
-  id: string
-  sellerAccount: string
-  name: string
-  sellerName: string
-  category: string
-  tagline: string
-  description: string
-  momo: string
-  nickname: string
-  latitude: number | null
-  longitude: number | null
-  distanceKm: number | null
-  score: number
-  matchTier: GrandmaMatchTier
-  highlights: GrandmaSearchHighlight[]
-  matchedProductSample?: string
-}
-
-export type GrandmaSearchResult = {
-  ok: true
-  source: "mysql"
-  query: string
-  shops: GrandmaSearchShopHit[]
-  suggestions: string[]
-  page: number
-  pageSize: number
-  total: number
-  hasMore: boolean
-  radiusKm: number | null
-  nearMe: boolean
-  emptyReason: string | null
-}
-
-export type GrandmaSearchParams = {
-  q?: string
-  sector?: string
-  category?: string
-  lat?: number
-  lng?: number
-  radiusKm?: number | null
-  nearMe?: boolean
-  page?: number
-  pageSize?: number
-  suggest?: boolean
-}
+export type { GrandmaSearchParams, GrandmaSearchResult, GrandmaSearchShopHit } from "@/lib/grandma-search"
 
 function sectorToCategoryLabel(sector: string): string {
   const hit = Object.entries(GRANDMA_CATEGORY_TO_SECTOR_SLUG).find(([, v]) => v === sector)
@@ -121,9 +121,59 @@ function addAccts(into: Set<string>, rows: RowDataPacket[]) {
   }
 }
 
+async function queryProductAccounts(
+  p: Pool,
+  pats: string[],
+  label = "product-like",
+): Promise<RowDataPacket[]> {
+  if (!pats.length) return []
+  const likeOr = pats.map(() => `s.ITEM_NAME LIKE ?`).join(" OR ")
+  return trackedQuery(
+    p,
+    label,
+    `SELECT s.SELLER_ISHYIGA_ACCOUNT AS acct, s.ITEM_NAME AS name
+     FROM seller_add_stock s
+     WHERE s.STATUS = 'ACTIVE' AND s.QUANTITY > 0
+       AND (${likeOr})
+     LIMIT 400`,
+    pats,
+  )
+}
+
+function longestPrefixPattern(prefixes: string[], fallback: string): string {
+  if (!prefixes.length) return fallback
+  return prefixes.reduce((best, p) =>
+    p.replace(/%/g, "").length > best.replace(/%/g, "").length ? p : best,
+  )
+}
+
+function mergeProductHits(
+  found: Set<string>,
+  samples: Map<string, string>,
+  rows: RowDataPacket[],
+  qRaw = "",
+) {
+  for (const r of rows) {
+    const acct = String(r.acct ?? "").trim()
+    const name = String(r.name ?? "").trim()
+    if (acct) found.add(acct)
+    if (!acct || !name) continue
+    const key = acct.toUpperCase()
+    const prev = samples.get(key)
+    if (!prev) {
+      samples.set(key, name)
+      continue
+    }
+    if (!qRaw || prev === name) continue
+    const nextScore = rankGrandmaSearchHit(qRaw, { productBlob: name }).score
+    const prevScore = rankGrandmaSearchHit(qRaw, { productBlob: prev }).score
+    if (nextScore > prevScore) samples.set(key, name)
+  }
+}
+
 /**
- * Invert product search: find matching seller accounts first (FULLTEXT + shop LIKE),
- * then load those rows. Avoids a correlated EXISTS over every LIVE seller's stock.
+ * Invert product search: longest prefix, then remaining prefixes, then contains, then typo LIKE.
+ * BOOLEAN FULLTEXT prefixes (+c* / +cha* / +milk*) are not used — they measured 5–16s.
  */
 async function collectTextSearchAccounts(
   p: Pool,
@@ -133,118 +183,70 @@ async function collectTextSearchAccounts(
   const samples = new Map<string, string>()
   const sector = sectorFilter(params.sector)
   const sectorAnd = sector.sql ? `AND ${sector.sql}` : ""
-  const likes = params.likes.length ? params.likes : [`%${normalizeSearchText(params.qRaw)}%`]
+  const prefixes = buildGrandmaPrefixLikePatterns(params.qRaw).slice(0, 4)
+  const fallbackPrefix = `${normalizeSearchText(params.qRaw)}%`
+  const shopPrefix = longestPrefixPattern(prefixes, fallbackPrefix)
+  const longPrefs = prefixes.filter((p) => p.replace(/%/g, "").length >= 4)
+  const shortPrefs = prefixes.filter((p) => p.replace(/%/g, "").length < 4)
 
-  const shopLikes = [likes[0] ?? `%${normalizeSearchText(params.qRaw).replace(/\s+/g, "%")}%`]
-  const shopLikeSql = shopLikes
-    .map(() => `(LOWER(a.OWNER) LIKE ? OR LOWER(COALESCE(a.nickname,'')) LIKE ?)`)
-    .join(" OR ")
-  const shopBinds: unknown[] = []
-  for (const like of shopLikes) shopBinds.push(like, like)
-
-  const shopPromise = p.query<RowDataPacket[]>(
+  const shopPromise = trackedQuery(
+    p,
+    "shop-prefix",
     `SELECT a.ISHYIGA_ACCOUNT AS acct
      FROM account_signup a
      WHERE a.TYPE = 'SELLER' AND a.STATUS = 'LIVE'
        ${sectorAnd}
-       AND (${shopLikeSql})
+       AND (a.OWNER LIKE ? OR COALESCE(a.nickname,'') LIKE ?)
      LIMIT ${TEXT_CANDIDATE_CAP}`,
-    [...sector.binds, ...shopBinds],
+    [...sector.binds, shopPrefix, shopPrefix],
+  ).catch(() => [] as RowDataPacket[])
+
+  const productPrefixPats = longPrefs.length ? longPrefs : prefixes.length ? prefixes : [shopPrefix]
+  const productPrefixPromise = queryProductAccounts(p, productPrefixPats, "product-prefix").catch(
+    () => [] as RowDataPacket[],
   )
 
-  const tokens = tokenizeSearchQuery(params.qRaw)
-  const shopShaped = tokens.length >= 2 && tokens.every((t) => t.length >= 5)
-  const ftPromise = shopShaped
-    ? Promise.resolve({ ok: true, rows: [] as RowDataPacket[] })
-    : (async () => {
-    const ftQueries = buildGrandmaFulltextBooleanQueries(params.qRaw).slice(0, 3)
-    try {
-      const parts = await Promise.all(
-        ftQueries.map(async (ft) => {
-          const [prodRows] = await p.query<RowDataPacket[]>(
-            `SELECT s.SELLER_ISHYIGA_ACCOUNT AS acct, MIN(s.ITEM_NAME) AS name
-             FROM seller_add_stock s
-             WHERE MATCH(s.ITEM_NAME, s.DESCRIPTION_KEYWORD) AGAINST (? IN BOOLEAN MODE)
-               AND s.STATUS = 'ACTIVE' AND s.QUANTITY > 0
-             GROUP BY s.SELLER_ISHYIGA_ACCOUNT
-             LIMIT ${TEXT_CANDIDATE_CAP}`,
-            [ft],
-          )
-          return prodRows
-        }),
-      )
-      return { ok: true, rows: parts.flat() }
-    } catch {
-      return { ok: false, rows: [] as RowDataPacket[] }
-    }
-  })()
-
-  const [[shopRows], ftResult] = await Promise.all([shopPromise, ftPromise])
+  const [shopRows, prefixProd] = await Promise.all([shopPromise, productPrefixPromise])
   addAccts(found, shopRows)
+  mergeProductHits(found, samples, prefixProd, params.qRaw)
 
-  const likelyShopNameQuery =
-    found.size > 0 && tokens.length >= 2 && tokens.every((t) => t.length >= 5)
-
-  if (!likelyShopNameQuery) {
-    for (const r of ftResult.rows) {
-      const acct = String(r.acct ?? "").trim()
-      const name = String(r.name ?? "").trim()
-      if (acct) found.add(acct)
-      if (acct && name && !samples.has(acct.toUpperCase())) samples.set(acct.toUpperCase(), name)
-    }
-    if (found.size === 0) {
-      const likePats = likes.slice(0, 4)
-      if (likePats.length) {
-        const likeOr = likePats.map(() => `LOWER(s.ITEM_NAME) LIKE ?`).join(" OR ")
-        try {
-          const [likeRows] = await p.query<RowDataPacket[]>(
-            `SELECT s.SELLER_ISHYIGA_ACCOUNT AS acct, MIN(s.ITEM_NAME) AS name
-             FROM seller_add_stock s
-             WHERE s.STATUS = 'ACTIVE' AND s.QUANTITY > 0
-               AND (${likeOr})
-             GROUP BY s.SELLER_ISHYIGA_ACCOUNT
-             LIMIT ${TEXT_CANDIDATE_CAP}`,
-            likePats,
-          )
-          for (const r of likeRows) {
-            const acct = String(r.acct ?? "").trim()
-            const name = String(r.name ?? "").trim()
-            if (acct) found.add(acct)
-            if (acct && name && !samples.has(acct.toUpperCase())) samples.set(acct.toUpperCase(), name)
-          }
-        } catch {
-          /* ignore */
-        }
-      }
-    }
-    if (found.size === 0) {
-      const typoPats = buildGrandmaTypoLikePatterns(params.qRaw).slice(0, 6)
-      if (typoPats.length) {
-        const likeOr = typoPats.map(() => `LOWER(s.ITEM_NAME) LIKE ?`).join(" OR ")
-        try {
-          const [typoRows] = await p.query<RowDataPacket[]>(
-            `SELECT s.SELLER_ISHYIGA_ACCOUNT AS acct, MIN(s.ITEM_NAME) AS name
-             FROM seller_add_stock s
-             WHERE s.STATUS = 'ACTIVE' AND s.QUANTITY > 0
-               AND (${likeOr})
-             GROUP BY s.SELLER_ISHYIGA_ACCOUNT
-             LIMIT ${TEXT_CANDIDATE_CAP}`,
-            typoPats,
-          )
-          for (const r of typoRows) {
-            const acct = String(r.acct ?? "").trim()
-            const name = String(r.name ?? "").trim()
-            if (acct) found.add(acct)
-            if (acct && name && !samples.has(acct.toUpperCase())) samples.set(acct.toUpperCase(), name)
-          }
-        } catch {
-          /* ignore */
-        }
-      }
+  if (found.size < TEXT_CANDIDATE_CAP && longPrefs.length && shortPrefs.length) {
+    try {
+      mergeProductHits(
+        found,
+        samples,
+        await queryProductAccounts(p, shortPrefs, "product-prefix-short"),
+        params.qRaw,
+      )
+    } catch {
+      /* ignore */
     }
   }
 
-  return { accounts: [...found].slice(0, TEXT_CANDIDATE_CAP), samples }
+  if (found.size === 0) {
+    const likePats = (params.likes.length ? params.likes : [`%${normalizeSearchText(params.qRaw)}%`]).slice(
+      0,
+      6,
+    )
+    try {
+      mergeProductHits(found, samples, await queryProductAccounts(p, likePats, "product-contains"), params.qRaw)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (found.size === 0) {
+    const typoPats = buildGrandmaTypoLikePatterns(params.qRaw).slice(0, 8)
+    try {
+      mergeProductHits(found, samples, await queryProductAccounts(p, typoPats, "product-typo"), params.qRaw)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const accounts = [...found].slice(0, TEXT_CANDIDATE_CAP)
+  sqlStats.candidates = accounts.length
+  return { accounts, samples }
 }
 
 function buildWhere(params: {
@@ -289,6 +291,7 @@ function buildWhere(params: {
 export async function runGrandmaSearch(
   params: GrandmaSearchParams,
 ): Promise<GrandmaSearchResult | { ok: false; error: string; code: string }> {
+  resetSqlStats()
   const p = getPool()
   if (!p) {
     return { ok: false, error: GRANDMA_PUBLIC_SEARCH_UNAVAILABLE, code: "MYSQL_NOT_CONFIGURED" }
@@ -305,12 +308,14 @@ export async function runGrandmaSearch(
       : Math.max(0.1, Number(params.radiusKm))
   const sector = String(params.sector || params.category || "").trim()
   const likes = buildGrandmaSearchLikePatterns(qRaw)
+  const suggestOnly =
+    Boolean(params.suggestOnly) ||
+    (Boolean(params.suggest) && qRaw.length > 0 && qRaw.length < GRANDMA_FULL_SEARCH_MIN_CHARS && !nearMe)
+  const wantSuggestions = (params.suggest || suggestOnly) && qRaw.length >= 1
 
-  const suggestionsPromise =
-    params.suggest && qRaw.length >= 1 ? fetchSuggestions(p, qRaw) : Promise.resolve([] as string[])
+  const suggestionsPromise = wantSuggestions ? fetchSuggestions(p, qRaw) : Promise.resolve([] as string[])
 
-  // Suggestions-only early exit for very short queries without near-me
-  if (params.suggest && qRaw.length < 2 && !nearMe) {
+  if (suggestOnly || (qRaw.length > 0 && qRaw.length < GRANDMA_FULL_SEARCH_MIN_CHARS && !nearMe)) {
     return {
       ok: true,
       source: "mysql",
@@ -321,8 +326,8 @@ export async function runGrandmaSearch(
       pageSize,
       total: 0,
       hasMore: false,
-      radiusKm: null,
-      nearMe: false,
+      radiusKm: nearMe ? radiusKm : null,
+      nearMe,
       emptyReason: null,
     }
   }
@@ -330,7 +335,7 @@ export async function runGrandmaSearch(
   try {
     let accountIds: string[] | undefined
     let productSamplesFromText: Map<string, string> | undefined
-    if (qRaw.length >= 2) {
+    if (qRaw.length >= GRANDMA_FULL_SEARCH_MIN_CHARS) {
       const textHits = await collectTextSearchAccounts(p, { qRaw, likes, sector })
       accountIds = textHits.accounts
       productSamplesFromText = textHits.samples
@@ -398,7 +403,9 @@ async function executeSearch(
   // same EXISTS/LIKE plan — that second pass was the main 10–30s cost.
   let total = 0
   if (!rankThenPage) {
-    const [countRows] = await p.query<RowDataPacket[]>(
+    const countRows = await trackedQuery(
+      p,
+      "count-sellers",
       `SELECT COUNT(*) AS cnt FROM account_signup a WHERE ${where.sql}`,
       where.binds,
     )
@@ -429,7 +436,7 @@ async function executeSearch(
     LIMIT ? OFFSET ?
   `
 
-  const [rows] = await p.query<RowDataPacket[]>(listSql, [
+  const rows = await trackedQuery(p, nearMe ? "list-sellers-nearme" : "list-sellers", listSql, [
     ...selectBinds,
     ...where.binds,
     fetchLimit,
@@ -540,67 +547,50 @@ async function executeSearch(
 async function fetchSuggestions(p: Pool, qRaw: string): Promise<string[]> {
   const q = normalizeSearchText(qRaw)
   if (!q) return []
-  const likePrefix = `${q}%`
-  const contains = `%${q}%`
+  const prefixes = buildGrandmaPrefixLikePatterns(qRaw).slice(0, 3)
+  const likePrefix = longestPrefixPattern(prefixes, `${q}%`)
   const out = new Set<string>()
+  const isValidLabel = (label: string) =>
+    Boolean(label) && label.toLowerCase() !== "null" && label.toLowerCase() !== "undefined"
 
-  try {
-    const [shopRows] = await p.query<RowDataPacket[]>(
-      `SELECT DISTINCT COALESCE(NULLIF(TRIM(nickname), ''), OWNER) AS label
-       FROM account_signup
-       WHERE TYPE = 'SELLER' AND STATUS = 'LIVE'
-         AND (LOWER(OWNER) LIKE ? OR LOWER(COALESCE(nickname,'')) LIKE ?)
-       LIMIT 8`,
-      [contains, contains],
-    )
-    for (const r of shopRows) {
-      const label = String(r.label ?? "").trim()
-      if (label) out.add(label)
-    }
-  } catch {
-    /* ignore */
+  const shopPromise =
+    q.length >= 2
+      ? trackedQuery(
+          p,
+          "suggest-shop",
+          `SELECT COALESCE(NULLIF(TRIM(nickname), ''), OWNER) AS label
+           FROM account_signup
+           WHERE TYPE = 'SELLER' AND STATUS = 'LIVE'
+             AND (OWNER LIKE ? OR COALESCE(nickname,'') LIKE ?)
+           LIMIT 16`,
+          [likePrefix, likePrefix],
+        ).catch(() => [] as RowDataPacket[])
+      : Promise.resolve([] as RowDataPacket[])
+
+  const prodOr =
+    prefixes.length > 0 ? prefixes.map(() => `ITEM_NAME LIKE ?`).join(" OR ") : "ITEM_NAME LIKE ?"
+  const prodBinds = prefixes.length ? prefixes : [likePrefix]
+  const prodPromise = trackedQuery(
+    p,
+    "suggest-product",
+    `SELECT ITEM_NAME AS label
+     FROM seller_add_stock
+     WHERE STATUS = 'ACTIVE' AND QUANTITY > 0
+       AND (${prodOr})
+     LIMIT 24`,
+    prodBinds,
+  ).catch(() => [] as RowDataPacket[])
+
+  const [shopRows, prodRows] = await Promise.all([shopPromise, prodPromise])
+  for (const r of shopRows) {
+    const label = String(r.label ?? "").trim()
+    if (isValidLabel(label)) out.add(label)
   }
-
-  try {
-    const ft = buildGrandmaFulltextBooleanQueries(qRaw)[0]
-    const [prodRows] = await p.query<RowDataPacket[]>(
-      ft
-        ? `SELECT DISTINCT ITEM_NAME AS label
-           FROM seller_add_stock
-           WHERE STATUS = 'ACTIVE' AND QUANTITY > 0
-             AND MATCH(ITEM_NAME, DESCRIPTION_KEYWORD) AGAINST (? IN BOOLEAN MODE)
-           LIMIT 10`
-        : `SELECT DISTINCT ITEM_NAME AS label
-           FROM seller_add_stock
-           WHERE STATUS = 'ACTIVE' AND QUANTITY > 0
-             AND LOWER(ITEM_NAME) LIKE ?
-           LIMIT 10`,
-      [ft || (q.length >= 2 ? likePrefix : contains)],
-    )
-    for (const r of prodRows) {
-      const label = String(r.label ?? "").trim()
-      if (label) out.add(label)
-    }
-  } catch {
-    try {
-      const [prodRows] = await p.query<RowDataPacket[]>(
-        `SELECT DISTINCT ITEM_NAME AS label
-         FROM seller_add_stock
-         WHERE STATUS = 'ACTIVE' AND QUANTITY > 0
-           AND LOWER(ITEM_NAME) LIKE ?
-         LIMIT 10`,
-        [q.length >= 2 ? likePrefix : contains],
-      )
-      for (const r of prodRows) {
-        const label = String(r.label ?? "").trim()
-        if (label) out.add(label)
-      }
-    } catch {
-      /* ignore */
-    }
+  for (const r of prodRows) {
+    const label = String(r.label ?? "").trim()
+    if (isValidLabel(label)) out.add(label)
   }
-
-  return [...out].slice(0, 12)
+  return [...out].slice(0, GRANDMA_SUGGEST_LIMIT)
 }
 
 async function sampleMatchingProductsBatch(
@@ -610,37 +600,19 @@ async function sampleMatchingProductsBatch(
 ): Promise<Map<string, string>> {
   const out = new Map<string, string>()
   if (!sellerAccounts.length) return out
-  const likeBinds = buildGrandmaSearchLikePatterns(qRaw)
+  const prefixes = buildGrandmaPrefixLikePatterns(qRaw).slice(0, 4)
+  const likeBinds = prefixes.length
+    ? prefixes
+    : buildGrandmaSearchLikePatterns(qRaw).slice(0, 4)
   const likes = likeBinds.length
-    ? likeBinds.slice(0, 6)
-    : [`%${normalizeSearchText(qRaw).replace(/\s+/g, "%")}%`]
+    ? likeBinds
+    : [`${normalizeSearchText(qRaw)}%`]
   const placeholders = sellerAccounts.map(() => "?").join(",")
-  const ftQs = buildGrandmaFulltextBooleanQueries(qRaw)
-  const sampleFt = ftQs[ftQs.length - 1]
+  const orLikes = likes.map(() => `ITEM_NAME LIKE ?`).join(" OR ")
   try {
-    if (sampleFt) {
-      const [ftRows] = await p.query<RowDataPacket[]>(
-        `SELECT SELLER_ISHYIGA_ACCOUNT AS acct, ITEM_NAME AS name
-         FROM seller_add_stock
-         WHERE SELLER_ISHYIGA_ACCOUNT IN (${placeholders})
-           AND STATUS = 'ACTIVE' AND QUANTITY > 0
-           AND MATCH(ITEM_NAME, DESCRIPTION_KEYWORD) AGAINST (? IN BOOLEAN MODE)
-         LIMIT 400`,
-        [...sellerAccounts, sampleFt],
-      )
-      for (const r of ftRows) {
-        const acct = String(r.acct ?? "").trim().toUpperCase()
-        const name = String(r.name ?? "").trim()
-        if (acct && name && !out.has(acct)) out.set(acct, name)
-      }
-      if (out.size > 0) return out
-    }
-  } catch {
-    /* fall through to ITEM_NAME LIKE on the candidate IN list */
-  }
-  const orLikes = likes.map(() => `LOWER(ITEM_NAME) LIKE ?`).join(" OR ")
-  try {
-    const [rows] = await p.query<RowDataPacket[]>(
+    const rows = await trackedQuery(
+      p,
+      "sample-prefix",
       `SELECT SELLER_ISHYIGA_ACCOUNT AS acct, ITEM_NAME AS name
        FROM seller_add_stock
        WHERE SELLER_ISHYIGA_ACCOUNT IN (${placeholders})
@@ -658,11 +630,38 @@ async function sampleMatchingProductsBatch(
     /* ignore */
   }
   if (out.size > 0) return out
-  const typoPats = buildGrandmaTypoLikePatterns(qRaw).slice(0, 6)
+  const containsPats = buildGrandmaSearchLikePatterns(qRaw).slice(0, 3)
+  if (containsPats.length) {
+    const containsOr = containsPats.map(() => `ITEM_NAME LIKE ?`).join(" OR ")
+    try {
+      const containRows = await trackedQuery(
+        p,
+        "sample-contains",
+        `SELECT SELLER_ISHYIGA_ACCOUNT AS acct, ITEM_NAME AS name
+         FROM seller_add_stock
+         WHERE SELLER_ISHYIGA_ACCOUNT IN (${placeholders})
+           AND STATUS = 'ACTIVE' AND QUANTITY > 0
+           AND (${containsOr})
+         LIMIT 400`,
+        [...sellerAccounts, ...containsPats],
+      )
+      for (const r of containRows) {
+        const acct = String(r.acct ?? "").trim().toUpperCase()
+        const name = String(r.name ?? "").trim()
+        if (acct && name && !out.has(acct)) out.set(acct, name)
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  if (out.size > 0) return out
+  const typoPats = buildGrandmaTypoLikePatterns(qRaw).slice(0, 8)
   if (!typoPats.length) return out
-  const typoOr = typoPats.map(() => `LOWER(ITEM_NAME) LIKE ?`).join(" OR ")
+  const typoOr = typoPats.map(() => `ITEM_NAME LIKE ?`).join(" OR ")
   try {
-    const [typoRows] = await p.query<RowDataPacket[]>(
+    const typoRows = await trackedQuery(
+      p,
+      "sample-typo",
       `SELECT SELLER_ISHYIGA_ACCOUNT AS acct, ITEM_NAME AS name
        FROM seller_add_stock
        WHERE SELLER_ISHYIGA_ACCOUNT IN (${placeholders})

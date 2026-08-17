@@ -489,6 +489,24 @@ export function getGrandmaListSuppliersBrowseUrlFallback(): string | null {
   return `${getBackendBaseForProxy()}/Api/grandma/suppliers/browse`
 }
 
+/**
+ * Dedicated Grandma Search (ITEM_NAME → LIVE account_signup). Not fetchSuggestions.
+ * Short path `/grandma/search`; long `/Api/grandma/search`.
+ */
+export function getGrandmaSearchUrl(): string {
+  if (process.env.GRANDMA_SEARCH_URL) {
+    return process.env.GRANDMA_SEARCH_URL
+  }
+  return `${getBackendBaseForProxy()}/grandma/search`
+}
+
+export function getGrandmaSearchUrlFallback(): string | null {
+  if (process.env.GRANDMA_SEARCH_URL) {
+    return null
+  }
+  return `${getBackendBaseForProxy()}/Api/grandma/search`
+}
+
 /** Account profile (account_seller; momo coalesced with account_signup): GET by email/account, PUT to update. */
 export function getAccountProfileUrl(): string {
   return process.env.JAVA_ACCOUNT_PROFILE_URL || `${getBackendBaseForProxy()}/Api/AccountProfile`

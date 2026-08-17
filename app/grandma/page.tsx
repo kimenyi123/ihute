@@ -30,6 +30,7 @@ import { haversineKm, isValidLatLng } from "@/lib/geo-haversine"
 import {
   GRANDMA_NEAR_ME_DEFAULT_RADIUS_KM,
   GRANDMA_NEAR_ME_RADIUS_OPTIONS_KM,
+  GRANDMA_FULL_SEARCH_MIN_CHARS,
   GRANDMA_PUBLIC_GPS_PERMISSION,
   GRANDMA_PUBLIC_INVALID_RADIUS,
   GRANDMA_PUBLIC_INVALID_SEARCH,
@@ -60,6 +61,13 @@ import {
   computeIhutePlatformFeeRwf,
   stripShopMomoLabel,
 } from "@/lib/grandma-order-billing"
+import {
+  formatGrandmaDistanceKm,
+  grandmaDeliveryDistanceKm,
+  quoteGrandmaFulfillmentFeeRwf,
+  quoteGrandmaLogisticsFeeRwf,
+  type GrandmaLogisticsId,
+} from "@/lib/grandma-logistics-pricing"
 import { GRANDMA_CATEGORY_TO_SECTOR_SLUG, displayGrandmaShopName, grandmaCategoryLabel, grandmaNavCategories, grandmaOthersChildCategories, isOthersChildCategory, isOthersHubCategory, resolveGrandmaCategory } from "@/lib/seller-category-sector"
 import { fetchSectorStatsFromApi, productCountFromSupplierRow } from "@/lib/fetch-suggestions-helpers"
 import { filterProductsByRelevance } from "@/lib/search-utils"
@@ -149,8 +157,8 @@ type BurrowsApiSeller = {
 
 type BurrowsApiResponse = { ok: boolean; sellers?: BurrowsApiSeller[] }
 
-type LogisticsId = "human" | "bike" | "moto"
-type LogisticsOption = { id: LogisticsId; icon: string; label: string; baseRwf: number; rwfPerKm: number }
+type LogisticsId = GrandmaLogisticsId
+type LogisticsOption = { id: LogisticsId; icon: string; label: string }
 
 /** Buyer chooses delivery vs collecting at shop — avoids mixing modes. */
 type FulfillmentMode = "delivery" | "pickup" | "takeaway"
@@ -328,43 +336,6 @@ function normalizeSellerKeyFromSearch(raw: unknown): string {
   if (!s) return ""
   const synthetic = s.toLowerCase().startsWith("supplier_") ? s : `supplier_${s}__x`
   return sellerAccountFromGrandmaShopId(synthetic).toUpperCase()
-}
-
-/** Collect seller accounts from global search JSON (products + suppliers). */
-function collectSellerAccountsFromGlobalSearchJson(json: Record<string, unknown>): Set<string> {
-  const out = new Set<string>()
-  const add = (raw: unknown) => {
-    const k = normalizeSellerKeyFromSearch(raw)
-    if (k) out.add(k)
-  }
-  const products = Array.isArray(json.products) ? json.products : []
-  for (const p of products) {
-    if (!p || typeof p !== "object") continue
-    const o = p as Record<string, unknown>
-    add(
-      o.supplier_account ??
-        o.SELLER_ISHYIGA_ACCOUNT ??
-        o.supplierAccount ??
-        o.ISHYIGA_ACCOUNT ??
-        o.seller_account ??
-        o.SELLER_ACCOUNT,
-    )
-  }
-  for (const arr of [json.suppliersByProduct, json.suppliersByName]) {
-    const rows = Array.isArray(arr) ? arr : []
-    for (const s of rows) {
-      if (!s || typeof s !== "object") continue
-      const o = s as Record<string, unknown>
-      add(
-        o.supplier_account ??
-          o.SELLER_ISHYIGA_ACCOUNT ??
-          o.supplierAccount ??
-          o.ISHYIGA_ACCOUNT ??
-          o.seller_account,
-      )
-    }
-  }
-  return out
 }
 
 function numPriceish(v: unknown): number {
@@ -1837,9 +1808,9 @@ const INITIAL_PRODUCTS: Product[] = [
 ]
 
 const LOGISTICS: LogisticsOption[] = [
-  { id: "human", icon: "🚶", label: "Human", baseRwf: 150, rwfPerKm: 85 },
-  { id: "bike", icon: "🚲", label: "Bike", baseRwf: 200, rwfPerKm: 110 },
-  { id: "moto", icon: "🏍", label: "Moto", baseRwf: 250, rwfPerKm: 145 },
+  { id: "human", icon: "🚶", label: "Human" },
+  { id: "bike", icon: "🚲", label: "Bike" },
+  { id: "moto", icon: "🏍", label: "Moto" },
 ]
 
 const PAYMENTS: PaymentMode[] = [
@@ -1853,6 +1824,7 @@ const PAYMENTS: PaymentMode[] = [
 const TAXES_PLACEHOLDER = 0
 
 function formatRwf(v: number): string {
+  if (!Number.isFinite(v)) return "—"
   return `${Math.round(v).toLocaleString()} RWF`
 }
 
@@ -2154,17 +2126,9 @@ function shopDisplayReviews(s: ShopEntry): number {
   return 12 + (h % 280)
 }
 
-function logisticsQuote(opt: LogisticsOption, distanceKm: number): number {
-  const km = Math.max(0, distanceKm)
-  return Math.round(opt.baseRwf + opt.rwfPerKm * km)
-}
-
-/**
- * ETA window (minutes): prep + travel by distance & mode.
- * Human (walk) is slowest per km; moto fastest — same short trip must not beat motorbike on foot.
- */
-function deliveryEtaRange(distanceKm: number, mode: LogisticsId | null): { lo: number; hi: number } {
-  const km = Math.max(0, distanceKm)
+function deliveryEtaRange(distanceKm: number | null, mode: LogisticsId | null): { lo: number; hi: number } {
+  if (distanceKm == null || !Number.isFinite(distanceKm) || distanceKm < 0) return { lo: 0, hi: 0 }
+  const km = distanceKm
   const kmEff = Math.max(0.2, km)
   const prepMin = 7
   const minPerKm =
@@ -2651,51 +2615,9 @@ export default function GrandmaPage() {
     }
   }, [locationData])
 
-  /** Debounced global product search so shop list can include stores that sell the query (e.g. “milk”), not only name/tagline matches. */
-  useEffect(() => {
-    let cancelled = false
-    const q = shopSearch.trim()
-    if (q.length < 2) {
-      setShopProductSearchAccounts([])
-      setShopProductSearchLoading(false)
-      return
-    }
-    const ac = new AbortController()
-    const tid = setTimeout(() => {
-      if (cancelled) return
-      void (async () => {
-        setShopProductSearchLoading(true)
-        try {
-          const sector = GRANDMA_CATEGORY_TO_SECTOR_SLUG[category]?.trim()
-          const params = new URLSearchParams({
-            globalSearch: q,
-            limit: "200",
-            Currency: "RWF",
-          })
-          if (sector) params.set("sector", sector)
-          const res = await fetch(`/api/fetchSuggestions?${params.toString()}`, {
-            signal: ac.signal,
-            cache: "no-store",
-          })
-          if (!res.ok) throw new Error(`HTTP ${res.status}`)
-          const json = (await res.json()) as Record<string, unknown>
-          const acc = collectSellerAccountsFromGlobalSearchJson(json)
-          if (!cancelled) setShopProductSearchAccounts([...acc])
-        } catch {
-          if (!cancelled && !ac.signal.aborted) setShopProductSearchAccounts([])
-        } finally {
-          if (!cancelled && !ac.signal.aborted) setShopProductSearchLoading(false)
-        }
-      })()
-    }, 380)
-    return () => {
-      cancelled = true
-      clearTimeout(tid)
-      ac.abort()
-    }
-  }, [shopSearch, category])
+  /** Shop-list product matches come from Grandma Java search — not Next.js MySQL. */
 
-  /** Home Google-style search: items via Java catalog + shops via Grandma MySQL. */
+  /** Home Google-style search: items via Java catalog + shops via Grandma Java search. */
   useEffect(() => {
     if (page !== 1) return
     let cancelled = false
@@ -2812,7 +2734,7 @@ export default function GrandmaPage() {
     language,
   ])
 
-  /** Production Grandma search: MySQL-backed ranking + Near Me radius (falls back to legacy client filter). */
+  /** Production Grandma search: Java-backed ranking + Near Me radius (falls back to legacy client filter). */
   useEffect(() => {
     let cancelled = false
     const q = shopSearch.trim()
@@ -2825,10 +2747,10 @@ export default function GrandmaPage() {
       setSearchSuggestions([])
       setBackendSearchLoading(false)
       setSearchHasMore(false)
+      setShopProductSearchAccounts([])
       return
     }
 
-    setBackendSearchLoading(true)
     setBackendSearchError(null)
 
     if (nearMe) {
@@ -2858,7 +2780,8 @@ export default function GrandmaPage() {
     const tid = setTimeout(() => {
       if (cancelled) return
       void (async () => {
-        setBackendSearchLoading(true)
+        const suggestOnly = q.length > 0 && q.length < GRANDMA_FULL_SEARCH_MIN_CHARS && !nearMe
+        if (!suggestOnly) setBackendSearchLoading(true)
         try {
           const sector = GRANDMA_CATEGORY_TO_SECTOR_SLUG[category]?.trim() || ""
           const params = new URLSearchParams({
@@ -2866,6 +2789,7 @@ export default function GrandmaPage() {
             page: String(searchPage),
             pageSize: "40",
           })
+          if (suggestOnly) params.set("suggestOnly", "1")
           if (q) params.set("q", q)
           if (sector) params.set("sector", sector)
           params.set("category", category)
@@ -2921,6 +2845,18 @@ export default function GrandmaPage() {
                   nearMe,
                 }),
               )
+            }
+            return
+          }
+
+          if (suggestOnly) {
+            if (!cancelled) {
+              setBackendSearchError(null)
+              setSearchSuggestions(json.suggestions ?? [])
+              setBackendSearchShops(null)
+              setSearchHasMore(false)
+              setBackendEmptyReason(null)
+              setShopProductSearchAccounts([])
             }
             return
           }
@@ -2987,7 +2923,7 @@ export default function GrandmaPage() {
             setSearchSuggestions(json.suggestions ?? [])
             setSearchHasMore(Boolean(json.hasMore))
             setBackendEmptyReason(json.emptyReason ?? null)
-            if (q.length >= 2) {
+            if (q.length >= GRANDMA_FULL_SEARCH_MIN_CHARS) {
               setShopProductSearchAccounts(
                 mapped.map((s) => sellerAccountFromGrandmaShopId(s.id).toUpperCase()).filter(Boolean),
               )
@@ -3002,7 +2938,7 @@ export default function GrandmaPage() {
           if (!cancelled && !ac.signal.aborted) setBackendSearchLoading(false)
         }
       })()
-    }, 320)
+    }, 200)
 
     return () => {
       cancelled = true
@@ -3135,21 +3071,32 @@ export default function GrandmaPage() {
     [selectedShopId, allAvailableShops, apiShops, category]
   )
 
-  const deliveryKm = selectedShop?.distanceKm ?? 0
+  const deliveryDistanceKm = useMemo(() => {
+    return grandmaDeliveryDistanceKm(
+      locationData?.latitude,
+      locationData?.longitude,
+      selectedShop?.latitude,
+      selectedShop?.longitude,
+    )
+  }, [
+    locationData?.latitude,
+    locationData?.longitude,
+    selectedShop?.latitude,
+    selectedShop?.longitude,
+  ])
 
-  const logisticsTotal = useMemo(() => {
-    if (fulfillmentMode === "pickup") return 0
-    if (fulfillmentMode === "takeaway") return 500
-    const opt = LOGISTICS.find((x) => x.id === selectedLogistics)
-    return opt ? logisticsQuote(opt, deliveryKm) : 0
-  }, [fulfillmentMode, selectedLogistics, deliveryKm])
+  const logisticsFeeRwf = useMemo(() => {
+    return quoteGrandmaFulfillmentFeeRwf(fulfillmentMode, selectedLogistics, deliveryDistanceKm)
+  }, [fulfillmentMode, selectedLogistics, deliveryDistanceKm])
+
+  const logisticsTotal = logisticsFeeRwf
 
   const etaRange = useMemo(
     () =>
       fulfillmentMode === "pickup" || fulfillmentMode === "takeaway"
         ? { lo: 0, hi: 0 }
-        : deliveryEtaRange(deliveryKm, selectedLogistics),
-    [deliveryKm, selectedLogistics, fulfillmentMode]
+        : deliveryEtaRange(deliveryDistanceKm, selectedLogistics),
+    [deliveryDistanceKm, selectedLogistics, fulfillmentMode]
   )
 
   const couriersByDistance = useMemo(() => {
@@ -5156,11 +5103,11 @@ export default function GrandmaPage() {
   const etaSubText = useMemo(() => {
     const tr = GRANDMA_LABELS[language]
     if (fulfillmentMode === "pickup" || fulfillmentMode === "takeaway") return tr.etaPickupSub
-    const km = deliveryKm.toFixed(1)
+    const km = formatGrandmaDistanceKm(deliveryDistanceKm).replace(/ km$/, "")
     const mode =
       selectedLogistics === "human" ? tr.logHuman : selectedLogistics === "bike" ? tr.logBike : tr.logMoto
     return tr.etaSub.replace("{km}", km).replace("{mode}", mode)
-  }, [language, deliveryKm, selectedLogistics, fulfillmentMode])
+  }, [language, deliveryDistanceKm, selectedLogistics, fulfillmentMode])
 
   const selectedLogisticsLabel = useMemo(() => {
     const tr = GRANDMA_LABELS[language]
@@ -5445,6 +5392,7 @@ export default function GrandmaPage() {
     ihuteFees,
     itemsTotal,
     logisticsTotal,
+    logisticsFeeRwf,
   ])
 
   const featuredCourierSafe = useMemo(() => {
@@ -6760,7 +6708,6 @@ export default function GrandmaPage() {
               setShopSearch(e.target.value)
               setShowSearchSuggestions(true)
               setSearchPage(1)
-              if (e.target.value.trim().length >= 1) setBackendSearchLoading(true)
             }}
             onFocus={() => setShowSearchSuggestions(true)}
             onBlur={() => setTimeout(() => setShowSearchSuggestions(false), 180)}
@@ -7556,7 +7503,9 @@ export default function GrandmaPage() {
 
         <p className="note" style={{ marginTop: 0, marginBottom: 10 }}>
           {fulfillmentMode === "delivery"
-            ? tPay.logisticsNote.replace("{km}", deliveryKm.toFixed(1))
+            ? deliveryDistanceKm == null
+              ? GRANDMA_PUBLIC_GPS_PERMISSION
+              : tPay.logisticsNote.replace("{km}", deliveryDistanceKm.toFixed(1))
             : fulfillmentMode === "takeaway"
             ? tPay.logisticsNoteTakeaway
             : tPay.logisticsNotePickup}
@@ -7580,7 +7529,7 @@ export default function GrandmaPage() {
             ) : null}
           </div>
           <div className="shop-dist-pill" title="Distance to this shop">
-            {selectedShop ? `${selectedShop.distanceKm.toFixed(1)} km` : "—"}
+            {selectedShop ? formatGrandmaDistanceKm(deliveryDistanceKm) : "—"}
           </div>
         </div>
 
@@ -7604,7 +7553,7 @@ export default function GrandmaPage() {
                   <div className="log-label">
                     {opt.id === "human" ? tPay.logHuman : opt.id === "bike" ? tPay.logBike : tPay.logMoto}
                   </div>
-                  <div className="log-price">{formatRwf(logisticsQuote(opt, deliveryKm))}</div>
+                  <div className="log-price">{formatRwf(quoteGrandmaLogisticsFeeRwf(opt.id, deliveryDistanceKm))}</div>
                 </div>
               ))}
             </div>
@@ -7749,7 +7698,11 @@ export default function GrandmaPage() {
           <div className="pay-detail-row">
             <span className="pay-detail-label">{tPay.eta}</span>
             <span className="pay-detail-value">
-              {fulfillmentMode === "pickup" || fulfillmentMode === "takeaway" ? tPay.etaAtShop : `${etaRange.lo}–${etaRange.hi} min`}
+              {fulfillmentMode === "pickup" || fulfillmentMode === "takeaway"
+                ? tPay.etaAtShop
+                : deliveryDistanceKm == null
+                  ? "—"
+                  : `${etaRange.lo}–${etaRange.hi} min`}
             </span>
           </div>
           <div className="pay-detail-sub" style={{ paddingTop: 2 }}>

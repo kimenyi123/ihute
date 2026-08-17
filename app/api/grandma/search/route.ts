@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { runGrandmaSearch } from "@/lib/grandma-search-mysql"
-import { getOnboardingMysqlConfigStatus } from "@/lib/onboarding-mysql"
+import { runGrandmaSearch } from "@/lib/grandma-search-java"
+import { warmJavaBackendBase } from "@/lib/backend-config"
 import {
   GRANDMA_SEARCH_DEFAULT_PAGE_SIZE,
   parseGrandmaSearchRadiusKm,
@@ -20,7 +20,8 @@ import {
 export const runtime = "nodejs"
 
 /**
- * Grandma production search — MySQL on existing account_signup + seller_add_stock.
+ * Grandma production search — Java/Tomcat APIs, then Next.js ranking.
+ * Does not open a Next.js MySQL connection.
  *
  * Query params:
  * - q: search text
@@ -30,6 +31,7 @@ export const runtime = "nodejs"
  * - radiusKm: when nearMe, omit/empty → 1 km; `all` → no radius cap
  * - page, pageSize
  * - suggest: 1 to include autocomplete suggestions
+ * - suggestOnly: 1 to return prefix suggestions without full shop ranking
  */
 export async function GET(req: NextRequest) {
   const rid = crypto.randomUUID()
@@ -85,6 +87,7 @@ export async function GET(req: NextRequest) {
         ? Math.min(100, Math.floor(pageSizeRaw))
         : GRANDMA_SEARCH_DEFAULT_PAGE_SIZE
     const suggest = sp.get("suggest") === "1" || sp.get("suggest") === "true"
+    const suggestOnly = sp.get("suggestOnly") === "1" || sp.get("suggestOnly") === "true"
 
     if (latRaw != null && latRaw !== "" && lngRaw != null && lngRaw !== "" && !isValidLatLng(lat, lng)) {
       console.warn(`[api/grandma/search] ${rid} GEO_INVALID`)
@@ -108,6 +111,8 @@ export async function GET(req: NextRequest) {
       )
     }
 
+    await warmJavaBackendBase()
+
     const result = await runGrandmaSearch({
       q,
       sector,
@@ -119,19 +124,13 @@ export async function GET(req: NextRequest) {
       page,
       pageSize,
       suggest,
+      suggestOnly,
     })
 
     if (!result.ok) {
-      const mysqlStatus =
-        result.code === "MYSQL_NOT_CONFIGURED" ? getOnboardingMysqlConfigStatus() : undefined
       const ms = Date.now() - started
-      if (mysqlStatus) {
-        console.warn(`[api/grandma/search] ${rid} MYSQL_NOT_CONFIGURED ms=${ms} qLen=${q.length} nearMe=${nearMe}`, mysqlStatus)
-      } else {
-        console.warn(`[api/grandma/search] ${rid} ${result.code} ms=${ms} qLen=${q.length} nearMe=${nearMe}`)
-      }
-      const unavailable =
-        result.code === "MYSQL_NOT_CONFIGURED" || result.code === "MYSQL_QUERY_FAILED"
+      console.warn(`[api/grandma/search] ${rid} ${result.code} ms=${ms} qLen=${q.length} nearMe=${nearMe}`)
+      const unavailable = result.code === "JAVA_UNREACHABLE"
       return NextResponse.json(
         {
           ok: false,
@@ -143,7 +142,7 @@ export async function GET(req: NextRequest) {
 
     const ms = Date.now() - started
     console.info(
-      `[api/grandma/search] ${rid} ok total=${result.total} shops=${result.shops.length} ms=${ms} qLen=${q.length} nearMe=${nearMe}`,
+      `[api/grandma/search] ${rid} ok total=${result.total} shops=${result.shops.length} sug=${result.suggestions.length} ms=${ms} qLen=${q.length} nearMe=${nearMe} suggestOnly=${suggestOnly}`,
     )
     return NextResponse.json(result)
   } catch (e: unknown) {
