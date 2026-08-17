@@ -100,7 +100,6 @@ export function KioskStatusPage({ orderId }: Props) {
 
   useEffect(() => {
     let cancelled = false
-    let interval: ReturnType<typeof setInterval> | undefined
 
     const poll = async () => {
       try {
@@ -153,7 +152,7 @@ export function KioskStatusPage({ orderId }: Props) {
 
         setFailCount(0)
         if (s === "completed" || s === "cancelled") {
-          if (interval) clearInterval(interval)
+          clearInterval(interval)
         }
       } catch {
         if (cancelled) return
@@ -165,10 +164,10 @@ export function KioskStatusPage({ orderId }: Props) {
       }
     }
     poll()
-    interval = setInterval(poll, 6000)
+    const interval = setInterval(poll, 6000)
     return () => {
       cancelled = true
-      if (interval) clearInterval(interval)
+      clearInterval(interval)
     }
   }, [orderId])
 

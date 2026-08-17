@@ -20,6 +20,7 @@ interface BackendProfile {
   businessName?: string
   businessCategory?: string
   preferredCategories?: string
+  photo?: string
   clientId?: string
   [key: string]: unknown
 }
@@ -42,6 +43,7 @@ function normalizeProfile(p: BackendProfile) {
     owner: (p.owner ?? "").trim(),
     businessName: (p.businessName ?? "").trim(),
     businessCategory: (p.businessCategory ?? "").trim(),
+    photo: (p.photo ?? "").trim(),
   }
 }
 

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { Plus, Edit, Trash2, FileText, Grid3x3 } from 'lucide-react'
-import { useAuthStore } from '@/lib/auth-store'
+import { postAdminApi } from '@/lib/admin-client'
 
 interface Sector {
   name: string
@@ -23,7 +23,6 @@ interface HomepageCategory {
 }
 
 export default function CategoriesPage() {
-  const { user } = useAuthStore()
   const [sectors, setSectors] = useState<Sector[]>([])
   const [homepageCategories, setHomepageCategories] = useState<HomepageCategory[]>([])
   const [loading, setLoading] = useState(true)
@@ -49,11 +48,7 @@ export default function CategoriesPage() {
   const loadSectors = async () => {
     try {
       setLoading(true)
-      const res = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'getSectors', adminEmail: user?.email || '' })
-      })
+      const res = await postAdminApi({ action: 'getSectors' })
       const data = await res.json()
       
       if (data.ok) {
@@ -70,10 +65,9 @@ export default function CategoriesPage() {
     if (!selectedSector) return
     
     try {
-      const res = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'getSectorComplianceRules', sector: selectedSector, adminEmail: user?.email || '' })
+      const res = await postAdminApi({
+        action: 'getSectorComplianceRules',
+        sector: selectedSector,
       })
       const data = await res.json()
       
@@ -88,11 +82,7 @@ export default function CategoriesPage() {
   const loadHomepageCategories = async () => {
     try {
       setLoading(true)
-      const res = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'getHomepageCategories', adminEmail: user?.email || '' })
-      })
+      const res = await postAdminApi({ action: 'getHomepageCategories' })
       const data = await res.json()
       
       if (data.ok) {
@@ -108,20 +98,15 @@ export default function CategoriesPage() {
   const handleSaveCategory = async (category: HomepageCategory) => {
     try {
       const action = category.id ? 'updateHomepageCategory' : 'createHomepageCategory'
-      const res = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action,
-          categoryId: category.categoryId,
-          nameKey: category.nameKey,
-          descKey: category.descKey,
-          imageUrl: category.imageUrl,
-          colorClass: category.colorClass,
-          displayOrder: category.displayOrder || 0,
-          isActive: category.isActive !== false,
-          adminEmail: user?.email || ''
-        })
+      const res = await postAdminApi({
+        action,
+        categoryId: category.categoryId,
+        nameKey: category.nameKey,
+        descKey: category.descKey,
+        imageUrl: category.imageUrl,
+        colorClass: category.colorClass,
+        displayOrder: category.displayOrder || 0,
+        isActive: category.isActive !== false,
       })
       const data = await res.json()
       if (data.ok) {
@@ -137,11 +122,7 @@ export default function CategoriesPage() {
     if (!confirm('Are you sure you want to delete this category?')) return
     
     try {
-      const res = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'deleteHomepageCategory', categoryId, adminEmail: user?.email || '' })
-      })
+      const res = await postAdminApi({ action: 'deleteHomepageCategory', categoryId })
       const data = await res.json()
       if (data.ok) {
         loadHomepageCategories()
@@ -153,15 +134,10 @@ export default function CategoriesPage() {
 
   const handleToggleCategory = async (categoryId: string, isActive: boolean) => {
     try {
-      const res = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          action: 'toggleHomepageCategory', 
-          categoryId, 
-          isActive,
-          adminEmail: user?.email || '' 
-        })
+      const res = await postAdminApi({
+        action: 'toggleHomepageCategory',
+        categoryId,
+        isActive,
       })
       const data = await res.json()
       if (data.ok) {

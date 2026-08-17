@@ -7,8 +7,9 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { getServerProxyBackendBase } from "@/lib/backend-config"
 
-const JAVA_BACKEND_BASE = process.env.JAVA_BACKEND_BASE || 'http://localhost:8080/Trading'
+const JAVA_BACKEND_BASE = getServerProxyBackendBase()
 
 export async function GET(request: NextRequest) {
     try {

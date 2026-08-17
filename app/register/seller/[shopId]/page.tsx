@@ -1,6 +1,16 @@
-import { CrazyShoppingBoarding } from "@/components/crazy-shopping-boarding"
+import { redirect } from "next/navigation"
+import { grandmaRegisterFormHref } from "@/lib/grandma-urls"
 
-/** Same seller onboarding as `/register/seller`; `shopId` is for deep links (e.g. Umuriro SMS). */
-export default function SellerRegisterWithShopIdPage() {
-  return <CrazyShoppingBoarding />
+/**
+ * Legacy Umuriro / SMS deep link.
+ * Does not render Grandma registration UI under the Main `/register` tree —
+ * redirects to the Grandma-owned canonical route.
+ */
+export default async function SellerRegisterWithShopIdPage({
+  params,
+}: {
+  params: Promise<{ shopId: string }>
+}) {
+  const { shopId } = await params
+  redirect(grandmaRegisterFormHref("seller", { shopId }))
 }

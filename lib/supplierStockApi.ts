@@ -5,14 +5,16 @@
  * Backend (fetchSuggestions, etc.) must always search Redis first; when no data, search DB.
  *
  * Redis value format (used across search, dashboard, cart, shop-with-me):
+ *   - **Sellable stock** (one row) = `item_packet / item_emballage` (emballage missing or invalid → treat as 1).
+ *   - **Line price** (customer) = `selling_price × item_emballage` (base × pack multiplier).
  *   {
  *     "key": "supplier_<account>",   // e.g. "supplier_ALGG0000187"
  *     "data": [
  *       {
  *         "item_commercial_name": string,
- *         "item_packet": string,
- *         "item_emballage": string,  // pass through as-is; empty "" allowed
- *         "selling_price": string,   // use for price (not item_emballage)
+ *         "item_packet": string,     // raw inventory qty (smallest units on this line)
+ *         "item_emballage": string,  // units per sellable pack; pass through as-is; empty "" allowed
+ *         "selling_price": string,   // base unit price; `price` may alias same value (not item_emballage)
  *         "cost_price": string,
  *         "item_key_words": string,
  *         "item_state": string,     // e.g. expiry date; can be ""
@@ -95,11 +97,70 @@ export interface UpsertResponse {
 
 const API_BASE = '/api/supplier/stock';
 
+function coerceOk(v: unknown): boolean {
+  return v === true || v === 'true' || v === 1 || v === '1';
+}
+
+/** Normalize backend / proxy JSON so the upload UI always has ok + message. */
+export function normalizeImportResult(raw: unknown, httpStatus: number): ImportResult {
+  const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const itemsImported = Number(r.itemsImported ?? r.items_imported ?? 0) || 0;
+  const itemsUpdated = Number(r.itemsUpdated ?? r.items_updated ?? 0) || 0;
+  const rowsParsedRaw = Number(r.rowsParsed ?? r.rows_parsed);
+  const rowsParsed =
+    Number.isFinite(rowsParsedRaw) && rowsParsedRaw > 0
+      ? rowsParsedRaw
+      : itemsImported + itemsUpdated;
+  const rowsSkipped = Number(r.rowsSkipped ?? r.rows_skipped ?? 0) || 0;
+  const ok = coerceOk(r.ok) || coerceOk(r.success);
+  const errMsg =
+    (typeof r.error === 'string' && r.error) ||
+    (typeof r.message === 'string' && r.message && !ok ? r.message : '') ||
+    '';
+
+  let message =
+    (typeof r.message === 'string' && r.message.trim() && ok ? r.message.trim() : '') ||
+    '';
+  if (!message) {
+    if (ok) {
+      const n = itemsImported + itemsUpdated;
+      message =
+        n > 0
+          ? `Success — ${itemsImported} added, ${itemsUpdated} updated (${n} total).`
+          : `Import finished (${rowsParsed} row(s) processed).`;
+    } else {
+      message = errMsg || `Import failed (${httpStatus}).`;
+    }
+  }
+
+  const errors = Array.isArray(r.errors)
+    ? (r.errors as unknown[]).map((e) => String(e))
+    : undefined;
+
+  return {
+    ok,
+    message,
+    itemsImported: itemsImported || undefined,
+    itemsUpdated: itemsUpdated || undefined,
+    rowsParsed: rowsParsed || undefined,
+    rowsSkipped: rowsSkipped || undefined,
+    rowsSkippedNote: typeof r.rowsSkippedNote === 'string' ? r.rowsSkippedNote : undefined,
+    backupKey: typeof r.backupKey === 'string' ? r.backupKey : undefined,
+    supplierKey: typeof r.supplierKey === 'string' ? r.supplierKey : undefined,
+    errors,
+    error: ok ? undefined : errMsg || message,
+  };
+}
+
 /**
  * Import Excel file to database and Redis.
  * Sends account in URL so the proxy can stream the file without buffering.
  */
-export async function importStockExcel(file: File, account: string): Promise<ImportResult> {
+export async function importStockExcel(
+  file: File,
+  account: string,
+  opts?: { signal?: AbortSignal },
+): Promise<ImportResult> {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('account', account);
@@ -108,9 +169,38 @@ export async function importStockExcel(file: File, account: string): Promise<Imp
   const response = await fetch(`${API_BASE}?${params.toString()}`, {
     method: 'POST',
     body: formData,
+    signal: opts?.signal,
   });
 
-  return response.json();
+  let data: ImportResult;
+  try {
+    const json = (await response.json()) as unknown;
+    data = normalizeImportResult(json, response.status);
+  } catch (e) {
+    if (e instanceof Error && e.name === 'AbortError') {
+      return {
+        ok: false,
+        message: 'Import cancelled',
+        error: 'Import cancelled',
+      };
+    }
+    return {
+      ok: false,
+      message: 'Invalid response from server',
+      error: `Server returned non-JSON (${response.status})`,
+    };
+  }
+
+  if (!response.ok && !data.ok) {
+    return {
+      ...data,
+      ok: false,
+      message: data.message || data.error || `Import failed (${response.status})`,
+      error: data.error || data.message || `HTTP ${response.status}`,
+    };
+  }
+
+  return data;
 }
 
 /**

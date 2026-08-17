@@ -6,8 +6,8 @@ import { ShoppingCart, Send, Trash2, AlertCircle, Users, Plus } from "lucide-rea
 // Mock store hooks - replace with your actual imports
 const useCartStore = () => ({
   items: [
-    { id: 1, name: "Beer", qty: 2, price: 1000, unit: "bottle", selectedUnit: "bottle" },
-    { id: 2, name: "Fries", qty: 1, price: 2000, unit: "plate", selectedUnit: "plate" }
+    { id: 1, name: "Beer", qty: 2, price: 1000, unit: "bottle", selectedUnit: "bottle", lineSignature: "", notes: "" },
+    { id: 2, name: "Fries", qty: 1, price: 2000, unit: "plate", selectedUnit: "plate", lineSignature: "", notes: "" },
   ],
   getTotalPrice: () => 4000,
   clearCart: () => console.log("Clear cart"),
@@ -117,13 +117,27 @@ export default function TableCommandCartFixed() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          items: items.map(item => ({
-            name: item.name,
-            qty: item.qty,
-            unitPrice: item.price,
-            unit: item.unit || "pcs",
-            itemCode: (item as { itemCode?: string; id: string | number }).itemCode ?? String((item as { id: string | number }).id),
-          })),
+          items: items.map((item) => {
+            const row = item as {
+              name: string
+              qty: number
+              price: number
+              unit?: string
+              itemCode?: string
+              id: string | number
+              itemEmballage?: string
+            }
+            return {
+              name: row.name,
+              qty: row.qty,
+              unitPrice: row.price,
+              unit: row.unit || "pcs",
+              itemCode: row.itemCode ?? String(row.id),
+              ...(row.itemEmballage
+                ? { item_emballage: row.itemEmballage, ITEM_EMBALLAGE: row.itemEmballage }
+                : {}),
+            }
+          }),
           sellerAccount: activeSession.locationId,
           sellerName: activeSession.locationName,
           buyerEmail: activeSession.userEmail,

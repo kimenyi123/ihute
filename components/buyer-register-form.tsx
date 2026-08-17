@@ -36,7 +36,7 @@ import { BUYER_UI, L, pickLang, SELLER_UI } from "@/lib/seller-register-i18n"
 import { useAuthStore } from "@/lib/auth-store"
 import type { UserRole } from "@/lib/auth-store"
 import { getShopPublicUrl } from "@/lib/shop-public-url"
-import { shopCategoryToSectorSlug } from "@/lib/seller-category-sector"
+import { shopCategoryToSectorSlug, GRANDMA_REGISTRATION_CATEGORY_VALUES } from "@/lib/seller-category-sector"
 import {
   mapListSuppliersWithProductsToShops,
   type ShopInfo,
@@ -194,16 +194,7 @@ function toGeoOptions(values: string[]): GeoComboboxOption[] {
   return values.map((v) => ({ value: v, label: v, keywords: v.toLowerCase() }))
 }
 
-const SHOP_CATEGORIES = [
-  "pharmacy",
-  "liquor store",
-  "boutique",
-  "bar/restaurant",
-  "supermarket",
-  "coffee shop",
-  "pizzeria",
-  "electronics",
-].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
+const SHOP_CATEGORIES = GRANDMA_REGISTRATION_CATEGORY_VALUES
 
 type PaymentId = "momo" | "airtel" | "bk" | "cash"
 type RiderId = "human" | "bike" | "moto"

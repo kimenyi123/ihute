@@ -3,7 +3,7 @@
  * Provides accurate geocoding with smart caching for Next.js/React
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 
 // ==================== TYPES ====================
 

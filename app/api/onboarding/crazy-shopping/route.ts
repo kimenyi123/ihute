@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
-
-import mysql from "mysql2/promise"
+import {
+  isOnboardingMysqlConfigured,
+  persistShopOnboardingDraft,
+} from "@/lib/onboarding-draft-persist"
 
 
 
@@ -41,37 +43,9 @@ import mysql from "mysql2/promise"
 
 
 async function tryPersistDraft(body: unknown): Promise<boolean> {
-
-  const host = process.env.ONBOARDING_MYSQL_HOST
-
-  const user = process.env.ONBOARDING_MYSQL_USER
-
-  const password = process.env.ONBOARDING_MYSQL_PASSWORD
-
-  const database = process.env.ONBOARDING_MYSQL_DATABASE
-
-  if (!host || !user || password === undefined || !database) return false
-
-
-
-  const conn = await mysql.createConnection({ host, user, password, database })
-
-  try {
-
-    await conn.query("INSERT INTO shop_onboarding_draft (payload_json) VALUES (?)", [
-
-      JSON.stringify(body),
-
-    ])
-
-    return true
-
-  } finally {
-
-    await conn.end()
-
-  }
-
+  if (!isOnboardingMysqlConfigured()) return false
+  await persistShopOnboardingDraft(body)
+  return true
 }
 
 

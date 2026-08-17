@@ -1,58 +1,81 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { useAuthStore } from '@/lib/auth-store'
+import { isAdminUser } from '@/lib/auth-login-client'
 
 interface AdminGuardProps {
     children: React.ReactNode
 }
 
 /**
- * AdminGuard - Protects admin routes from unauthorized access
- * 
- * Features:
- * - Waits for localStorage rehydration before checking auth
- * - Shows loading spinner during rehydration
- * - Redirects to /login if not authenticated
- * - Redirects to / if user is not admin
- * - Only renders children when authenticated admin user confirmed
+ * AdminGuard - Protects /admin/* and /admin_grandma/*
+ *
+ * Requires Java account with TYPE/role ADMIN (see isAdminUser).
  */
 export function AdminGuard({ children }: AdminGuardProps) {
     const router = useRouter()
+    const pathname = usePathname()
     const { user, isAuthenticated, checkSession, hasHydrated } = useAuthStore()
-    const [isLoading, setIsLoading] = useState(true)
+    const [denyReason, setDenyReason] = useState<'session' | 'not_admin' | null>(null)
+
+    const adminTarget =
+        pathname?.startsWith('/admin') ? pathname : '/admin/dashboard'
+
+    const hydrated = hasHydrated
+    const isAdmin = isAdminUser(user)
+    // Do not call checkSession() during render (it may logout). Effect below enforces expiry.
+    const allowed = hydrated && isAuthenticated && isAdmin && denyReason !== 'session' && denyReason !== 'not_admin'
 
     useEffect(() => {
-        // Wait for localStorage to rehydrate
-        if (!hasHydrated) {
-            return
-        }
+        if (!hydrated) return
 
-        // Check session validity (handles inactivity timeout)
+        setDenyReason(null)
         const sessionValid = checkSession()
 
         if (!sessionValid || !isAuthenticated) {
-            router.push('/login')
+            setDenyReason('session')
+            router.replace(
+                '/login?redirect=' + encodeURIComponent(adminTarget),
+            )
             return
         }
 
-        if (user?.role !== 'admin') {
-            router.push('/')
-            return
+        if (!isAdminUser(user)) {
+            setDenyReason('not_admin')
+            router.replace('/')
+        }
+    }, [hydrated, isAuthenticated, user, checkSession, router, adminTarget])
+
+    if (!hydrated || !allowed) {
+        if (denyReason === 'not_admin') {
+            return (
+                <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
+                    <div className="max-w-md rounded-xl border border-amber-200 bg-white p-6 text-center shadow-sm">
+                        <p className="text-sm font-semibold text-gray-900">Admin access only</p>
+                        <p className="mt-2 text-sm text-gray-600">
+                            This account is not an admin on the server (needs{' '}
+                            <code className="rounded bg-gray-100 px-1">TYPE = ADMIN</code> in Java). Sign in with
+                            your admin email or phone linked to an admin account.
+                        </p>
+                        <Link
+                            href="/login?redirect=%2Fadmin%2Fdashboard"
+                            className="mt-4 inline-block text-sm font-medium text-blue-600 hover:underline"
+                        >
+                            Sign in as admin
+                        </Link>
+                    </div>
+                </div>
+            )
         }
 
-        // All checks passed, show content immediately
-        setIsLoading(false)
-    }, [hasHydrated, isAuthenticated, user, checkSession, router])
-
-    // Show loading until rehydration completes and auth is verified
-    if (!hasHydrated || isLoading) {
         return (
-            <div className="flex items-center justify-center min-h-screen bg-gray-50">
+            <div className="flex min-h-screen items-center justify-center bg-gray-50">
                 <div className="text-center">
-                    <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-600 mx-auto"></div>
-                    <p className="mt-4 text-sm text-gray-600">Loading...</p>
+                    <div className="mx-auto h-16 w-16 animate-spin rounded-full border-b-4 border-blue-600"></div>
+                    <p className="mt-4 text-sm text-gray-600">Loading admin…</p>
                 </div>
             </div>
         )

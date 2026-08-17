@@ -25,6 +25,20 @@ export async function POST(req: NextRequest) {
     ordersUrl.searchParams.set("action", "createOrder")
 
     const timeout = Math.max(getProxyTimeoutMs(), 120_000)
+    const subtotal =
+      body.subtotal != null && String(body.subtotal).trim() !== ""
+        ? Number(body.subtotal)
+        : NaN
+    const orderNotes = String(
+      body.orderNotes ??
+      body.orderNote ??
+      body.notes ??
+      body.ORDER_NOTE ??
+      body.CONDITIONS ??
+      ""
+    ).trim()
+    const deliveryName = String(body.deliveryName ?? body.DELIVERY_NAME ?? "").trim()
+    const deliveryAmount = Number(body.deliveryAmount ?? body.DELIVERY_AMOUNT ?? 0)
     const payload = {
       buyerEmail: String(body.buyerEmail ?? "").trim(),
       buyerName: String(body.buyerName ?? "").trim(),
@@ -39,6 +53,10 @@ export async function POST(req: NextRequest) {
       currency: String(body.currency ?? "RWF"),
       isTableCommand: false,
       items,
+      ...(orderNotes ? { orderNote: orderNotes, ORDER_NOTE: orderNotes, CONDITIONS: orderNotes } : {}),
+      ...(deliveryName ? { deliveryName, DELIVERY_NAME: deliveryName } : {}),
+      ...(Number.isFinite(deliveryAmount) ? { deliveryAmount, DELIVERY_AMOUNT: deliveryAmount } : {}),
+      ...(Number.isFinite(subtotal) && subtotal > 0 ? { subtotal } : {}),
     }
 
     const resp = await fetch(ordersUrl.toString(), {

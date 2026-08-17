@@ -16,13 +16,14 @@ import Image from "next/image"
 import { FileSpreadsheet, ArrowLeft, ArrowRight, CheckCircle } from "lucide-react"
 import { RWANDA_DISTRICTS } from "@/lib/constants"
 import { GPSCapture } from "@/components/gps-capture"
+import { GRANDMA_REGISTRATION_CATEGORY_VALUES } from "@/lib/seller-category-sector"
 
 type FormRole = "buyer" | "seller" | "rider"
 
 export type RegisterAccountFormProps = {
   /** Default role when the form loads */
   initialRole?: FormRole
-  /** Hide buyer/seller/rider switch (used on /register/seller and /register/rider) */
+  /** Hide buyer/seller/rider switch (used when role is fixed by the page) */
   hideRolePicker?: boolean
   pageTitle?: string
   pageDescription?: string
@@ -30,10 +31,7 @@ export type RegisterAccountFormProps = {
   backHref?: string
 }
 
-const BUSINESS_SECTORS = [
-  "pharmacy", "liquor store", "boutique", "bar/restaurant",
-  "supermarket", "coffee shop", "pizzeria", "electronics",
-]
+const BUSINESS_SECTORS = GRANDMA_REGISTRATION_CATEGORY_VALUES
 
 const DELIVERY_MODES = [
   { value: "delivery", label: "Delivery (we deliver to customers)" },
@@ -56,13 +54,8 @@ export function RegisterAccountForm({
 }: RegisterAccountFormProps) {
   const router = useRouter()
   const login = useAuthStore((state) => state.login)
-  const [mounted, setMounted] = useState(false)
   const [role, setRole] = useState<FormRole>(initialRole)
   const [currentStep, setCurrentStep] = useState(1)
-
-  useEffect(() => {
-    setMounted(true)
-  }, [])
 
   useEffect(() => {
     setRole(initialRole)
@@ -85,6 +78,7 @@ export function RegisterAccountForm({
   const [loading, setLoading] = useState(false)
   const [excelFile, setExcelFile] = useState<File | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [fieldErrors, setFieldErrors] = useState<Record<string,string | undefined>>({})
   const [showPendingModal, setShowPendingModal] = useState(false)
   const [sellerRegisterMeta, setSellerRegisterMeta] = useState<{
     temporaryPasswordEmailed?: boolean
@@ -115,13 +109,26 @@ export function RegisterAccountForm({
 
       const digits = formData.phone.replace(/\D/g, "")
       const syntheticSellerEmail = digits ? `${digits}@phone-register.ihute.local` : ""
+      // Normalize phone for server: accept +2507XXXXXXXX, 2507XXXXXXXX, or 07XXXXXXXX
+      const normalizedForServer = ((): string | null => {
+        const d = digits
+        if (!d) return null
+        if (d.length === 12 && d.startsWith("250") && (d[3] === "7" || d[3] === "8")) return d
+        if (d.length === 9 && (d.startsWith("7") || d.startsWith("8"))) return "250" + d
+        if (d.length === 10 && d.startsWith("0") && (d[1] === "7" || d[1] === "8")) return "250" + d.slice(1)
+        return null
+      })()
+
+      if (!normalizedForServer) {
+        throw new Error("Invalid phone number — use +2507XXXXXXXX or 07XXXXXXXX format")
+      }
 
       const payload: any = {
         email: role === "seller" ? syntheticSellerEmail || formData.email : formData.email,
         password: formData.password,
         firstName,
         lastName,
-        tel: formData.phone,
+        tel: normalizedForServer,
         location: formData.location,
         role: role === "seller" ? "SELLER" : role === "rider" ? "DRIVER" : "BUYER",
       }
@@ -192,20 +199,37 @@ export function RegisterAccountForm({
   // ── Step validation ───────────────────────────────────────────────────────
   const handleNext = () => {
     if (currentStep === 1) {
-      if (!formData.name || !formData.phone || !formData.location) {
-        setError("Please fill in all fields"); return
+      const errs: Record<string,string> = {}
+      if (!formData.name) errs.name = "Required"
+      if (!formData.phone) errs.phone = "Required"
+      // phone digits check
+      const pd = formData.phone.replace(/\D/g, "")
+      const okPhone = (pd.length === 12 && pd.startsWith("250") && (pd[3] === "7" || pd[3] === "8")) ||
+        (pd.length === 9 && (pd.startsWith("7") || pd.startsWith("8"))) ||
+        (pd.length === 10 && pd.startsWith("0") && (pd[1] === "7" || pd[1] === "8"))
+      if (!okPhone) errs.phone = "Invalid phone — use +2507XXXXXXXX or 07XXXXXXXX"
+      if (!formData.location) errs.location = "Required"
+      if (role !== "seller" && !formData.email) errs.email = "Required"
+      if ((role === "buyer" || role === "rider") && !formData.password.trim()) errs.password = "Choose a password"
+      if (Object.keys(errs).length > 0) {
+        setFieldErrors(errs)
+        setError("Please fix the fields marked in red")
+        return
       }
-      if (role !== "seller" && !formData.email) {
-        setError("Please fill in all fields"); return
-      }
-      if ((role === "buyer" || role === "rider") && !formData.password.trim()) {
-        setError("Please choose a password"); return
-      }
+      setFieldErrors({})
     }
     if (currentStep === 2 && role === "seller") {
-      if (!formData.companyName || !formData.sector || !formData.deliveryMode) {
-        setError("Please fill in all required business fields"); return
+      const errs: Record<string,string> = {}
+      if (!formData.companyName) errs.companyName = "Required"
+      if (!formData.sector) errs.sector = "Required"
+      if (!formData.deliveryMode) errs.deliveryMode = "Required"
+      if (!formData.tin || !formData.tin.trim()) errs.tin = "Required"
+      if (Object.keys(errs).length > 0) {
+        setFieldErrors(errs)
+        setError("Please fill in all required business fields")
+        return
       }
+      setFieldErrors({})
     }
     setError(null)
     setCurrentStep(prev => Math.min(prev + 1, totalSteps))
@@ -244,16 +268,6 @@ export function RegisterAccountForm({
   )
 
   // ── Render ────────────────────────────────────────────────────────────────
-  if (!mounted) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50/50 to-slate-100 p-4">
-        <div className="w-full max-w-2xl flex items-center justify-center min-h-[320px]">
-          <p className="text-slate-500">Loading...</p>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50/50 to-slate-100 p-4">
       <div className="w-full max-w-2xl space-y-4">
@@ -299,7 +313,9 @@ export function RegisterAccountForm({
                   <div className="space-y-2">
                     <Label htmlFor="name">Full Name</Label>
                     <Input id="name" placeholder="John Doe" value={formData.name}
-                      onChange={(e) => set("name", e.target.value)} required />
+                      onChange={(e) => { set("name", e.target.value); setFieldErrors(prev => ({ ...prev, name: undefined })) }}
+                      aria-invalid={fieldErrors.name ? "true" : undefined} required />
+                    {fieldErrors.name && <p className="text-sm text-destructive mt-1">{fieldErrors.name}</p>}
                   </div>
                   {role !== "seller" && (
                   <div className="space-y-2">
@@ -316,7 +332,11 @@ export function RegisterAccountForm({
                   <div className="space-y-2">
                     <Label htmlFor="phone">Phone Number</Label>
                     <Input id="phone" type="tel" placeholder="+250788123456" value={formData.phone}
-                      onChange={(e) => set("phone", e.target.value)} required />
+                      onChange={(e) => { set("phone", e.target.value); setFieldErrors(prev => ({ ...prev, phone: undefined })) }}
+                      aria-invalid={fieldErrors.phone ? "true" : undefined}
+                      className={fieldErrors.phone ? "aria-invalid:ring-destructive/40 aria-invalid:border-destructive" : ""}
+                      required />
+                    {fieldErrors.phone && <p className="text-sm text-destructive mt-1">{fieldErrors.phone}</p>}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="location">Location</Label>
@@ -340,10 +360,11 @@ export function RegisterAccountForm({
                       type="password"
                       placeholder={role === "seller" ? "Create a password, or leave blank for email" : "Create a password"}
                       value={formData.password}
-                      onChange={(e) => set("password", e.target.value)}
+                      onChange={(e) => { set("password", e.target.value); setFieldErrors(prev => ({ ...prev, password: undefined })) }}
                       required={role === "buyer" || role === "rider"}
                       autoComplete="new-password"
                     />
+                    {fieldErrors.password && <p className="text-sm text-destructive mt-1">{fieldErrors.password}</p>}
                   </div>
                 </>
               )}
@@ -354,12 +375,14 @@ export function RegisterAccountForm({
                   <div className="space-y-2">
                     <Label htmlFor="companyName">Business / Company Name <span className="text-destructive">*</span></Label>
                     <Input id="companyName" placeholder="e.g. Kigali Pharma Ltd" value={formData.companyName}
-                      onChange={(e) => set("companyName", e.target.value)} required />
+                      onChange={(e) => { set("companyName", e.target.value); setFieldErrors(prev => ({ ...prev, companyName: undefined })) }}
+                      aria-invalid={fieldErrors.companyName ? "true" : undefined} required />
+                    {fieldErrors.companyName && <p className="text-sm text-destructive mt-1">{fieldErrors.companyName}</p>}
                   </div>
 
                   <div className="space-y-2">
                     <Label htmlFor="sector">Business Sector <span className="text-destructive">*</span></Label>
-                    <Select value={formData.sector} onValueChange={(v) => set("sector", v)}>
+                    <Select value={formData.sector} onValueChange={(v) => { set("sector", v); setFieldErrors(prev => ({ ...prev, sector: undefined })) }}>
                       <SelectTrigger><SelectValue placeholder="Select sector" /></SelectTrigger>
                       <SelectContent>
                         {BUSINESS_SECTORS.map((s) => (
@@ -371,7 +394,7 @@ export function RegisterAccountForm({
 
                   <div className="space-y-2">
                     <Label htmlFor="deliveryMode">Delivery Mode <span className="text-destructive">*</span></Label>
-                    <Select value={formData.deliveryMode} onValueChange={(v) => set("deliveryMode", v)}>
+                    <Select value={formData.deliveryMode} onValueChange={(v) => { set("deliveryMode", v); setFieldErrors(prev => ({ ...prev, deliveryMode: undefined })) }}>
                       <SelectTrigger><SelectValue placeholder="How do you deliver?" /></SelectTrigger>
                       <SelectContent>
                         {DELIVERY_MODES.map((d) => (
@@ -379,6 +402,18 @@ export function RegisterAccountForm({
                         ))}
                       </SelectContent>
                     </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="tin">TIN (Tax ID) <span className="text-destructive">*</span></Label>
+                    <Input
+                      id="tin"
+                      placeholder="e.g. 123456789"
+                      value={formData.tin}
+                      onChange={(e) => { set("tin", e.target.value); setFieldErrors(prev => ({ ...prev, tin: undefined })) }}
+                      required
+                    />
+                    {fieldErrors.tin && <p className="text-sm text-destructive mt-1">{fieldErrors.tin}</p>}
                   </div>
 
                   <div className="space-y-2">

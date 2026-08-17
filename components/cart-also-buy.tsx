@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { ProductCard } from "@/components/product-card"
 import type { CartItem } from "@/lib/cart-store"
+import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price"
 import { Sparkles, Loader2 } from "lucide-react"
 
 type Product = {
@@ -12,6 +13,13 @@ type Product = {
   price: number
   unit?: string
   image?: string
+  image_url?: string
+  item_image_url?: string
+  IMAGE_URL?: string
+  item_key_words?: string
+  item_code?: string
+  famille?: string
+  FAMILLE?: string
   /** Product code for cart merge (same code + same seller = one line) */
   itemCode?: string
   supplierId?: string
@@ -21,6 +29,7 @@ type Product = {
   brand?: string
   momo?: string
   inStock?: boolean
+  itemEmballage?: string | number
 }
 
 const MAX_PRODUCTS = 8
@@ -60,7 +69,10 @@ export function CartAlsoBuy({ cartItems }: { cartItems: CartItem[] }) {
       if (!name) return null
       const key = (code || fallbackId).toLowerCase()
       const id = code || key
-      const price = parsePrice(p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? p.price)
+      const base = parsePrice(p.selling_price ?? p.SALE_PRICE_INCLUSIVE ?? p.price)
+      const embRaw = p.item_emballage ?? p.ITEM_EMBALLAGE
+      const price = generalSellingPrice(base, embRaw)
+      const itemEmballage = normalizeItemEmballageForCart(embRaw)
       const supplierIdRaw = (p.SELLER_ISHYIGA_ACCOUNT ?? p.item_seller_account ?? "").toString().trim()
       const supplierNameRaw = (p.SELLER_NAMES ?? p.supplier_name ?? "").toString().trim()
       return {
@@ -70,12 +82,20 @@ export function CartAlsoBuy({ cartItems }: { cartItems: CartItem[] }) {
         price,
         unit: p.UNIT ?? p.item_packet ?? "",
         image: p.image_url ?? p.item_image_url ?? p.IMAGE_URL ?? p.image,
+        image_url: p.image_url,
+        item_image_url: p.item_image_url,
+        IMAGE_URL: p.IMAGE_URL,
+        item_key_words: p.item_key_words ?? p.ITEM_CODE,
+        item_code: p.item_code ?? p.ITEM_CODE,
+        famille: p.famille ?? p.FAMILLE,
+        FAMILLE: p.FAMILLE,
         supplierId: p.SELLER_ISHYIGA_ACCOUNT ?? p.item_seller_account ?? supplierIdRaw ?? "",
         supplierName: p.SELLER_NAMES ?? p.supplier_name ?? supplierNameRaw ?? "",
         supplierLocation: p.LOCATION ?? p.supplier_location,
         brand: p.item_fabricant ?? p.id_fabricant ?? p.brand,
         momo: p.momo,
         inStock: true,
+        ...(itemEmballage ? { itemEmballage } : {}),
       }
     }
 
@@ -185,6 +205,7 @@ export function CartAlsoBuy({ cartItems }: { cartItems: CartItem[] }) {
     return () => { cancelled = true }
   }, [firstSupplierName, cartItems.map((i) => i.id).sort().join(",")])
 
+  // Cart upsell: "You can also buy" — bordered card + sparkles heading; spinner until recommendations load.
   if (loading) {
     return (
       <section className="rounded-lg border bg-card p-4">
@@ -199,8 +220,10 @@ export function CartAlsoBuy({ cartItems }: { cartItems: CartItem[] }) {
     )
   }
 
+  // Nothing to show — omit the section so the cart stays clean.
   if (products.length === 0) return null
 
+  // Recommendations: responsive grid of cards (see ProductCard for actions).
   return (
     <section className="rounded-lg border bg-card p-4">
       <h2 className="text-lg font-semibold text-foreground flex items-center gap-2 mb-4">

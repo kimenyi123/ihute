@@ -157,3 +157,314 @@
   animation: ish-breathe 2.4s ease-in-out infinite;
   will-change: transform, opacity;
 }
+
+/* ============================================================================
+   RESPONSIVE UTILITIES
+   ============================================================================ */
+
+/* Prevent horizontal overflow on mobile */
+html, body {
+  overflow-x: clip;
+  max-width: 100%;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Better touch targets on mobile */
+@media (max-width: 768px) {
+  button, a, input, select, textarea {
+    touch-action: manipulation;
+  }
+
+  /* Increase tap target size on mobile */
+  .tap-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* Responsive tables - horizontal scroll */
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-responsive table {
+  min-width: 600px;
+}
+
+/* Responsive cards - stack on mobile */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+@media (max-width: 640px) {
+  .card-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.75rem;
+  }
+
+  .card-grid-single-mobile {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Container padding adjustments */
+.container-mobile {
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+@media (min-width: 640px) {
+  .container-mobile {
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .container-mobile {
+    padding-left: 2rem;
+    padding-right: 2rem;
+  }
+}
+
+/* Hide scrollbar but keep functionality */
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Hide scrollbar for swipe carousels */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Safe area for notched devices */
+.safe-area-inset {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+.safe-area-bottom {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+/* Mobile-optimized form inputs */
+@media (max-width: 768px) {
+  input, select, textarea {
+    font-size: 16px; /* Prevent zoom on iOS */
+  }
+}
+
+/* Responsive text utilities */
+.text-responsive-sm {
+  font-size: clamp(0.75rem, 2vw, 0.875rem);
+}
+
+.text-responsive-base {
+  font-size: clamp(0.875rem, 2.5vw, 1rem);
+}
+
+.text-responsive-lg {
+  font-size: clamp(1rem, 3vw, 1.125rem);
+}
+
+.text-responsive-xl {
+  font-size: clamp(1.125rem, 4vw, 1.25rem);
+}
+
+.text-responsive-2xl {
+  font-size: clamp(1.25rem, 5vw, 1.5rem);
+}
+
+/* Prevent text overflow */
+.text-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.text-truncate-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.text-truncate-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Flex utilities for responsive layouts */
+.flex-responsive {
+  display: flex;
+  flex-direction: column;
+}
+
+@media (min-width: 768px) {
+  .flex-responsive {
+    flex-direction: row;
+  }
+}
+
+/* Image responsive handling */
+.img-responsive {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Sticky header offset for content */
+.sticky-offset {
+  scroll-margin-top: 5rem;
+}
+
+/* ── i18n / multilingual typography ─────────────────────────────────── */
+
+:root {
+  --i18n-line-height: 1.6;
+}
+
+html[lang="rw"] {
+  --i18n-line-height: 1.7;
+}
+
+html[lang="rw"] body {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  hyphens: auto;
+  -webkit-hyphens: auto;
+  line-height: var(--i18n-line-height);
+  letter-spacing: 0.01em;
+}
+
+html[lang="fr"] body {
+  hyphens: auto;
+  -webkit-hyphens: auto;
+}
+
+html[lang="rw"] button:not(.logo):not(.back-btn):not(.more-btn):not(.orders-btn),
+html[lang="rw"] .btn,
+html[lang="rw"] [role="button"] {
+  white-space: normal;
+  min-height: 2.5rem;
+  padding-inline: 0.875rem;
+  line-height: 1.35;
+  text-align: center;
+}
+
+html[lang="rw"] h1,
+html[lang="rw"] h2,
+html[lang="rw"] h3 {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.3;
+}
+
+html[lang="rw"] td,
+html[lang="rw"] th {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  padding-inline: 0.5rem;
+}
+
+html[lang="rw"] .text-truncate,
+html[lang="fr"] .text-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+html[lang="rw"] .text-wrap-i18n,
+html[lang="fr"] .text-wrap-i18n {
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* Grandma seller registration — Current Location attention hints */
+@keyframes shop-gps-icon-zoom {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.15);
+  }
+}
+
+@keyframes shop-gps-ring-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.28);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.12);
+  }
+}
+
+@keyframes shop-gps-arrow-nudge {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(5px);
+  }
+}
+
+@keyframes shop-gps-btn-attention {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.22);
+  }
+}
+
+.shop-gps-icon-hint {
+  animation: shop-gps-icon-zoom 1.6s ease-in-out infinite;
+}
+
+.shop-gps-icon-ring-hint {
+  animation: shop-gps-ring-pulse 1.6s ease-in-out infinite;
+}
+
+.shop-gps-arrow-hint {
+  animation: shop-gps-arrow-nudge 1.2s ease-in-out infinite;
+}
+
+.shop-gps-btn-attention {
+  animation: shop-gps-btn-attention 1.2s ease-in-out 3;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shop-gps-icon-hint,
+  .shop-gps-icon-ring-hint,
+  .shop-gps-arrow-hint,
+  .shop-gps-btn-attention {
+    animation: none !important;
+  }
+}

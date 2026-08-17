@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 // Mock database query function - replace with your actual database implementation
 async function queryDB(sql: string, sqlParams: any[]): Promise<any> {
@@ -8,14 +8,12 @@ async function queryDB(sql: string, sqlParams: any[]): Promise<any> {
   return Promise.resolve();
 }
 
-interface RouteParams {
-  params: { id: string }
-}
+type RouteCtx = { params: Promise<{ id: string }> };
 
-export async function PUT(request: Request, { params }: RouteParams) {
+export async function PUT(request: NextRequest, { params }: RouteCtx) {
   try {
     const userData = await request.json();
-    const userId = params.id;
+    const { id: userId } = await params;
 
     const sql = `
       UPDATE account_signup SET
@@ -104,9 +102,9 @@ export async function PUT(request: Request, { params }: RouteParams) {
   }
 }
 
-export async function DELETE(request: Request, { params }: RouteParams) {
+export async function DELETE(request: NextRequest, { params }: RouteCtx) {
   try {
-    const userId = params.id;
+    const { id: userId } = await params;
     const sql = 'DELETE FROM account_signup WHERE CLIENT_ID = ?';
     await queryDB(sql, [userId]);
 

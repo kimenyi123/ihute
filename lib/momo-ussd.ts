@@ -1,9 +1,9 @@
 /**
- * MoMo USSD string for payment: *182*1*1*momocode*amount#
- * Override with NEXT_PUBLIC_MOMO_USSD_PREFIX (e.g. *182*8*1*) if your operator uses a different shortcode.
+ * MoMo USSD string for payment: *182*8*1*momocode*amount#
+ * Override with NEXT_PUBLIC_MOMO_USSD_PREFIX if your operator uses a different shortcode.
  */
 const PREFIX =
-  (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_MOMO_USSD_PREFIX) || "*182*1*1*"
+  (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_MOMO_USSD_PREFIX) || "*182*8*1*"
 
 export function buildMoMoUssd(momoCode: string, amount: number): string {
   const code = (momoCode || "").trim()

@@ -1,37 +1,104 @@
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  /** Monorepo: lockfile may exist in parent (`Ihute-new-v/`); pin Turbopack root to this app. */
+  turbopack: {
+    root: path.resolve(__dirname),
+    /**
+     * Prescription upload (and similar) server routes intentionally use fs under
+     * public/uploads/prescriptions. Turbopack 16.2 still emits a false-positive
+     * "whole project NFT" warning for that pattern even with statically scoped joins.
+     * This suppresses only that diagnostic — it does not disable NFT tracing.
+     */
+    ignoreIssue: [
+      {
+        path: '**/next.config.*',
+        title: 'Encountered unexpected file in NFT list',
+      },
+    ],
+  },
+  /**
+   * Keep runtime upload I/O; do not ship the git tree / mobile project into the
+   * prescription-upload serverless trace when Turbopack over-approximates cwd fs use.
+   */
+  outputFileTracingExcludes: {
+    '/api/orders/prescription-upload': [
+      './.git/**',
+      './android/**',
+      './ios/**',
+      './.data/**',
+      './public/uploads/products/**',
+      './public/uploads/shops/**',
+    ],
+  },
   typescript: {
-    ignoreBuildErrors: true,
+    ignoreBuildErrors: false,
   },
   images: {
     unoptimized: true,
   },
   async rewrites() {
-    const backendBase = process.env.NEXT_PUBLIC_API_URL || 'https://ihute.rw/Trading_beta'
+    const raw = (
+      process.env.NEXT_PUBLIC_API_URL ||
+      process.env.JAVA_BACKEND_BASE ||
+      'http://localhost:8082/Trading'
+    ).replace(/\/+$/, '')
+    const javaBase = raw.toLowerCase().includes('/trading') ? raw : `${raw}/Trading`
 
     return [
-      // Proxy B2B API requests to Java servlet
+      // Proxy B2B API requests to Java servlet (same host/port as JAVA_BACKEND_BASE / NEXT_PUBLIC_API_URL)
       {
         source: '/supplier/b2b/api/:path*',
-        destination: 'http://localhost:8080/supplier/b2b/api/:path*',
+        destination: `${javaBase}/supplier/b2b/api/:path*`,
       },
-      // Proxy other supplier APIs if needed
       {
         source: '/api/supplier/:path*',
-        destination: 'http://localhost:8080/api/supplier/:path*',
+        destination: `${javaBase}/api/supplier/:path*`,
       },
       // ─── Payment API proxy ───────────────────────────────────────────────
       // Routes /api/payment/* and /api/analytics/* through the Next.js
       // server so browser CORS never triggers (server-to-server has no CORS).
       {
         source: '/api/payment/:path*',
-        destination: `${backendBase}/api/payment/:path*`,
+        destination: `${javaBase}/api/payment/:path*`,
       },
       {
         source: '/api/analytics/:path*',
-        destination: `${backendBase}/api/analytics/:path*`,
+        destination: `${javaBase}/api/analytics/:path*`,
+      },
+      {
+        source: '/api/payers',
+        destination: `${javaBase}/api/payers`,
+      },
+      {
+        source: '/api/payers/:path*',
+        destination: `${javaBase}/api/payers/:path*`,
+      },
+      {
+        source: '/api/seller-payers',
+        destination: `${javaBase}/api/seller-payers`,
+      },
+      {
+        source: '/api/seller-payers/:path*',
+        destination: `${javaBase}/api/seller-payers/:path*`,
+      },
+      {
+        source: '/api/seller-payments/:path*',
+        destination: `${javaBase}/api/seller-payments/:path*`,
       },
     ]
+  },
+
+  /** Dev: slow first compile on large pages can exceed default chunk fetch timeout → ChunkLoadError. */
+  webpack: (config, { dev, isServer }) => {
+    if (dev && !isServer) {
+      config.output = { ...config.output, chunkLoadTimeout: 300_000 }
+    }
+    return config
   },
 }
 

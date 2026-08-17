@@ -8,9 +8,84 @@ import { cn } from "@/lib/utils";
 import { UnifiedNotification } from "@/components/unified-notification";
 import { useAuthStore } from "@/lib/auth-store";
 import { isRestoBarPreferredCategories } from "@/lib/supplier-sector";
+import { useLanguageStore, type Language } from "@/lib/language-store";
+
+const SUPPLIER_UI: Record<Language, {
+  supplierPanel: string; manageProducts: string; dashboard: string
+  orders: string; buyerDashboard: string; myPurchases: string
+  selfOrdering: string; tables: string; ratings: string
+  b2b: string; expenses: string; uploadStock: string
+  scanMenu: string; settings: string; grandma: string
+  grandmaHint: string; logout: string; closeSidebar: string
+  openSidebar: string
+}> = {
+  en: {
+    supplierPanel: "Supplier Panel",
+    manageProducts: "Manage your products and orders",
+    dashboard: "Dashboard",
+    orders: "Orders",
+    buyerDashboard: "Buyer Dashboard",
+    myPurchases: "My purchases",
+    selfOrdering: "Self Ordering",
+    tables: "Tables",
+    ratings: "Ratings",
+    b2b: "B2B / Wholesale",
+    expenses: "Expenses",
+    uploadStock: "Upload Stock",
+    scanMenu: "Scan Menu",
+    settings: "Settings",
+    grandma: "Grandma",
+    grandmaHint: "Mobile shop, best seller & top-up tips (seller mode)",
+    logout: "Logout",
+    closeSidebar: "Close sidebar",
+    openSidebar: "Open sidebar",
+  },
+  rw: {
+    supplierPanel: "Ikibaho cy'Umucuruzi",
+    manageProducts: "Gucunga ibicuruzwa n'ibitumijwe",
+    dashboard: "Ikibaho",
+    orders: "Ibitumijwe",
+    buyerDashboard: "Ikibaho cy'Umuguzi",
+    myPurchases: "Ibyo naguze",
+    selfOrdering: "Gutumiza ku meza",
+    tables: "Ameza",
+    ratings: "Amanota",
+    b2b: "Rekizisiyo / Kurangura byinshi",
+    expenses: "Ibyakoreshejwe",
+    uploadStock: "Ongeraho sitoki",
+    scanMenu: "Soma menyu",
+    settings: "Ibigenga",
+    grandma: "Grandma",
+    grandmaHint: "Iduka kuri telefoni, ibicuruzwa bigurishwa cyane n'inyongera muri sitoki",
+    logout: "Sohoka",
+    closeSidebar: "Funga urutonde",
+    openSidebar: "Fungura urutonde",
+  },
+  fr: {
+    supplierPanel: "Panneau Fournisseur",
+    manageProducts: "G\u00e9rer vos produits et commandes",
+    dashboard: "Tableau de bord",
+    orders: "Commandes",
+    buyerDashboard: "Tableau acheteur",
+    myPurchases: "Mes achats",
+    selfOrdering: "Commande en libre-service",
+    tables: "Tables",
+    ratings: "\u00c9valuations",
+    b2b: "B2B / Grossiste",
+    expenses: "D\u00e9penses",
+    uploadStock: "Ajouter du stock",
+    scanMenu: "Scanner le menu",
+    settings: "Param\u00e8tres",
+    grandma: "Grandma",
+    grandmaHint: "Boutique mobile, meilleures ventes et r\u00e9approvisionnement (mode vendeur)",
+    logout: "D\u00e9connexion",
+    closeSidebar: "Fermer le menu",
+    openSidebar: "Ouvrir le menu",
+  },
+};
 
 export default function SupplierLayout({ children }: { children: React.ReactNode }) {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -18,11 +93,9 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
   const { user, isAuthenticated, hasHydrated } = useAuthStore();
   const logout = useAuthStore((state) => state.logout);
   const login = useAuthStore((state) => state.login);
+  const language = useLanguageStore((s) => s.language);
+  const ui = SUPPLIER_UI[language] ?? SUPPLIER_UI.en;
 
-  /**
-   * Self Ordering + Tables are restaurant/bar features only (see PREFEREDCATEGORIES).
-   * Opt-in when profile looks like bar/restaurant; never show if auth flagged pharmacySector.
-   */
   const [showRestoKioskNav, setShowRestoKioskNav] = useState(false);
 
   useEffect(() => {
@@ -54,34 +127,45 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
     const showRestoSupplierLinks = showRestoKioskNav && user?.pharmacySector !== true;
 
     const items: { name: string; href: string }[] = [
-      { name: "Dashboard", href: "/supplier/dashboard" },
-      { name: "Orders", href: "/supplier/orders" },
+      { name: ui.dashboard, href: "/supplier/dashboard" },
+      { name: ui.orders, href: "/supplier/orders" },
     ];
     if (showDualPurchases) {
-      items.push({ name: "My purchases", href: "/buyer/orders" });
+      items.push(
+        { name: ui.buyerDashboard, href: "/buyer/dashboard" },
+        { name: ui.myPurchases, href: "/buyer/orders" },
+      );
     }
     if (showRestoSupplierLinks) {
       items.push(
-        { name: "Self Ordering", href: "/supplier/self-ordering" },
-        { name: "Tables", href: "/supplier/tables" },
+        { name: ui.selfOrdering, href: "/supplier/self-ordering" },
+        { name: ui.tables, href: "/supplier/tables" },
       );
     }
     items.push(
-      { name: "Ratings", href: "/supplier/ratings" },
-      { name: "Rekizisiyo / Kurangura byinshi", href: "/supplier/b2b" },
-      { name: "Expenses", href: "/supplier/expenses" },
-      { name: "Upload Stock", href: "/supplier/products/add" },
-      { name: "Scan Menu", href: "/supplier/scan-menu" },
-      { name: "Settings", href: "/supplier/settings/location" },
+      { name: "UrubutoPay", href: "/supplier/urubuto" },
+      { name: ui.ratings, href: "/supplier/ratings" },
+      { name: ui.b2b, href: "/supplier/b2b" },
+      { name: ui.expenses, href: "/supplier/expenses" },
+      { name: ui.uploadStock, href: "/supplier/products/add" },
+      { name: ui.scanMenu, href: "/supplier/scan-menu" },
+      { name: ui.settings, href: "/supplier/settings/location" },
     );
     return items;
-  }, [user?.dualPharmacyRetail, user?.pharmacySector, showRestoKioskNav]);
+  }, [user?.dualPharmacyRetail, user?.pharmacySector, showRestoKioskNav, ui]);
 
   const closeSidebar = useCallback(() => {
     setSidebarOpen(false);
   }, []);
 
-  // Close sidebar with Escape key when open
+  useEffect(() => {
+    const mql = window.matchMedia("(min-width: 1024px)");
+    const syncSidebar = () => setSidebarOpen(mql.matches);
+    syncSidebar();
+    mql.addEventListener("change", syncSidebar);
+    return () => mql.removeEventListener("change", syncSidebar);
+  }, []);
+
   useEffect(() => {
     if (!sidebarOpen) return;
 
@@ -95,14 +179,12 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [sidebarOpen, closeSidebar]);
 
-  // When on orders page with ?account=: ensure session reflects that account (auto-login + real seller name)
   const isOrdersPageWithAccount =
     (pathname === "/supplier/orders" || pathname === "/supplier/kiosk-orders") &&
     accountFromUrl.length > 0;
   useEffect(() => {
     if (!hasHydrated || !isOrdersPageWithAccount) return;
 
-    // If current session already matches this account and has a human-readable name, keep it
     const current = user;
     const hasNiceName =
       !!current?.name &&
@@ -112,7 +194,6 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
       return;
     }
 
-    // Fetch supplier profile to get real owner name for this account, then (re)login
     (async () => {
       let displayName = accountFromUrl;
       try {
@@ -128,7 +209,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
           }
         }
       } catch {
-        // best-effort only; fall back to account code
+        // best-effort
       }
 
       login({
@@ -144,10 +225,9 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
     })();
   }, [hasHydrated, isOrdersPageWithAccount, accountFromUrl, user, login]);
 
-  // Enhanced session protection with automatic redirect (skip when we're creating session from ?account=)
   useEffect(() => {
-    if (!hasHydrated) return; // Wait for store to load from localStorage
-    if (isOrdersPageWithAccount && !isAuthenticated) return; // Let the effect above create session first
+    if (!hasHydrated) return;
+    if (isOrdersPageWithAccount && !isAuthenticated) return;
 
     if (!isAuthenticated || user?.role !== "supplier") {
       logout();
@@ -155,7 +235,6 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
     }
   }, [hasHydrated, isAuthenticated, user, isOrdersPageWithAccount, router, logout]);
 
-  // ── Full-screen bypass for kiosk customer display ──────────────────────────
   if (pathname.startsWith("/supplier/kiosk-orders")) {
     return <div className="min-h-screen bg-slate-900">{children}</div>;
   }
@@ -163,12 +242,14 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Mobile Header */}
-      <div className="lg:hidden bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between">
-        <h1 className="text-xl font-bold text-slate-900">Supplier Panel</h1>
+      <div className="sticky top-0 z-40 bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between">
+        <h1 className="text-lg font-bold text-slate-900 truncate pr-2">
+          {user?.businessName || ui.supplierPanel}
+        </h1>
         <button
           onClick={() => setSidebarOpen((open) => !open)}
           className="p-2 rounded-md text-slate-600 hover:bg-slate-100"
-          aria-label={sidebarOpen ? "Close sidebar" : "Open sidebar"}
+          aria-label={sidebarOpen ? ui.closeSidebar : ui.openSidebar}
         >
           {sidebarOpen ? <X size={24} /> : <Menu size={24} />}
         </button>
@@ -181,18 +262,17 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
             fixed inset-y-0 left-0 z-50
             w-64 bg-white border-r border-slate-200
             transform transition-transform duration-300 ease-in-out
-            ${sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
-            lg:translate-x-0
+            ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}
           `}
         >
           <div className="h-full flex flex-col">
             {/* Logo/Header */}
             <div className="p-6 border-b border-slate-200 hidden lg:block">
               <h2 className="text-2xl font-bold text-slate-900">
-                {user?.businessName || "Supplier Panel"}
+                {user?.businessName || ui.supplierPanel}
               </h2>
               <p className="text-sm text-slate-500 mt-1">
-                {user?.businessCategory || "Manage your products and orders"}
+                {user?.businessCategory || ui.manageProducts}
               </p>
             </div>
 
@@ -200,7 +280,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
             <nav className="flex-1 overflow-y-auto p-4">
               <ul className="space-y-2">
                 {menu.map((item) => (
-                  <li key={item.name}>
+                  <li key={item.href}>
                     <Link
                       href={item.href}
                       onClick={closeSidebar}
@@ -218,7 +298,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
               </ul>
             </nav>
 
-            {/* Grandma marketplace (mobile-style app) */}
+            {/* Grandma marketplace */}
             <div className="px-4 pb-2">
               <Link
                 href="/grandma"
@@ -233,16 +313,18 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                   closeSidebar();
                 }}
                 className={cn(
-                  "flex w-full items-center gap-3 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-semibold text-sky-950 shadow-sm transition-colors hover:bg-sky-100",
+                  "flex w-full flex-col gap-0.5 rounded-xl border border-sky-200 bg-gradient-to-br from-sky-50 to-white px-4 py-3 text-left text-sm font-semibold text-sky-950 shadow-sm transition-colors hover:border-sky-300 hover:bg-sky-50/90",
                   pathname?.startsWith("/grandma") && "border-sky-400 bg-sky-100 ring-2 ring-sky-200",
                 )}
               >
-                <Smartphone className="h-5 w-5 shrink-0 text-sky-700" aria-hidden />
-                <span className="leading-tight">Grandma app</span>
+                <span className="flex items-center gap-2">
+                  <Smartphone className="h-5 w-5 shrink-0 text-sky-700" aria-hidden />
+                  <span className="leading-tight">{ui.grandma}</span>
+                </span>
+                <span className="pl-7 text-[11px] font-normal leading-snug text-slate-600">
+                  {ui.grandmaHint}
+                </span>
               </Link>
-              <p className="mt-1.5 px-1 text-[11px] leading-snug text-slate-500">
-                Shop and orders in the Grandma experience
-              </p>
             </div>
 
             {/* Footer / Logout */}
@@ -256,7 +338,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                 }}
               >
                 <LogOut size={20} />
-                <span>Logout</span>
+                <span>{ui.logout}</span>
               </button>
             </div>
           </div>
@@ -272,7 +354,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
         )}
 
         {/* Main Content */}
-        <main className="flex-1 lg:ml-64 lg:overflow-y-auto">
+        <main className={cn("flex-1 min-w-0 lg:overflow-y-auto transition-[padding] duration-300", sidebarOpen && "lg:pl-64")}>
           <div className="p-4 lg:p-8">
             {children}
           </div>

@@ -1,0 +1,153 @@
+import { useAuthStore } from "@/lib/auth-store"
+
+const LEGACY_DISCARD_EMAILS = new Set<string>(["admin0799338897@ihute.local"])
+
+/**
+ * POST to the Next.js /api/admin proxy. Identity comes from the hydrated auth store
+ * (email + optional adminApiToken), not stale body.adminEmail.
+ */
+export function postAdminApi(body: Record<string, unknown>): Promise<Response> {
+  const { user, hasHydrated, logout } = useAuthStore.getState()
+  let userEmail = (user?.email ?? "").trim()
+  if (userEmail && LEGACY_DISCARD_EMAILS.has(userEmail.toLowerCase())) {
+    console.warn("[postAdminApi] stale legacy email in memory — signing out:", userEmail)
+    logout()
+    userEmail = ""
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          ok: false,
+          error: "Stale session removed. Sign in again with your real admin account.",
+        }),
+        { status: 401, headers: { "Content-Type": "application/json" } },
+      ),
+    )
+  }
+  const incoming =
+    typeof body.adminEmail === "string" && body.adminEmail.trim() !== "" ? body.adminEmail.trim() : ""
+
+  if (incoming && userEmail && incoming.toLowerCase() !== userEmail.toLowerCase()) {
+    console.warn("[postAdminApi] ignoring body.adminEmail (stale):", incoming, "→ using store:", userEmail)
+  }
+  if (!hasHydrated) {
+    console.warn("[postAdminApi] auth store not rehydrated yet — wait before calling admin APIs")
+  }
+
+  const payload: Record<string, unknown> = { ...body }
+  delete payload.adminEmail
+  if (userEmail) {
+    payload.adminEmail = userEmail
+  }
+
+  const tok = user?.adminApiToken?.trim()
+  if (tok) {
+    payload.adminToken = tok
+  }
+
+  return fetch("/api/admin", {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...(userEmail ? { "x-admin-email": userEmail } : {}),
+      ...(tok ? { "x-admin-token": tok } : {}),
+    },
+    body: JSON.stringify(payload),
+  })
+}
+
+/** GET admin-protected Next.js routes (activity logs, commercial stats, …). */
+export function fetchAdminProtectedApi(path: string, init?: RequestInit): Promise<Response> {
+  const { user, hasHydrated, logout } = useAuthStore.getState()
+  let userEmail = (user?.email ?? "").trim()
+  if (userEmail && LEGACY_DISCARD_EMAILS.has(userEmail.toLowerCase())) {
+    logout()
+    return Promise.resolve(
+      new Response(JSON.stringify({ ok: false, error: "Stale session removed." }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      }),
+    )
+  }
+  if (!hasHydrated) {
+    console.warn("[fetchAdminProtectedApi] auth store not rehydrated yet")
+  }
+  const tok = user?.adminApiToken?.trim()
+  return fetch(path, {
+    method: init?.method || "GET",
+    credentials: "include",
+    headers: {
+      ...(userEmail ? { "x-admin-email": userEmail } : {}),
+      ...(tok ? { "x-admin-token": tok } : {}),
+      ...(init?.headers as Record<string, string> | undefined),
+    },
+    body: init?.body,
+  })
+}
+
+/** Proxies to `/api/admin/urubuto-merchant-document` for binary file responses (not JSON-only `/api/admin`). */
+export function postAdminUrubutoMerchantDocumentDownload(params: {
+  sellerAccount: string
+  documentId: number
+}): Promise<Response> {
+  const { user, hasHydrated, logout } = useAuthStore.getState()
+  let userEmail = (user?.email ?? "").trim()
+  if (userEmail && LEGACY_DISCARD_EMAILS.has(userEmail.toLowerCase())) {
+    console.warn("[postAdminUrubutoMerchantDocumentDownload] stale legacy email — signing out:", userEmail)
+    logout()
+    userEmail = ""
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          ok: false,
+          error: "Stale session removed. Sign in again with your real admin account.",
+        }),
+        { status: 401, headers: { "Content-Type": "application/json" } },
+      ),
+    )
+  }
+  if (!hasHydrated) {
+    console.warn("[postAdminUrubutoMerchantDocumentDownload] auth store not rehydrated yet")
+  }
+
+  const payload: Record<string, unknown> = {
+    action: "downloadUrubutoMerchantDocument",
+    sellerAccount: params.sellerAccount,
+    documentId: params.documentId,
+  }
+  if (userEmail) {
+    payload.adminEmail = userEmail
+  }
+  const tok = user?.adminApiToken?.trim()
+  if (tok) {
+    payload.adminToken = tok
+  }
+
+  return fetch("/api/admin/urubuto-merchant-document", {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...(userEmail ? { "x-admin-email": userEmail } : {}),
+      ...(tok ? { "x-admin-token": tok } : {}),
+    },
+    body: JSON.stringify(payload),
+  })
+}
+
+/** POST /api/admin/ebm/request — fiscalize order via RRA EBM API. */
+export function postAdminEbmRequest(orderId: number, force = false): Promise<Response> {
+  const { user } = useAuthStore.getState()
+  const userEmail = (user?.email ?? "").trim()
+  const tok = user?.adminApiToken?.trim()
+  return fetch("/api/admin/ebm/request", {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...(userEmail ? { "x-admin-email": userEmail } : {}),
+      ...(tok ? { "x-admin-token": tok } : {}),
+    },
+    body: JSON.stringify({ orderId, force }),
+  })
+}

@@ -44,6 +44,20 @@ export type CartItem = {
   /** Set when adding from shop-with-me bar/resto (DEPARTMENT or PREFERRED_CATEGORIES); enables table-command autofill in cart */
   isBarResto?: boolean
 
+  /**
+   * Package/packet multiplier from catalog (`item_emballage`). Sent on order create for DB line items.
+   * `price` is already general selling price (base × multiplier).
+   */
+  itemEmballage?: string
+
+  /** Catalog `item_state` (batch/expiry); optional on order payload */
+  item_state?: string
+  /** Expiry label (e.g. dd/mm/yy from Ex:) for price-variant lines */
+  expiryLabel?: string
+
+  /** From NIKI / seller_add_stock — this line needs an Rx photo at checkout */
+  requiresPrescription?: boolean
+
   qty: number
 }
 
@@ -103,6 +117,10 @@ type CartState = {
   removeGroupBySeller: (supplierId: string) => void
   /** Merge duplicate lines (same supplier + same product code or name) into one line with summed qty */
   mergeDuplicateCartLines: () => void
+  /** Stamp Rx-required on matching cart lines (itemCode / niki / id). */
+  stampRequiresPrescription: (codes: string[]) => void
+  /** Replace displayed shop name (account_seller.owner) for all lines of a seller. */
+  setSupplierDisplayName: (supplierId: string, supplierName: string) => void
 
   // ✅ NEW: Table management
   setTableInfo: (info: TableInfo | null) => void
@@ -121,6 +139,51 @@ type CartState = {
 }
 
 /** Prefer a real product image URL when merging duplicate cart lines. */
+/** Same line only if price matches to 1 cent (different lot prices = separate cart lines). */
+function cartPriceCents(price: unknown): number {
+  const n =
+    typeof price === "number" && Number.isFinite(price)
+      ? price
+      : Number(String(price ?? "").replace(/[^\d.-]/g, "")) || 0
+  return Math.round(n * 100)
+}
+
+function buildCartLineId(input: {
+  supplierId?: string
+  itemCode?: string
+  id?: string
+  name?: string
+  selectedUnit?: string
+  unit?: string
+  price?: unknown
+}): string {
+  const sid = (input.supplierId ?? "").toString().trim() || "unknown-supplier"
+  const code =
+    (input.itemCode ?? "").toString().trim() ||
+    (input.id ?? "").toString().trim() ||
+    (input.name ?? "").toString().trim().toLowerCase() ||
+    "unknown-item"
+  const unit = ((input.selectedUnit ?? input.unit) ?? "").toString().trim()
+  const cents = cartPriceCents(input.price)
+  return `${sid}::${code}::${unit}::${cents}`
+}
+
+function normalizeCartLineIds(items: CartItem[]): CartItem[] {
+  if (!Array.isArray(items) || items.length === 0) return []
+  return items.map((it) => ({
+    ...it,
+    id: buildCartLineId({
+      supplierId: it.supplierId,
+      itemCode: it.itemCode,
+      id: it.id,
+      name: it.name,
+      selectedUnit: it.selectedUnit,
+      unit: it.unit,
+      price: it.price,
+    }),
+  }))
+}
+
 function pickBestCartImage(...candidates: (string | undefined)[]): string | undefined {
   for (const c of candidates) {
     const s = typeof c === "string" ? c.trim() : ""
@@ -148,6 +211,16 @@ export const useCartStore = create<CartState>()(
           const nameKey = (item.name ?? "").toString().trim().toLowerCase()
           const incomingSig = prescriptionLineKey({ erx: item.erx, notes: item.notes })
           const sid = (item.supplierId ?? "").toString().trim()
+          const itemCents = cartPriceCents(item.price)
+          const cartLineId = buildCartLineId({
+            supplierId: sid,
+            itemCode: productCode,
+            id: item.id,
+            name: item.name,
+            selectedUnit,
+            unit: item.unit,
+            price: item.price,
+          })
 
           const sigOf = (x: CartItem) => x.lineSignature ?? prescriptionLineKey({ erx: x.erx, notes: x.notes })
 
@@ -159,6 +232,13 @@ export const useCartStore = create<CartState>()(
               (x.selectedUnit ?? x.unit) === selectedUnit &&
               sigOf(x) === incomingSig
             )
+            const xUnit = (x.selectedUnit ?? x.unit) ?? ""
+            return (
+              (x.supplierId ?? "").toString().trim() === sid &&
+              xCode === productCode &&
+              (x.selectedUnit ?? x.unit) === selectedUnit &&
+              cartPriceCents(x.price) === itemCents
+            )
           }
           const matchByCode = (x: CartItem) => {
             const xCode = (x.itemCode ?? x.id).toString().trim()
@@ -167,9 +247,16 @@ export const useCartStore = create<CartState>()(
           const matchByName = (x: CartItem) => {
             const xName = (x.name ?? "").toString().trim().toLowerCase()
             return (x.supplierId ?? "").toString().trim() === sid && xName === nameKey && nameKey !== "" && sigOf(x) === incomingSig
+            return (
+              (x.supplierId ?? "").toString().trim() === sid &&
+              xName === nameKey &&
+              nameKey !== "" &&
+              cartPriceCents(x.price) === itemCents
+            )
           }
 
-          const existing = state.items.find(matchExact) ?? state.items.find(matchByCode) ?? state.items.find(matchByName)
+          const existing =
+            state.items.find(matchExact) ?? state.items.find(matchByCode) ?? state.items.find(matchByName)
 
           try {
             trackClick("product", item.id, item.name)
@@ -189,6 +276,15 @@ export const useCartStore = create<CartState>()(
             }, typeof first.price === "number" && Number.isFinite(first.price) ? first.price : 0)
             const mergedLine: CartItem = {
               ...first,
+              id: buildCartLineId({
+                supplierId: first.supplierId,
+                itemCode: (first.itemCode ?? productCode).toString().trim(),
+                id: first.id,
+                name: first.name,
+                selectedUnit: first.selectedUnit,
+                unit: first.unit,
+                price: bestPrice,
+              }),
               qty: totalQty,
               price: bestPrice,
               itemCode: (first.itemCode ?? item.itemCode ?? first.id ?? item.id).toString().trim() || first.itemCode,
@@ -219,9 +315,14 @@ export const useCartStore = create<CartState>()(
               famille: first.famille ?? item.famille,
               momo: first.momo ?? item.momo,
               sellerPhone: first.sellerPhone ?? item.sellerPhone,
+              itemEmballage: first.itemEmballage ?? item.itemEmballage,
+              item_state: first.item_state ?? item.item_state,
+              requiresPrescription: Boolean(first.requiresPrescription || item.requiresPrescription),
+              expiryLabel: first.expiryLabel ?? item.expiryLabel,
             }
             return {
               items: state.items.filter((x) => !keyMatch(x)).concat([mergedLine]),
+              payment: { ...state.payment, [sid]: "unpaid" },
             }
           }
           // Ensure price is always a number (API may send string or omit)
@@ -235,7 +336,10 @@ export const useCartStore = create<CartState>()(
             itemCode: (item.itemCode ?? item.id).toString().trim() || undefined,
             lineSignature: incomingSig,
           }
-          return { items: [...state.items, withCode] }
+          return {
+            items: [...state.items, withCode],
+            payment: { ...state.payment, [sid]: "unpaid" },
+          }
         })
 
         // Track cart activity for abandoned cart reminders (throttled: max once per 10s to avoid load)
@@ -289,6 +393,7 @@ export const useCartStore = create<CartState>()(
           const nameKey = (item.name ?? "").toString().trim().toLowerCase()
           const incomingSig = prescriptionLineKey({ erx: item.erx, notes: item.notes })
           const sid = (item.supplierId ?? "").toString().trim()
+          const itemCents = cartPriceCents(item.price)
 
           const sigOf = (x: CartItem) => x.lineSignature ?? prescriptionLineKey({ erx: x.erx, notes: x.notes })
 
@@ -308,6 +413,12 @@ export const useCartStore = create<CartState>()(
           const matchByName = (x: CartItem) => {
             const xName = (x.name ?? "").toString().trim().toLowerCase()
             return (x.supplierId ?? "").toString().trim() === sid && xName === nameKey && nameKey !== "" && sigOf(x) === incomingSig
+            return (
+              (x.supplierId ?? "").toString().trim() === sid &&
+              xName === nameKey &&
+              nameKey !== "" &&
+              cartPriceCents(x.price) === itemCents
+            )
           }
 
           const idx = state.items.findIndex(matchExact)
@@ -320,8 +431,16 @@ export const useCartStore = create<CartState>()(
             const matching = state.items.filter(keyMatch)
             const totalQty = matching.reduce((sum, x) => sum + x.qty, 0) + qty
             const first = matching[0]
+            const incomingPrice =
+              typeof item.price === "number" && Number.isFinite(item.price) ? item.price : 0
+            const bestPrice = matching.reduce((max, x) => {
+              const p = typeof x.price === "number" && Number.isFinite(x.price) ? x.price : 0
+              return p > max ? p : max
+            }, incomingPrice)
             const mergedLine: CartItem = {
               ...first,
+              // Keep displayed/cart price when old lines were added with legacy base-unit price.
+              price: bestPrice,
               qty: totalQty,
               itemCode: (first.itemCode ?? item.itemCode ?? first.id ?? item.id).toString().trim() || first.itemCode,
               notes: first.notes ?? item.notes,
@@ -351,9 +470,14 @@ export const useCartStore = create<CartState>()(
               famille: first.famille ?? item.famille,
               momo: first.momo ?? item.momo,
               sellerPhone: first.sellerPhone ?? item.sellerPhone,
+              itemEmballage: first.itemEmballage ?? item.itemEmballage,
+              item_state: first.item_state ?? item.item_state,
+              requiresPrescription: Boolean(first.requiresPrescription || item.requiresPrescription),
+              expiryLabel: first.expiryLabel ?? item.expiryLabel,
             }
             return {
               items: state.items.filter((x) => !keyMatch(x)).concat([mergedLine]),
+              payment: { ...state.payment, [sid]: "unpaid" },
             }
           }
           const withCode: CartItem = {
@@ -363,7 +487,10 @@ export const useCartStore = create<CartState>()(
             itemCode: (item.itemCode ?? item.id).toString().trim() || undefined,
             lineSignature: incomingSig,
           }
-          return { items: [...state.items, withCode] }
+          return {
+            items: [...state.items, withCode],
+            payment: { ...state.payment, [sid]: "unpaid" },
+          }
         }),
 
       inc: (id, selectedUnit, lineSignature) =>
@@ -423,7 +550,9 @@ export const useCartStore = create<CartState>()(
         const sid = (supplierId ?? "").toString().trim()
         set((s) => ({
           items: s.items.filter((x) => (x.supplierId ?? "").toString().trim() !== sid),
-          payment: { ...s.payment, [supplierId]: "paid" },
+          payment: Object.fromEntries(
+            Object.entries(s.payment).filter(([k]) => k !== sid),
+          ),
         }))
       },
 
@@ -463,6 +592,10 @@ export const useCartStore = create<CartState>()(
                 IMAGE_URL: pickBestCartImage(cur.IMAGE_URL, it.IMAGE_URL),
                 item_key_words: cur.item_key_words ?? it.item_key_words,
                 famille: cur.famille ?? it.famille,
+                itemEmballage: cur.itemEmballage ?? it.itemEmballage,
+                item_state: cur.item_state ?? it.item_state,
+                requiresPrescription: Boolean(cur.requiresPrescription || it.requiresPrescription),
+                expiryLabel: cur.expiryLabel ?? it.expiryLabel,
               }
             } else {
               merged.push({ ...it, itemCode: (it.itemCode ?? it.id).toString().trim() || it.itemCode })
@@ -470,6 +603,41 @@ export const useCartStore = create<CartState>()(
           }
           if (merged.length === items.length) return state
           return { items: merged }
+        }),
+
+      setSupplierDisplayName: (supplierId, supplierName) =>
+        set((state) => {
+          const sid = (supplierId ?? "").toString().trim()
+          const name = (supplierName ?? "").toString().trim()
+          if (!sid || !name) return state
+          let changed = false
+          const items = state.items.map((it) => {
+            if ((it.supplierId ?? "").toString().trim() !== sid) return it
+            if ((it.supplierName ?? "").trim() === name) return it
+            changed = true
+            return { ...it, supplierName: name }
+          })
+          return changed ? { items } : state
+        }),
+
+      stampRequiresPrescription: (codes) =>
+        set((state) => {
+          const setCodes = new Set(
+            (codes || []).map((c) => String(c || "").trim().toUpperCase()).filter(Boolean),
+          )
+          let changed = false
+          const items = state.items.map((it) => {
+            const keys = [it.itemCode, it.item_key_words, it.id]
+              .map((v) => String(v || "").trim().toUpperCase())
+              .filter(Boolean)
+            const hit = keys.some((k) => setCodes.has(k))
+            if (Boolean(it.requiresPrescription) !== hit) {
+              changed = true
+              return { ...it, requiresPrescription: hit }
+            }
+            return it
+          })
+          return changed ? { items } : state
         }),
 
       // ✅ NEW: Table management functions
@@ -527,6 +695,15 @@ export const useCartStore = create<CartState>()(
       // Use sessionStorage so multiple self-order screens opened on the same
       // POS device (different tabs/windows) don't overwrite each other's cart.
       storage: createJSONStorage(() => sessionStorage),
+      onRehydrateStorage: () => (state) => {
+        try {
+          if (!state) return
+          const normalized = normalizeCartLineIds(state.items)
+          if (normalized.length) state.replaceItemsFromSync(normalized)
+        } catch {
+          // ignore
+        }
+      },
     }
   )
 )

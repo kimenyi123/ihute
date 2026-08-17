@@ -2,6 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
+import dynamic from "next/dynamic"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -15,12 +16,23 @@ import {
   ArrowLeft,
   CreditCard,
   FileText,
+  Download,
+  Eye,
   XCircle,
+  Loader2,
 } from "lucide-react"
-import { formatPaymentMethod } from "@/lib/payment-utils"
+import { formatPaymentMethod, isCashOnDelivery } from "@/lib/payment-utils"
+import {
+  buildOrderReceiptViewModel,
+  buildOrderWhatsAppMessageFromViewModel,
+  isTableCommandOrder,
+  resolveTableCommandLinePerson,
+} from "@/lib/table-command-whatsapp"
 import { RatingModal } from "@/components/RatingModal"
+import { sellerAccountFromOrder } from "@/lib/order-seller-account"
 import { useOrderTracking } from "@/hooks/useOrderTracking"
 import { DeliveryCountdown } from "@/components/delivery-countdown"
+import { unitMeaningfulForDisplay } from "@/lib/product-unit-display"
 import {
   Dialog,
   DialogContent,
@@ -30,6 +42,40 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
+import { TaxInvoice } from "@/components/invoice/TaxInvoice"
+import { InvoiceQRCode } from "@/components/invoice/InvoiceQRCode"
+import type { BuyerEbmFiscalInfo } from "@/lib/ebm/ebm-buyer-request"
+import { buildTaxInvoiceViewModel } from "@/lib/invoice/tax-invoice-view-model"
+import { downloadTaxInvoicePdf } from "@/lib/invoice/tax-invoice-pdf"
+import type { TaxInvoiceOrderInput } from "@/lib/invoice/tax-invoice-types"
+
+const QRCode = dynamic(() => import("react-qr-code"), { ssr: false })
+
+type DocumentState = "DELIVERY_NOTE" | "INVOICE_REQUESTED" | "INVOICED"
+
+type DeliveryNotePayload = {
+  ok?: boolean
+  orderId?: number
+  livId?: string
+  livid?: string
+  sellerName?: string
+  sellerTin?: string
+  sessionType?: "table" | "single"
+  tableName?: string | null
+  date?: string
+  servedBy?: string | null
+  orderStatus?: string
+  documentState?: DocumentState | string
+  items?: Array<{ name?: string; qty?: number; unitPrice?: number; amount?: number; orderedBy?: string | null }>
+  totals?: { subtotal?: number; total?: number; currency?: string }
+  paymentStatus?: string
+  qrPayload?: string
+  trackUrl?: string
+  invoicePdfUrl?: string | null
+  askingForInvoice?: boolean
+  message?: string
+  error?: string
+}
 
 // Updated to match supplier statuses + cancelled (reject / cancel from seller or system)
 type OrderStatus =
@@ -49,11 +95,20 @@ type OrderDetail = {
   buyerName?: string
   buyerPhone?: string
   buyerLocation?: string
+  deliveryName?: string
+  deliveryAmount?: number
   items: Array<{
     name: string
     qty: number
     unitPrice: number
     unit?: string
+    orderedBy?: string
+    ORDERED_BY?: string
+    lineId?: number
+    ID_LIST?: number
+    lineCreatedAt?: number | string | null
+    HEURE?: number | string | null
+    heure?: number | string | null
   }>
   total: number
   paymentMethod: string
@@ -61,12 +116,21 @@ type OrderDetail = {
   status: OrderStatus
   /** Raw DB / servlet value (e.g. INVOICE>>LOADED) — shown verbatim when present */
   ORDER_STATUS?: string
+  IS_TABLE_COMMAND?: boolean
+  TABLE_NAME?: string
+  TABLE_LOCATION?: string
   createdAt: string
   estimatedDeliveryAt?: string
   driverPhone?: string
   /** Seller marked payment (shared server meta; gateway may still be pending). */
   sellerPaymentAck?: "paid" | "pending"
   clientMetaUpdatedAt?: string
+  SELLER_TIN?: string
+  BUYER_TIN?: string
+  SELLER_EMAIL?: string
+  BUYER_EMAIL?: string
+  SELLER_ADDRESS?: string
+  CURRENCY?: string
 }
 
 function statusIcon(status: OrderStatus) {
@@ -192,8 +256,8 @@ function buildTracking(status: OrderStatus) {
   // Get friendly name for current status
   const statusLabels: Record<OrderStatus, string> = {
     "open": "Order Placed",
-    "pending": "Awaiting Confirmation",
-    "processing": "Being Prepared",
+    "pending": "Order Placed",
+    "processing": "Processing",
     "invoice": "Invoice",
     "in-transit": "Out for Delivery",
     "delivered": "Delivered Successfully",
@@ -247,7 +311,7 @@ function buildTracking(status: OrderStatus) {
 }
 
 function normalizePhone(raw?: string | null): string {
-  let v = (raw || "").replace(/\s|-/g, "")
+  const v = (raw || "").replace(/\s|-/g, "")
   if (!v) return ""
   if (v.startsWith("+250") || v.startsWith("+258")) return v
   if (v.startsWith("250")) return "+" + v
@@ -260,6 +324,25 @@ function waHrefFor(phone: string, text: string) {
   const p = phone.replace(/^\+/, "")
   const encoded = encodeURIComponent(text)
   return `https://wa.me/${p}?text=${encoded}`
+}
+
+function canShowInvoiceActions(rawStatus?: string): boolean {
+  const s = (rawStatus || "").trim().toUpperCase()
+  return s !== "" && s !== "OPEN"
+}
+
+function orderFinancials(order: OrderDetail) {
+  const logisticsFeeValue = Number(order.deliveryAmount ?? (order as { DELIVERY_AMOUNT?: number }).DELIVERY_AMOUNT ?? 0)
+  const subtotalValue = order.items.reduce(
+    (sum, item) => sum + Number(item.qty || 0) * Number(item.unitPrice || 0),
+    0,
+  )
+  const dbTotal = Number(order.total || 0)
+  const computedTotal = subtotalValue + logisticsFeeValue
+  const displayTotal =
+    logisticsFeeValue > 0 && dbTotal > 0 && dbTotal < computedTotal ? computedTotal : dbTotal || computedTotal
+  const discountValue = Math.max(0, subtotalValue + logisticsFeeValue - displayTotal)
+  return { logisticsFeeValue, subtotalValue, displayTotal, discountValue }
 }
 
 const trackShell =
@@ -284,8 +367,18 @@ function TrackOrderPageInner() {
   const [addressDraft, setAddressDraft] = useState("")
   const [addressBusy, setAddressBusy] = useState(false)
   const [editingAddress, setEditingAddress] = useState(false)
+  const [invoiceOpen, setInvoiceOpen] = useState(false)
+  const [ebmLoading, setEbmLoading] = useState(false)
+  const [ebmStatus, setEbmStatus] = useState<
+    "not_requested" | "pending" | "success" | "failed" | "retry" | "rejected"
+  >("not_requested")
+  const [ebmMessage, setEbmMessage] = useState<string | null>(null)
+  const [ebmFiscal, setEbmFiscal] = useState<BuyerEbmFiscalInfo | null>(null)
   /** Opaque 5-char code for share links (from API). */
   const [publicToken, setPublicToken] = useState<string | null>(null)
+  const [deliveryNote, setDeliveryNote] = useState<DeliveryNotePayload | null>(null)
+  const [invoiceBusy, setInvoiceBusy] = useState(false)
+  const [invoiceMsg, setInvoiceMsg] = useState("")
 
   // Rating modal state
   const [showRatingModal, setShowRatingModal] = useState(false)
@@ -391,6 +484,19 @@ function TrackOrderPageInner() {
     setPublicToken(typeof json.publicToken === "string" ? json.publicToken : null)
   }, [orderId])
 
+  const loadDeliveryNote = useCallback(async (explicitId?: string) => {
+    const id = (explicitId || (/^\d+$/.test(orderId) ? orderId : "")).trim()
+    if (!id || !/^\d+$/.test(id)) return
+    const origin = typeof window !== "undefined" ? window.location.origin : ""
+    const p = new URLSearchParams({ orderId: id })
+    if (origin) p.set("publicSiteUrl", origin)
+    const res = await fetch(`/api/orders/delivery-note?${p}`, { cache: "no-store" })
+    const json = (await res.json().catch(() => ({}))) as DeliveryNotePayload
+    if (res.ok && json.ok !== false) {
+      setDeliveryNote(json)
+    }
+  }, [orderId])
+
   useEffect(() => {
     let cancelled = false
     void (async () => {
@@ -398,6 +504,10 @@ function TrackOrderPageInner() {
       setError(null)
       try {
         await loadOrderFromServer()
+        if (!cancelled) {
+          const id = /^\d+$/.test(orderId) ? orderId : ""
+          await loadDeliveryNote(id)
+        }
       } catch (err: unknown) {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load order")
       } finally {
@@ -407,7 +517,84 @@ function TrackOrderPageInner() {
     return () => {
       cancelled = true
     }
-  }, [orderId, loadOrderFromServer])
+  }, [orderId, loadOrderFromServer, loadDeliveryNote])
+
+  // After track resolves token → numeric id, load delivery note
+  useEffect(() => {
+    if (order?.orderId != null && /^\d+$/.test(String(order.orderId))) {
+      void loadDeliveryNote(String(order.orderId))
+    }
+  }, [order?.orderId, loadDeliveryNote])
+
+  const loadEbmStatus = useCallback(async (numericOrderId: number) => {
+    try {
+      const res = await fetch(`/api/orders/ebm-request?orderId=${numericOrderId}`, { cache: "no-store" })
+      const data = (await res.json()) as {
+        ok?: boolean
+        ebmStatus?: string
+        message?: string
+        fiscal?: BuyerEbmFiscalInfo
+      }
+      if (data.ok && data.ebmStatus) {
+        const st = data.ebmStatus as typeof ebmStatus
+        if (["not_requested", "pending", "success", "failed", "retry", "rejected"].includes(st)) {
+          setEbmStatus(st)
+        }
+        if (data.message) setEbmMessage(data.message)
+        setEbmFiscal(data.fiscal ?? null)
+      }
+    } catch {
+      /* non-blocking */
+    }
+  }, [])
+
+  useEffect(() => {
+    const id = Number(order?.orderId ?? orderId)
+    if (!Number.isFinite(id) || id < 1) return
+    if (!canShowInvoiceActions(order?.ORDER_STATUS)) return
+    void loadEbmStatus(id)
+  }, [order?.orderId, order?.ORDER_STATUS, orderId, loadEbmStatus])
+
+  const requestEbmFromBuyer = async () => {
+    const id = Number(order?.orderId ?? orderId)
+    if (!Number.isFinite(id) || id < 1) return
+    setEbmLoading(true)
+    setEbmMessage(null)
+    try {
+      const res = await fetch("/api/orders/ebm-request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId: id }),
+      })
+      const data = (await res.json()) as {
+        ok?: boolean
+        error?: string
+        message?: string
+        ebmStatus?: string
+        alreadyFiscalized?: boolean
+        awaitingApproval?: boolean
+      }
+      if (!res.ok || !data.ok) {
+        setEbmMessage(data.error || "Could not request EBM invoice")
+        return
+      }
+      const st = (data.ebmStatus || "pending") as typeof ebmStatus
+      if (["pending", "success", "failed", "retry", "rejected"].includes(st)) setEbmStatus(st)
+      if (data.alreadyFiscalized) {
+        void loadEbmStatus(id)
+      }
+      setEbmMessage(
+        data.message ||
+          (data.alreadyFiscalized
+            ? "Invoice already fiscalized"
+            : "Seller notified — they will approve your EBM invoice"),
+      )
+    } catch (e: unknown) {
+      setEbmMessage(e instanceof Error ? e.message : "EBM request failed")
+    } finally {
+      setEbmLoading(false)
+    }
+  }
 
   // Sync currentStatus from useOrderTracking to order state
   useEffect(() => {
@@ -477,6 +664,44 @@ function TrackOrderPageInner() {
     // No need to show again since rating was successful
   }
 
+  const displayBuyerLocationForInvoice =
+    buyerAddressOverride !== undefined ? buyerAddressOverride : (order?.buyerLocation ?? "")
+
+  const taxInvoiceViewModel = useMemo(() => {
+    if (!order) return null
+    const { displayTotal } = orderFinancials(order)
+    const orderInput: TaxInvoiceOrderInput = {
+      orderId: String(order.orderId),
+      sellerName: order.sellerName,
+      sellerPhone: order.sellerPhone,
+      sellerAccount: order.sellerAccount,
+      buyerName: order.buyerName,
+      buyerPhone: order.buyerPhone,
+      buyerLocation: displayBuyerLocationForInvoice,
+      buyerEmail: order.BUYER_EMAIL,
+      createdAt: order.createdAt,
+      total: displayTotal,
+      items: order.items.map((item) => ({
+        name: item.name,
+        qty: item.qty,
+        unitPrice: item.unitPrice,
+        ITEM_CODE: (item as { ITEM_CODE?: string }).ITEM_CODE,
+      })),
+      SELLER_TIN: order.SELLER_TIN,
+      BUYER_TIN: order.BUYER_TIN,
+      SELLER_EMAIL: order.SELLER_EMAIL,
+      BUYER_EMAIL: order.BUYER_EMAIL,
+      SELLER_ADDRESS: order.SELLER_ADDRESS,
+      CURRENCY: order.CURRENCY,
+    }
+    return buildTaxInvoiceViewModel({ order: orderInput, fiscal: ebmFiscal })
+  }, [order, displayBuyerLocationForInvoice, ebmFiscal])
+
+  const downloadInvoice = useCallback(async () => {
+    if (!taxInvoiceViewModel) return
+    await downloadTaxInvoicePdf(taxInvoiceViewModel, `invoice-order-${String(order?.orderId ?? orderId)}.pdf`)
+  }, [taxInvoiceViewModel, order?.orderId, orderId])
+
   if (loading) {
     return (
       <div className={trackShell}>
@@ -544,57 +769,105 @@ function TrackOrderPageInner() {
     buyerAddressOverride !== undefined ? buyerAddressOverride : (order.buyerLocation ?? "")
   const canEditDeliveryAddress = order.status !== "delivered" && order.status !== "cancelled"
 
-  // Format items for WhatsApp message
-  const formatCurrency = (amount: number) => `${amount.toLocaleString()} RWF`
+  const { logisticsFeeValue, subtotalValue, displayTotal, discountValue } = orderFinancials(order)
 
-  // Build styled WhatsApp message
-  const padRight = (s: string, w: number) => (s.length >= w ? s : s + ' '.repeat(w - s.length))
-  const padLeft = (s: string, w: number) => (s.length >= w ? s : ' '.repeat(w - s.length) + s)
-  const trunc = (s: string, w: number) => (s.length > w ? s.slice(0, w - 1) + '…' : s)
-
-  const NAME_W = 44, QTY_W = 5, AMT_W = 14
-  const header = padRight('Product name', NAME_W) + padLeft('Qty', QTY_W) + padLeft('Amount', AMT_W)
-  const sep = '-'.repeat(NAME_W + QTY_W + AMT_W)
-
-  const lines = order.items.map((item) => {
-    const nm = padRight(trunc(item.name.replace(/\s+/g, ' ').trim(), NAME_W), NAME_W)
-    const qt = padLeft(String(item.qty), QTY_W)
-    const amt = padLeft(formatCurrency(item.qty * item.unitPrice), AMT_W)
-    return nm + qt + amt
-  })
-
-  // Determine paid amount based on payment method
-  const isPaid = order.paymentMethod && !order.paymentMethod.toLowerCase().includes('delivery')
-  const paidAmount = isPaid ? order.total : 0
+  const isPaid =
+    !isCashOnDelivery(order.paymentMethod) &&
+    (String(order.paymentStatus ?? "").toLowerCase().includes("paid") ||
+      order.paymentMethod.toUpperCase().includes("PAID_"))
+  const paidAmount = isPaid ? displayTotal : 0
 
   const shareTrackSlug = publicToken || orderId
   const internalOrderNo = String(order.orderId ?? orderId)
+  const publicShopBase = (process.env.NEXT_PUBLIC_SHOP_URL || process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://shop.ihute.rw").replace(/\/$/, "")
+  const trackLink = `${publicShopBase}/track-order/${encodeURIComponent(shareTrackSlug)}${fromGrandma ? "?from=grandma" : ""}`
 
-  const whatsappMessage = [
-    'Order',
-    '',
-    `Shop: ${order.sellerName}`,
-    displayBuyerLocation.trim() ? `Location: ${displayBuyerLocation.trim()}` : "",
-    `Order ID: ${internalOrderNo}`,
-    '',
-    '```',
-    header,
-    sep,
-    ...lines,
-    '```',
-    '',
-    `Total: ${formatCurrency(order.total)}`,
-    `Discount: ${formatCurrency(0)}`,
-    `Paid: ${formatCurrency(paidAmount)}`,
-    '',
-    `Paid at: ${formatPaymentMethod(order.paymentMethod)}`,
-    `Message: ${internalOrderNo ? `ORDER ${internalOrderNo}` : '-'}`,
-    `My phone: ${order.buyerPhone || ''}`,
-    '',
-    `Follow: ${typeof window !== "undefined" ? window.location.origin : ""}/track-order/${encodeURIComponent(shareTrackSlug)}${fromGrandma ? "?from=grandma" : ""}`
-  ].filter(Boolean).join("\n")
+  const documentState = String(deliveryNote?.documentState || "DELIVERY_NOTE").toUpperCase()
+  const invoicePdfHref =
+    (deliveryNote?.invoicePdfUrl && String(deliveryNote.invoicePdfUrl)) ||
+    (order.orderId != null ? `/api/orders/invoice-pdf?orderId=${encodeURIComponent(String(order.orderId))}` : "")
+  const qrValue = deliveryNote?.qrPayload || deliveryNote?.trackUrl || trackLink
+  const canShowInvoice = canShowInvoiceActions(order?.ORDER_STATUS)
+
+  const whatsappMessage = buildOrderWhatsAppMessageFromViewModel(
+    buildOrderReceiptViewModel({
+      shop: order.sellerName,
+      location:
+        displayBuyerLocation ||
+        (order.TABLE_NAME ? `Table: ${order.TABLE_NAME}` : undefined),
+      orderId: internalOrderNo,
+      defaultOrderedBy: (order.buyerName ?? "").trim() || undefined,
+      items: order.items.map((item) => ({
+        name: item.name,
+        qty: item.qty,
+        unitPrice: item.unitPrice,
+        orderedBy: resolveTableCommandLinePerson(
+          item.orderedBy ?? item.ORDERED_BY,
+          order.buyerName,
+        ),
+        lineId: item.lineId ?? item.ID_LIST,
+        lineCreatedAt:
+          item.lineCreatedAt ?? item.HEURE ?? item.heure ?? order.createdAt,
+      })),
+      subtotal: subtotalValue,
+      total: displayTotal,
+      discount: discountValue,
+      paid: paidAmount,
+      paidAt: formatPaymentMethod(order.paymentMethod),
+      reference: internalOrderNo ? `ORDER ${internalOrderNo}` : undefined,
+      myPhone: order.buyerPhone,
+      link: trackLink,
+      isTableCommand: isTableCommandOrder({
+        IS_TABLE_COMMAND: order.IS_TABLE_COMMAND,
+        TABLE_NAME: order.TABLE_NAME,
+        buyerLocation: displayBuyerLocation,
+      }),
+      logisticsFee: logisticsFeeValue,
+    }),
+  )
 
   const whatsappHref = sellerPhoneNormalized ? waHrefFor(sellerPhoneNormalized, whatsappMessage) : ""
+
+  async function askForInvoice() {
+    if (!order?.orderId && !deliveryNote?.livId && !deliveryNote?.livid) return
+    setInvoiceBusy(true)
+    setInvoiceMsg("")
+    try {
+      const liv = (deliveryNote?.livId || deliveryNote?.livid || "").trim()
+      const body: Record<string, unknown> = {
+        publicSiteUrl: typeof window !== "undefined" ? window.location.origin : undefined,
+      }
+      if (liv) {
+        body.livid = liv
+      } else if (order?.orderId) {
+        body.orderId = Number(order.orderId)
+      } else {
+        setInvoiceMsg("Missing order or liv id")
+        return
+      }
+      const res = await fetch("/api/orders/request-invoice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+      const json = (await res.json().catch(() => ({}))) as DeliveryNotePayload
+      if (!res.ok || json.ok === false) {
+        setInvoiceMsg(json.error || "Could not request invoice")
+        return
+      }
+      setDeliveryNote(json)
+      setInvoiceMsg(
+        json.message ||
+          (json.livId || json.livid
+            ? `This person is asking for invoice for ${json.livId || json.livid}`
+            : "This person is asking for invoice"),
+      )
+    } catch (e) {
+      setInvoiceMsg(e instanceof Error ? e.message : "Could not request invoice")
+    } finally {
+      setInvoiceBusy(false)
+    }
+  }
 
   return (
     <div className={trackShell}>
@@ -663,12 +936,37 @@ function TrackOrderPageInner() {
                   </div>
                 </div>
 
-                {order.buyerName && (
-                  <div>
-                    <p className="text-sm text-muted-foreground">Buyer Name</p>
-                    <p className="font-medium">{order.buyerName}</p>
-                  </div>
-                )}
+                {(() => {
+                  const isCisBon = /CIS_BON/i.test(String(order.paymentMethod || ""))
+                  const servedBy = (deliveryNote?.servedBy || "").trim()
+                  const buyer = (order.buyerName || "").trim()
+                  // Never show CIS staff (servedBy) as the buyer
+                  if (isCisBon) {
+                    if (servedBy) {
+                      return (
+                        <div>
+                          <p className="text-sm text-muted-foreground">Served by</p>
+                          <p className="font-medium">{servedBy}</p>
+                        </div>
+                      )
+                    }
+                    return null
+                  }
+                  if (!buyer || (servedBy && buyer.toLowerCase() === servedBy.toLowerCase())) {
+                    return servedBy ? (
+                      <div>
+                        <p className="text-sm text-muted-foreground">Served by</p>
+                        <p className="font-medium">{servedBy}</p>
+                      </div>
+                    ) : null
+                  }
+                  return (
+                    <div>
+                      <p className="text-sm text-muted-foreground">Buyer Name</p>
+                      <p className="font-medium">{buyer}</p>
+                    </div>
+                  )
+                })()}
                 {order.buyerPhone && (
                   <div>
                     <p className="text-sm text-muted-foreground">Buyer Phone</p>
@@ -883,6 +1181,152 @@ function TrackOrderPageInner() {
             </Card>
           )}
 
+          <Card className="border-0 shadow-xl rounded-2xl border-indigo-100 bg-white text-slate-900">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5 text-indigo-600" />
+                Delivery note
+              </CardTitle>
+              <CardDescription>
+                {deliveryNote?.sellerName || order.sellerName}
+                {deliveryNote?.sessionType === "table" && deliveryNote?.tableName
+                  ? ` · Table ${deliveryNote.tableName}`
+                  : ""}
+                {deliveryNote?.servedBy ? ` · Served by ${deliveryNote.servedBy}` : ""}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                {orderStatusBadge(order)}
+                <Badge variant="outline" className="font-mono text-xs">
+                  {documentState.replace(/_/g, " ")}
+                </Badge>
+                {deliveryNote?.date ? (
+                  <span className="text-slate-500">{deliveryNote.date}</span>
+                ) : null}
+              </div>
+
+              {qrValue ? (
+                <div className="flex flex-col items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="rounded-lg bg-white p-3">
+                    <QRCode value={qrValue} size={128} />
+                  </div>
+                  <p className="text-center text-xs text-slate-500">Scan to open this delivery note</p>
+                </div>
+              ) : null}
+
+              {documentState === "DELIVERY_NOTE" ? (
+                <Button
+                  type="button"
+                  className="w-full bg-indigo-600 hover:bg-indigo-700"
+                  disabled={invoiceBusy}
+                  onClick={() => void askForInvoice()}
+                >
+                  <FileText className="mr-2 h-4 w-4" />
+                  {invoiceBusy ? "Requesting…" : "Ask for invoice"}
+                </Button>
+              ) : null}
+
+              {documentState === "INVOICE_REQUESTED" ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  Invoice requested — waiting on seller
+                </div>
+              ) : null}
+
+              {documentState === "INVOICED" ? (
+                <div className="flex flex-wrap gap-2">
+                  {(deliveryNote?.livId || deliveryNote?.livid) ? (
+                    <Button type="button" className="bg-sky-700 hover:bg-sky-800" asChild>
+                      <Link href={`/invoice/${encodeURIComponent(String(deliveryNote.livId || deliveryNote.livid))}`}>
+                        <Eye className="mr-2 h-4 w-4" />
+                        View / download invoice
+                      </Link>
+                    </Button>
+                  ) : (
+                    <>
+                      <Button type="button" variant="outline" asChild>
+                        <a href={invoicePdfHref} target="_blank" rel="noopener noreferrer">
+                          <Eye className="mr-2 h-4 w-4" />
+                          View invoice
+                        </a>
+                      </Button>
+                      <Button type="button" className="bg-indigo-600 hover:bg-indigo-700" asChild>
+                        <a href={invoicePdfHref} download={`invoice-${order.orderId}.pdf`}>
+                          <Download className="mr-2 h-4 w-4" />
+                          Download invoice
+                        </a>
+                      </Button>
+                    </>
+                  )}
+                </div>
+              ) : null}
+
+              {invoiceMsg ? <p className="text-sm text-slate-600">{invoiceMsg}</p> : null}
+            </CardContent>
+          </Card>
+
+          {canShowInvoice && (
+            <Card className="border-0 shadow-xl rounded-2xl border-indigo-100 bg-white text-slate-900">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FileText className="h-5 w-5 text-indigo-600" />
+                  Tax invoice (EBM)
+                </CardTitle>
+                <CardDescription>
+                  Your order reached invoice stage ({order.ORDER_STATUS || "INVOICE"}). You can view or download it.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-nowrap items-center gap-1.5 overflow-x-auto pb-1">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setInvoiceOpen(true)}
+                  className="h-7 shrink-0 px-2 text-[11px]"
+                >
+                  <Eye className="h-3 w-3 mr-1" />
+                  View
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => void downloadInvoice()}
+                  className="h-7 shrink-0 px-2 text-[11px] bg-indigo-600 hover:bg-indigo-700"
+                >
+                  <Download className="h-3 w-3 mr-1" />
+                  Download
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={ebmLoading || ebmStatus === "success" || ebmStatus === "pending"}
+                  onClick={() => void requestEbmFromBuyer()}
+                  className="h-7 shrink-0 px-2 text-[11px] bg-green-600 hover:bg-green-700 text-white disabled:opacity-60"
+                >
+                  {ebmLoading ? (
+                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                  ) : (
+                    <FileText className="h-3 w-3 mr-1" />
+                  )}
+                  {ebmStatus === "success" ? "EBM OK" : "Request EBM"}
+                </Button>
+              </CardContent>
+              {ebmMessage ? (
+                <p className="px-6 pb-4 text-sm text-green-800 bg-green-50 border-t border-green-100">
+                  {ebmMessage}
+                </p>
+              ) : ebmStatus === "pending" ? (
+                <p className="px-6 pb-4 text-sm text-amber-800 bg-amber-50 border-t border-amber-100">
+                  Awaiting seller approval for RRA EBM fiscal invoice.
+                </p>
+              ) : ebmStatus === "rejected" ? (
+                <p className="px-6 pb-4 text-sm text-red-800 bg-red-50 border-t border-red-100">
+                  Seller rejected this EBM request. You can tap Request EBM again if needed.
+                </p>
+              ) : null}
+            </Card>
+          )}
+
           {/* Driver contact (when in transit) */}
           {(order.status === "in-transit" && (order.driverPhone || order.sellerPhone)) && (
             <Card className="border-0 shadow-xl rounded-2xl border-blue-100 bg-white text-slate-900">
@@ -1006,7 +1450,7 @@ function TrackOrderPageInner() {
                       <p className="font-medium">{item.name}</p>
                       <p className="text-sm text-muted-foreground">
                         {item.qty} × {item.unitPrice.toLocaleString()} RWF
-                        {item.unit && ` (${item.unit})`}
+                        {unitMeaningfulForDisplay(item.unit) ? ` (${item.unit})` : ""}
                       </p>
                     </div>
                     <p className="font-bold">{(item.qty * item.unitPrice).toLocaleString()} RWF</p>
@@ -1017,7 +1461,7 @@ function TrackOrderPageInner() {
               <div className="mt-4 pt-4 border-t">
                 <div className="flex justify-between items-center">
                   <p className="text-lg font-bold">Total</p>
-                  <p className="text-lg font-bold">{order.total.toLocaleString()} RWF</p>
+                  <p className="text-lg font-bold">{displayTotal.toLocaleString()} RWF</p>
                 </div>
               </div>
             </CardContent>
@@ -1119,12 +1563,35 @@ function TrackOrderPageInner() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      
+      <Dialog open={invoiceOpen} onOpenChange={setInvoiceOpen}>
+        <DialogContent className="max-w-[min(100vw,820px)] border-0 bg-white text-slate-900 sm:rounded-2xl print:max-w-none">
+          <DialogTitle className="sr-only">Invoice</DialogTitle>
+          <div className="max-h-[70vh] overflow-auto rounded-lg border border-slate-200 bg-white p-2 print:max-h-none print:overflow-visible print:border-0">
+            {taxInvoiceViewModel ? <TaxInvoice invoice={taxInvoiceViewModel} /> : null}
+          </div>
+          <DialogFooter className="print:hidden">
+            <Button type="button" variant="outline" onClick={() => setInvoiceOpen(false)}>
+              Close
+            </Button>
+            <Button type="button" onClick={() => void downloadInvoice()} className="bg-indigo-600 hover:bg-indigo-700">
+              <Download className="h-4 w-4 mr-2" />
+              Download PDF
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {taxInvoiceViewModel?.sdc.showQr ? (
+        <div className="fixed -left-[9999px] top-0 opacity-0 pointer-events-none" aria-hidden>
+          <InvoiceQRCode value={taxInvoiceViewModel.sdc.qrContent} show />
+        </div>
+      ) : null}
+
       {/* Rating Modal */}
       {order && showRatingModal && (
         <RatingModal
           orderId={String(order.orderId)}
-          sellerId={order.sellerAccount || ""}
+          sellerId={sellerAccountFromOrder(order as Record<string, unknown>)}
           sellerName={order.sellerName}
           buyerPhone={order.buyerPhone || ""}
           items={ratingItems}

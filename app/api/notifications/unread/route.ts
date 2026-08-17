@@ -1,51 +1,68 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from "next/server"
+import {
+  getBackendBaseForProxy,
+  getProxyTimeoutMs,
+  isTomcatMissingServlet,
+  warmJavaBackendBase,
+} from "@/lib/backend-config"
+
+const EMPTY = { ok: true as const, notifications: [] as unknown[], count: 0 }
 
 export async function GET(request: NextRequest) {
   try {
-    // Get userId from query params (client-side auth uses localStorage, not cookies)
-    const { searchParams } = new URL(request.url);
-    const userId = searchParams.get('userId');
-    
+    const { searchParams } = new URL(request.url)
+    const userId = searchParams.get("userId")
+
     if (!userId) {
-      return NextResponse.json({ 
-        ok: false, 
-        error: 'Not authenticated',
-        notifications: [],
-        count: 0
-      }, { status: 401 });
-    }
-    
-    const backendUrl = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/Trading';
-    const response = await fetch(
-      `${backendUrl}/NotificationServlet?action=getUnread&userId=${encodeURIComponent(userId)}`
-    );
-
-    const text = await response.text();
-    const contentType = response.headers.get('content-type') || '';
-    const isJson = contentType.includes('application/json') && response.ok;
-    if (!isJson || text.trim().startsWith('<')) {
-      return NextResponse.json({
-        ok: true,
-        notifications: [],
-        count: 0,
-      }, { status: 200 });
+      return NextResponse.json(
+        { ok: false, error: "Not authenticated", notifications: [], count: 0 },
+        { status: 401 },
+      )
     }
 
-    let data: { ok?: boolean; notifications?: unknown[]; count?: number };
+    await warmJavaBackendBase()
+    const backendUrl = getBackendBaseForProxy()
+    const timeoutMs = Math.min(8000, Math.max(4000, getProxyTimeoutMs()))
+
+    let response: Response
     try {
-      data = JSON.parse(text);
-    } catch {
-      return NextResponse.json({ ok: true, notifications: [], count: 0 }, { status: 200 });
+      response = await fetch(
+        `${backendUrl}/NotificationServlet?action=getUnread&userId=${encodeURIComponent(userId)}`,
+        { cache: "no-store", signal: AbortSignal.timeout(timeoutMs) },
+      )
+    } catch (e) {
+      console.warn("[notifications/unread] backend unreachable:", e)
+      return NextResponse.json({ ...EMPTY, degraded: true })
     }
-    return NextResponse.json(data);
 
+    const text = await response.text()
+    const contentType = response.headers.get("content-type") || ""
+
+    if (isTomcatMissingServlet(text, response.status)) {
+      return NextResponse.json({ ...EMPTY, degraded: true })
+    }
+
+    const isJson = contentType.includes("application/json") && response.ok
+    if (!isJson || text.trim().startsWith("<")) {
+      return NextResponse.json(EMPTY)
+    }
+
+    try {
+      const data = JSON.parse(text) as {
+        ok?: boolean
+        notifications?: unknown[]
+        count?: number
+      }
+      return NextResponse.json({
+        ok: data.ok ?? true,
+        notifications: Array.isArray(data.notifications) ? data.notifications : [],
+        count: typeof data.count === "number" ? data.count : 0,
+      })
+    } catch {
+      return NextResponse.json(EMPTY)
+    }
   } catch (error) {
-    console.error('Failed to fetch notifications:', error);
-    return NextResponse.json({ 
-      ok: false,
-      error: 'Failed to fetch notifications',
-      notifications: [],
-      count: 0
-    }, { status: 500 });
+    console.error("[notifications/unread]", error)
+    return NextResponse.json({ ...EMPTY, degraded: true })
   }
 }

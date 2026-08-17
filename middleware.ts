@@ -1,8 +1,102 @@
 import { NextResponse, type NextRequest } from "next/server"
 
 export function middleware(req: NextRequest) {
-  const host = (req.headers.get("host") || "").split(":")[0].toLowerCase()
+  // Prefer proxy-provided host (`x-forwarded-host`) when present so nginx / proxies
+  // that don't preserve the original `Host` header still allow host-based routing.
+  const rawHostHeader = req.headers.get("x-forwarded-host") || req.headers.get("host") || ""
+  const host = rawHostHeader.split(",")[0].split(":")[0].trim().toLowerCase()
   const { pathname } = req.nextUrl
+  const redirectParam = req.nextUrl.searchParams.get("redirect") || ""
+  const referer = (req.headers.get("referer") || "").toLowerCase()
+
+  // Keep Grandma auth fully isolated from the main Ihute /login page.
+  // This catches stale links/bookmarks and sends them to /grandma/login.
+  if (pathname === "/login") {
+    const grandmaHost = host === "shop.ihute.rw" || host.startsWith("grandma.ihute.rw")
+    const grandmaRedirect = (() => {
+      if (!redirectParam) return false
+      try {
+        const decoded = decodeURIComponent(redirectParam)
+        return decoded.startsWith("/grandma")
+      } catch {
+        return redirectParam.startsWith("/grandma")
+      }
+    })()
+    const adminRedirect = (() => {
+      if (!redirectParam) return false
+      try {
+        const decoded = decodeURIComponent(redirectParam)
+        return decoded.startsWith("/admin")
+      } catch {
+        return redirectParam.startsWith("/admin")
+      }
+    })()
+    const grandmaReferer = referer.includes("/grandma") && !adminRedirect
+    if (!adminRedirect && (grandmaHost || grandmaRedirect || grandmaReferer)) {
+      const url = req.nextUrl.clone()
+      url.pathname = "/grandma/login"
+      return NextResponse.redirect(url, 307)
+    }
+  }
+
+  // Registration aliases → canonical paths only (no host / ?surface branching).
+  // Main owns /register/web-form; Grandma owns /grandma/register-form.
+  if (pathname === "/register/grandma-buyer") {
+    const url = req.nextUrl.clone()
+    url.pathname = "/grandma/register-form"
+    url.searchParams.set("role", "buyer")
+    return NextResponse.redirect(url, 308)
+  }
+  if (pathname === "/register/grandma-seller") {
+    const url = req.nextUrl.clone()
+    url.pathname = "/grandma/register-form"
+    url.searchParams.set("role", "seller")
+    return NextResponse.redirect(url, 308)
+  }
+  if (pathname === "/register/buyer") {
+    const url = req.nextUrl.clone()
+    url.pathname = "/register/web-form"
+    url.searchParams.set("role", "buyer")
+    return NextResponse.redirect(url, 308)
+  }
+  if (pathname === "/register/seller") {
+    // Exact path only — `/register/seller/[shopId]` is handled by its page redirect.
+    const url = req.nextUrl.clone()
+    url.pathname = "/register/web-form"
+    url.searchParams.set("role", "seller")
+    return NextResponse.redirect(url, 308)
+  }
+
+  if (pathname === "/forgot-password") {
+    const url = req.nextUrl.clone()
+    const grandmaHost = host === "shop.ihute.rw" || host.startsWith("grandma.ihute.rw")
+    const surfaceOverride = url.searchParams.get("surface")
+    const isGrandma =
+      grandmaHost ||
+      (process.env.NODE_ENV === "development" && surfaceOverride === "grandma")
+
+    if (isGrandma) {
+      url.pathname = "/forgot-password/grandma"
+      url.searchParams.delete("surface")
+    } else {
+      url.pathname = "/forgot-password/web-form"
+    }
+    return NextResponse.rewrite(url)
+  }
+
+  if (pathname === "/reset-password") {
+    const grandmaHost = host === "shop.ihute.rw" || host.startsWith("grandma.ihute.rw")
+    const surfaceOverride = req.nextUrl.searchParams.get("surface")
+    const isGrandma =
+      grandmaHost ||
+      (process.env.NODE_ENV === "development" && surfaceOverride === "grandma")
+    if (isGrandma) {
+      const url = req.nextUrl.clone()
+      url.pathname = "/forgot-password"
+      url.searchParams.delete("surface")
+      return NextResponse.redirect(url, 307)
+    }
+  }
 
   // Grandma UI is served on shop.ihute.rw; apex /grandma was 404 for some deployments — send users to shop.
   if (host === "ihute.rw" || host === "www.ihute.rw") {
@@ -22,11 +116,12 @@ export function middleware(req: NextRequest) {
     }
   }
 
-  // Dedicated registration entry points (configure DNS A/CNAME to same deployment as ihute.rw)
+  // Dedicated Main seller registration host → canonical Main register route
   if (host === "seller.ihute.rw") {
     if (pathname === "/" || pathname === "") {
       const url = req.nextUrl.clone()
-      url.pathname = "/register/seller"
+      url.pathname = "/register/web-form"
+      url.searchParams.set("role", "seller")
       return NextResponse.rewrite(url)
     }
   }

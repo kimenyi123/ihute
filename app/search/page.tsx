@@ -9,15 +9,24 @@ import { useCartStore } from "@/lib/cart-store"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { filterSuppliersByRelevance } from "@/lib/search-utils"
+import { shouldRunTextSearch } from "@/lib/search-query-min"
 import { getTranslations } from "@/lib/keyword-mapping"
-import { MapPin, Store, ChevronLeft, ChevronRight } from "lucide-react"
+import { MapPin, Store, Search } from "lucide-react"
 import { useTableCommandStore } from "@/lib/table-command-store"
 import { useLocationStoreEnhanced } from "@/lib/location-store-enhanced"
 import { LocationBadge } from "@/components/location-badge"
 import { ProductCard } from "@/components/product-card"
 import { ProductQuickView, type QuickViewProduct } from "@/components/product-quick-view"
+import { Input } from "@/components/ui/input"
 import { fetchSearchSuggestions } from "@/lib/search-suggestions"
 import { usePriceDropToasts } from "@/lib/use-price-drop-toasts"
+import {
+  generalSellingPrice,
+  normalizeItemEmballageForCart,
+  resolveItemEmballageRaw,
+} from "@/lib/package-price"
+import { dedupeSearchProductsByItemCodeAndSellingPrice } from "@/lib/dedupe-search-products"
+import { parseItemStateBatchExpiry } from "@/lib/item-state-display"
 import {
   getProductImageCandidates,
   getProductImageUrl,
@@ -33,6 +42,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination"
+import Image from "next/image"
+import { cn } from "@/lib/utils"
+import { getCookieValue } from "@/lib/cookies"
+import { sellerDisplayName, sellerDisplayNameFromProduct } from "@/lib/seller-display-name"
 
 type Shop = {
   supplier_account: string
@@ -48,6 +70,10 @@ type Product = {
   item_commercial_name: string
   item_packet?: string
   item_emballage?: string
+  /** Batch / expiry line from Redis (e.g. Ex:ddmmyy) — needed for per-lot cards. */
+  item_state?: string
+  /** When set by `/api/fetchSuggestions` enrichment, prefer this for display & sort. */
+  final_selling_price?: number
   selling_price?: number | string
   cost_price?: number | string
   /** Currency from account_signup for this supplier. */
@@ -64,7 +90,12 @@ type Product = {
   image?: string
   image_url?: string
   item_image_url?: string
+  IMAGE_URL?: string
+  famille?: string
+  FAMILLE?: string
+  item_fabricant?: string
   relevance_score?: number
+  requiresPrescription?: boolean
 }
 
 type SearchResult = {
@@ -87,6 +118,18 @@ type SectorSeller = {
   products: Product[]
 }
 
+// Category image mapping
+const CATEGORY_IMAGES: Record<string, string> = {
+  pharmacy: "/pharmacy-medicine-pills-bottles.jpg",
+  "liquor-store": "/wine-bottles-liquor-store.jpg",
+  boutique: "/fashion-clothing-boutique-store.jpg",
+  "bar-resto": "/restaurant-food-dining-bar.jpg",
+  supermarket: "/supermarket-groceries-shopping-cart.jpg",
+  "coffee-shop": "/coffee-shop-cafe-espresso.jpg",
+  beauty: "/beauty-cosmetics-makeup-products.jpg",
+  general: "/general-store-retail-products.jpg",
+}
+
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || process.env.NEXT_PUBLIC_API_URL || ""
 const SECTOR_OPTIONS = [
   "pharmacy",
@@ -99,6 +142,27 @@ const SECTOR_OPTIONS = [
   "general",
 ]
 const QUICK_LOCATIONS = ["Kigali", "Musanze", "Rubavu", "Huye", "Muhanga", "Rusizi"]
+
+/** Compact page numbers with ellipses for supplier product pagination. */
+function supplierPaginationPages(current: number, total: number): (number | "ellipsis")[] {
+  if (total <= 0) return []
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
+  const cur = Math.min(Math.max(1, current), total)
+  const set = new Set<number>()
+  set.add(1)
+  set.add(total)
+  for (let d = -1; d <= 1; d++) {
+    const p = cur + d
+    if (p >= 1 && p <= total) set.add(p)
+  }
+  const sorted = [...set].sort((a, b) => a - b)
+  const out: (number | "ellipsis")[] = []
+  for (let i = 0; i < sorted.length; i++) {
+    if (i > 0 && sorted[i]! - sorted[i - 1]! > 1) out.push("ellipsis")
+    out.push(sorted[i]!)
+  }
+  return out
+}
 
 /** Derive data source from API response for console logging. */
 function getDataSourceLabel(data: {
@@ -122,13 +186,64 @@ function getDataSourceLabel(data: {
 
 /** Infer sector from query so food/drink searches don't return pharmacy. Backend uses sector to filter. */
 function inferSectorFromQuery(q: string): string {
-  if (!q || q.length < 2) return ""
+  if (!shouldRunTextSearch(q)) return ""
   const lower = q.toLowerCase()
   const foodDrink =
     /\b(martini|chicken|chips|wine|beer|salad|coffee|tea|bread|rice|fish|meat|pork|beef|pizza|pasta|burger|breakfast|lunch|dinner|glass|bottle|drink|food|menu|restaurant|bar|cafe)\b/i.test(lower) ||
     /\b(ingurube|inkoko|umuceri|inzoga|amata|saladi|ibitoki|ifunguro)\b/i.test(lower)
   if (foodDrink) return "bar-resto"
   return ""
+}
+
+function normalizeItemCodeForMatch(s: string): string {
+  return s
+    .trim()
+    .toLowerCase()
+    .replace(/^[([{.,;:\s_-]+/g, "")
+    .replace(/[)\].,;:\s_-]+$/g, "")
+    .trim()
+}
+
+/** For supplier in-page search: compare display names with collapsed whitespace. */
+function normalizeCommercialNameForSearchMatch(s: string): string {
+  return s.trim().toLowerCase().replace(/\s+/g, " ")
+}
+
+/** All normalized codes we might compare to `item` URL param (handles Redis/DB field names). */
+function collectNormalizedProductCodes(p: Product): string[] {
+  const q = p as Record<string, unknown>
+  const raw = [
+    p.item_code,
+    p.item_key_words,
+    q.ITEM_CODE,
+    q.ITEM_KEY_WORDS,
+  ]
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const x of raw) {
+    if (typeof x !== "string" || !x.trim()) continue
+    const n = normalizeItemCodeForMatch(x)
+    if (!n || seen.has(n)) continue
+    seen.add(n)
+    out.push(n)
+  }
+  return out
+}
+
+/**
+ * Match `item` query param to a product. For SKU-like params (no spaces), require exact code match
+ * so we don't pull in unrelated rows when deep-linking from global search.
+ */
+function productMatchesItemParam(p: Product, normalizedItem: string): boolean {
+  if (!normalizedItem) return false
+  const codes = collectNormalizedProductCodes(p)
+  const skuLike = !/\s/.test(normalizedItem) && normalizedItem.length >= 2
+  return codes.some((c) => {
+    if (c === normalizedItem) return true
+    if (skuLike) return false
+    if (!c.length || !normalizedItem.length) return false
+    return c.includes(normalizedItem) || normalizedItem.includes(c)
+  })
 }
 
 // -------- helpers --------
@@ -164,6 +279,37 @@ function productMatchesCategoryAndPrice(
   return searchable.includes(slug) || name.includes(slug)
 }
 
+function coerceOptionalPositiveNumber(raw: unknown): number | undefined {
+  if (raw == null || raw === "") return undefined
+  const n =
+    typeof raw === "number"
+      ? raw
+      : parseFloat(String(raw).replace(/[^\d.,-]/g, "").replace(",", "."))
+  return Number.isFinite(n) && n >= 0 ? n : undefined
+}
+
+function productItemEmballageRaw(p: Product): unknown {
+  return resolveItemEmballageRaw(p as Record<string, unknown>)
+}
+
+function productBaseSellingPrice(p: Product): number {
+  return (
+    extractNumericPrice(p.selling_price) ||
+    extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) ||
+    extractNumericPrice((p as any).price) ||
+    0
+  )
+}
+
+function productGeneralSellingPrice(p: Product): number {
+  return generalSellingPrice(productBaseSellingPrice(p), productItemEmballageRaw(p))
+}
+
+/** Line price shown in grid / cart: always `selling_price × item_emballage` (missing emballage → multiplier 1). */
+function productLinePrice(p: Product): number {
+  return productGeneralSellingPrice(p)
+}
+
 function toCardProduct(p: Product & { search_priority?: string; contains_ingredient?: string }) {
   // Image: ProductCard will call getProductImageSrc(product); pass raw fields so it can build KAOS URLs and fallback to backend image_url
   const price =
@@ -171,17 +317,33 @@ function toCardProduct(p: Product & { search_priority?: string; contains_ingredi
     extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) ||
     extractNumericPrice((p as any).price) ||
     0
+  const baseCode =
+    p.item_code ||
+    p.item_key_words ||
+    `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`
+  const linePrice = productLinePrice(p)
+  /** Same code at different prices / lots — distinct cart lines. */
+  const id = `${baseCode}__p${Math.round(linePrice * 100)}`
+  const itemStateRaw = String((p as { item_state?: string }).item_state ?? "").trim()
+  const { expiryLabel } = parseItemStateBatchExpiry(itemStateRaw || undefined)
+
+  const embRaw = productItemEmballageRaw(p)
+  const itemEmballage = normalizeItemEmballageForCart(embRaw)
   return {
     id: p.item_code || p.item_key_words || `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`,
     name: p.item_commercial_name || "Product",
-    description: undefined,
+    description:
+      String((p as { description?: string; item_description?: string }).description
+        ?? (p as { item_description?: string }).item_description
+        ?? "").trim() || undefined,
     price,
     currency: p.currency || "RWF",
-    unit: p.item_packet ?? "",
+    // Cart/display packs should follow item_emballage (pcs), not raw stock packet.
+    unit: "pcs",
     inStock: true,
     rating: 4,
     supplierId: p.supplier_account,
-    supplierName: p.supplier_name || p.supplier_account || "Supplier",
+    supplierName: sellerDisplayNameFromProduct(p),
     supplierLocation: p.supplier_location,
     momo: p.momo,
     itemCode: p.item_code || p.item_key_words,
@@ -194,7 +356,18 @@ function toCardProduct(p: Product & { search_priority?: string; contains_ingredi
     IMAGE_URL: (p as any).IMAGE_URL,
     searchPriority: (p.search_priority === "direct" || p.search_priority === "contains" ? p.search_priority : undefined) as "direct" | "contains" | undefined,
     containsIngredient: typeof p.contains_ingredient === "string" ? p.contains_ingredient : undefined,
+    requiresPrescription: Boolean(
+      (p as { requires_prescription?: unknown; requiresPrescription?: unknown }).requires_prescription
+        ?? (p as { requiresPrescription?: unknown }).requiresPrescription,
+    ),
+    ...(itemEmballage ? { itemEmballage } : {}),
+    ...(itemStateRaw ? { item_state: itemStateRaw } : {}),
+    ...(expiryLabel ? { expiryLabel } : {}),
     brand: (p as any).item_fabricant ?? (p as any).id_fabricant ?? (p as any).brand,
+    shop_count: (p as any).shop_count,
+    nickname: (p as any).nickname ?? (p as any).NICKNAME ?? (p as any).seller_nickname ?? (p as any).supplier_nickname,
+    cheapest_shop_nickname: (p as any).cheapest_shop_nickname,
+    niki_merge: (p as any).niki_merge === true ? true : undefined,
   }
 }
 
@@ -261,13 +434,15 @@ function normalizeSupplierProductsResponse(
       const items = (p as any).items
       if (Array.isArray(items) && items.length > 0) {
         for (const item of items) {
-          const rawImg = getProductImageUrl(item)
-          const img = rawImg ? (normalizeImageUrl(rawImg) ?? rawImg) : undefined
+          const itemState = String(item.item_state ?? item.ITEM_STATE ?? "").trim()
+          const nestedFinal = coerceOptionalPositiveNumber(item.final_selling_price)
           flat.push({
             item_code: item.item_key_words ?? item.item_code ?? "",
             item_commercial_name: item.item_commercial_name ?? item.item_name ?? "Product",
             item_packet: item.item_packet,
-            item_emballage: item.item_emballage ?? "",
+            item_emballage: item.item_emballage ?? item.ITEM_EMBALLAGE ?? "",
+            ...(itemState ? { item_state: itemState } : {}),
+            ...(nestedFinal != null ? { final_selling_price: nestedFinal } : {}),
             selling_price: item.selling_price ?? item.SALE_PRICE_INCLUSIVE,
             cost_price: item.cost_price,
             currency: item.currency,
@@ -276,43 +451,66 @@ function normalizeSupplierProductsResponse(
             item_key_words_kinyarwanda: item.item_key_words_kinyarwanda,
             item_description: item.item_description ?? item.description,
             supplier_account,
-            supplier_name,
+            supplier_name: sellerDisplayName({
+              owner: (item as { OWNER?: string; owner?: string }).OWNER
+                ?? (item as { owner?: string }).owner,
+              supplierName: (item as { supplier_name?: string }).supplier_name ?? supplier_name,
+              nickname: (item as { nickname?: string }).nickname,
+              supplierAccount: supplier_account,
+            }),
             supplier_location: (p as any).supplier_location ?? undefined,
             type: (p as any).type ?? "product",
-          image: img ?? undefined,
-          image_url: img ?? undefined,
-          item_image_url: img ?? undefined,
-          momo: item.momo ?? (p as any).momo,
-          famille: (item as any).famille ?? (p as any).famille ?? (item as any).FAMILLE ?? (p as any).FAMILLE,
-          item_fabricant: (item as any).item_fabricant ?? (p as any).item_fabricant ?? (item as any).id_fabricant ?? (p as any).id_fabricant,
-        })
+            // Preserve original backend image fields for KAOS URL construction
+            image: item.image,
+            image_url: item.image_url,
+            item_image_url: item.item_image_url,
+            IMAGE_URL: item.IMAGE_URL,
+            // Also preserve famille for KAOS paths
+            famille: item.famille,
+            FAMILLE: item.FAMILLE,
+            momo: item.momo ?? (p as any).momo,
+          })
         }
       } else {
             const q = p as any
             const rawImg = getProductImageUrl(q)
             const img = rawImg ? (normalizeImageUrl(rawImg) ?? rawImg) : undefined
+        const flatState = String(q.item_state ?? q.ITEM_STATE ?? "").trim()
+        const flatFinal = coerceOptionalPositiveNumber(q.final_selling_price)
         flat.push({
           item_code: q.item_key_words ?? q.item_code ?? q.ITEM_CODE ?? "",
           item_commercial_name: q.item_commercial_name ?? q.item_name ?? q.ITEM_NAME ?? "Product",
           item_packet: q.item_packet ?? q.UNIT,
-          item_emballage: q.item_emballage ?? "",
+          item_emballage: q.item_emballage ?? q.ITEM_EMBALLAGE ?? "",
+          ...(flatState ? { item_state: flatState } : {}),
+          ...(flatFinal != null ? { final_selling_price: flatFinal } : {}),
           item_key_words: q.item_key_words,
           item_key_words_french: q.item_key_words_french,
           item_key_words_kinyarwanda: q.item_key_words_kinyarwanda,
           item_description: q.item_description ?? q.description,
           supplier_account: q.supplier_account ?? supplier_account,
-          supplier_name: q.supplier_name ?? supplier_name,
+          supplier_name: sellerDisplayNameFromProduct({
+            ...q,
+            supplier_account: q.supplier_account ?? supplier_account,
+            supplier_name: q.supplier_name ?? supplier_name,
+          }),
           supplier_location: q.supplier_location,
           type: q.type ?? "product",
-          image: img ?? undefined,
-          image_url: img ?? undefined,
-          item_image_url: img ?? undefined,
+          // Preserve original backend image fields for KAOS URL construction
+          image: q.image,
+          image_url: q.image_url,
+          item_image_url: q.item_image_url,
+          IMAGE_URL: q.IMAGE_URL,
+          // Also preserve famille for KAOS paths
+          famille: q.famille,
+          FAMILLE: q.FAMILLE,
           selling_price: q.selling_price ?? q.SALE_PRICE_INCLUSIVE ?? q.price,
           cost_price: q.cost_price,
           currency: q.currency,
           momo: q.momo,
-          famille: (q as any).famille ?? (q as any).FAMILLE,
-          item_fabricant: (q as any).item_fabricant ?? (q as any).id_fabricant,
+          ...(((q as any).item_fabricant ?? (q as any).id_fabricant)
+            ? { item_fabricant: String((q as any).item_fabricant ?? (q as any).id_fabricant) }
+            : {}),
         })
       }
     }
@@ -328,7 +526,10 @@ function normalizeSupplierProductsResponse(
     return normalizeSupplierProductsResponse(
       rawProducts,
       seller.ISHYIGA_ACCOUNT ?? seller.seller_account ?? supplierAccount,
-      seller.OWNER ?? seller.SELLER_NAMES ?? seller.seller_name ?? supplierName
+      seller.OWNER ?? seller.SELLER_NAMES ?? seller.seller_name ?? sellerDisplayName({
+        supplierName,
+        supplierAccount,
+      })
     )
   }
 
@@ -345,6 +546,7 @@ export default function SearchPage() {
   const supplierNameParam = searchParams.get("supplierName")
   const locationParam = searchParams.get("location") || ""
   const sectorParam = searchParams.get("sector") || ""
+  const itemParam = searchParams.get("item")?.trim() ?? ""
   const categoryParam = searchParams.get("category") || ""
   const priceMinParam = searchParams.get("priceMin") || ""
   const priceMaxParam = searchParams.get("priceMax") || ""
@@ -380,15 +582,26 @@ export default function SearchPage() {
 
   function toQuickViewProduct(p: Product): QuickViewProduct {
     const price = extractNumericPrice(p.selling_price) || extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) || extractNumericPrice((p as any).price) || 0
+    const embRaw = productItemEmballageRaw(p)
+    const itemEmballage = normalizeItemEmballageForCart(embRaw)
     return {
       id: p.item_code || p.item_key_words || "",
       name: p.item_commercial_name || "Product",
       price,
       currency: p.currency || "RWF",
       image: getProductImageSrc(p),
+      unit: "pcs",
       itemCode: p.item_code || p.item_key_words,
       supplierId: p.supplier_account,
       supplierName: p.supplier_name,
+      ...(itemEmballage ? { itemEmballage } : {}),
+      image_url: p.image_url,
+      item_image_url: p.item_image_url,
+      IMAGE_URL: p.IMAGE_URL,
+      famille: p.famille ?? p.FAMILLE,
+      FAMILLE: p.FAMILLE,
+      item_key_words: p.item_key_words,
+      item_code: p.item_code || p.item_key_words,
     }
   }
 
@@ -413,15 +626,12 @@ export default function SearchPage() {
 
     const itemCode = (p.item_code || p.item_key_words || "").toString().trim()
     const id = itemCode || `${(p.item_commercial_name || "product").toLowerCase()}-${p.item_packet || ""}`
-    const unit = p.item_packet || ""
-    // Price: selling_price (Redis) or SALE_PRICE_INCLUSIVE/price (DB). item_emballage is not price.
-    const price =
-      extractNumericPrice(p.selling_price) ||
-      extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) ||
-      extractNumericPrice((p as any).price) ||
-      0
+    const unit = "pcs"
+    const embRaw = productItemEmballageRaw(p)
+    const price = productLinePrice(p)
+    const itemEmballage = normalizeItemEmballageForCart(embRaw)
     const supplierId = (p.supplier_account || "unknown").toString().trim()
-    const supplierName = p.supplier_name || p.supplier_account || "Supplier"
+    const supplierName = sellerDisplayNameFromProduct(p)
     const baseItem = {
       id,
       itemCode: itemCode || id,
@@ -440,6 +650,8 @@ export default function SearchPage() {
       item_key_words: p.item_key_words,
       famille: (p as any).famille ?? (p as any).FAMILLE,
       momo: p.momo || (p as any)?.seller_momo || "",
+      ...(itemEmballage ? { itemEmballage } : {}),
+      ...(p.requiresPrescription ? { requiresPrescription: true } : {}),
     }
 
     // Check if we're in a table command context
@@ -455,6 +667,22 @@ export default function SearchPage() {
 
     // Show success message instead of redirecting
     alert(`Added "${p.item_commercial_name}" to your cart!`)
+
+    const activeTerm = debouncedQ.trim()
+    if (activeTerm) {
+      fetch("/api/internal/search-event-select", {
+        method: "POST",
+        headers: { "x-ihute-internal": "true", "Content-Type": "application/json" },
+        body: JSON.stringify({
+          term: activeTerm,
+          item_code: itemCode || id,
+          item_name: p.item_commercial_name,
+          source: "main_search",
+          shop_nickname: null,
+          session_id: getCookieValue("ihute_sid"),
+        }),
+      }).catch(() => {})
+    }
   }
 
   const onTileKey = (e: KeyboardEvent<HTMLDivElement>, p: Product) => {
@@ -471,6 +699,8 @@ export default function SearchPage() {
     if (debouncedQ) params.set("q", debouncedQ)
     if (supplierParam) params.set("supplier", supplierParam)
     if (supplierNameParam) params.set("supplierName", supplierNameParam)
+    const itemFromUrl = searchParams.get("item")?.trim()
+    if (itemFromUrl && supplierParam) params.set("item", itemFromUrl)
 
     // location
     const locProvided = Object.prototype.hasOwnProperty.call(updates, "location")
@@ -498,7 +728,7 @@ export default function SearchPage() {
 
   // Quick search: 200ms debounce so backend is hit fast (like shop-with-me)
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedQ(q.trim()), 200)
+    const t = setTimeout(() => setDebouncedQ(q.trim()), 150)
     return () => clearTimeout(t)
   }, [q])
 
@@ -518,12 +748,39 @@ export default function SearchPage() {
   // Sync selected shop from URL params
   useEffect(() => {
     if (supplierParam) {
+      const fromUrl = sellerDisplayName({
+        supplierName: supplierNameParam,
+        supplierAccount: supplierParam,
+        fallback: "",
+      })
       setSelectedShop({
         supplier_account: supplierParam,
-        supplier_name: supplierNameParam || supplierParam,
+        supplier_name: fromUrl,
         type: "supplier",
         supplier_location: null,
       })
+      if (fromUrl) return
+      let cancelled = false
+      fetch(`/api/account/profile?account=${encodeURIComponent(supplierParam)}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (cancelled || !data?.ok || !data?.profile) return
+          const p = data.profile as { owner?: string; businessName?: string; name?: string; nickname?: string }
+          const name = sellerDisplayName({
+            owner: p.owner ?? p.businessName ?? p.name,
+            nickname: p.nickname,
+            supplierAccount: supplierParam,
+          })
+          setSelectedShop((prev) =>
+            prev && prev.supplier_account === supplierParam
+              ? { ...prev, supplier_name: name || prev.supplier_name }
+              : prev,
+          )
+        })
+        .catch(() => {})
+      return () => {
+        cancelled = true
+      }
     } else {
       setSelectedShop(null)
     }
@@ -537,9 +794,9 @@ export default function SearchPage() {
 
   // ====== MAIN FIX: Trust backend translation results ======
   useEffect(() => {
-    let cancelled = false
+    const cancelled = false
     async function run() {
-      if (!debouncedQ || debouncedQ.length < 2) {
+      if (!shouldRunTextSearch(debouncedQ)) {
         setSearchResult(null)
         return
       }
@@ -576,7 +833,11 @@ export default function SearchPage() {
 
         if (!cancelled) {
           // Log data source (Redis vs DB) for debugging
-          const dataSource = getDataSourceLabel(data)
+          const dataSource = getDataSourceLabel({
+            source: data.source,
+            fromNiki: data.fromNiki,
+            products: data.products?.map((p: any) => ({ source: p.source })) || []
+          })
           const productSources = (data.products ?? []).map((p: Product & { source?: string }) => p?.source ?? "?")
           console.log("[Search] Data source:", dataSource, "| Query:", debouncedQ, "| Products:", data.products?.length ?? 0, "| source:", data.source, "fromNiki:", data.fromNiki, "| Product sources:", productSources.slice(0, 5))
           if (dataSource === "unknown") {
@@ -594,13 +855,13 @@ export default function SearchPage() {
           const filteredSuppliersByName = filterSuppliersByRelevance(
             data.suppliersByName || [],
             debouncedQ,
-            10 // Lower threshold for suppliers
+            5 // Lowered threshold for full page results (more inclusive)
           )
 
           const filteredSuppliersByProduct = filterSuppliersByRelevance(
             data.suppliersByProduct || [],
             debouncedQ,
-            10 // Lower threshold for suppliers
+            5 // Lowered threshold for full page results (more inclusive)
           )
 
           setSearchResult({
@@ -639,7 +900,7 @@ export default function SearchPage() {
       }
     }
     run()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [debouncedQ, selectedShop?.supplier_account, locationParam, sectorParam])
 
   // Seller catalogue (RIGHT)
@@ -654,7 +915,7 @@ export default function SearchPage() {
       try {
         const url = `/api/fetchSuggestions?supplierProducts=${encodeURIComponent(
           selectedShop.supplier_account,
-        )}&limit=500&Currency=RWF`
+        )}&limit=240&Currency=RWF`
         const res = await fetch(url, { cache: "no-store" })
         const raw = res.ok ? await res.json() : null
         const data = normalizeSupplierProductsResponse(
@@ -675,11 +936,30 @@ export default function SearchPage() {
     }
   }, [selectedShop])
 
+  useEffect(() => {
+    if (!selectedShop) return
+    const already = sellerDisplayName({
+      supplierName: selectedShop.supplier_name,
+      supplierAccount: selectedShop.supplier_account,
+      fallback: "",
+    })
+    if (already) return
+    const p = shopProducts[0] ?? searchResult?.products?.[0]
+    if (!p) return
+    const name = sellerDisplayNameFromProduct(p)
+    if (!name || name === "Supplier") return
+    setSelectedShop((prev) =>
+      prev && prev.supplier_account === selectedShop.supplier_account
+        ? { ...prev, supplier_name: name }
+        : prev,
+    )
+  }, [shopProducts, searchResult, selectedShop])
+
   // When user types in "Search in PANGOLIN'S BURROWS", hit backend (fetchSuggestions) so keyword search works
   useEffect(() => {
     let cancelled = false
     const query = debouncedSupplierSearch.trim()
-    if (!selectedShop || !query) {
+    if (!selectedShop || !shouldRunTextSearch(query)) {
       setSupplierSearchResults(null)
       setLoadingSupplierSearch(false)
       return
@@ -749,37 +1029,108 @@ export default function SearchPage() {
     } else {
       raw = supplierSearchResults ?? []
     }
-    const filtered = raw.filter(p => {
-      const price = extractNumericPrice(p.selling_price) || extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) || extractNumericPrice((p as any).price)
-      return price > 0
-    })
-    const price = (p: Product) => extractNumericPrice(p.selling_price) || extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) || extractNumericPrice((p as any).price)
-    if (supplierProductSort === "price-asc") return [...filtered].sort((a, b) => price(a) - price(b))
-    if (supplierProductSort === "price-desc") return [...filtered].sort((a, b) => price(b) - price(a))
-    return filtered
-  }, [debouncedSupplierSearch, supplierSearchResults, shopProducts, supplierProductSort])
+    // Some backend responses provide only `final_selling_price` (enriched by `/api/fetchSuggestions`).
+    // Filter using `productLinePrice()` so valid products are not dropped.
+    const filtered = raw.filter((p) => productLinePrice(p) > 0)
+    // Same as `/api/fetchSuggestions` keyword path: one card per supplier + item code + base selling price (multi-lot → merged).
+    const deduped = dedupeSearchProductsByItemCodeAndSellingPrice(filtered) as Product[]
+    // Supplier search uses backend `globalSearch`, which is keyword/fuzzy — similar SKUs (e.g. N-22 vs N-23) can both match.
+    // If at least one product's commercial name equals the query (normalized), show only those exact matches.
+    const supplierQ = debouncedSupplierSearch.trim()
+    let listForSort = deduped
+    if (supplierQ) {
+      const qn = normalizeCommercialNameForSearchMatch(supplierQ)
+      const exactMatches = deduped.filter(
+        (p) => normalizeCommercialNameForSearchMatch(p.item_commercial_name ?? "") === qn,
+      )
+      if (exactMatches.length > 0) {
+        listForSort = exactMatches
+      }
+    }
+    let ordered: Product[]
+    if (supplierProductSort === "price-asc")
+      ordered = [...listForSort].sort((a, b) => productLinePrice(a) - productLinePrice(b))
+    else if (supplierProductSort === "price-desc")
+      ordered = [...listForSort].sort((a, b) => productLinePrice(b) - productLinePrice(a))
+    else ordered = listForSort
 
-  // Reset supplier products page when list or sort changes
+    if (itemParam) {
+      const norm = normalizeItemCodeForMatch(itemParam)
+      let matches = ordered.filter((p) => productMatchesItemParam(p, norm))
+      if (matches.length === 0 && debouncedQ.trim()) {
+        const qn = debouncedQ.trim().toLowerCase().replace(/\s+/g, " ").trim()
+        matches = ordered.filter(
+          (p) => (p.item_commercial_name || "").toLowerCase().replace(/\s+/g, " ").trim() === qn
+        )
+      }
+      if (matches.length > 0) ordered = matches
+    }
+    return ordered
+  }, [debouncedSupplierSearch, supplierSearchResults, shopProducts, supplierProductSort, itemParam, debouncedQ])
+
+  // Reset supplier products page when list, sort, in-supplier search, or page size changes
   useEffect(() => {
     setSupplierProductPage(1)
-  }, [displayedSupplierProducts.length, supplierProductSort, debouncedSupplierSearch])
+  }, [displayedSupplierProducts.length, supplierProductSort, debouncedSupplierSearch, supplierProductsPerPage])
+
+  const supplierTotalPages = useMemo(
+    () => Math.max(1, Math.ceil(displayedSupplierProducts.length / supplierProductsPerPage)),
+    [displayedSupplierProducts.length, supplierProductsPerPage],
+  )
+
+  useEffect(() => {
+    setSupplierProductPage((p) => (p > supplierTotalPages ? supplierTotalPages : p))
+  }, [supplierTotalPages])
+
+  const paginatedSupplierProducts = useMemo(() => {
+    const page = Math.min(supplierProductPage, supplierTotalPages)
+    const start = (page - 1) * supplierProductsPerPage
+    return displayedSupplierProducts.slice(start, start + supplierProductsPerPage)
+  }, [displayedSupplierProducts, supplierProductPage, supplierProductsPerPage, supplierTotalPages])
+
+  const supplierPageSafe = Math.min(supplierProductPage, supplierTotalPages)
+  const supplierRangeStart =
+    displayedSupplierProducts.length === 0 ? 0 : (supplierPageSafe - 1) * supplierProductsPerPage + 1
+  const supplierRangeEnd =
+    displayedSupplierProducts.length === 0
+      ? 0
+      : supplierRangeStart + paginatedSupplierProducts.length - 1
+
+  const supplierPageList = useMemo(
+    () => supplierPaginationPages(supplierProductPage, supplierTotalPages),
+    [supplierProductPage, supplierTotalPages],
+  )
 
   const priceMinNum = useMemo(() => (priceMinParam ? parseInt(priceMinParam, 10) : 0), [priceMinParam])
   const priceMaxNum = useMemo(() => (priceMaxParam ? parseInt(priceMaxParam, 10) : 0), [priceMaxParam])
 
-  // Main search products (global): apply client-side category + price filter (API has no support), exclude 0 price, then sort
+  // Main search products (global): category + price filter, exclude 0 line price, sort, optional item deep-link match
   const searchProductsWithPrice = useMemo(() => {
     const list = searchResult?.products ?? []
-    let filtered = list.filter(p => {
-      const price = extractNumericPrice(p.selling_price) || extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) || extractNumericPrice((p as any).price)
-      if (price <= 0) return false
+    const filtered = list.filter((p) => {
+      if (productLinePrice(p) <= 0) return false
       return productMatchesCategoryAndPrice(p, categoryParam, priceMinNum, priceMaxNum)
     })
-    const priceNum = (p: Product) => extractNumericPrice(p.selling_price) || extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) || extractNumericPrice((p as any).price)
-    if (productSort === "price-asc") return [...filtered].sort((a, b) => priceNum(a) - priceNum(b))
-    if (productSort === "price-desc") return [...filtered].sort((a, b) => priceNum(b) - priceNum(a))
-    return filtered
-  }, [searchResult?.products, productSort, categoryParam, priceMinNum, priceMaxNum])
+    let ordered: Product[]
+    if (productSort === "price-asc")
+      ordered = [...filtered].sort((a, b) => productLinePrice(a) - productLinePrice(b))
+    else if (productSort === "price-desc")
+      ordered = [...filtered].sort((a, b) => productLinePrice(b) - productLinePrice(a))
+    else ordered = filtered
+
+    if (itemParam) {
+      const norm = normalizeItemCodeForMatch(itemParam)
+      let matches = ordered.filter((p) => productMatchesItemParam(p, norm))
+      if (matches.length === 0 && debouncedQ.trim()) {
+        const qn = debouncedQ.trim().toLowerCase().replace(/\s+/g, " ").trim()
+        matches = ordered.filter(
+          (p) => (p.item_commercial_name || "").toLowerCase().replace(/\s+/g, " ").trim() === qn
+        )
+      }
+      if (matches.length > 0) ordered = matches
+    }
+    return ordered
+  }, [searchResult?.products, productSort, categoryParam, priceMinNum, priceMaxNum, itemParam, debouncedQ])
 
   // Group products by supplier so the page is ordered (not a mix of many suppliers)
   const productsBySupplier = useMemo(() => {
@@ -789,15 +1140,17 @@ export default function SearchPage() {
       if (!map.has(sid)) map.set(sid, [])
       map.get(sid)!.push(p)
     }
-    return Array.from(map.entries()).map(([supplierId, products]) => {
-      const first = products[0]
-      return {
-        supplierId,
-        supplierName: (first?.supplier_name ?? first?.supplier_account ?? supplierId).toString(),
-        supplierLocation: first?.supplier_location,
-        products,
-      }
-    })
+    return Array.from(map.entries())
+      .map(([supplierId, products]) => {
+        const first = products[0]
+        return {
+          supplierId,
+          supplierName: sellerDisplayNameFromProduct(first ?? {}),
+          supplierLocation: first?.supplier_location,
+          products,
+        }
+      })
+      .filter((g) => g.products.length > 0)
   }, [searchProductsWithPrice])
 
   // Notify when watched products in search results have dropped in price
@@ -810,7 +1163,7 @@ export default function SearchPage() {
       const key = `${id}|${sid}`
       if (!id || seen.has(key)) return
       seen.add(key)
-      const price = extractNumericPrice(p.selling_price) || extractNumericPrice((p as any).SALE_PRICE_INCLUSIVE) || extractNumericPrice((p as any).price)
+      const price = productGeneralSellingPrice(p)
       if (price <= 0) return
       out.push({
         productId: id,
@@ -834,6 +1187,8 @@ export default function SearchPage() {
     return Array.from(supplierMap.values())
   }, [searchResult])
 
+  const shouldPickSupplierFirst = !selectedShop && !!debouncedQ && allSuppliers.length > 1
+
   // Upgrade selected shop info if a richer copy arrives
   useEffect(() => {
     if (!selectedShop || allSuppliers.length === 0) return
@@ -844,6 +1199,32 @@ export default function SearchPage() {
       (selectedShop.supplier_location ?? "") !== (full.supplier_location ?? "")
     if (needsUpgrade) setSelectedShop(full)
   }, [allSuppliers, selectedShop])
+
+  // Auto-open supplier when global search resolves to a single supplier.
+  useEffect(() => {
+    if (!shouldRunTextSearch(debouncedQ)) return
+    if (!searchResult) return
+    if (selectedShop) return
+    if (supplierParam) return
+    if (allSuppliers.length === 0) return
+
+    const normalizedQuery = debouncedQ.trim().toLowerCase()
+    const exactMatch = allSuppliers.find(
+      (s) => s.supplier_name?.trim().toLowerCase() === normalizedQuery
+    )
+    const candidate = exactMatch || (allSuppliers.length === 1 ? allSuppliers[0] : undefined)
+    if (!candidate) return
+
+    setSelectedShop(candidate)
+    const params = new URLSearchParams({
+      q: debouncedQ,
+      supplier: candidate.supplier_account,
+      supplierName: candidate.supplier_name,
+    })
+    if (locationParam) params.set("location", locationParam)
+    if (sectorParam) params.set("sector", sectorParam)
+    router.replace(`/search?${params.toString()}`)
+  }, [allSuppliers, debouncedQ, locationParam, router, searchResult, sectorParam, selectedShop, supplierParam])
 
   const handleSelectShop = (shop: Shop) => {
     // Clear global search when selecting a new seller
@@ -937,14 +1318,78 @@ export default function SearchPage() {
   // Calculate total items in table cart
   const tableCartItemCount = tableCartItems.reduce((total, item) => total + item.qty, 0)
 
+  /** Deep-linked from global search (?item=&supplier=): minimal chrome; multiple matching lines still list in a grid. */
+  const isFocusedProductView = Boolean(itemParam && supplierParam)
+
+  /** Browsing one supplier's full inventory (?supplier=…) — hide Global Search; use in-supplier UI only. */
+  const isBrowsingSupplierInventory = Boolean(supplierParam?.trim()) && !itemParam
+
+  /** Title, main query box, location/sector bar, and global-result hints — not when already scoped to a supplier. */
+  const showGlobalSearchUI = !isFocusedProductView && !isBrowsingSupplierInventory
+  /** User requested a cleaner search page: hide the top controls strip. */
+  const showGlobalSearchTopStrip = false
+
+  const focusedSupplierLabel = sellerDisplayName({
+    supplierName: selectedShop?.supplier_name ?? supplierNameParam,
+    supplierAccount: selectedShop?.supplier_account ?? supplierParam,
+  })
+
+  const startNewSearch = () => {
+    setQ("")
+    setDebouncedQ("")
+    setSupplierSearch("")
+    setSelectedShop(null)
+    const params = new URLSearchParams()
+    if (locationParam) params.set("location", locationParam)
+    if (sectorParam) params.set("sector", sectorParam)
+    const qs = params.toString()
+    router.push(qs ? `/search?${qs}` : "/search")
+  }
+
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
-      <main className="container mx-auto flex-1 px-4 py-8">
-        <div className="flex items-center justify-between mb-4">
-          <h1 className="text-2xl font-semibold">Global Search</h1>
-          <LocationBadge />
-        </div>
+      <main
+        className={cn(
+          "container mx-auto flex-1 px-3 py-5 sm:px-4 sm:py-6",
+          isBrowsingSupplierInventory && "bg-gradient-to-b from-slate-100/50 via-slate-50/40 to-white",
+        )}
+      >
+        {showGlobalSearchUI && showGlobalSearchTopStrip ? (
+          <div className="flex items-center justify-between mb-4">
+            <h1 className="text-2xl font-semibold">Global Search</h1>
+            <LocationBadge />
+          </div>
+        ) : isFocusedProductView ? (
+          <div className="mb-6 w-full max-w-5xl mx-auto">
+            {loadingProducts ? (
+              <div className="space-y-3">
+                <span className="inline-block h-8 w-48 max-w-full bg-muted animate-pulse rounded-md" aria-hidden />
+                <span className="inline-block h-4 w-64 max-w-full bg-muted animate-pulse rounded-md" aria-hidden />
+              </div>
+            ) : (
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Seller</p>
+                  {focusedSupplierLabel ? (
+                    <p className="text-lg font-semibold text-foreground mt-0.5">{focusedSupplierLabel}</p>
+                  ) : null}
+                  <p className="text-sm text-muted-foreground mt-1 max-w-xl">
+                    Review the product and add to cart below.
+                  </p>
+                </div>
+                {/* <div className="flex flex-wrap gap-2 shrink-0"> */}
+                  {/* <Button type="button" variant="outline" size="sm" onClick={openSellerCatalogWithoutItem}>
+                    Browse all from this seller
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm" className="text-blue-600" onClick={startNewSearch}>
+                    New search
+                  </Button> */}
+                {/* </div> */}
+              </div>
+            )}
+          </div>
+        ) : null}
 
         {/* Table Context Indicator */}
         {tableCommand && (
@@ -974,6 +1419,8 @@ export default function SearchPage() {
           </div>
         )}
 
+        {showGlobalSearchUI && showGlobalSearchTopStrip && (
+          <>
         {/* Search Row — quick search: backend hit after 200ms debounce */}
         <div className="flex gap-2 items-center mb-3">
           <input
@@ -982,7 +1429,7 @@ export default function SearchPage() {
             placeholder="Search in English or Kinyarwanda (e.g., water, amazi, honey, ubuki...)"
             className="w-full rounded-xl border px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
           />
-          {(loading || (q.trim().length >= 2 && q.trim() !== debouncedQ)) && (
+          {(loading || (shouldRunTextSearch(q) && q.trim() !== debouncedQ)) && (
             <span className="text-sm opacity-60 animate-pulse whitespace-nowrap">Searching…</span>
           )}
         </div>
@@ -1014,7 +1461,7 @@ export default function SearchPage() {
             <div className="flex items-center gap-2 bg-gray-50 rounded-full px-3 py-1.5 border">
               <span className="text-sm">📍</span>
               <input
-                className="bg-transparent outline-none text-sm w-44"
+                className="bg-transparent outline-none text-sm w-full sm:w-44"
                 placeholder="Location (e.g., Kigali)"
                 value={locationDraft}
                 onChange={(e) => setLocationDraft(e.target.value)}
@@ -1041,7 +1488,7 @@ export default function SearchPage() {
                   <span className="text-sm">🗂️</span>
                   <select
                     aria-label="Select sector"
-                    className="bg-transparent outline-none text-sm w-48"
+                    className="bg-transparent outline-none text-sm w-full sm:w-48"
                     value={sectorDraft}
                     onChange={(e) => {
                       const val = e.target.value
@@ -1117,11 +1564,13 @@ export default function SearchPage() {
                 onClick={handleClearShop}
                 title="Clear supplier filter"
               >
-                🔒 Supplier: {selectedShop.supplier_name} <span className="opacity-60">✕</span>
+                🔒 Supplier: {focusedSupplierLabel} <span className="opacity-60">✕</span>
               </Badge>
             )}
           </div>
         </div>
+          </>
+        )}
 
         {searchResult?.error && (
           <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700">
@@ -1130,14 +1579,14 @@ export default function SearchPage() {
         )}
 
         {/* When item is not in NIKI (Redis), backend returns DB results; show hint */}
-        {searchResult && (searchResult.products.length > 0 || searchResult.suppliersByName.length > 0 || searchResult.suppliersByProduct.length > 0) && (searchResult.source === "database" || searchResult.fromNiki === false) && (
+        {showGlobalSearchUI && searchResult && (searchResult.products.length > 0 || searchResult.suppliersByName.length > 0 || searchResult.suppliersByProduct.length > 0) && (searchResult.source === "database" || searchResult.fromNiki === false) && (
           <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-sm">
             Showing results from full catalog (not in NIKI cache).
           </div>
         )}
 
         {/* Location-Aware Search Indicator */}
-        {(() => {
+        {showGlobalSearchUI && (() => {
           const locationData = useLocationStoreEnhanced.getState().location
           if (locationData?.district) {
             return (
@@ -1165,16 +1614,35 @@ export default function SearchPage() {
           return null
         })()}
 
-        <div className="max-w-5xl mx-auto">
+        <div
+          className={cn(
+            "mx-auto w-full",
+            isBrowsingSupplierInventory && "max-w-7xl",
+            isFocusedProductView && "max-w-5xl",
+            !isBrowsingSupplierInventory && !isFocusedProductView && "max-w-5xl",
+          )}
+        >
           {/* Main content (single column; no right sidebar) */}
           <div className="space-y-6">
             {/* Sector Spotlight */}
-            {sectorParam && (
+            {sectorParam && showGlobalSearchUI && (
               <section className="bg-white rounded-xl border p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <h2 className="font-semibold text-lg">
-                    Sector spotlight — <span className="text-blue-700">{sectorParam}</span>
-                  </h2>
+                  <div className="flex items-center gap-3">
+                    {CATEGORY_IMAGES[sectorParam] && (
+                      <div className="relative w-12 h-12 rounded-lg overflow-hidden flex-shrink-0">
+                        <Image
+                          src={CATEGORY_IMAGES[sectorParam]}
+                          alt={sectorParam.replace("-", " ")}
+                          fill
+                          className="object-cover"
+                        />
+                      </div>
+                    )}
+                    <h2 className="font-semibold text-lg">
+                      Sector spotlight — <span className="text-blue-700">{sectorParam.replace("-", " ")}</span>
+                    </h2>
+                  </div>
                   <div className="flex items-center gap-2">
                     {loadingSector && <span className="text-sm opacity-60 animate-pulse">Loading…</span>}
                     <Button size="sm" variant="outline" onClick={clearSector} title="Clear sector filter">
@@ -1216,7 +1684,9 @@ export default function SearchPage() {
                       </div>
                       {Array.isArray(s.products) && s.products.length > 0 && (
                         <div className="mt-3 space-y-2">
-                          {s.products.slice(0, 3).map((p, idx) => (
+                          {s.products.slice(0, 3).map((p, idx) => {
+                            const showPrice = productGeneralSellingPrice(p as Product)
+                            return (
                             <div
                               key={`${p.item_code}-${p.supplier_account || s.seller_account}-${idx}`}
                               className="p-2 rounded border hover:border-blue-300 cursor-pointer"
@@ -1233,10 +1703,13 @@ export default function SearchPage() {
                               <div className="text-sm font-medium">{p.item_commercial_name}</div>
                               <div className="text-xs text-gray-600">{p.item_packet || ""}</div>
                               <div className="text-sm font-semibold text-green-700">
-                                {p.selling_price != null ? `${Number(p.selling_price).toLocaleString()} ${p.currency || "RWF"}` : "Price not available"}
+                                {showPrice > 0
+                                  ? `${showPrice.toLocaleString()} ${p.currency || "RWF"}`
+                                  : "Price not available"}
                               </div>
                             </div>
-                          ))}
+                            )
+                          })}
                         </div>
                       )}
                     </div>
@@ -1245,165 +1718,279 @@ export default function SearchPage() {
               </section>
             )}
 
-            {/* Supplier products in main area when supplier selected */}
+            {/* Supplier products — catalog layout when browsing a seller; spotlight layout when item deep-linked */}
             {selectedShop && (
-              <section className="bg-white rounded-xl border p-4">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-                  <h2 className="font-semibold text-lg">
-                    Products from <span className="text-blue-700">{selectedShop.supplier_name}</span>
-                  </h2>
-                  <div className="flex items-center gap-2 flex-1 sm:max-w-xs">
-                    <input
-                      value={supplierSearch}
-                      onChange={(e) => setSupplierSearch(e.target.value)}
-                      placeholder={`Search in ${selectedShop.supplier_name}...`}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      aria-label="Search products from this supplier"
-                    />
-                    {(loadingSupplierSearch || (supplierSearch.trim() && supplierSearch.trim() !== debouncedSupplierSearch)) && (
-                      <span className="text-xs text-gray-500 animate-pulse whitespace-nowrap">Searching…</span>
-                    )}
+              <section
+                className={cn(
+                  itemParam
+                    ? "border-0 bg-transparent p-0 shadow-none"
+                    : "overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-900/5",
+                )}
+              >
+                {!itemParam ? (
+                  <div className="border-b border-slate-100 bg-white">
+                    <div className="px-2 py-3 sm:px-4 sm:py-4">
+                      <div className="flex flex-col gap-3">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                            <span className="hidden text-[9px] font-bold uppercase tracking-wide text-slate-400 sm:inline">
+                              Catalog
+                            </span>
+                            <h2 className="text-balance text-base font-bold leading-tight text-slate-900 sm:text-[17px]">
+                              <span className="font-medium text-slate-600">Products from </span>
+                              <span className="text-blue-700">{focusedSupplierLabel}</span>
+                            </h2>
+                          </div>
+                          <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0 text-[11px] text-slate-500">
+                            {selectedShop.supplier_location ? (
+                              <span className="inline-flex items-center gap-0.5">
+                                <MapPin className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
+                                {selectedShop.supplier_location}
+                              </span>
+                            ) : null}
+                            <Button
+                              type="button"
+                              variant="link"
+                              className="h-auto p-0 text-[11px] text-blue-700 underline-offset-2"
+                              onClick={startNewSearch}
+                            >
+                              All suppliers
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="relative flex-1">
+                          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                          <Input
+                            id="supplier-catalog-search"
+                            type="search"
+                            placeholder="Search products..."
+                            value={supplierSearch}
+                            onChange={(e) => setSupplierSearch(e.target.value)}
+                            className="pl-10"
+                            aria-label={
+                              focusedSupplierLabel
+                                ? `Search products in ${focusedSupplierLabel}`
+                                : "Search products in this shop"
+                            }
+                          />
+                          {loadingSupplierSearch ||
+                          (shouldRunTextSearch(supplierSearch) &&
+                            supplierSearch.trim() !== debouncedSupplierSearch) ? (
+                            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground animate-pulse">
+                              …
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                </div>
+                ) : null}
                 {loadingProducts ? (
-                  <div className="py-8 text-center text-gray-500 text-sm">Loading products…</div>
-                ) : loadingSupplierSearch && debouncedSupplierSearch.trim() ? (
-                  <div className="py-8 text-center text-gray-500 text-sm">Searching…</div>
+                  <div className={cn("py-10 text-center text-slate-500", !itemParam && "px-3 sm:px-5")}>
+                    <div className="mx-auto mb-2 h-6 w-6 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600" />
+                    <p className="text-xs font-medium">Loading products…</p>
+                  </div>
+                ) : loadingSupplierSearch && shouldRunTextSearch(debouncedSupplierSearch) ? (
+                  <div className={cn("py-10 text-center text-slate-500", !itemParam && "px-3 sm:px-5")}>
+                    <p className="text-xs font-medium">Searching…</p>
+                  </div>
                 ) : displayedSupplierProducts.length > 0 ? (
                   <>
-                    {(() => {
-                      const total = displayedSupplierProducts.length
-                      const totalPages = Math.max(1, Math.ceil(total / supplierProductsPerPage))
-                      const page = Math.min(Math.max(1, supplierProductPage), totalPages)
-                      const startIndex = (page - 1) * supplierProductsPerPage
-                      const endIndex = Math.min(startIndex + supplierProductsPerPage, total)
-                      const paginatedProducts = displayedSupplierProducts.slice(startIndex, endIndex)
-                      return (
-                        <>
-                          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                            <p className="text-sm text-gray-500">
-                              {total} product{total !== 1 ? "s" : ""}
-                              {debouncedSupplierSearch.trim() ? ` matching "${debouncedSupplierSearch.trim()}"` : ""}
-                            </p>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <Select value={supplierProductSort} onValueChange={(v: "relevance" | "price-asc" | "price-desc") => setSupplierProductSort(v)}>
-                                <SelectTrigger className="w-[140px] h-9">
-                                  <SelectValue placeholder="Sort by" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="relevance">Relevance</SelectItem>
-                                  <SelectItem value="price-asc">Price: Low to High</SelectItem>
-                                  <SelectItem value="price-desc">Price: High to Low</SelectItem>
-                                </SelectContent>
-                              </Select>
-                              <span className="text-sm text-gray-500">
-                                Showing {startIndex + 1}–{endIndex} of {total}
-                              </span>
+                    {!itemParam ? (
+                      <div className="flex flex-col gap-1.5 border-b border-slate-100 bg-slate-50/80 px-2 py-1.5 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+                        <p className="text-[11px] text-slate-600">
+                          <span className="font-medium text-slate-900">
+                            {supplierRangeStart}–{supplierRangeEnd}
+                          </span>
+                          <span className="text-slate-500"> of </span>
+                          <span className="font-medium text-slate-900">{displayedSupplierProducts.length}</span>
+                          <span className="text-slate-500">
+                            {" "}
+                            product{displayedSupplierProducts.length !== 1 ? "s" : ""}
+                          </span>
+                          {debouncedSupplierSearch.trim() ? (
+                            <span className="text-slate-500">
+                              {" "}
+                              matching &quot;{debouncedSupplierSearch.trim()}&quot;
+                            </span>
+                          ) : null}
+                        </p>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <Select
+                            value={String(supplierProductsPerPage)}
+                            onValueChange={(v) => setSupplierProductsPerPage(Number(v))}
+                          >
+                            <SelectTrigger
+                              className="h-8 w-[118px] rounded-full border-slate-200 bg-white text-[11px]"
+                              aria-label="Products per page"
+                            >
+                              <SelectValue placeholder="Per page" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="15">15 / page</SelectItem>
+                              <SelectItem value="30">30 / page</SelectItem>
+                              <SelectItem value="60">60 / page</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <Select
+                            value={supplierProductSort}
+                            onValueChange={(v: "relevance" | "price-asc" | "price-desc") =>
+                              setSupplierProductSort(v)
+                            }
+                          >
+                            <SelectTrigger className="h-8 w-[148px] rounded-full border-slate-200 bg-white text-[11px]">
+                              <SelectValue placeholder="Sort by" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="relevance">Relevance</SelectItem>
+                              <SelectItem value="price-asc">Price: Low to High</SelectItem>
+                              <SelectItem value="price-desc">Price: High to Low</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    ) : supplierTotalPages > 1 ? (
+                      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-4 sm:px-6">
+                        <p className="text-sm text-slate-500">
+                          Showing {supplierRangeStart}–{supplierRangeEnd} of {displayedSupplierProducts.length} product
+                          {displayedSupplierProducts.length !== 1 ? "s" : ""}
+                        </p>
+                        <Select
+                          value={String(supplierProductsPerPage)}
+                          onValueChange={(v) => setSupplierProductsPerPage(Number(v))}
+                        >
+                          <SelectTrigger className="h-9 w-[120px]" aria-label="Products per page">
+                            <SelectValue placeholder="Per page" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="15">15 / page</SelectItem>
+                            <SelectItem value="30">30 / page</SelectItem>
+                            <SelectItem value="60">60 / page</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ) : null}
+                    <div
+                      className={cn(
+                        "grid w-full",
+                        itemParam
+                          ? "grid-cols-[repeat(auto-fill,minmax(280px,1fr))] justify-items-start gap-4"
+                          : // Narrow fixed-width columns (~storefront card): caps width so Buy/Watch wrap like the reference
+                            "justify-center gap-x-3 gap-y-4 px-2 pb-3 pt-2 sm:justify-start sm:px-4 [grid-template-columns:repeat(auto-fill,minmax(180px,220px))]",
+                      )}
+                    >
+                      {paginatedSupplierProducts.map((p, index) =>
+                        itemParam ? (
+                          <div
+                            key={`${p.item_code}-${p.supplier_account || ""}-${index}`}
+                            className="flex justify-start"
+                          >
+                            <ProductCard
+                              product={toCardProduct(p)}
+                              layout="spotlight"
+                              onQuickView={() => {
+                                setQuickViewProduct(p)
+                                setQuickViewOpen(true)
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <div
+                            key={`${p.item_code}-${p.supplier_account || ""}-${index}`}
+                            className="group relative"
+                          >
+                            <div
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => addProductToCart(p)}
+                              onKeyDown={(e) => onTileKey(e, p)}
+                              title="Click to add to cart"
+                              className="rounded-md transition duration-200 group-hover:ring-1 group-hover:ring-blue-200/90"
+                            >
+                              <ProductCard
+                                product={toCardProduct(p)}
+                                layout="compact"
+                                onQuickView={() => {
+                                  setQuickViewProduct(p)
+                                  setQuickViewOpen(true)
+                                }}
+                              />
                             </div>
                           </div>
-                          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-                            {paginatedProducts.map((p, index) => (
-                              <div key={`${p.item_code}-${p.supplier_account || ""}-${startIndex + index}`} className="relative">
-                                <div role="button" tabIndex={0} onClick={() => addProductToCart(p)} onKeyDown={(e) => onTileKey(e, p)} title="Click to add to cart">
-                                  <ProductCard product={toCardProduct(p)} />
-                                </div>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="absolute bottom-2 right-2 text-xs z-10"
-                                  onClick={(e) => { e.stopPropagation(); setQuickViewProduct(p); setQuickViewOpen(true); }}
-                                >
-                                  Quick view
-                                </Button>
-                              </div>
-                            ))}
-                          </div>
-                          {totalPages > 1 && (
-                            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-4 pt-4 border-t border-gray-200">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm text-gray-500">Show</span>
-                                <Select
-                                  value={String(supplierProductsPerPage)}
-                                  onValueChange={(v) => {
-                                    setSupplierProductsPerPage(Number(v))
-                                    setSupplierProductPage(1)
+                        ),
+                      )}
+                    </div>
+                    {supplierTotalPages > 1 ? (
+                      <Pagination
+                        className={cn("border-t border-slate-100 bg-slate-50/40 py-3", !itemParam && "px-3 sm:px-5")}
+                      >
+                        <PaginationContent className="flex-wrap justify-center gap-1">
+                          <PaginationItem>
+                            <PaginationPrevious
+                              href="#"
+                              className={supplierPageSafe <= 1 ? "pointer-events-none opacity-40" : undefined}
+                              onClick={(e) => {
+                                e.preventDefault()
+                                setSupplierProductPage((p) => Math.max(1, p - 1))
+                              }}
+                            />
+                          </PaginationItem>
+                          {supplierPageList.map((item, idx) =>
+                            item === "ellipsis" ? (
+                              <PaginationItem key={`e-${idx}`}>
+                                <PaginationEllipsis />
+                              </PaginationItem>
+                            ) : (
+                              <PaginationItem key={item}>
+                                <PaginationLink
+                                  href="#"
+                                  size="icon"
+                                  isActive={item === supplierPageSafe}
+                                  onClick={(e) => {
+                                    e.preventDefault()
+                                    setSupplierProductPage(item)
                                   }}
                                 >
-                                  <SelectTrigger className="w-[72px] h-8">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="10">10</SelectItem>
-                                    <SelectItem value="15">15</SelectItem>
-                                    <SelectItem value="24">24</SelectItem>
-                                    <SelectItem value="48">48</SelectItem>
-                                    <SelectItem value="96">96</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                                <span className="text-sm text-gray-500">per page</span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm text-gray-500">
-                                  Page {page} of {totalPages}
-                                </span>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-8 gap-1"
-                                  onClick={() => setSupplierProductPage((p) => Math.max(1, p - 1))}
-                                  disabled={page <= 1}
-                                >
-                                  <ChevronLeft className="h-4 w-4" />
-                                  Previous
-                                </Button>
-                                <div className="flex items-center gap-1">
-                                  {Array.from({ length: totalPages }, (_, i) => i + 1)
-                                    .filter((pNum) => pNum === 1 || pNum === totalPages || Math.abs(pNum - page) <= 1)
-                                    .map((pNum, i, arr) => (
-                                      <div key={pNum} className="flex items-center gap-1">
-                                        {i > 0 && arr[i - 1] !== pNum - 1 && (
-                                          <span className="text-gray-400 px-1">…</span>
-                                        )}
-                                        <Button
-                                          variant={page === pNum ? "default" : "outline"}
-                                          size="sm"
-                                          className="h-8 w-8 p-0 min-w-8"
-                                          onClick={() => setSupplierProductPage(pNum)}
-                                        >
-                                          {pNum}
-                                        </Button>
-                                      </div>
-                                    ))}
-                                </div>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-8 gap-1"
-                                  onClick={() => setSupplierProductPage((p) => Math.min(totalPages, p + 1))}
-                                  disabled={page >= totalPages}
-                                >
-                                  Next
-                                  <ChevronRight className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </div>
+                                  {item}
+                                </PaginationLink>
+                              </PaginationItem>
+                            ),
                           )}
-                        </>
-                      )
-                    })()}
+                          <PaginationItem>
+                            <PaginationNext
+                              href="#"
+                              className={
+                                supplierPageSafe >= supplierTotalPages ? "pointer-events-none opacity-40" : undefined
+                              }
+                              onClick={(e) => {
+                                e.preventDefault()
+                                setSupplierProductPage((p) => Math.min(supplierTotalPages, p + 1))
+                              }}
+                            />
+                          </PaginationItem>
+                        </PaginationContent>
+                      </Pagination>
+                    ) : null}
                   </>
                 ) : (
-                  <div className="text-center py-6 text-gray-500">
-                    {debouncedSupplierSearch.trim()
-                      ? `No products matching "${debouncedSupplierSearch.trim()}"`
-                      : "No products available from this supplier"}
+                  <div
+                    className={cn(
+                      "py-10 text-center text-slate-600",
+                      !itemParam && "border-t border-slate-100 bg-slate-50/30 px-3 sm:px-5",
+                    )}
+                  >
+                    <p className="text-xs font-medium">
+                      {debouncedSupplierSearch.trim()
+                        ? `No products matching "${debouncedSupplierSearch.trim()}"`
+                        : "No products available from this supplier"}
+                    </p>
                   </div>
                 )}
               </section>
             )}
 
             {/* Products matching query — hidden when a supplier is selected (products from that supplier show above) */}
-            {!selectedShop && searchResult && searchProductsWithPrice.length > 0 && (
+            {!selectedShop && !shouldPickSupplierFirst && searchResult && searchProductsWithPrice.length > 0 && (
               <section className="bg-white rounded-xl border p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                   <h2 className="font-semibold text-lg">
@@ -1440,45 +2027,23 @@ export default function SearchPage() {
                         )}
                         <span className="font-normal text-muted-foreground">({products.length})</span>
                       </h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                         {products.map((product, index) => (
-                          <div
-                            key={`${product.item_code}-${product.supplier_account || ""}-${index}`}
-                            className="rounded-lg border p-3 hover:border-blue-300 transition-colors group"
-                          >
-                            <div className="flex gap-3">
-                              <ProductThumb
-                                product={product}
-                                alt={String(product.item_commercial_name ?? product.item_code ?? "Product")}
+                          <div key={`${product.item_code}-${product.supplier_account || ""}-${index}`} className="relative">
+                            <div
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => addProductToCart(product)}
+                              onKeyDown={(e) => onTileKey(e, product)}
+                              title="Click to add to cart"
+                            >
+                              <ProductCard
+                                product={toCardProduct(product)}
+                                onQuickView={() => {
+                                  setQuickViewProduct(product)
+                                  setQuickViewOpen(true)
+                                }}
                               />
-                              <div className="min-w-0 flex-1">
-                                <div className="font-medium text-gray-900 group-hover:text-blue-700 line-clamp-2">
-                                  {product.item_commercial_name}
-                                </div>
-                                <div className="text-sm text-gray-600 mt-1 line-clamp-1">
-                                  {product.item_packet || "No description"}
-                                </div>
-                              </div>
-                            </div>
-                            <div className="mt-2 text-base font-semibold text-green-600">
-                              {product.selling_price != null ? `${Number(product.selling_price).toLocaleString()} ${product.currency || "RWF"}` : "Price not available"}
-                            </div>
-                            <div className="mt-3 flex gap-2">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="text-xs"
-                                onClick={(e) => { e.stopPropagation(); setQuickViewProduct(product); setQuickViewOpen(true); }}
-                              >
-                                Quick view
-                              </Button>
-                              <Button
-                                size="sm"
-                                className="text-xs"
-                                onClick={(e) => { e.stopPropagation(); addProductToCart(product); }}
-                              >
-                                Add to cart
-                              </Button>
                             </div>
                           </div>
                         ))}
@@ -1504,11 +2069,7 @@ export default function SearchPage() {
                   {allSuppliers.map((supplier) => (
                     <div
                       key={supplier.supplier_account}
-                      className={`p-3 rounded-lg border cursor-pointer transition-all ${
-                        selectedShop?.supplier_account === supplier.supplier_account
-                          ? "border-blue-500 bg-blue-50"
-                          : "border-gray-200 hover:border-blue-300 hover:bg-gray-50"
-                      }`}
+                      className="p-3 rounded-lg border cursor-pointer transition-all border-gray-200 hover:border-blue-300 hover:bg-gray-50"
                       onClick={() => handleSelectShop(supplier)}
                       title="Click to preview this supplier's products"
                     >

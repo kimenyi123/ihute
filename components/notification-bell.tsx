@@ -5,6 +5,7 @@ import { Bell, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/lib/auth-store';
 import { RatingModal } from './RatingModal';
+import { sellerAccountFromOrder, sellerNameFromOrder } from '@/lib/order-seller-account';
 
 interface Notification {
   id: number;
@@ -13,6 +14,26 @@ interface Notification {
   actionUrl: string;
   type: string;
   createdAt: number;
+}
+
+async function trackNotificationAction(
+  action: 'markOpened' | 'markIgnored',
+  notificationId: number,
+  userId: string
+) {
+  try {
+    await fetch('/api/notifications', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action,
+        notificationId,
+        userId,
+      }),
+    });
+  } catch (error) {
+    console.error(`Failed to ${action} for notification:`, error);
+  }
 }
 
 export function NotificationBell() {
@@ -65,6 +86,7 @@ export function NotificationBell() {
       const userEmail = user?.email || user?.ishyigaAccount;
       if (!userEmail) return;
 
+      await trackNotificationAction('markOpened', id, userEmail);
       await fetch(`/api/notifications/${id}/read?userId=${encodeURIComponent(userEmail)}`, { method: 'POST' });
       
       // Update local state
@@ -88,8 +110,8 @@ export function NotificationBell() {
             if (data.ok && data.order) {
               setRatingData({
                 orderId: orderId,
-                sellerId: data.order.sellerAccount || '',
-                sellerName: data.order.sellerName || 'Supplier',
+                sellerId: sellerAccountFromOrder(data.order),
+                sellerName: sellerNameFromOrder(data.order),
                 items: data.order.items || [],
               });
               setRatingModalOpen(true);

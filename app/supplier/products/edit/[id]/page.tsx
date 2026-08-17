@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { Trash2, Loader2 } from "lucide-react"
+import { normalizeProductImagePublicUrl } from "@/lib/public-asset-url"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,6 +25,7 @@ type Product = {
   id: string
   name: string
   price: number
+  cost: number
   stock: number
   category?: string
   imageUrl?: string
@@ -43,8 +45,10 @@ export default function SupplierEditProductPage() {
   const [error, setError] = useState<string | null>(null)
 
   const [price, setPrice] = useState("")
+  const [cost, setCost] = useState("")
   const [stock, setStock] = useState("")
   const [imageUrl, setImageUrl] = useState("")
+  const [imageFile, setImageFile] = useState<File | null>(null)
 
   // Fetch product from API
   useEffect(() => {
@@ -101,17 +105,31 @@ export default function SupplierEditProductPage() {
               productStock = parseInt(foundProduct.stock || foundProduct.QUANTITY || 0)
             }
 
-            const productImageUrl = foundProduct.item_image_url || foundProduct.image_url || foundProduct.IMAGE_URL || ""
+            const rawImage =
+              foundProduct.item_image_url || foundProduct.image_url || foundProduct.IMAGE_URL || ""
+            const productImageUrl = rawImage ? normalizeProductImagePublicUrl(String(rawImage)) : ""
+            const productCost =
+              parseFloat(
+                String(
+                  foundProduct.cost_price ??
+                  foundProduct.COST_PRICE ??
+                  foundProduct.item_cost ??
+                  0
+                )
+              ) || 0
+
             const mapped: Product = {
               id: productId,
               name: productName,
               price: productPrice,
+              cost: productCost,
               stock: productStock,
               category: foundProduct.category || "uncategorized",
               imageUrl: productImageUrl,
             }
             setProduct(mapped)
             setPrice(String(mapped.price))
+            setCost(String(mapped.cost))
             setStock(String(mapped.stock))
             setImageUrl(productImageUrl || "")
           } else {
@@ -145,6 +163,7 @@ export default function SupplierEditProductPage() {
           account: user.ishyigaAccount,
           itemCode: product.id,
           price: Number(price || 0),
+          cost: Number(cost || 0),
           stock: stockNum,
           quantity: stockNum,
           item_packet: String(stockNum),
@@ -155,6 +174,42 @@ export default function SupplierEditProductPage() {
       const json = await res.json()
 
       if (json.ok) {
+        if (imageFile) {
+          const normalizedCode = String(product.id || "").trim().toUpperCase()
+          if (!normalizedCode) {
+            throw new Error("Product code is required before image upload")
+          }
+          const fd = new FormData()
+          fd.append("scope", "product")
+          fd.append("account", user.ishyigaAccount)
+          fd.append("itemCode", normalizedCode)
+          fd.append("file", imageFile)
+          const imgRes = await fetch("/api/images/overrides", {
+            method: "POST",
+            body: fd,
+          })
+          const imgJson = await imgRes.json().catch(() => ({}))
+          if (!imgRes.ok || !imgJson?.ok) {
+            throw new Error(imgJson?.error || "Product updated but image upload failed")
+          }
+          const uploadedUrl = String(imgJson.imageUrl || "").trim()
+          if (uploadedUrl) {
+            const imgSave = await fetch("/api/supplier/stock", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                action: "updateProduct",
+                account: user.ishyigaAccount,
+                itemCode: normalizedCode,
+                imageUrl: uploadedUrl,
+              }),
+            })
+            const imgSaveJson = await imgSave.json().catch(() => ({}))
+            if (!imgSave.ok || !imgSaveJson?.ok) {
+              throw new Error(imgSaveJson?.error || "Image uploaded but failed to save IMAGE_URL in database")
+            }
+          }
+        }
         toast({
           title: "Product updated",
           description: "Your changes have been saved.",
@@ -261,6 +316,17 @@ export default function SupplierEditProductPage() {
           </div>
 
           <div className="space-y-2">
+            <Label>Cost Price (RWF)</Label>
+            <Input
+              type="number"
+              value={cost}
+              onChange={(e) => setCost(e.target.value)}
+              disabled={saving || deleting}
+              placeholder="0"
+            />
+          </div>
+
+          <div className="space-y-2">
             <Label>Stock</Label>
             <Input 
               type="number" 
@@ -277,6 +343,16 @@ export default function SupplierEditProductPage() {
               placeholder="https://..."
               value={imageUrl} 
               onChange={(e) => setImageUrl(e.target.value)}
+              disabled={saving || deleting}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Upload image</Label>
+            <Input
+              type="file"
+              accept="image/*"
+              onChange={(e) => setImageFile(e.target.files?.[0] ?? null)}
               disabled={saving || deleting}
             />
           </div>

@@ -5,6 +5,7 @@ export interface Product {
   name: string
   category: string
   price: number
+  currency?: string
   unit: string // "piece", "box", "carton", "crate", "kg", "liter"
   stock: number
   supplierId: string

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerProxyBackendBase } from "@/lib/backend-config";
 
 export async function POST(request: NextRequest) {
   try {
@@ -12,7 +13,7 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
     
-    const backendUrl = process.env.BACKEND_URL || 'http://localhost:8080/Trading';
+    const backendUrl = getServerProxyBackendBase();
     
     // Call the Java backend to create the notification
     const response = await fetch(

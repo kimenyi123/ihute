@@ -14,6 +14,30 @@ function startOfTodayLocal(): Date {
   return d
 }
 
+function getOrderTimeMs(order: Record<string, unknown>): number | null {
+  const raw =
+    order.heure ??
+    order.HEURE ??
+    order.CREATED_AT ??
+    order.createdAt ??
+    order.created_at ??
+    order.ORDER_DATE ??
+    order.order_date
+
+  if (raw == null) return null
+  const text = String(raw).trim()
+  if (!text) return null
+
+  const mysqlLike = /^(\d{4}-\d{2}-\d{2})[\sT](\d{2}:\d{2}:\d{2})/.exec(text)
+  if (mysqlLike) {
+    const parsed = new Date(`${mysqlLike[1]}T${mysqlLike[2]}`)
+    return Number.isNaN(parsed.getTime()) ? null : parsed.getTime()
+  }
+
+  const parsed = new Date(text)
+  return Number.isNaN(parsed.getTime()) ? null : parsed.getTime()
+}
+
 export async function GET(req: NextRequest) {
   const account = req.nextUrl.searchParams.get("account")?.trim()
   if (!account) {
@@ -57,8 +81,8 @@ export async function GET(req: NextRequest) {
       if (!orders.length) break
 
       for (const order of orders) {
-        const created = order.CREATED_AT ?? order.createdAt ?? order.order_date
-        const orderTime = created ? new Date(created).getTime() : 0
+        const orderTime = getOrderTimeMs(order)
+        if (orderTime == null) continue
         if (orderTime < todayStart) {
           stop = true
           continue

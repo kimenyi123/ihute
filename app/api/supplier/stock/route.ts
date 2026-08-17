@@ -1,9 +1,48 @@
 // app/api/supplier/stock/route.ts
 import { NextRequest, NextResponse } from "next/server"
 
-import { getBackendBase } from "@/lib/backend-config"
+import { getSupplierStockUrl } from "@/lib/backend-config"
+import { importStockExcelViaAddProduct } from "@/lib/supplier-stock-excel-import"
 
-const STOCK_SERVLET_URL = `${getBackendBase()}/SupplierStock`
+const STOCK_SERVLET_URL = getSupplierStockUrl()
+
+type ImportExcelBackendPayload = {
+  ok?: boolean
+  message?: string
+  itemsImported?: number
+  itemsUpdated?: number
+  rowsParsed?: number
+  rowsSkipped?: number
+  error?: string
+}
+
+/** Abort when client disconnects or route timeout fires. */
+function mergeAbortSignals(signals: AbortSignal[]): AbortSignal {
+  const anyFn = (AbortSignal as unknown as { any?: (s: AbortSignal[]) => AbortSignal }).any
+  if (typeof anyFn === "function") {
+    try {
+      return anyFn(signals)
+    } catch {
+      /* continue */
+    }
+  }
+  const c = new AbortController()
+  const on = () => {
+    try {
+      c.abort()
+    } catch {
+      /* ignore */
+    }
+  }
+  for (const s of signals) {
+    if (s.aborted) {
+      on()
+      break
+    }
+    s.addEventListener("abort", on)
+  }
+  return c.signal
+}
 
 export async function GET(req: NextRequest) {
   const controller = new AbortController()
@@ -39,7 +78,7 @@ export async function GET(req: NextRequest) {
       data = JSON.parse(text)
     } catch {
       console.error("[SUPPLIER-STOCK] Failed to parse response")
-      return NextResponse.json({ ok: false, products: [] }, { status: 200 })
+      return NextResponse.json({ ok: true, products: [], count: 0, source: "parse-error" }, { status: 200 })
     }
 
     // Handle different response formats
@@ -56,25 +95,39 @@ export async function GET(req: NextRequest) {
 
     console.log(`[SUPPLIER-STOCK] Found ${products.length} products (source: ${data.source || 'unknown'})`)
 
-    return NextResponse.json({
-      ok: true,
-      products,
-      count: products.length,
-      source: data.source || 'unknown'
-    }, { status: 200 })
+    const lastStockUploadAt =
+      data.lastStockUploadAt ??
+      data.last_stock_upload_at ??
+      null
+
+    return NextResponse.json(
+      {
+        ok: true,
+        products,
+        count: products.length,
+        source: data.source || "unknown",
+        lastStockUploadAt,
+      },
+      {
+        status: 200,
+        headers: {
+          "Cache-Control": "private, no-store, max-age=0, must-revalidate",
+        },
+      },
+    )
 
   } catch (e: any) {
     console.error("[SUPPLIER-STOCK] Error:", e)
 
     if (e.name === 'AbortError') {
       return NextResponse.json(
-        { ok: false, products: [], error: "Request timeout" },
-        { status: 504 }
+        { ok: true, products: [], count: 0, source: "timeout", error: "Request timeout - Tomcat may be starting up" },
+        { status: 200 }
       )
     }
 
     return NextResponse.json(
-      { ok: false, products: [], error: e?.message },
+      { ok: true, products: [], count: 0, source: "error", error: e?.message },
       { status: 200 }
     )
   } finally {
@@ -98,43 +151,123 @@ export async function POST(req: NextRequest) {
     const contentType = req.headers.get('content-type') || ''
 
     let body: any
-    let headers: HeadersInit = {}
+    const headers: HeadersInit = {}
 
     // Handle multipart/form-data (Excel upload)
-    if (contentType.includes('multipart/form-data')) {
-      // For importExcel, stream body to backend to avoid buffering the whole file in Node
-      const account = searchParams.get("account")
-      if (effectiveAction === "importExcel" && account) {
-        const urlWithAccount = `${STOCK_SERVLET_URL}?action=importExcel&account=${encodeURIComponent(account)}`
-        headers["Content-Type"] = contentType
-        const streamResp = await fetch(urlWithAccount, {
-          method: "POST",
-          headers: { ...headers, Cookie: req.headers.get("cookie") || "" },
-          body: req.body as BodyInit,
-          signal: controller.signal,
-          cache: "no-store",
-          duplex: "half",
-        } as RequestInit)
-        const responseText = await streamResp.text()
-        let data: unknown
-        try {
-          data = JSON.parse(responseText)
-        } catch {
-          return NextResponse.json(
-            { ok: false, error: "Invalid response from backend" },
-            { status: 500 }
-          )
-        }
-        if (!streamResp.ok || (data as { ok?: boolean }).ok === false) {
-          return NextResponse.json(
-            { ok: false, error: (data as { error?: string }).error || "Import failed" },
-            { status: streamResp.status || 500 }
-          )
-        }
-        clearTimeout(timeout)
-        return NextResponse.json(data)
-      }
+    if (contentType.includes("multipart/form-data")) {
       const formData = await req.formData()
+      const account =
+        searchParams.get("account")?.trim() ||
+        String(formData.get("account") ?? "").trim()
+      if (!effectiveAction) {
+        effectiveAction = String(formData.get("action") ?? "").trim() || null
+      }
+
+      if (effectiveAction === "importExcel" && account) {
+        const cookie = req.headers.get("cookie") || ""
+        const fileEntry = formData.get("file")
+        const fileName =
+          fileEntry instanceof File
+            ? fileEntry.name
+            : String(formData.get("fileName") ?? "upload.xlsx")
+
+        const forwardFd = new FormData()
+        if (fileEntry instanceof Blob) {
+          forwardFd.append("file", fileEntry, fileName)
+        }
+        forwardFd.append("account", account)
+
+        const urlWithAccount = `${STOCK_SERVLET_URL}?action=importExcel&account=${encodeURIComponent(account)}`
+        let data: ImportExcelBackendPayload | null = null
+        let backendFailed = false
+        let javaUnreachable = false
+
+        try {
+          const backendResp = await fetch(urlWithAccount, {
+            method: "POST",
+            headers: { Cookie: cookie },
+            body: forwardFd,
+            signal: controller.signal,
+            cache: "no-store",
+          })
+          const responseText = await backendResp.text()
+          try {
+            data = JSON.parse(responseText) as ImportExcelBackendPayload
+          } catch {
+            backendFailed = true
+          }
+          if (!backendResp.ok || data?.ok === false) {
+            backendFailed = true
+          }
+        } catch (e) {
+          backendFailed = true
+          javaUnreachable = true
+          if (e instanceof Error && e.name === "AbortError") {
+            clearTimeout(timeout)
+            return NextResponse.json(
+              {
+                ok: false,
+                error:
+                  "Import timed out. Try fewer rows or split the file, then upload again.",
+              },
+              { status: 504 },
+            )
+          }
+        }
+
+        const imported =
+          (data?.itemsImported ?? 0) + (data?.itemsUpdated ?? 0)
+        if (!backendFailed && data?.ok) {
+          clearTimeout(timeout)
+          return NextResponse.json({
+            ...data,
+            message:
+              data.message ||
+              `Imported ${imported} product(s) into your stock.`,
+          })
+        }
+
+        // Java reachable but returned an error — show actual error
+        if (!javaUnreachable) {
+          clearTimeout(timeout)
+          const err = data?.error || "Import failed on the server. Make sure Tomcat is running and the WAR is deployed."
+          return NextResponse.json(
+            { ok: false, error: err, itemsImported: data?.itemsImported ?? 0 },
+            { status: 502 },
+          )
+        }
+
+        if (fileEntry instanceof Blob) {
+          const merged = mergeAbortSignals([controller.signal, req.signal])
+          const fallback = await importStockExcelViaAddProduct(
+            fileEntry,
+            fileName,
+            account,
+            cookie,
+            merged,
+          )
+          clearTimeout(timeout)
+          const note =
+            backendFailed && fallback.ok
+              ? " Saved via row-by-row import (Java bulk import was unavailable)."
+              : ""
+          return NextResponse.json({
+            ...fallback,
+            message: `${fallback.message || "Import finished."}${note}`,
+          })
+        }
+
+        clearTimeout(timeout)
+        return NextResponse.json(
+          {
+            ok: false,
+            error: data?.error || "Import failed. Make sure Tomcat is running at port 8080 and the Trading.war is deployed.",
+            itemsImported: data?.itemsImported ?? 0,
+          },
+          { status: backendFailed ? 502 : 400 },
+        )
+      }
+
       body = formData
     } 
     // Handle JSON body (regular API calls)
@@ -221,7 +354,16 @@ export async function DELETE(req: NextRequest) {
 
   try {
     const searchParams = req.nextUrl.searchParams
-    const itemCode = searchParams.get("itemCode")
+    // Extract itemCode from path: /api/supplier/stock/ITEM123
+    const pathname = req.nextUrl.pathname
+    const pathSegments = pathname.split('/')
+    let itemCode = pathSegments[pathSegments.length - 1] // Get last segment
+    
+    // If not in path, try query parameters
+    if (!itemCode || itemCode === 'stock') {
+      itemCode = searchParams.get("itemCode") || ""
+    }
+    
     const account = searchParams.get("account")
 
     console.log(`[SUPPLIER-STOCK] DELETE request - itemCode: ${itemCode}, account: ${account}`)

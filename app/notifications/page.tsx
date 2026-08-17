@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Bell, ArrowLeft, ExternalLink } from 'lucide-react';
+import { Bell, ExternalLink } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/lib/auth-store';
+import { Header } from '@/components/header';
 
 interface Notification {
   id: number;
@@ -13,6 +14,22 @@ interface Notification {
   type: string;
   createdAt: number;
   isRead: boolean;
+}
+
+async function trackNotificationOpened(notificationId: number, userId: string) {
+  try {
+    await fetch('/api/notifications', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'markOpened',
+        notificationId,
+        userId,
+      }),
+    });
+  } catch (error) {
+    console.error('Failed to track notification open:', error);
+  }
 }
 
 export default function NotificationsPage() {
@@ -56,6 +73,7 @@ export default function NotificationsPage() {
       const userEmail = user?.email || user?.ishyigaAccount;
       if (!userEmail) return;
 
+      await trackNotificationOpened(id, userEmail);
       await fetch(`/api/notifications/${id}/read?userId=${encodeURIComponent(userEmail)}`, { 
         method: 'POST' 
       });
@@ -120,25 +138,8 @@ export default function NotificationsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 sticky top-0 z-10">
-        <div className="max-w-4xl mx-auto px-4 py-4">
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => router.back()}
-              className="p-2 hover:bg-gray-100 rounded-full transition-colors"
-            >
-              <ArrowLeft className="w-6 h-6" />
-            </button>
-            <div>
-              <h1 className="text-2xl font-bold">Notifications</h1>
-              <p className="text-sm text-gray-600">
-                {notifications.filter(n => !n.isRead).length} unread
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* Header with hamburger menu */}
+      <Header />
 
       {/* Notifications List */}
       <div className="max-w-4xl mx-auto px-4 py-6">

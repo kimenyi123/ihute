@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import mysql from "mysql2/promise";
+import { getSupplierStockUrl } from "@/lib/backend-config";
 
 const pool = mysql.createPool({
   host: "localhost",
@@ -11,8 +12,12 @@ const pool = mysql.createPool({
   queueLimit: 0,
 });
 
-export async function GET(req: NextRequest, { params }: { params: { itemCode: string } }) {
-  const { itemCode } = params;
+const STOCK_SERVLET_URL = getSupplierStockUrl();
+
+type Ctx = { params: Promise<{ itemCode: string }> };
+
+export async function GET(req: NextRequest, { params }: Ctx) {
+  const { itemCode } = await params;
   if (!itemCode) return NextResponse.json({ ok: false, message: "Item code is required" }, { status: 400 });
 
   try {
@@ -29,8 +34,9 @@ export async function GET(req: NextRequest, { params }: { params: { itemCode: st
     return NextResponse.json({ ok: false, message: err.message || "Internal Server Error" }, { status: 500 });
   }
 }
-export async function PUT(req: NextRequest, { params }: { params: { itemCode: string } }) {
-  const { itemCode } = params;
+
+export async function PUT(req: NextRequest, { params }: Ctx) {
+  const { itemCode } = await params;
   const body = await req.json();
 
   try {
@@ -56,34 +62,58 @@ export async function PUT(req: NextRequest, { params }: { params: { itemCode: st
   }
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { itemCode: string } }) {
-  const { itemCode } = params;
-  const searchParams = req.nextUrl.searchParams;
-  const account = searchParams.get("account");
+/** Proxy to Java SupplierStock servlet (DB + Redis). */
+export async function DELETE(req: NextRequest, { params }: Ctx) {
+  const { itemCode } = await params;
+  const account = req.nextUrl.searchParams.get("account");
 
   if (!itemCode) {
     return NextResponse.json({ ok: false, message: "Item code is required" }, { status: 400 });
   }
 
+  let url = `${STOCK_SERVLET_URL}?itemCode=${encodeURIComponent(itemCode)}`;
+  if (account) {
+    url += `&account=${encodeURIComponent(account)}`;
+  }
+
+  const headers: HeadersInit = {
+    Accept: "application/json",
+  };
+  const cookieHeader = req.headers.get("cookie");
+  if (cookieHeader) {
+    headers.Cookie = cookieHeader;
+  }
+
   try {
-    let query = "DELETE FROM seller_add_stock WHERE ITEM_CODE = ?";
-    let queryParams: any[] = [itemCode];
+    const resp = await fetch(url, {
+      method: "DELETE",
+      headers,
+      cache: "no-store",
+    });
 
-    // If account is provided, add it to the WHERE clause for safety
-    if (account) {
-      query += " AND SELLER_ISHYIGA_ACCOUNT = ?";
-      queryParams.push(account);
+    const text = await resp.text();
+    let data: { ok?: boolean; message?: string; error?: string };
+    try {
+      data = JSON.parse(text);
+    } catch {
+      console.error("[SUPPLIER-STOCK] Invalid DELETE response:", text.slice(0, 200));
+      return NextResponse.json(
+        { ok: false, message: "Invalid response from backend" },
+        { status: 502 },
+      );
     }
 
-    const [result]: any = await pool.query(query, queryParams);
-
-    if (result.affectedRows === 0) {
-      return NextResponse.json({ ok: false, message: "Product not found or already deleted" }, { status: 404 });
+    if (!resp.ok || !data.ok) {
+      return NextResponse.json(
+        { ok: false, message: data.error || data.message || "Failed to delete product" },
+        { status: resp.status || 500 },
+      );
     }
 
-    return NextResponse.json({ ok: true, message: "Product deleted successfully" });
-  } catch (err: any) {
-    console.error("[DELETE-PRODUCT] Error:", err);
-    return NextResponse.json({ ok: false, message: err.message || "Internal Server Error" }, { status: 500 });
+    return NextResponse.json(data);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Failed to delete product";
+    console.error("[SUPPLIER-STOCK] DELETE proxy error:", err);
+    return NextResponse.json({ ok: false, message }, { status: 500 });
   }
 }

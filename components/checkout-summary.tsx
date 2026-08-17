@@ -22,6 +22,8 @@ function CheckoutSummaryItemRow({ item, lineTotal }: { item: CartItem; lineTotal
     setImgError(false)
   }, [resolvedUrl])
 
+  const displayUnit = String(item.selectedUnit || item.unit || "Pkg").replace(/\bpcs?\b/gi, "Pkg")
+
   return (
     <div className="flex gap-3">
       <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-muted">
@@ -48,7 +50,7 @@ function CheckoutSummaryItemRow({ item, lineTotal }: { item: CartItem; lineTotal
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate">{item.name}</p>
         <p className="text-xs text-muted-foreground">
-          {item.qty ?? 0} × {item.selectedUnit || item.unit || "pcs"}
+          {item.qty ?? 0} × {displayUnit}
         </p>
         <p className="text-sm font-semibold text-primary">
           {lineTotal.toLocaleString()} RWF
@@ -87,7 +89,7 @@ export function CheckoutSummary({ isProcessing, showReview }: CheckoutSummaryPro
 
         <Separator />
 
-        {/* Pricing */}
+        {/* Pricing Breakdown */}
         <div className="space-y-2">
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground">Subtotal ({getTotalItems()} items)</span>
@@ -108,6 +110,7 @@ export function CheckoutSummary({ isProcessing, showReview }: CheckoutSummaryPro
 
         <Separator />
 
+        {/* Total */}
         <div className="flex items-center justify-between">
           <span className="font-semibold">Total</span>
           <span className="text-2xl font-bold text-primary">{total.toLocaleString()} RWF</span>

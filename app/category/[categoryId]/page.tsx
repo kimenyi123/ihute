@@ -31,7 +31,7 @@ export default async function CategoryPage(props: CategoryPageProps) {
     <div className="min-h-screen bg-background flex flex-col">
       <Header />
       <main className="container mx-auto px-4 py-6 flex-1">
-        <Breadcrumbs categoryName={categoryName} />
+        <Breadcrumbs categoryName={categoryName} categoryId={categoryId} />
         <CategoryClient categoryId={categoryId} categoryName={categoryName} />
       </main>
       <Footer />

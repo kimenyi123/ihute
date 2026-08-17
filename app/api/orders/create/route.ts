@@ -1,6 +1,16 @@
 import { NextResponse } from "next/server"
 import { getOrdersUrl } from "@/lib/backend-config"
 import { getOrCreatePublicTokenForOrderId } from "@/lib/order-tracking-token"
+import { DEFAULT_GUEST_ISHYIGA_ACCOUNT } from "@/lib/guest-checkout"
+import { orderErrorMessageWithProductNames } from "@/lib/order-error-display"
+import { resolveOrderPaymentStatus } from "@/lib/payment-utils"
+
+/** Java createOrder can be slow on cold Tomcat; default 60s (override with ORDER_CREATE_JAVA_TIMEOUT_MS). */
+const ORDER_CREATE_JAVA_TIMEOUT_MS = (() => {
+  const raw = process.env.ORDER_CREATE_JAVA_TIMEOUT_MS
+  const n = raw ? Number.parseInt(raw, 10) : 60_000
+  return Number.isFinite(n) && n >= 5_000 ? n : 60_000
+})()
 
 function describeConnectFailure(raw?: string): string {
   if (!raw?.trim()) {
@@ -8,7 +18,7 @@ function describeConnectFailure(raw?: string): string {
   }
   const r = raw.toLowerCase()
   if (r.includes("econnrefused")) {
-    return "Java backend refused the connection (nothing is listening on that host/port). Start Tomcat and confirm the port in .env.local matches (often 8080, not 8081)."
+    return "Java backend refused the connection (nothing is listening on that host/port). Start Tomcat and confirm JAVA_BACKEND_BASE / NEXT_PUBLIC_API_URL in .env.local matches your connector port (e.g. http://localhost:8082/Trading)."
   }
   if (r.includes("enotfound") || r.includes("getaddrinfo")) {
     return `Could not reach order service: ${raw}`
@@ -53,12 +63,44 @@ type LineIn = {
   name?: string
   item_name?: string
   itemCode?: string
+  NIKI_CODE?: string
+  nikiCode?: string
+  item_code?: string
+  ITEM_CODE?: string
+  item_key_words?: string
   qty?: number | string
   quantity?: number | string
   unitPrice?: number | string
   price?: number | string
   unit?: string
   measurement?: string
+  /** Package/packet multiplier — persisted on order line (e.g. order_transaction_list.ITEM_EMBALLAGE). */
+  item_emballage?: string | number
+  ITEM_EMBALLAGE?: string | number
+  itemEmballage?: string | number
+}
+
+function normalizeItemCode(it: LineIn): string | undefined {
+  const raw =
+    it.itemCode ??
+    it.NIKI_CODE ??
+    it.nikiCode ??
+    it.item_code ??
+    it.ITEM_CODE ??
+    it.item_key_words ??
+    ""
+  const s = String(raw).trim()
+  return s || undefined
+}
+
+type NormalizedOrderLine = {
+  name: string
+  itemCode?: string
+  qty: number
+  unitPrice: number
+  unit: string
+  item_emballage?: string
+  ITEM_EMBALLAGE?: string
 }
 
 /* =========================
@@ -83,13 +125,20 @@ export async function POST(req: Request) {
 
     /* -------- normalize items -------- */
     const rawItems: LineIn[] = Array.isArray(bodyIn.items) ? bodyIn.items : []
-    const items = rawItems.map((it, i) => ({
-      name: String(it.name ?? it.item_name ?? `Item ${i + 1}`),
-      itemCode: String(it.itemCode ?? "").trim() || undefined,
-      qty: Number(it.qty ?? it.quantity ?? 1),
-      unitPrice: Number(it.unitPrice ?? it.price ?? 0),
-      unit: String(it.unit ?? it.measurement ?? ""),
-    }))
+    const items: NormalizedOrderLine[] = rawItems.map((it, i) => {
+      const embRaw = it.item_emballage ?? it.ITEM_EMBALLAGE ?? it.itemEmballage
+      const embStr =
+        embRaw != null && String(embRaw).trim() !== "" ? String(embRaw).trim() : undefined
+      const base: NormalizedOrderLine = {
+        name: String(it.name ?? it.item_name ?? `Item ${i + 1}`),
+        itemCode: normalizeItemCode(it),
+        qty: Number(it.qty ?? it.quantity ?? 1),
+        unitPrice: Number(it.unitPrice ?? it.price ?? 0),
+        unit: String(it.unit ?? it.measurement ?? ""),
+      }
+      if (embStr == null) return base
+      return { ...base, item_emballage: embStr, ITEM_EMBALLAGE: embStr }
+    })
 
     console.log("[orders/create] Request items (NIKI_CODE in logs only):", items.map((it) => ({ name: it.name, qty: it.qty, NIKI_CODE: it.itemCode, unitPrice: it.unitPrice })))
 
@@ -104,12 +153,14 @@ export async function POST(req: Request) {
     }
 
     /* -------- payment validation -------- */
-    let paymentName = String(bodyIn.paymentName ?? "PAY_ON_DELIVERY").toUpperCase()
+    const paymentName = String(bodyIn.paymentName ?? "PAY_ON_DELIVERY").toUpperCase()
     const validPaymentMethods = [
       "PAY_ON_DELIVERY",
+      "PAY_AT_TABLE",
       "PAID_MTN_MOMO",
       "PAID_AIRTEL_MOMO",
       "PAID_CARD",
+      "PAID_URUBUTO",
       "MTN_MOMO",
       "AIRTEL_MOMO",
       "MOMO",
@@ -129,6 +180,35 @@ export async function POST(req: Request) {
       else if (paymentName.includes("CARD")) paymentId = `CARD_${Date.now()}`
       else paymentId = `COD_${Date.now()}`
     }
+    const reference = String(bodyIn.reference ?? "").trim()
+    const orderNote = String(
+      bodyIn.orderNote ?? bodyIn.orderNotes ?? bodyIn.notes ?? bodyIn.ORDER_NOTE ?? bodyIn.CONDITIONS ?? ""
+    ).trim()
+    console.log("[Orders Create API] Received orderNote:", orderNote || "[empty]", "from body.orderNote:", bodyIn.orderNote)
+    const requestedPaymentStatus = String(
+      bodyIn.paymentStatus ?? bodyIn.PAYMENT_STATUS ?? "",
+    ).trim()
+    const paymentStatus = resolveOrderPaymentStatus(paymentName, {
+      paymentStatus: requestedPaymentStatus,
+      reference,
+      paymentId,
+    })
+
+    /** Browser guest checkout — Java OrdersServlet must null-check buyer or read this flag (see GUEST_CHECKOUT_BUYER_ACCOUNT). */
+    const isGuestCheckout = Boolean(
+      bodyIn.isGuestCheckout ?? bodyIn.guestCheckout ?? /^guest_/i.test(buyerEmail.trim()),
+    )
+    let buyerAccount = String(bodyIn.buyerAccount ?? "").trim()
+    if (!buyerAccount) buyerAccount = String(process.env.GUEST_CHECKOUT_BUYER_ACCOUNT ?? "").trim()
+    if (!buyerAccount && isGuestCheckout) {
+      buyerAccount = String(
+        process.env.DEFAULT_GUEST_ISHYIGA_ACCOUNT ?? DEFAULT_GUEST_ISHYIGA_ACCOUNT,
+      ).trim()
+    }
+    // Always ensure buyerAccount is set — Java requires it to find the buyer row
+    if (!buyerAccount) {
+      buyerAccount = String(process.env.DEFAULT_GUEST_ISHYIGA_ACCOUNT ?? DEFAULT_GUEST_ISHYIGA_ACCOUNT).trim()
+    }
 
     /* -------- shared payload -------- */
     const shared = {
@@ -141,12 +221,19 @@ export async function POST(req: Request) {
       sellerPhone: String(bodyIn.sellerPhone ?? ""),
       paymentName,
       paymentId,
-      reference: String(bodyIn.reference ?? ""),
+      reference,
+      orderNote,
       currency: String(bodyIn.currency ?? "RWF"),
+      paymentStatus,
       items,
       isTableCommand: Boolean(bodyIn.isTableCommand),
       tableName: String(bodyIn.tableName ?? ""),
       tableLocation: String(bodyIn.tableLocation ?? ""),
+      orderSource: String(bodyIn.orderSource ?? ""),
+      shopNickname: String(bodyIn.shopNickname ?? ""),
+      acquisitionSource: String(bodyIn.acquisitionSource ?? ""),
+      isGuestCheckout,
+      buyerAccount,
     }
 
     let lastErr:
@@ -186,7 +273,12 @@ export async function POST(req: Request) {
         form.set("paymentName", shared.paymentName)
         form.set("paymentId", shared.paymentId)
         form.set("reference", shared.reference)
+        if (shared.orderNote) form.set("orderNote", shared.orderNote)
+        if (shared.orderNote) form.set("ORDER_NOTE", shared.orderNote)
+        if (shared.orderNote) form.set("CONDITIONS", shared.orderNote)
         form.set("currency", shared.currency)
+        form.set("paymentStatus", shared.paymentStatus)
+        form.set("PAYMENT_STATUS", shared.paymentStatus)
         form.set("items", JSON.stringify(shared.items))
 
         if (shared.buyerName) form.set("buyerName", shared.buyerName)
@@ -198,10 +290,15 @@ export async function POST(req: Request) {
           form.set("tableName", shared.tableName)
           form.set("tableLocation", shared.tableLocation)
         }
+        if (shared.orderSource) form.set("orderSource", shared.orderSource)
+        if (shared.shopNickname) form.set("shopNickname", shared.shopNickname)
+        if (shared.acquisitionSource) form.set("acquisitionSource", shared.acquisitionSource)
         form.set("skipStockCheck", "true")
+        if (shared.isGuestCheckout) form.set("isGuestCheckout", "true")
+        if (shared.buyerAccount) form.set("buyerAccount", shared.buyerAccount)
 
         const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 15000)
+        const timeoutId = setTimeout(() => controller.abort(), ORDER_CREATE_JAVA_TIMEOUT_MS)
         res = await fetch(url, {
           method: "POST",
           headers: {
@@ -233,7 +330,7 @@ export async function POST(req: Request) {
           const jsonUrl = new URL(url)
           jsonUrl.searchParams.set("action", "createOrder")
           const c2 = new AbortController()
-          const t2 = setTimeout(() => c2.abort(), 15000)
+          const t2 = setTimeout(() => c2.abort(), ORDER_CREATE_JAVA_TIMEOUT_MS)
           try {
             res = await fetch(jsonUrl.toString(), {
               method: "POST",
@@ -252,12 +349,22 @@ export async function POST(req: Request) {
                 paymentName: shared.paymentName,
                 paymentId: shared.paymentId,
                 reference: shared.reference,
+                orderNote: shared.orderNote,
+                ORDER_NOTE: shared.orderNote,
+                CONDITIONS: shared.orderNote,
                 currency: shared.currency,
+                paymentStatus: shared.paymentStatus,
+                PAYMENT_STATUS: shared.paymentStatus,
                 items: shared.items,
                 isTableCommand: shared.isTableCommand,
                 tableName: shared.tableName,
                 tableLocation: shared.tableLocation,
+                orderSource: shared.orderSource,
+                shopNickname: shared.shopNickname,
+                acquisitionSource: shared.acquisitionSource,
                 skipStockCheck: true,
+                isGuestCheckout: shared.isGuestCheckout,
+                ...(shared.buyerAccount ? { buyerAccount: shared.buyerAccount } : {}),
               }),
               signal: c2.signal,
               cache: "no-store",
@@ -286,14 +393,19 @@ export async function POST(req: Request) {
           ok: true,
           orderId: oid,
           ...(trackToken ? { trackToken } : {}),
+          ...(json?.tableCommand ? { tableCommand: json.tableCommand } : {}),
           via: url,
           sellerTel: json?.sellerTel ?? "",
           paymentName: shared.paymentName,
+          paymentStatus: shared.paymentStatus,
         })
       }
 
       if (json?.ok === false) {
-        lastBackendError = json.error || "Backend error"
+        lastBackendError = orderErrorMessageWithProductNames(
+          json.error || "Backend error",
+          items,
+        )
         return NextResponse.json(
           { ok: false, error: lastBackendError, details: json },
           { status: 400 },
@@ -333,9 +445,9 @@ export async function POST(req: Request) {
         last: lastErr,
         ordersUrl: url,
         hint:
-          lastErr && lastErr.status > 0
+          lastErr != null && (lastErr.status ?? 0) > 0
             ? "HTTP 500 means Tomcat reached OrdersServlet but Java threw an error — inspect catalina.out / IDE console. Connection issues are different (ECONNREFUSED / timeout)."
-            : "Check Java/Tomcat is running. In .env.local set JAVA_BACKEND_BASE to your context root (e.g. http://localhost:8080/Trading). Port must match Tomcat (8080 vs 8081).",
+            : "Check Java/Tomcat is running. In .env.local set JAVA_BACKEND_BASE or NEXT_PUBLIC_API_URL to your context root (e.g. http://localhost:8082/Trading).",
       },
       { status: 502 }
     )

@@ -263,7 +263,7 @@ export default function B2BQuickBuyPage() {
                       onKeyDown={(e) => e.key === "Enter" && handleSearch()}
                     />
                   </div>
-                  <Button onClick={handleSearch} disabled={loading} className="gap-2">
+                  <Button onClick={() => void handleSearch()} disabled={loading} className="gap-2">
                     <Search className="h-4 w-4" />
                     Search
                   </Button>

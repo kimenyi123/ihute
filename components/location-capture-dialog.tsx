@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { MapPin, Loader2, X } from "lucide-react"
+import { MapPin, Loader2 } from "lucide-react"
 import { useLocationStoreEnhanced, reverseGeocodeToDistrict, type LocationData } from "@/lib/location-store-enhanced"
 import { RWANDA_DISTRICTS } from "@/lib/constants"
 import { DISTRICT_CELLS } from "@/lib/rwanda-district-cells"

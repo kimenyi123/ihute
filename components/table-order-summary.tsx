@@ -27,7 +27,6 @@ import {
   Receipt,
   Users,
   ShoppingBag,
-  DollarSign,
   Clock,
   CheckCircle2,
   XCircle,

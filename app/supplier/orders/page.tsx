@@ -5,14 +5,274 @@ import { useEffect, useMemo, useState, useCallback } from "react"
 import { useRouter, useSearchParams, usePathname } from "next/navigation"
 import { useAuthStore } from "@/lib/auth-store"
 import { useOrdersStore, type Order } from "@/lib/orders-store"
-import { Header } from "@/components/header"
-import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Search, RotateCw, Calendar } from "lucide-react"
+import { Search, RotateCw, Calendar, Loader2, CheckCircle2 } from "lucide-react"
+import { SdcInfoCell, sdcRaw } from "@/components/sdc-info-cell"
+import { EbmDebugModal } from "@/components/EbmDebugModal"
+import {
+  extractEbmDebug,
+  logEbmApprovalToConsole,
+  type EbmApprovalApiResponse,
+  type EbmDebugView,
+} from "@/lib/ebm/utils/ebm-browser-debug"
+import { useLanguageStore, type Language } from "@/lib/language-store"
+import {
+  formatSupplierOrdersTablePayment,
+  supplierPaymentFilterKey,
+} from "@/lib/payment-utils"
+
+// ===========================================
+// Multilingual UI strings
+// ===========================================
+const ORDERS_UI: Record<Language, {
+  statusLabels: Record<string, string>
+  noSupplierAccount: string
+  checkingSession: string
+  wrongSeller: string
+  viewMyOrders: string
+  myOrders: string
+  refresh: string
+  loading: string
+  searchPlaceholder: string
+  searchByDates: string
+  today: string
+  last7Days: string
+  clearDates: string
+  allPayment: string
+  paid: string
+  unpaid: string
+  allStatus: string
+  allOrders: string
+  selfOrderKiosk: string
+  perPage10: string
+  perPage25: string
+  perPage50: string
+  perPage100: string
+  showAll: string
+  loadAllOrders: string
+  showing: string
+  of: string
+  orderSingular: string
+  orderPlural: string
+  filtered: string
+  colOrderNum: string
+  colUser: string
+  colCompany: string
+  colServedAmount: string
+  colDate: string
+  colSdcInfo: string
+  colTotal: string
+  colPayment: string
+  colStatus: string
+  colActions: string
+  noOrdersYet: string
+  noOrdersMatch: string
+  view: string
+  exportLabel: string
+  prev: string
+  page: string
+  next: string
+  errorUpdatingOrder: string
+  approveEbm: string
+  approvingEbm: string
+  ebmApproveOk: string
+  ebmApproveFailed: string
+  ebmInvoiceSuccess: string
+  rejectEbm: string
+  rejectingEbm: string
+  ebmRejectOk: string
+  ebmRejectFailed: string
+  ebmRejectConfirm: string
+  ebmInvoiceRejected: string
+}> = {
+  en: {
+    statusLabels: { open: "Open", processing: "Processing", invoice: "Invoice", "in-transit": "Out for Delivery", delivered: "Delivered" },
+    noSupplierAccount: "No supplier account found. Please log out and log in again so your supplier account is loaded.",
+    checkingSession: "Checking session\u2026",
+    wrongSeller: "This link is for another seller. You\u2019re logged in as",
+    viewMyOrders: "View my orders",
+    myOrders: "My Orders",
+    refresh: "Refresh",
+    loading: "Loading...",
+    searchPlaceholder: "Search by order #, customer, date, total, payment, status...",
+    searchByDates: "Search by dates",
+    today: "Today",
+    last7Days: "Last 7 days",
+    clearDates: "Clear dates",
+    allPayment: "All payment",
+    paid: "Paid",
+    unpaid: "Unpaid",
+    allStatus: "All status",
+    allOrders: "All orders",
+    selfOrderKiosk: "Self Order (kiosk)",
+    perPage10: "10 per page",
+    perPage25: "25 per page",
+    perPage50: "50 per page",
+    perPage100: "100 per page",
+    showAll: "Show all",
+    loadAllOrders: "Load all orders",
+    showing: "Showing",
+    of: "of",
+    orderSingular: "order",
+    orderPlural: "orders",
+    filtered: "(filtered)",
+    colOrderNum: "Order #",
+    colUser: "User",
+    colCompany: "Company",
+    colServedAmount: "Served Amount",
+    colDate: "Date",
+    colSdcInfo: "SDC Info",
+    colTotal: "Total",
+    colPayment: "Payment",
+    colStatus: "Status",
+    colActions: "Actions",
+    noOrdersYet: "No orders yet. Orders from customers will appear here.",
+    noOrdersMatch: "No orders match your search or filters. Try different criteria.",
+    view: "View",
+    exportLabel: "Export",
+    prev: "Prev",
+    page: "Page",
+    next: "Next",
+    errorUpdatingOrder: "Error updating order:",
+    approveEbm: "Approve EBM Invoice",
+    approvingEbm: "Approving…",
+    ebmApproveOk: "EBM invoice sent to RRA successfully.",
+    ebmApproveFailed: "EBM approval failed:",
+    ebmInvoiceSuccess: "EBM invoice successfully",
+    rejectEbm: "Reject",
+    rejectingEbm: "Rejecting…",
+    ebmRejectOk: "EBM request rejected.",
+    ebmRejectFailed: "EBM reject failed:",
+    ebmRejectConfirm: "Reject this EBM request? Use this when the order is fake or invalid.",
+    ebmInvoiceRejected: "EBM rejected",
+  },
+  rw: {
+    statusLabels: { open: "Bifunguye", processing: "Birimo gukorwa", invoice: "Inyemezabuguzi", "in-transit": "Biri mu nzira", delivered: "Byageze" },
+    noSupplierAccount: "Nta konti y\u2019umucuruzi yabonetse. Nyamuneka sohoka wongere winjire kugira ngo konti yawe ishyirweho.",
+    checkingSession: "Birimo gutangira\u2026",
+    wrongSeller: "Iyi linki ni iy\u2019undi mucuruzi. Winjiye nka",
+    viewMyOrders: "Reba ibitumijwe byanjye",
+    myOrders: "Ibitumijwe byanjye",
+    refresh: "Kura amakuru",
+    loading: "Birimo gutangira...",
+    searchPlaceholder: "Shakisha ukoresheje nimero, umukiriya, itariki, igiteranyo...",
+    searchByDates: "Shakisha ukurikije itariki",
+    today: "Uyu munsi",
+    last7Days: "Iminsi 7 ishize",
+    clearDates: "Siba itariki",
+    allPayment: "Uburyo bwose bwo kwishyura",
+    paid: "Byishyuwe",
+    unpaid: "Bitishyuwe",
+    allStatus: "Imiterere yose",
+    allOrders: "Ibitumijwe byose",
+    selfOrderKiosk: "Kwigurira (kiosk)",
+    perPage10: "10 kuri buri paji",
+    perPage25: "25 kuri buri paji",
+    perPage50: "50 kuri buri paji",
+    perPage100: "100 kuri buri paji",
+    showAll: "Erekana byose",
+    loadAllOrders: "Shyiramo ibitumijwe byose",
+    showing: "Kwerekana",
+    of: "mu",
+    orderSingular: "igitumijwe",
+    orderPlural: "ibitumijwe",
+    filtered: "(byatoranyijwe)",
+    colOrderNum: "Nimero",
+    colUser: "Umukiriya",
+    colCompany: "Isosiyete",
+    colServedAmount: "Amafaranga yishyuwe",
+    colDate: "Itariki",
+    colSdcInfo: "Amakuru ya SDC",
+    colTotal: "Igiteranyo",
+    colPayment: "Kwishyura",
+    colStatus: "Imiterere",
+    colActions: "Ibikorwa",
+    noOrdersYet: "Nta bitumijwe bihari. Ibitumijwe by\u2019abakiriya bizagaragara hano.",
+    noOrdersMatch: "Nta bitumijwe bihuye n\u2019ibyo ushakisha. Gerageza ibindi.",
+    view: "Reba",
+    exportLabel: "Kohereza hanze",
+    prev: "Inyuma",
+    page: "Paji",
+    next: "Komeza",
+    errorUpdatingOrder: "Ikosa mu guhindura igitumijwe:",
+    approveEbm: "Emeza inyemezabuguzi ya EBM",
+    approvingEbm: "Birimo…",
+    ebmApproveOk: "Inyemezabuguzi ya EBM yoherejwe kuri RRA.",
+    ebmApproveFailed: "Kwemeza EBM byanze:",
+    ebmInvoiceSuccess: "Inyemezabuguzi ya EBM yemejwe",
+    rejectEbm: "Wanga",
+    rejectingEbm: "Birimo kwanga…",
+    ebmRejectOk: "Icyifuzo cya EBM cyanzwe.",
+    ebmRejectFailed: "Kwanga EBM byanze:",
+    ebmRejectConfirm: "Wanga icyifuzo cya EBM? Koresha iyi buryo iyo itegeko ari ibinyoma.",
+    ebmInvoiceRejected: "EBM yanzwe",
+  },
+  fr: {
+    statusLabels: { open: "Ouvert", processing: "En cours", invoice: "Facture", "in-transit": "En cours de livraison", delivered: "Livr\u00e9" },
+    noSupplierAccount: "Aucun compte fournisseur trouv\u00e9. Veuillez vous d\u00e9connecter et vous reconnecter pour charger votre compte.",
+    checkingSession: "V\u00e9rification de la session\u2026",
+    wrongSeller: "Ce lien est destin\u00e9 \u00e0 un autre vendeur. Vous \u00eates connect\u00e9 en tant que",
+    viewMyOrders: "Voir mes commandes",
+    myOrders: "Mes commandes",
+    refresh: "Actualiser",
+    loading: "Chargement...",
+    searchPlaceholder: "Rechercher par n\u00b0 de commande, client, date, total, paiement, statut...",
+    searchByDates: "Rechercher par dates",
+    today: "Aujourd\u2019hui",
+    last7Days: "7 derniers jours",
+    clearDates: "Effacer les dates",
+    allPayment: "Tous les paiements",
+    paid: "Pay\u00e9",
+    unpaid: "Impay\u00e9",
+    allStatus: "Tous les statuts",
+    allOrders: "Toutes les commandes",
+    selfOrderKiosk: "Commande libre-service (kiosque)",
+    perPage10: "10 par page",
+    perPage25: "25 par page",
+    perPage50: "50 par page",
+    perPage100: "100 par page",
+    showAll: "Tout afficher",
+    loadAllOrders: "Charger toutes les commandes",
+    showing: "Affichage",
+    of: "sur",
+    orderSingular: "commande",
+    orderPlural: "commandes",
+    filtered: "(filtr\u00e9)",
+    colOrderNum: "N\u00b0 commande",
+    colUser: "Utilisateur",
+    colCompany: "Soci\u00e9t\u00e9",
+    colServedAmount: "Montant servi",
+    colDate: "Date",
+    colSdcInfo: "Info SDC",
+    colTotal: "Total",
+    colPayment: "Paiement",
+    colStatus: "Statut",
+    colActions: "Actions",
+    noOrdersYet: "Aucune commande pour le moment. Les commandes des clients appara\u00eetront ici.",
+    noOrdersMatch: "Aucune commande ne correspond \u00e0 votre recherche. Essayez d\u2019autres crit\u00e8res.",
+    view: "Voir",
+    exportLabel: "Exporter",
+    prev: "Pr\u00e9c\u00e9dent",
+    page: "Page",
+    next: "Suivant",
+    errorUpdatingOrder: "Erreur lors de la mise \u00e0 jour :",
+    approveEbm: "Approuver facture EBM",
+    approvingEbm: "Approbation…",
+    ebmApproveOk: "Facture EBM envoy\u00e9e \u00e0 la RRA.",
+    ebmApproveFailed: "\u00c9chec approbation EBM :",
+    ebmInvoiceSuccess: "Facture EBM r\u00e9ussie",
+    rejectEbm: "Rejeter",
+    rejectingEbm: "Rejet…",
+    ebmRejectOk: "Demande EBM rejet\u00e9e.",
+    ebmRejectFailed: "\u00c9chec rejet EBM :",
+    ebmRejectConfirm: "Rejeter cette demande EBM ? Utilisez ceci pour une commande frauduleuse ou invalide.",
+    ebmInvoiceRejected: "EBM rejet\u00e9",
+  },
+}
 
 // ===========================================
 // Constants
@@ -81,10 +341,114 @@ function localDateKeysLastNDays(n: number): { from: string; to: string } {
   return { from: toLocalDateKey(start), to: toLocalDateKey(end) }
 }
 
+function pickAnyStr(row: Record<string, unknown>, ...keys: string[]): string {
+  for (const k of keys) {
+    const v = row[k]
+    if (v != null && String(v).trim() !== "") return String(v).trim()
+  }
+  return ""
+}
+
+function pickAnyNum(row: Record<string, unknown>, ...keys: string[]): number | null {
+  for (const k of keys) {
+    const v = row[k]
+    if (v == null || String(v).trim() === "") continue
+    const n = Number(v)
+    if (!Number.isNaN(n)) return n
+  }
+  return null
+}
+
+function IssueInvoiceButton({
+  order,
+  orders,
+  setOrders,
+  defaultServedBy,
+}: {
+  order: Order
+  orders: Order[]
+  setOrders: (orders: Order[]) => void
+  defaultServedBy: string
+}) {
+  const [busy, setBusy] = useState(false)
+  const [servedBy, setServedBy] = useState(order.servedBy || defaultServedBy)
+  const doc = String(order.documentState || "DELIVERY_NOTE").toUpperCase()
+  if (doc === "INVOICED") {
+    return (
+      <Button type="button" size="sm" variant="outline" asChild>
+        <a
+          href={order.invoicePdfUrl || `/api/orders/invoice-pdf?orderId=${encodeURIComponent(order.id)}`}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          PDF
+        </a>
+      </Button>
+    )
+  }
+
+  async function issue() {
+    const name = window.prompt("Served by (staff name)", servedBy || defaultServedBy || "")
+    if (name == null) return
+    setServedBy(name.trim())
+    setBusy(true)
+    try {
+      const res = await fetch("/api/orders/issue-invoice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderId: Number(order.id),
+          servedBy: name.trim() || defaultServedBy,
+          publicSiteUrl: typeof window !== "undefined" ? window.location.origin : undefined,
+          force: true,
+        }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || json?.ok === false) {
+        throw new Error(json?.error || "Issue invoice failed")
+      }
+      setOrders(
+        orders.map((o) =>
+          o.id === order.id
+            ? {
+                ...o,
+                documentState: "INVOICED",
+                status: "invoice",
+                supplierStatus: "invoice",
+                servedBy: name.trim() || defaultServedBy,
+                invoicePdfUrl: json.invoicePdfUrl || `/api/orders/invoice-pdf?orderId=${order.id}`,
+              }
+            : o,
+        ),
+      )
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "Issue invoice failed")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const highlight = doc === "INVOICE_REQUESTED"
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant={highlight ? "default" : "outline"}
+      className={highlight ? "bg-indigo-600 hover:bg-indigo-700" : undefined}
+      disabled={busy}
+      onClick={() => void issue()}
+    >
+      {busy ? "…" : highlight ? "Issue invoice" : "Issue invoice"}
+    </Button>
+  )
+}
+
 // ===========================================
 // Inline Status Picker Component
 // ===========================================
 function InlineStatusPicker({ order, orders, setOrders }: { order: Order, orders: Order[], setOrders: (orders: Order[]) => void }) {
+  const language = useLanguageStore((s) => s.language)
+  const ui = ORDERS_UI[language] ?? ORDERS_UI.en
   const current = order.supplierStatus as SupplierStatusKey
   const [isUpdating, setIsUpdating] = useState(false)
 
@@ -99,14 +463,18 @@ function InlineStatusPicker({ order, orders, setOrders }: { order: Order, orders
       const res = await fetch(ORDER_STATUS_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId: Number(order.id), status: next })
+        body: JSON.stringify({
+          orderId: Number(order.id),
+          status: next,
+          publicSiteUrl: typeof window !== "undefined" ? window.location.origin : undefined,
+        }),
       })
 
       const json = await res.json()
       if (!res.ok) throw new Error(json?.error || "Update failed")
     } catch (e: any) {
       setOrders(orders.map(o => o.id === order.id ? { ...o, status: previousStatus, supplierStatus: current } : o))
-      alert(`Error updating order: ${e.message}`)
+      alert(`${ui.errorUpdatingOrder} ${e.message}`)
     } finally {
       setIsUpdating(false)
     }
@@ -116,13 +484,13 @@ function InlineStatusPicker({ order, orders, setOrders }: { order: Order, orders
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition bg-slate-50 text-slate-700 border-slate-300`}>
-          {current}
+          {ui.statusLabels[current] ?? current}
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48">
         {SUPPLIER_STATUS.map(opt => (
           <DropdownMenuItem key={opt.key} onClick={() => setStatus(opt.key)}>
-            {opt.label}
+            {ui.statusLabels[opt.key] ?? opt.label}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
@@ -140,6 +508,8 @@ export default function SupplierOrdersPage() {
   const accountFromUrl = searchParams?.get("account")?.trim() ?? ""
   const { user, isAuthenticated } = useAuthStore()
   const { orders, setOrders } = useOrdersStore()
+  const language = useLanguageStore((s) => s.language)
+  const ui = ORDERS_UI[language] ?? ORDERS_UI.en
 
   const [hydrated, setHydrated] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -154,6 +524,15 @@ export default function SupplierOrdersPage() {
   const [paymentFilter, setPaymentFilter] = useState<"all" | "paid" | "unpaid">("all")
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [sourceFilter, setSourceFilter] = useState<"all" | "kiosk">("all")
+  const [ebmPendingOrderIds, setEbmPendingOrderIds] = useState<Set<string>>(new Set())
+  const [ebmSuccessOrderIds, setEbmSuccessOrderIds] = useState<Set<string>>(new Set())
+  const [ebmRejectedOrderIds, setEbmRejectedOrderIds] = useState<Set<string>>(new Set())
+  const [ebmApprovingId, setEbmApprovingId] = useState<string | null>(null)
+  const [ebmRejectingId, setEbmRejectingId] = useState<string | null>(null)
+  const [ebmDegradedWarning, setEbmDegradedWarning] = useState<string | null>(null)
+  const [ebmConfigured, setEbmConfigured] = useState(false)
+  const [ebmDebugOpen, setEbmDebugOpen] = useState(false)
+  const [ebmDebug, setEbmDebug] = useState<EbmDebugView | null>(null)
 
   // Wait for persisted auth (localStorage) so link-with-account can "auto" show orders when already logged in on this device
   useEffect(() => {
@@ -195,7 +574,7 @@ export default function SupplierOrdersPage() {
   const loadOrders = useCallback(async () => {
     const sellerAccount = user?.ishyigaAccount?.trim()
     if (!sellerAccount) {
-      setErr("No supplier account found. Please log out and log in again so your supplier account (ishyigaAccount) is loaded.")
+      setErr(ui.noSupplierAccount)
       setLoading(false)
       return
     }
@@ -211,10 +590,20 @@ export default function SupplierOrdersPage() {
       const maxPages = 40
 
       while (pageNum <= maxPages) {
+        const criteria = statusFilter !== "all" ? statusFilter.toUpperCase() : undefined
         const res = await fetch("/api/seller-orders", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sellerAccount, page: pageNum, pageSize: pageSizeCap }),
+          body: JSON.stringify({
+            sellerAccount,
+            buyerAccount: searchQuery.trim() || undefined,
+            CLIENT: searchQuery.trim() || undefined,
+            START: dateFrom ? `${dateFrom} 00:00:00` : undefined,
+            END: dateTo ? `${dateTo} 23:59:59` : undefined,
+            criteria,
+            page: pageNum,
+            pageSize: pageSizeCap,
+          }),
           cache: "no-store",
         })
         const json = await res.json()
@@ -272,6 +661,7 @@ export default function SupplierOrdersPage() {
         )
 
         return {
+          rawRow: t,
           id: String(t.ID_ORDER ?? t.id_order ?? t.id ?? ""),
           sellerId: String(t.SELLER_ISHYIGA_ACCOUNT ?? t.seller_ishyiga_account ?? ""),
           sellerName: t.SELLER_NAMES ?? t.SELLER_OWNER ?? t.seller_names ?? "Supplier",
@@ -280,6 +670,9 @@ export default function SupplierOrdersPage() {
           subtotal: Number(t.AMOUNT ?? t.amount ?? 0),
           status: (t.ORDER_STATUS ?? t.order_status ?? "open")?.toLowerCase() || "open",
           supplierStatus: (t.ORDER_STATUS ?? t.order_status ?? "open")?.toLowerCase() || "open",
+          documentState: String(t.DOCUMENT_STATE ?? t.document_state ?? "DELIVERY_NOTE").toUpperCase(),
+          servedBy: String(t.SERVED_BY ?? t.served_by ?? "").trim() || undefined,
+          invoicePdfUrl: String(t.INVOICE_PDF_URL ?? t.invoice_pdf_url ?? "").trim() || undefined,
           // DB: chaos_beta.order_transaction.heure — list API may send heure / HEURE / CREATED_AT
           createdAt: (() => {
             const raw =
@@ -294,6 +687,8 @@ export default function SupplierOrdersPage() {
           })(),
           buyerTIN: t.BUYER_TIN ?? t.buyer_tin ?? "",
           SUPPLIER_TIN: t.SELLER_TIN ?? t.seller_tin ?? "",
+          // Prefer account_signup OWNER-style fields over generic BUYER_OWNER labels.
+          buyerOwner: t.OWNER ?? t.owner ?? t.BUYER_OWNER_NAME ?? t.BUYER_OWNER ?? t.buyer_owner_name ?? "",
           buyerName: (() => {
             if (isKioskOrder) {
               const kioskCustomerName = String(t.BUYER_NAMES ?? t.BUYER_NAME ?? t.CUSTOMER_NAME ?? t.customer_name ?? "").toString().trim()
@@ -313,7 +708,25 @@ export default function SupplierOrdersPage() {
             return raw
           })(),
           isKioskOrder,
-          paymentStatus: /(pay[_\s-]*on[_\s-]*delivery|cod)/i.test(String(t.PAYMENT_NAME ?? t.payment_name ?? "")) ? "unpaid" : "paid",
+          paymentStatus: supplierPaymentFilterKey(
+            String(t.PAYMENT_STATUS ?? t.payment_status ?? ""),
+          ),
+          paymentLabel: formatSupplierOrdersTablePayment(
+            String(t.PAYMENT_NAME ?? t.payment_name ?? ""),
+            String(t.PAYMENT_STATUS ?? t.payment_status ?? ""),
+          ),
+          servedAmount:
+            pickAnyNum(t, "SERVED_AMOUNT", "servedAmount", "AMOUNT_SERVED", "SERVED_TOTAL") ?? 0,
+          servedQty:
+            pickAnyNum(t, "CONFIRMED_RECEIVED_QTY", "SERVED_QTY", "servedQty", "SERVED_QUANTITY", "received_quantity") ?? 0,
+          orderNote:
+            pickAnyStr(t, "CONDITIONS", "ORDER_NOTE", "orderNote", "NOTE") || "",
+          internalData: pickAnyStr(t, "INTERNAL_DATA", "internal_data"),
+          timeSdc: pickAnyStr(t, "TIME_SDC", "time_sdc", "SDC_TIME", "sdc_time"),
+          sdcId: pickAnyStr(t, "SDC_ID", "sdc_id"),
+          receiptNumber: pickAnyStr(t, "RECEIPT_NUMBER", "receipt_number"),
+          sdcInternalData: pickAnyStr(t, "SDC_INTERNAL_DATA", "sdc_internal_data"),
+          receiptSignature: pickAnyStr(t, "RECEIPT_SIGNATURE", "receipt_signature"),
         }
       })
 
@@ -324,7 +737,137 @@ export default function SupplierOrdersPage() {
     } finally {
       setLoading(false)
     }
-  }, [user?.ishyigaAccount, setOrders, loadPageSize])
+  }, [user?.ishyigaAccount, setOrders, loadPageSize, searchQuery, dateFrom, dateTo, statusFilter])
+
+  const loadEbmPending = useCallback(async () => {
+    const sellerAccount = user?.ishyigaAccount?.trim()
+    if (!sellerAccount) return
+    try {
+      const res = await fetch(
+        `/api/seller/ebm?sellerAccount=${encodeURIComponent(sellerAccount)}`,
+        { cache: "no-store", signal: AbortSignal.timeout(25_000) },
+      )
+      const json = (await res.json()) as {
+        ok?: boolean
+        pendingOrderIds?: number[]
+        successOrderIds?: number[]
+        rejectedOrderIds?: number[]
+        pending?: Array<{ orderId: number }>
+        degraded?: boolean
+        warning?: string
+        configured?: boolean
+      }
+      if (!json.ok) return
+      setEbmConfigured(json.configured !== false)
+      const pendingIds = Array.isArray(json.pendingOrderIds)
+        ? json.pendingOrderIds
+        : (json.pending ?? []).map((p) => p.orderId)
+      const successIds = Array.isArray(json.successOrderIds) ? json.successOrderIds : []
+      const rejectedIds = Array.isArray(json.rejectedOrderIds) ? json.rejectedOrderIds : []
+      const successSet = new Set(successIds.map((id) => String(id)))
+      const rejectedSet = new Set(rejectedIds.map((id) => String(id)))
+      const pendingSet = new Set(pendingIds.map((id) => String(id)))
+      for (const id of successSet) pendingSet.delete(id)
+      for (const id of rejectedSet) pendingSet.delete(id)
+      setEbmPendingOrderIds(pendingSet)
+      setEbmSuccessOrderIds((prev) =>
+        json.degraded ? new Set([...prev, ...successSet]) : successSet,
+      )
+      setEbmRejectedOrderIds((prev) =>
+        json.degraded ? new Set([...prev, ...rejectedSet]) : rejectedSet,
+      )
+      setEbmDegradedWarning(json.degraded && json.warning ? String(json.warning) : null)
+    } catch {
+      /* non-blocking */
+    }
+  }, [user?.ishyigaAccount])
+
+  const approveEbmInvoice = useCallback(
+    async (orderId: string) => {
+      const sellerAccount = user?.ishyigaAccount?.trim()
+      if (!sellerAccount) return
+      setEbmApprovingId(orderId)
+      try {
+        const res = await fetch("/api/seller/ebm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ orderId: Number(orderId), sellerAccount }),
+        })
+        const json = (await res.json()) as EbmApprovalApiResponse & {
+          code?: string
+          receiptNumber?: string
+          message?: string
+        }
+        logEbmApprovalToConsole(json.ok ? "SUCCESS" : "FAILED", json)
+        if (!res.ok || !json.ok) {
+          const view = extractEbmDebug(json)
+          setEbmDebug(view)
+          setEbmDebugOpen(true)
+          throw new Error(
+            json.code === "EBM_NOT_CONFIGURED"
+              ? json.error || "EBM is not configured on this server. Add EBM_SECURITY_KEY to .env.local and restart."
+              : view.userMessage,
+          )
+        }
+        alert(
+          json.receiptNumber
+            ? `${ui.ebmApproveOk} Receipt: ${json.receiptNumber}`
+            : json.message || ui.ebmApproveOk,
+        )
+        setEbmPendingOrderIds((prev) => {
+          const next = new Set(prev)
+          next.delete(orderId)
+          return next
+        })
+        setEbmSuccessOrderIds((prev) => new Set(prev).add(orderId))
+      void loadEbmPending()
+      void loadOrders()
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : ui.ebmApproveFailed
+        alert(`${ui.ebmApproveFailed} ${msg}\n\nFull request/response opened below (+). Also check F12 → Console.`)
+      } finally {
+        setEbmApprovingId(null)
+      }
+    },
+    [user?.ishyigaAccount, loadOrders, loadEbmPending, ui],
+  )
+
+  const rejectEbmInvoice = useCallback(
+    async (orderId: string) => {
+      const sellerAccount = user?.ishyigaAccount?.trim()
+      if (!sellerAccount) return
+      if (!window.confirm(ui.ebmRejectConfirm)) return
+      setEbmRejectingId(orderId)
+      try {
+        const res = await fetch("/api/seller/ebm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            orderId: Number(orderId),
+            sellerAccount,
+            action: "reject",
+          }),
+        })
+        const json = (await res.json()) as { ok?: boolean; error?: string; message?: string }
+        if (!res.ok || !json.ok) {
+          throw new Error(json.error || ui.ebmRejectFailed)
+        }
+        alert(json.message || ui.ebmRejectOk)
+        setEbmPendingOrderIds((prev) => {
+          const next = new Set(prev)
+          next.delete(orderId)
+          return next
+        })
+        setEbmRejectedOrderIds((prev) => new Set(prev).add(orderId))
+        void loadEbmPending()
+      } catch (e: unknown) {
+        alert(`${ui.ebmRejectFailed} ${e instanceof Error ? e.message : ""}`)
+      } finally {
+        setEbmRejectingId(null)
+      }
+    },
+    [user?.ishyigaAccount, loadEbmPending, ui],
+  )
 
   useEffect(() => {
     if (!isAuthenticated || !user) return
@@ -337,9 +880,16 @@ export default function SupplierOrdersPage() {
       setErr(null)
       loadOrders()
     } else {
-      setErr("No supplier account found. Please log out and log in again so your supplier account is loaded.")
+      setErr(ui.noSupplierAccount)
     }
   }, [isAuthenticated, user, user?.ishyigaAccount, loadOrders, isWrongSeller, setOrders])
+
+  useEffect(() => {
+    if (!isAuthenticated || !user?.ishyigaAccount || isWrongSeller) return
+    void loadEbmPending()
+    const timer = setInterval(() => void loadEbmPending(), 30_000)
+    return () => clearInterval(timer)
+  }, [isAuthenticated, user?.ishyigaAccount, isWrongSeller, loadEbmPending, orders.length])
 
   useEffect(() => {
     if (!user?.ishyigaAccount) return
@@ -362,6 +912,7 @@ export default function SupplierOrdersPage() {
           (o.createdAt && String(o.createdAt).toLowerCase().includes(q)) ||
           (o.subtotal != null && String(o.subtotal).includes(q)) ||
           (o.paymentStatus && o.paymentStatus.toLowerCase().includes(q)) ||
+          ((o as Order & { paymentLabel?: string }).paymentLabel?.toLowerCase().includes(q)) ||
           (o.status && o.status.toLowerCase().includes(q))
       )
     }
@@ -403,6 +954,45 @@ export default function SupplierOrdersPage() {
     [filteredOrders, page, pageSize]
   )
   const supplierOrderLink = (orderId: number | string) => `/supplier/orders/${orderId}`
+  const exportOrderRowCsv = (order: any) => {
+    const fields = [
+      "Order ID",
+      "Buyer",
+      "Company",
+      "Amount",
+      "Served Amount",
+      "Status",
+      "Date",
+      "TIME_SDC",
+      "SDC_ID",
+      "RECEIPT_NUMBER",
+      "SDC_INTERNAL_DATA",
+      "RECEIPT_SIGNATURE",
+    ]
+    const values = [
+      String(order.id ?? ""),
+      String(order.buyerName ?? ""),
+      String(order.buyerOwner ?? ""),
+      String(order.subtotal ?? 0),
+      String(Number(order.servedAmount ?? 0)),
+      String(order.status ?? ""),
+      String(order.createdAt ?? ""),
+      sdcRaw(order.timeSdc) === "N/A" ? "" : String(order.timeSdc).trim(),
+      sdcRaw(order.sdcId) === "N/A" ? "" : String(order.sdcId).trim(),
+      sdcRaw(order.receiptNumber) === "N/A" ? "" : String(order.receiptNumber).trim(),
+      sdcRaw(order.sdcInternalData) === "N/A" ? "" : String(order.sdcInternalData).trim(),
+      sdcRaw(order.receiptSignature) === "N/A" ? "" : String(order.receiptSignature).trim(),
+    ]
+    const esc = (v: string) => `"${v.replace(/"/g, '""')}"`
+    const csv = `${fields.map(esc).join(",")}\n${values.map(esc).join(",")}\n`
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `order-${order.id}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 
   // Wait for auth to hydrate from localStorage so existing session counts as "logged in"
   if (!hydrated) {
@@ -410,17 +1000,15 @@ export default function SupplierOrdersPage() {
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <div className="text-center text-slate-600">
           <RotateCw className="h-8 w-8 animate-spin mx-auto mb-2" />
-          <p>Checking session…</p>
+          <p>{ui.checkingSession}</p>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <Header />
-
-      <main className="container mx-auto px-4 py-8">
+    <div className="min-h-0 bg-slate-50">
+      <main className="w-full px-2 sm:px-4 py-4 sm:py-6">
         {isWrongSeller && (
           <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4 flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm text-amber-800">
@@ -435,7 +1023,16 @@ export default function SupplierOrdersPage() {
         <div className="flex items-center justify-between gap-4 mb-4 flex-wrap">
           <h1 className="text-2xl font-bold">My Orders</h1>
           {user?.ishyigaAccount && (
-            <Button variant="outline" size="sm" onClick={() => loadOrders()} disabled={loading} className="gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                void loadEbmPending()
+                loadOrders()
+              }}
+              disabled={loading}
+              className="gap-2"
+            >
               <RotateCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
               Refresh
             </Button>
@@ -443,11 +1040,27 @@ export default function SupplierOrdersPage() {
         </div>
 
         {err && <div className="mb-4 p-2 bg-red-50 border border-red-300 rounded text-sm">{err}</div>}
+        {ebmDegradedWarning && (
+          <div className="mb-4 p-2 bg-amber-50 border border-amber-300 rounded text-sm text-amber-900">
+            EBM approvals unavailable: {ebmDegradedWarning}
+          </div>
+        )}
+        {!ebmConfigured && (
+          <div className="mb-4 p-2 bg-amber-50 border border-amber-300 rounded text-sm text-amber-900">
+            EBM approval is not configured. Add to <code className="text-xs">ihute-frontend/.env.local</code>:{" "}
+            <code className="text-xs">EBM_SECURITY_KEY=...</code> and optionally{" "}
+            <code className="text-xs">EBM_COMPANY_TIN=...</code>, then restart{" "}
+            <code className="text-xs">npm run dev</code>. Or insert the key into MySQL table{" "}
+            <code className="text-xs">ebm_platform_config</code> (see{" "}
+            <code className="text-xs">sql/ebm_platform_config.sql</code>). Get the security key from
+            Algorithm/Ishyiga RRA VSDC integration.
+          </div>
+        )}
         {loading && <div className="mb-4 p-2 text-sm">Loading...</div>}
 
-        <div className="mb-4 flex flex-col gap-4 rounded-lg border bg-white p-4">
+        <div className="mb-4 flex flex-col gap-4 rounded-lg border bg-white p-3 sm:p-4">
           <div className="flex flex-wrap items-center gap-3">
-            <div className="relative flex-1 min-w-[200px] max-w-sm">
+            <div className="relative w-full sm:flex-1 sm:min-w-[200px] sm:max-w-sm">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 placeholder="Search by order #, customer, date, total, payment, status..."
@@ -464,7 +1077,7 @@ export default function SupplierOrdersPage() {
                 aria-label="From date"
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
-                className="w-[140px]"
+                className="w-full sm:w-[140px]"
               />
               <span className="text-muted-foreground">–</span>
               <Input
@@ -472,7 +1085,7 @@ export default function SupplierOrdersPage() {
                 aria-label="To date"
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
-                className="w-[140px]"
+                className="w-full sm:w-[140px]"
               />
               <Button
                 type="button"
@@ -514,7 +1127,7 @@ export default function SupplierOrdersPage() {
               </Button>
             </div>
             <Select value={paymentFilter} onValueChange={(v) => setPaymentFilter(v as "all" | "paid" | "unpaid")}>
-              <SelectTrigger className="w-[130px]">
+              <SelectTrigger className="w-full sm:w-[130px]">
                 <SelectValue placeholder="Payment" />
               </SelectTrigger>
               <SelectContent>
@@ -524,7 +1137,7 @@ export default function SupplierOrdersPage() {
               </SelectContent>
             </Select>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[130px]">
+              <SelectTrigger className="w-full sm:w-[130px]">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
@@ -537,7 +1150,7 @@ export default function SupplierOrdersPage() {
               </SelectContent>
             </Select>
             <Select value={sourceFilter} onValueChange={(v) => setSourceFilter(v as "all" | "kiosk")}>
-              <SelectTrigger className="w-[170px]">
+              <SelectTrigger className="w-full sm:w-[170px]">
                 <SelectValue placeholder="Order source" />
               </SelectTrigger>
               <SelectContent>
@@ -552,7 +1165,7 @@ export default function SupplierOrdersPage() {
                 setPage(1)
               }}
             >
-              <SelectTrigger className="w-[110px]">
+              <SelectTrigger className="w-full sm:w-[110px]">
                 <SelectValue placeholder="Per page" />
               </SelectTrigger>
               <SelectContent>
@@ -592,12 +1205,15 @@ export default function SupplierOrdersPage() {
         </div>
 
         <div className="rounded-lg border bg-white overflow-x-auto">
-          <Table className="min-w-[1000px]">
+          <Table className="min-w-[1250px]">
             <TableHeader>
               <TableRow>
                 <TableHead>Order #</TableHead>
-                <TableHead>Customer</TableHead>
+                <TableHead>User</TableHead>
+                <TableHead>Company</TableHead>
+                <TableHead>Served Amount</TableHead>
                 <TableHead>Date</TableHead>
+                <TableHead>SDC Info</TableHead>
                 <TableHead>Total</TableHead>
                 <TableHead>Payment</TableHead>
                 <TableHead>Status</TableHead>
@@ -607,7 +1223,7 @@ export default function SupplierOrdersPage() {
             <TableBody>
               {!loading && !err && pagedOrders.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
                     {orders.length === 0
                       ? "No orders yet. Orders from customers will appear here."
                       : "No orders match your search or filters. Try different criteria."}
@@ -627,16 +1243,87 @@ export default function SupplierOrdersPage() {
                         )}
                       </div>
                     </TableCell>
+                    <TableCell>{(order as any).buyerOwner || "—"}</TableCell>
+                    <TableCell>{Number((order as any).servedAmount ?? 0).toLocaleString()} RWF</TableCell>
                     <TableCell>{formatOrderDate(order.createdAt)}</TableCell>
+                    <TableCell className="align-middle">
+                      <SdcInfoCell order={order} />
+                    </TableCell>
                     <TableCell>{order.subtotal.toLocaleString()} RWF</TableCell>
-                    <TableCell>{order.paymentStatus}</TableCell>
+                    <TableCell>{(order as Order & { paymentLabel?: string }).paymentLabel ?? order.paymentStatus}</TableCell>
                     <TableCell>
                       <InlineStatusPicker order={order} orders={orders} setOrders={setOrders} />
                     </TableCell>
-                    <TableCell className="text-center flex gap-2 justify-center">
-                      <Button variant="outline" size="sm" onClick={() => router.push(supplierOrderLink(order.id))}>
-                        View
-                      </Button>
+                    <TableCell className="text-center">
+                      <div className="inline-flex flex-nowrap items-center justify-center gap-1">
+                        <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => router.push(supplierOrderLink(order.id))}>
+                          {ui.view}
+                        </Button>
+                        <IssueInvoiceButton
+                          order={order}
+                          orders={orders}
+                          setOrders={setOrders}
+                          defaultServedBy={
+                            (user?.name || user?.email || user?.ishyigaAccount || "").trim()
+                          }
+                        />
+                        <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => exportOrderRowCsv(order)}>
+                          {ui.exportLabel}
+                        </Button>
+                        {ebmSuccessOrderIds.has(order.id) ? (
+                          <Button
+                            size="sm"
+                            disabled
+                            className="h-7 px-2 text-xs bg-green-600 text-white opacity-100 cursor-default hover:bg-green-600"
+                            title={ui.ebmInvoiceSuccess}
+                          >
+                            <CheckCircle2 className="h-3 w-3 mr-1 shrink-0" />
+                            {ui.ebmInvoiceSuccess}
+                          </Button>
+                        ) : ebmRejectedOrderIds.has(order.id) ? (
+                          <Button
+                            size="sm"
+                            disabled
+                            className="h-7 px-2 text-xs bg-red-600 text-white opacity-100 cursor-default hover:bg-red-600"
+                            title={ui.ebmInvoiceRejected}
+                          >
+                            {ui.ebmInvoiceRejected}
+                          </Button>
+                        ) : ebmPendingOrderIds.has(order.id) ? (
+                          <>
+                            <Button
+                              size="sm"
+                              disabled={ebmApprovingId === order.id || ebmRejectingId === order.id || !ebmConfigured}
+                              title={
+                                !ebmConfigured
+                                  ? "Set EBM_SECURITY_KEY in .env.local and restart the dev server"
+                                  : undefined
+                              }
+                              className="h-7 px-2 text-xs bg-green-600 hover:bg-green-700 text-white disabled:opacity-50"
+                              onClick={() => void approveEbmInvoice(order.id)}
+                            >
+                              {ebmApprovingId === order.id ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                ui.approveEbm
+                              )}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={ebmApprovingId === order.id || ebmRejectingId === order.id}
+                              className="h-7 px-2 text-xs border-red-300 text-red-700 hover:bg-red-50"
+                              onClick={() => void rejectEbmInvoice(order.id)}
+                            >
+                              {ebmRejectingId === order.id ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                ui.rejectEbm
+                              )}
+                            </Button>
+                          </>
+                        ) : null}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))
@@ -646,14 +1333,13 @@ export default function SupplierOrdersPage() {
         </div>
 
         {/* Pagination Controls */}
-        <div className="flex justify-between mt-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 mt-4">
           <Button disabled={page === 1} onClick={() => setPage(p => p - 1)}>Prev</Button>
           <span>Page {page} of {totalPages}</span>
           <Button disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>Next</Button>
         </div>
       </main>
-
-      <Footer />
+      <EbmDebugModal open={ebmDebugOpen} onOpenChange={setEbmDebugOpen} debug={ebmDebug} />
     </div>
   )
 }

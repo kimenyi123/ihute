@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerProxyBackendBase } from "@/lib/backend-config";
 
 export async function POST(
   request: NextRequest,
@@ -16,7 +17,7 @@ export async function POST(
       return NextResponse.json({ ok: false, error: 'Not authenticated' }, { status: 401 });
     }
     
-    const backendUrl = process.env.BACKEND_URL || 'http://localhost:8080/Trading';
+    const backendUrl = getServerProxyBackendBase();
     const response = await fetch(
       `${backendUrl}/NotificationServlet?action=markRead&notificationId=${id}&userId=${encodeURIComponent(userId)}`,
       { method: 'POST' }

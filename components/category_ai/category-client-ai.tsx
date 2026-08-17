@@ -74,18 +74,18 @@ export function CategoryClientAI({
       }
       setSectorListPayload(null);
       try {
-        const listUrl = `/api/sector-list-suppliers?sector=${encodeURIComponent(sid)}&Currency=RWF&limit=${LIST_SECTOR_SUPPLIERS_LIMIT}`;
+        const listUrl = `/api/sector-list-suppliers?sector=${encodeURIComponent(sid)}&Currency=RWF&limit=${LIST_SECTOR_SUPPLIERS_LIMIT}&productsPerSeller=0`;
         const [stats, listRes] = await Promise.all([
           fetchSectorStatsFromApi(sid),
           fetch(listUrl, { cache: "no-store" }),
         ]);
-        const raw: unknown = listRes.ok ? await listRes.json() : [];
-        const arr = normalizeListSuppliersPayload(raw);
-        const mapped = mapListSuppliersWithProductsToShops(arr);
+        const rawPrimary: unknown = listRes.ok ? await listRes.json() : [];
+        const mergedRows = normalizeListSuppliersPayload(rawPrimary);
+        const mapped = mapListSuppliersWithProductsToShops(mergedRows);
         if (cancelled) return;
-        setSectorListPayload(arr);
+        setSectorListPayload(mergedRows);
         setSectorShops(mapped);
-        const itemsSum = sumProductsInListSuppliersPayload(arr);
+        const itemsSum = sumProductsInListSuppliersPayload(mergedRows);
         setSectorStats(
           stats
             ? { shops: stats.shops, items: stats.items }

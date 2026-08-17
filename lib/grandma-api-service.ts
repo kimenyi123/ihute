@@ -162,7 +162,7 @@ class GrandmaApiService {
    */
   async getSupplierProducts(
     supplierAccount: string,
-    limit: number = 20,
+    limit: number = 10_000,
     currency: string = 'RWF'
   ): Promise<Product[]> {
     const params = new URLSearchParams({

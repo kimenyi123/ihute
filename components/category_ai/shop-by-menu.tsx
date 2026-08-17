@@ -9,9 +9,7 @@ import { ShopsBySector } from "./shops-by-sector"
 import { BrandListAI } from "./brand-list-ai"
 import { BestDealsSection } from "./best-deals-section"
 import { PersonalizedSections } from "@/components/personalized-sections"
-import { useProductFiltersStore } from "@/lib/product-filters-store"
-
-export type ShopByTab = "sector" | "category" | "shops" | "brand" | "all" | "opportunities" | "manufacturers" | "high-margin" | "high-demand"
+import { useProductFiltersStore, type ShopByTab } from "@/lib/product-filters-store"
 
 /** All tabs use icons: Sector, Category, Shops (store icons), Brand, All items, etc. */
 const EMOJI = (char: string) => <span className="text-base leading-none" aria-hidden>{char}</span>

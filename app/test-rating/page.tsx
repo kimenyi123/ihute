@@ -17,8 +17,8 @@ export default function TestRatingPage() {
       const response = await fetch(`/api/debug-rating?action=testOrder&orderId=${orderId}`)
       const data = await response.json()
       setResults(data)
-    } catch (error) {
-      setResults({ error: error.message })
+    } catch (error: unknown) {
+      setResults({ error: error instanceof Error ? error.message : String(error) })
     } finally {
       setLoading(false)
     }
@@ -35,8 +35,8 @@ export default function TestRatingPage() {
       const response = await fetch(`/api/debug-rating?action=checkNotifications&buyerEmail=${encodeURIComponent(buyerEmail)}`)
       const data = await response.json()
       setResults(data)
-    } catch (error) {
-      setResults({ error: error.message })
+    } catch (error: unknown) {
+      setResults({ error: error instanceof Error ? error.message : String(error) })
     } finally {
       setLoading(false)
     }
@@ -48,8 +48,8 @@ export default function TestRatingPage() {
       const response = await fetch(`/api/debug-rating?action=checkColumns`)
       const data = await response.json()
       setResults(data)
-    } catch (error) {
-      setResults({ error: error.message })
+    } catch (error: unknown) {
+      setResults({ error: error instanceof Error ? error.message : String(error) })
     } finally {
       setLoading(false)
     }

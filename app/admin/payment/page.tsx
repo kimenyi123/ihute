@@ -1,10 +1,12 @@
 'use client';
 import React from 'react';
 import PaymentDashboard from '@/components/payment/payment-dashboard';
+import { AdminPaymentSubnav } from '@/components/payment/admin-payment-subnav';
 
 export default function AdminPaymentPage() {
   return (
     <div className="space-y-6">
+      <AdminPaymentSubnav />
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">
           Payment Dashboard

@@ -1,0 +1,198 @@
+# Bitbucket Pipelines — ihute-frontend CI/CD
+#
+# Push to master → CI + auto-deploy DEV (dev.ihute.rw) — fully automatic.
+#
+# Bitbucket variables (Repository settings → Pipelines → Repository variables):
+#   DEPLOY_HOST, DEPLOY_USER, DEPLOY_PASS (secured — SSH password)
+
+image: node:22
+
+definitions:
+  caches:
+    npm: ~/.npm
+
+  scripts:
+    - &resolve-branch |
+        if [ -n "${DEPLOY_BRANCH:-}" ]; then
+          export GIT_REF="$DEPLOY_BRANCH"
+        else
+          export GIT_REF="$BITBUCKET_BRANCH"
+        fi
+        echo "Deploying git ref: $GIT_REF"
+
+    - &ssh-remote-deploy |
+        chmod +x scripts/pipeline-ssh-deploy.sh scripts/pipeline-remote-deploy-cmd.sh
+        REMOTE_CMD="$(bash scripts/pipeline-remote-deploy-cmd.sh "$DEPLOY_PATH" "$GIT_REF" "$PM2_APP_NAME")"
+        bash scripts/pipeline-ssh-deploy.sh "$REMOTE_CMD"
+
+  steps:
+    - step: &ci
+        name: CI — lint, typecheck, build
+        caches:
+          - npm
+        script:
+          - node -v
+          - npm ci
+          - npm run lint
+          - npm run typecheck
+          - export NEXT_PUBLIC_SITE_URL="${CI_NEXT_PUBLIC_SITE_URL:-https://ihute.rw}"
+          - export NEXT_PUBLIC_API_URL="${CI_NEXT_PUBLIC_API_URL:-https://ihute.rw/Trading}"
+          - export JAVA_BACKEND_BASE="${CI_JAVA_BACKEND_BASE:-http://127.0.0.1:8080/Trading}"
+          - npm run build
+
+    - step: &deploy-production
+        name: "Deploy → PRODUCTION (ihute.rw)"
+        deployment: production
+        script:
+          - *resolve-branch
+          - export DEPLOY_PATH=/var/www/ihute-frontend
+          - export PM2_APP_NAME=ihute-frontend
+          - *ssh-remote-deploy
+
+    - step: &deploy-dev
+        name: "Deploy → DEV (dev.ihute.rw)"
+        deployment: staging
+        script:
+          - *resolve-branch
+          - export DEPLOY_PATH=/var/www/ihute-frontend-dev
+          - export PM2_APP_NAME=ihute-dev
+          - *ssh-remote-deploy
+
+    - step: &deploy-beta
+        name: "Deploy → BETA (beta.ihute.rw)"
+        deployment: test
+        script:
+          - *resolve-branch
+          - export DEPLOY_PATH=/var/www/ihute-frontend_beta
+          - export PM2_APP_NAME=ihute-beta
+          - *ssh-remote-deploy
+
+    - step: &deploy-grandma
+        name: "Deploy → GRANDMA (shop.ihute.rw)"
+        deployment: grandma
+        script:
+          - *resolve-branch
+          - export DEPLOY_PATH=/var/www/grandma-ihute
+          - export PM2_APP_NAME=ihute-grandma
+          - *ssh-remote-deploy
+
+    - step: &deploy-selected
+        name: Deploy selected environment
+        script:
+          - *resolve-branch
+          - chmod +x scripts/pipeline-resolve-target.sh
+          - eval "$(bash scripts/pipeline-resolve-target.sh "$ENVIRONMENT")"
+          - echo "Target $ENVIRONMENT → $DEPLOY_PATH (pm2 $PM2_APP_NAME)"
+          - *ssh-remote-deploy
+
+pipelines:
+  default:
+    - step: *ci
+
+  pull-requests:
+    "**":
+      - step: *ci
+
+  branches:
+    master:
+      - step: *ci
+      - step: *deploy-dev
+
+    "**":
+      - step: *ci
+
+  custom:
+    default:
+      - variables:
+          - name: DEPLOY_BRANCH
+            default: ""
+      - step: *ci
+      - step: *deploy-dev
+      - step:
+          <<: *deploy-beta
+          trigger: manual
+      - step:
+          <<: *deploy-grandma
+          trigger: manual
+      - step:
+          <<: *deploy-production
+          trigger: manual
+
+    promote:
+      - variables:
+          - name: DEPLOY_BRANCH
+            default: ""
+      - step: *ci
+      - step: *deploy-dev
+      - step:
+          <<: *deploy-beta
+          trigger: manual
+      - step:
+          <<: *deploy-grandma
+          trigger: manual
+      - step:
+          <<: *deploy-production
+          trigger: manual
+
+    deploy:
+      - variables:
+          - name: ENVIRONMENT
+            default: dev
+            allowed-values:
+              - dev
+              - beta
+              - grandma
+              - production
+          - name: DEPLOY_BRANCH
+            default: ""
+          - name: RUN_CI
+            default: "false"
+            allowed-values:
+              - "true"
+              - "false"
+      - step:
+          name: CI (optional)
+          caches:
+            - npm
+          script:
+            - |
+              if [ "$RUN_CI" = "true" ]; then
+                node -v
+                npm ci
+                npm run lint
+                npm run typecheck
+                export NEXT_PUBLIC_SITE_URL="${CI_NEXT_PUBLIC_SITE_URL:-https://ihute.rw}"
+                export NEXT_PUBLIC_API_URL="${CI_NEXT_PUBLIC_API_URL:-https://ihute.rw/Trading}"
+                export JAVA_BACKEND_BASE="${CI_JAVA_BACKEND_BASE:-http://127.0.0.1:8080/Trading}"
+                npm run build
+              else
+                echo "Skipping CI (RUN_CI=false)"
+              fi
+      - step: *deploy-selected
+
+    deploy-production:
+      - variables:
+          - name: DEPLOY_BRANCH
+            default: ""
+      - step: *deploy-production
+
+    deploy-dev:
+      - variables:
+          - name: DEPLOY_BRANCH
+            default: ""
+      - step: *deploy-dev
+
+    deploy-beta:
+      - variables:
+          - name: DEPLOY_BRANCH
+            default: ""
+      - step: *deploy-beta
+
+    deploy-grandma:
+      - variables:
+          - name: DEPLOY_BRANCH
+            default: ""
+      - step: *deploy-grandma
+
+    ci-only:
+      - step: *ci

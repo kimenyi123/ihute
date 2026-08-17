@@ -1,8 +1,42 @@
 import { NextResponse } from "next/server"
-import { getAuthUrl, getSuppliersUrl } from "@/lib/backend-config" // ← add getSuppliersUrl
+import { getAuthUrl, getBackendBase, getSuppliersUrl } from "@/lib/backend-config"
 
 const JAVA_AUTH_URL = getAuthUrl()
-const JAVA_SUPPLIERS_URL = getSuppliersUrl() // e.g. http://yourserver/Api/InsertSuppliers
+
+/** Ordered URLs: env/default first, then canonical …/InsertSuppliers if different (fixes legacy …/Api/InsertSuppliers 404). */
+function insertSuppliersPostUrls(): string[] {
+  const primary = getSuppliersUrl()
+  const canonical = `${getBackendBase()}/InsertSuppliers`
+  if (primary === canonical) return [primary]
+  return [primary, canonical]
+}
+
+/** When Tomcat returns HTML (404 page, error page) instead of JSON from InsertSuppliers. */
+function describeInsertSuppliersNonJsonError(requestUrl: string, status: number, body: string): string {
+  const start = (body || "").slice(0, 400).trim()
+  const looksHtml = /^\s*</.test(start) || /<!doctype/i.test(start) || /<html/i.test(start)
+  if (status === 404) {
+    return looksHtml
+      ? `Seller registration URL not found (HTTP 404). The Java InsertSuppliers servlet is missing or the path is wrong. Set JAVA_SUPPLIERS_URL in .env.local (e.g. …/Trading/InsertSuppliers). Request was: ${requestUrl}`
+      : `Seller registration upstream returned HTTP 404. Verify JAVA_SUPPLIERS_URL matches your deployed servlet. Request was: ${requestUrl}`
+  }
+  if (looksHtml) {
+    return `Seller registration server returned HTML instead of JSON (HTTP ${status}). Usually JAVA_SUPPLIERS_URL is wrong or the servlet is not deployed. Request was: ${requestUrl}`
+  }
+  return `InsertSuppliers did not return JSON (HTTP ${status}). Check the backend is running and the servlet returns application/json. Request was: ${requestUrl}`
+}
+
+function describeAuthRegisterNonJsonError(requestUrl: string, status: number, body: string): string {
+  const start = (body || "").slice(0, 400).trim()
+  const looksHtml = /^\s*</.test(start) || /<!doctype/i.test(start) || /<html/i.test(start)
+  if (status === 404) {
+    return `Buyer registration URL not found (HTTP 404). Set JAVA_AUTH_URL in .env.local (e.g. …/Trading/Kaos/user-auth). Request was: ${requestUrl}`
+  }
+  if (looksHtml) {
+    return `Auth server returned HTML instead of JSON (HTTP ${status}). Check JAVA_AUTH_URL and that user-auth servlet is deployed. Request was: ${requestUrl}`
+  }
+  return `Auth server did not return JSON (HTTP ${status}). Request was: ${requestUrl}`
+}
 
 export async function POST(req: Request) {
   const rid = crypto.randomUUID()
@@ -14,8 +48,9 @@ export async function POST(req: Request) {
 
     // ─── SELLER → InsertSuppliers servlet ───────────────────────────────────
     if (String(role).toUpperCase() === "SELLER") {
-      if (!JAVA_SUPPLIERS_URL) {
-        console.error(`[RID ${rid}] Missing JAVA_SUPPLIERS_URL`)
+      const supplierUrls = insertSuppliersPostUrls()
+      if (!supplierUrls[0]) {
+        console.error(`[RID ${rid}] Missing seller registration URL`)
         return NextResponse.json({ ok: false, error: "JAVA_SUPPLIERS_URL not configured", rid }, { status: 500 })
       }
 
@@ -44,27 +79,43 @@ export async function POST(req: Request) {
       }
       if (body.gpsAccuracy != null) sellerPayload.gpsAccuracy = String(body.gpsAccuracy)
 
-      console.log(`[RID ${rid}] -> POST ${JAVA_SUPPLIERS_URL} (seller registration)`, sellerPayload)
+      let res!: Response
+      let text!: string
+      let usedSupplierUrl = supplierUrls[0]
 
-      const res = await fetch(JAVA_SUPPLIERS_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(sellerPayload),
-        cache: "no-store",
-      })
+      for (let i = 0; i < supplierUrls.length; i++) {
+        const url = supplierUrls[i]
+        console.log(`[RID ${rid}] -> POST ${url} (seller registration)`, sellerPayload)
+        res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(sellerPayload),
+          cache: "no-store",
+        })
+        text = await res.text()
+        usedSupplierUrl = url
+        if (res.status !== 404 || i === supplierUrls.length - 1) break
+        console.warn(`[RID ${rid}] InsertSuppliers HTTP404 at ${url}, retrying next URL…`)
+      }
 
-      const text = await res.text()
       const trimmed = text.trim().replace(/^\uFEFF/, "") // strip BOM
       let json: any
-      try { json = JSON.parse(trimmed || "{}") } catch {
+      try {
+        json = JSON.parse(trimmed || "{}")
+      } catch {
         console.error(`[RID ${rid}] Bad JSON from InsertSuppliers. Status=${res.status} Body: ${text.slice(0, 800)}`)
         const preview = text.slice(0, 200).replace(/\s+/g, " ")
-        return NextResponse.json({
-          ok: false,
-          error: "Supplier server returned invalid response. Check backend is running and returns JSON.",
-          rawPreview: preview,
-          rid,
-        }, { status: 502 })
+        return NextResponse.json(
+          {
+            ok: false,
+            error: describeInsertSuppliersNonJsonError(usedSupplierUrl, res.status, text),
+            upstreamStatus: res.status,
+            triedUrls: supplierUrls,
+            rawPreview: preview,
+            rid,
+          },
+          { status: 502 },
+        )
       }
 
       // 201 = created successfully (Java may include temporaryPasswordEmailed when password was generated)
@@ -80,12 +131,31 @@ export async function POST(req: Request) {
         })
       }
 
-      // 409 = duplicate / conflict
+      // 409 = duplicate / conflict (e.g. buyer email, or insertSeller duplicate)
       if (res.status === 409) {
         return NextResponse.json({ ok: false, error: json.message || json.error || "Conflict", rid }, { status: 409 })
       }
 
-      return NextResponse.json({ ok: false, error: json.error || "Supplier registration failed", rid }, { status: 400 })
+      // InsertSuppliers returns 200 when email is already SELLER ("Seller exists with user type SELLER.")
+      if (res.status === 200) {
+        const msg =
+          json.message ||
+          json.error ||
+          "This email is already registered as a seller. Sign in or use Forgot password if needed."
+        return NextResponse.json({ ok: false, error: msg, rid }, { status: 409 })
+      }
+
+      if (res.status >= 500) {
+        return NextResponse.json(
+          { ok: false, error: json.error || json.message || "Supplier server error", rid },
+          { status: 502 },
+        )
+      }
+
+      return NextResponse.json(
+        { ok: false, error: json.error || json.message || "Supplier registration failed", rid },
+        { status: 400 },
+      )
     }
 
     // ─── BUYER / DRIVER → existing general auth servlet ─────────────────────
@@ -138,9 +208,20 @@ export async function POST(req: Request) {
 
     const text = await res.text()
     let json: any
-    try { json = JSON.parse(text) } catch {
+    try {
+      json = JSON.parse(text)
+    } catch {
       console.error(`[RID ${rid}] Bad JSON from auth servlet. Status=${res.status} Body: ${text.slice(0, 800)}`)
-      return NextResponse.json({ ok: false, error: "Bad JSON from auth server", raw: text.slice(0, 800), rid }, { status: 502 })
+      return NextResponse.json(
+        {
+          ok: false,
+          error: describeAuthRegisterNonJsonError(JAVA_AUTH_URL, res.status, text),
+          upstreamStatus: res.status,
+          rawPreview: text.slice(0, 200).replace(/\s+/g, " "),
+          rid,
+        },
+        { status: 502 },
+      )
     }
 
     if (!res.ok || !json?.ok) {

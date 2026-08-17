@@ -1,16 +1,7 @@
 // API service for location-based searches
 
-// Use environment variable for backend URL (client-side needs NEXT_PUBLIC_ prefix)
-// Prefer NEXT_PUBLIC_API_BASE so it stays consistent with the rest of the app.
-// If NEXT_PUBLIC_API_BASE is not set, fall back to the older JAVA_BACKEND_BASE-style default.
-const BACKEND_BASE =
-  process.env.NEXT_PUBLIC_API_BASE ||
-  process.env.NEXT_PUBLIC_JAVA_BACKEND_BASE ||
-  "http://localhost:8080/Trading"
-
-// If NEXT_PUBLIC_API_BASE already points directly to the Kaos path, you can set it to
-// e.g. http://localhost:8080/Trading/Kaos and this will just append `/fetchSuggestions`.
-const API_BASE_URL = BACKEND_BASE.endsWith("/Kaos") ? BACKEND_BASE : `${BACKEND_BASE}/Kaos`;
+// Use Next.js API proxy to avoid client-side CORS / backend availability issues.
+const API_BASE_URL = "/api";
 
 export interface NearbySupplier {
     supplier_id: string;
@@ -71,13 +62,18 @@ export async function searchNearbySuppliers(
         params.append('radiusKm', radiusKm.toString());
     }
 
-    const response = await fetch(`${API_BASE_URL}/fetchSuggestions?${params}`);
-
+    const response = await fetch(`${API_BASE_URL}/fetchSuggestions?${params}`, { cache: "no-store" });
     if (!response.ok) {
-        throw new Error('Failed to fetch nearby suppliers');
+        return { suppliers: [], count: 0 };
     }
-
-    return response.json();
+    const data = await response.json().catch(() => null);
+    if (!data || typeof data !== "object") {
+        return { suppliers: [], count: 0 };
+    }
+    return {
+        suppliers: Array.isArray((data as any).suppliers) ? (data as any).suppliers : [],
+        count: typeof (data as any).count === "number" ? (data as any).count : 0,
+    };
 }
 
 /**
@@ -97,13 +93,37 @@ export async function searchNearbyProducts(
         limit: limit.toString(),
     });
 
-    const response = await fetch(`${API_BASE_URL}/fetchSuggestions?${params}`);
-
+    const response = await fetch(`${API_BASE_URL}/fetchSuggestions?${params}`, { cache: "no-store" });
     if (!response.ok) {
-        throw new Error('Failed to search nearby products');
+        return {
+            query,
+            buyer: { lat, lng },
+            radius_used_km: 0,
+            results: [],
+            count: 0,
+        };
     }
-
-    return response.json();
+    const data = await response.json().catch(() => null);
+    if (!data || typeof data !== "object") {
+        return {
+            query,
+            buyer: { lat, lng },
+            radius_used_km: 0,
+            results: [],
+            count: 0,
+        };
+    }
+    return {
+        query: typeof (data as any).query === "string" ? (data as any).query : query,
+        buyer:
+            (data as any).buyer && typeof (data as any).buyer === "object"
+                ? (data as any).buyer
+                : { lat, lng },
+        radius_used_km:
+            typeof (data as any).radius_used_km === "number" ? (data as any).radius_used_km : 0,
+        results: Array.isArray((data as any).results) ? (data as any).results : [],
+        count: typeof (data as any).count === "number" ? (data as any).count : 0,
+    };
 }
 
 /**

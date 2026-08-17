@@ -2,8 +2,8 @@
 
 import { useTableCommandStore } from "@/lib/table-command-store"
 import { Button } from "@/components/ui/button"
-import { Beer, X, Lock, CheckCircle, Send, Share2 } from "lucide-react"
-import { useState } from "react"
+import { Beer, X, Lock, CheckCircle, Send, Link2 } from "lucide-react"
+import { useEffect, useState } from "react"
 import { TableCommandShareModal } from "@/components/table-command-share-modal"
 import {
   AlertDialog,
@@ -34,12 +34,21 @@ export function TableCommandBanner() {
   const [sendSuccess, setSendSuccess] = useState<any>(null)
   const [isSending, setIsSending] = useState(false)
 
-  if (!activeSession) return null
-
-  const isActive = activeSession.status === "ACTIVE"
-  const isSent = activeSession.status === "SENT"
-  const isClosed = activeSession.status === "CLOSED"
+  const isActive = activeSession?.status === "ACTIVE"
+  const isSent = activeSession?.status === "SENT"
+  const isClosed = activeSession?.status === "CLOSED"
   const userCanClose = canCloseTable()
+
+  useEffect(() => {
+    if (isClosed && activeSession) {
+      const timer = setTimeout(() => {
+        leaveTableCommand()
+      }, 3000)
+      return () => clearTimeout(timer)
+    }
+  }, [isClosed, leaveTableCommand, activeSession])
+
+  if (!activeSession) return null
 
   // background color based on status
   const bgClass = isClosed
@@ -149,6 +158,19 @@ export function TableCommandBanner() {
                 </Button>
               )}
 
+              {/* SHARE TABLE LINK BUTTON (creators only) */}
+              {activeSession.isCreator && activeSession.shareableLink && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowShareModal(true)}
+                  className="text-white hover:bg-white/20 hover:text-white gap-1 sm:gap-1.5 bg-blue-600 hover:bg-blue-700 h-7 sm:h-9 px-2 sm:px-3 text-xs sm:text-sm"
+                >
+                  <Link2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                  <span className="hidden sm:inline">Share</span>
+                </Button>
+              )}
+
               {isSent && userCanClose && (
                 <Button
                   variant="ghost"
@@ -168,16 +190,19 @@ export function TableCommandBanner() {
                 </div>
               )}
 
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowLeaveDialog(true)}
-                className="text-white hover:bg-white/20 hover:text-white gap-1 sm:gap-1.5 h-7 sm:h-9 px-2 sm:px-3 text-xs sm:text-sm"
-              >
-                <X className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                <span className="hidden sm:inline">Leave Table</span>
-                <span className="sm:hidden">Leave</span>
-              </Button>
+              {/* Leave Table button - hidden when table is closed (auto-leaves) */}
+              {!isClosed && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowLeaveDialog(true)}
+                  className="text-white hover:bg-white/20 hover:text-white gap-1 sm:gap-1.5 h-7 sm:h-9 px-2 sm:px-3 text-xs sm:text-sm"
+                >
+                  <X className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                  <span className="hidden sm:inline">Leave Table</span>
+                  <span className="sm:hidden">Leave</span>
+                </Button>
+              )}
             </div>
           </div>
         </div>

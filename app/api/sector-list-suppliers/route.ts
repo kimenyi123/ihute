@@ -1,13 +1,40 @@
 import type { NextRequest } from "next/server"
-import { getProxyTimeoutMs, getSectorListSuppliersUrl } from "@/lib/backend-config"
+import {
+  getGrandmaListSuppliersBrowseUrl,
+  getProxyTimeoutMs,
+  getSectorListSuppliersUrl,
+  warmJavaBackendBase,
+} from "@/lib/backend-config"
 
 const DEFAULT_TIMEOUT_MS = Math.max(30000, getProxyTimeoutMs())
+
+async function fetchGrandmaBrowseFallback(incoming: URL, signal: AbortSignal) {
+  const target = new URL(getGrandmaListSuppliersBrowseUrl())
+  incoming.searchParams.forEach((v, k) => {
+    if (k === "limit") {
+      target.searchParams.set("sellerLimit", v)
+    } else {
+      target.searchParams.set(k, v)
+    }
+  })
+  if (!target.searchParams.has("productsPerSeller")) {
+    target.searchParams.set("productsPerSeller", "6")
+  }
+
+  return fetch(target.toString(), {
+    method: "GET",
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+    signal,
+  })
+}
 
 /**
  * Proxies to Tomcat {@code /Kaos/sectorListSuppliers} — same JSON array as legacy
  * {@code fetchSuggestions?listSuppliersWithProducts=}, with Tomcat timing headers forwarded.
  */
 export async function GET(req: NextRequest) {
+  await warmJavaBackendBase()
   const incoming = new URL(req.url)
   const target = new URL(getSectorListSuppliersUrl())
   incoming.searchParams.forEach((v, k) => target.searchParams.set(k, v))
@@ -25,6 +52,19 @@ export async function GET(req: NextRequest) {
     })
     const text = await resp.text()
     const proxyRtMs = Math.round(performance.now() - t0)
+
+    if (resp.status === 404 || resp.status === 503 || text.trim() === "[]") {
+      const fallbackResp = await fetchGrandmaBrowseFallback(incoming, controller.signal)
+      const body = fallbackResp.ok ? await fallbackResp.text() : JSON.stringify([])
+      const headers = new Headers()
+      headers.set("content-type", "application/json; charset=utf-8")
+      headers.set("Access-Control-Allow-Origin", "*")
+      headers.set("Access-Control-Allow-Methods", "GET, OPTIONS")
+      headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+      headers.set("X-Proxy-Rt-Ms", String(proxyRtMs))
+      headers.set("X-Sector-List-Fallback", "grandma-browse")
+      return new Response(body, { status: fallbackResp.ok ? 200 : resp.status, headers })
+    }
 
     const headers = new Headers()
     headers.set("content-type", resp.headers.get("content-type") || "application/json; charset=utf-8")

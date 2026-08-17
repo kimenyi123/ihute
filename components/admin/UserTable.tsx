@@ -17,7 +17,7 @@ export default function UserTable({ users, onEdit, onDelete }: UserTableProps) {
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
 
   const filteredUsers = useMemo(() => {
-    let filtered = users.filter(user =>
+    const filtered = users.filter(user =>
       Object.values(user).some(value =>
         value?.toString().toLowerCase().includes(searchTerm.toLowerCase())
       )

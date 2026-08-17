@@ -5,7 +5,6 @@ import { useAuthStore } from "@/lib/auth-store"
 import { useRouter } from "next/navigation"
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
-import { Star } from "lucide-react"
 
 export default function MyRatingsPage() {
   const { isAuthenticated, user } = useAuthStore()

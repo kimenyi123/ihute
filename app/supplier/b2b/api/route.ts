@@ -2,10 +2,10 @@
 // Proxy for Rekizisiyo Servlet (Java/Tomcat)
 
 import { NextRequest, NextResponse } from "next/server";
+import { getJavaSetCookieValues, rewriteForwardedSetCookie } from "@/lib/java-proxy-cookies";
+import { getServerProxyBackendBase } from "@/lib/backend-config";
 
-// For local development (default)
-const JAVA_BACKEND_BASE =
-  process.env.JAVA_BACKEND_BASE || "http://localhost:8080/Trading";
+const JAVA_BACKEND_BASE = getServerProxyBackendBase();
 
 // B2B servlet URL - JAVA_BACKEND_BASE already includes /Trading
 const B2B_SERVLET_URL = `${JAVA_BACKEND_BASE}/supplier/b2b/api`;
@@ -17,16 +17,10 @@ function createAbort(timeoutMs: number) {
   return { controller, timeout };
 }
 
-/**
- * Forward Set-Cookie from Java backend back to browser (if present).
- * Note: Depending on environment, multiple cookies may be merged by fetch.
- */
+/** Forward Set-Cookie from Java backend back to browser (Undici: use getSetCookie, not headers.get). */
 function forwardSetCookie(javaResp: Response, nextResp: NextResponse) {
-  const setCookie = javaResp.headers.get("set-cookie");
-  if (setCookie) {
-    // If multiple cookies are returned in one string, this still works for most cases.
-    // If you need strict multi-set-cookie support later, we can split safely.
-    nextResp.headers.set("set-cookie", setCookie);
+  for (const raw of getJavaSetCookieValues(javaResp.headers)) {
+    nextResp.headers.append("Set-Cookie", rewriteForwardedSetCookie(raw));
   }
 }
 

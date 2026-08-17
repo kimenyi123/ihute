@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { Bike, Package, ShoppingCart, Store, UserCog, Users } from "lucide-react"
+import { Bike, MessageSquare, Package, ShoppingCart, Store, UserCog, Users } from "lucide-react"
 
 const tiles: { href: string; title: string; subtitle: string; icon: typeof Store }[] = [
   { href: "/admin_grandma/sellers", title: "Seller", subtitle: "List & profile completion", icon: Store },
@@ -10,6 +10,7 @@ const tiles: { href: string; title: string; subtitle: string; icon: typeof Store
   { href: "/admin_grandma/agents", title: "Agents", subtitle: "Field agents (soon)", icon: UserCog },
   { href: "/admin_grandma/orders", title: "Orders", subtitle: "Order monitor (soon)", icon: ShoppingCart },
   { href: "/admin_grandma/items", title: "Items", subtitle: "Pending validation · Umuriro drafts", icon: Package },
+  { href: "/admin/client-suggestions", title: "Client Suggestions", subtitle: "Support form feedback", icon: MessageSquare },
 ]
 
 export default function AdminGrandmaDashboardPage() {
