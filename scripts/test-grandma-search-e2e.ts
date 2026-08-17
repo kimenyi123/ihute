@@ -1,10 +1,9 @@
 /**
- * End-to-end Grandma search integration against real MySQL.
+ * Legacy MySQL e2e for the unused Next.js adapter (`lib/grandma-search-mysql.ts`).
+ * Production Grandma Search is Java: GET /api/grandma/search → /grandma/search.
+ * Do not treat this script as the production Search path.
  *
  *   npx tsx scripts/test-grandma-search-e2e.ts
- *   npx tsx scripts/test-grandma-search-e2e.ts --connect-only
- *
- * Requires ONBOARDING_MYSQL_* (or EBM_/FORGOT_PASSWORD_/SUPPLIER_STOCK_/MYSQL_*) in .env.local
  */
 import fs from "node:fs"
 import path from "node:path"
@@ -14,23 +13,41 @@ import { fileURLToPath } from "node:url"
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const connectOnly = process.argv.includes("--connect-only")
 
+function stripQuotes(raw: string): string {
+  const v = raw.trim()
+  if (
+    (v.startsWith('"') && v.endsWith('"') && v.length >= 2) ||
+    (v.startsWith("'") && v.endsWith("'") && v.length >= 2)
+  ) {
+    return v.slice(1, -1)
+  }
+  return v
+}
+
+function readEnvText(filePath: string): string {
+  const buf = fs.readFileSync(filePath)
+  if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe) return buf.toString("utf16le")
+  if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) {
+    return buf.slice(3).toString("utf8")
+  }
+  const utf8 = buf.toString("utf8")
+  if (utf8.includes("\u0000")) return buf.toString("utf16le").replace(/^\uFEFF/, "")
+  return utf8
+}
+
 function loadEnvFile(filePath: string) {
   if (!fs.existsSync(filePath)) return
-  const text = fs.readFileSync(filePath, "utf8")
-  for (const line of text.split(/\r?\n/)) {
-    const t = line.trim()
+  const text = readEnvText(filePath)
+  for (const line of text.split(/\r\n|\n|\r/)) {
+    let t = line.trim()
     if (!t || t.startsWith("#")) continue
+    if (t.startsWith("export ")) t = t.slice("export ".length).trim()
     const eq = t.indexOf("=")
     if (eq < 1) continue
     const key = t.slice(0, eq).trim()
-    let val = t.slice(eq + 1).trim()
-    if (
-      (val.startsWith('"') && val.endsWith('"')) ||
-      (val.startsWith("'") && val.endsWith("'"))
-    ) {
-      val = val.slice(1, -1)
-    }
-    if (process.env[key] === undefined) process.env[key] = val
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue
+    if (process.env[key]?.trim()) continue
+    process.env[key] = stripQuotes(t.slice(eq + 1))
   }
 }
 
@@ -277,15 +294,13 @@ async function main() {
     return `indexes=${names.filter((n) => /gps|geo|lat|location/i.test(n)).join("|")}`
   })
 
-  await timed("10b. Check FULLTEXT on seller_add_stock", async () => {
+  await timed("10b. seller_add_stock retrieval indexes (FULLTEXT unused for prefixes)", async () => {
     const conn = await mysql.createConnection(connOpts)
-    const [idx] = await conn.query<any[]>(
-      "SHOW INDEX FROM seller_add_stock WHERE Index_type='FULLTEXT'",
-    )
+    const [idx] = await conn.query<any[]>("SHOW INDEX FROM seller_add_stock")
     await conn.end()
-    const names = [...new Set(idx.map((r) => String(r.Key_name)))]
-    if (!names.length) throw new Error("No FULLTEXT on seller_add_stock (LIKE fallback only — slower)")
-    return `fulltext=${names.join(",")}`
+    const fulltext = [...new Set(idx.filter((r) => String(r.Index_type) === "FULLTEXT").map((r) => String(r.Key_name)))]
+    const itemName = idx.filter((r) => String(r.Column_name) === "ITEM_NAME").map((r) => `${r.Key_name}:${r.Index_type}`)
+    return `fulltext=${fulltext.join(",") || "none"} itemName=${itemName.slice(0, 6).join(",") || "none"}`
   })
 
   await timed("10c. Sellers with GPS coordinates", async () => {

@@ -170,7 +170,8 @@ export NODE_ENV=production
 
 try_reuse_tomcat_mysql
 if [[ "$mysql_complete" -eq 0 ]]; then
-  log "WARNING: Grandma Search/Near Me will fail (MySQL not configured for this Next.js process)."
+  log "WARNING: Next.js MySQL namespace incomplete. GPS persist, Umuriro drafts, client suggestions, admin Grandma sellers/drafts, and EBM helpers may fail."
+  log "  Grandma Search uses JAVA_BACKEND_BASE / BACKEND_URL → GET {base}/grandma/search, not Next.js MySQL."
 fi
 
 log "Restarting PM2 process: $PM2_APP_NAME"

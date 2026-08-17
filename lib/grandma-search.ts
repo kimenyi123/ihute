@@ -24,6 +24,9 @@ export type GrandmaSearchHighlight = {
 export const GRANDMA_SEARCH_MAX_QUERY_CHARS = 80
 export const GRANDMA_SEARCH_MAX_TOKENS = 8
 export const GRANDMA_SEARCH_CANDIDATE_CAP = 250
+/** Full shop ranking starts here; 1–3 chars stay autocomplete-only unless Near Me. */
+export const GRANDMA_FULL_SEARCH_MIN_CHARS = 4
+export const GRANDMA_SUGGEST_LIMIT = 8
 export const GRANDMA_PUBLIC_SEARCH_UNAVAILABLE =
   "Search is temporarily unavailable. Please try again shortly."
 export const GRANDMA_PUBLIC_NEARME_UNAVAILABLE =
@@ -32,6 +35,55 @@ export const GRANDMA_PUBLIC_GPS_PERMISSION = "Please allow location access to us
 export const GRANDMA_PUBLIC_NO_NEARBY = "No shops were found near your current location."
 export const GRANDMA_PUBLIC_INVALID_SEARCH = "Please enter a product or shop name."
 export const GRANDMA_PUBLIC_INVALID_RADIUS = "Please enter a valid search radius."
+
+export type GrandmaSearchShopHit = {
+  id: string
+  sellerAccount: string
+  name: string
+  sellerName: string
+  category: string
+  tagline: string
+  description: string
+  momo: string
+  nickname: string
+  latitude: number | null
+  longitude: number | null
+  distanceKm: number | null
+  score: number
+  matchTier: GrandmaMatchTier
+  highlights: GrandmaSearchHighlight[]
+  matchedProductSample?: string
+}
+
+export type GrandmaSearchResult = {
+  ok: true
+  source: "mysql" | "java"
+  query: string
+  shops: GrandmaSearchShopHit[]
+  suggestions: string[]
+  page: number
+  pageSize: number
+  total: number
+  hasMore: boolean
+  radiusKm: number | null
+  nearMe: boolean
+  emptyReason: string | null
+}
+
+export type GrandmaSearchParams = {
+  q?: string
+  sector?: string
+  category?: string
+  lat?: number
+  lng?: number
+  radiusKm?: number | null
+  nearMe?: boolean
+  page?: number
+  pageSize?: number
+  suggest?: boolean
+  /** Prefix autocomplete only — skip ranking and 250-candidate retrieval. */
+  suggestOnly?: boolean
+}
 
 /** True when a string looks like an internal diagnostic (never show to users). */
 export function isTechnicalGrandmaErrorText(raw: string): boolean {
@@ -544,6 +596,7 @@ export function buildGrandmaSearchLikePatterns(qRaw: string): string[] {
       const stem = t.slice(0, -1)
       if (stem.length >= 3) add(`%${stem}%`)
     }
+    if (t.length >= 5) add(`%${t.slice(0, 4)}%`)
     if (t.length >= 6) add(`%${t.slice(0, 5)}%`)
     if (t.length >= 5 && t.length <= 8 && collapsed === t) {
       for (let i = t.length - 2; i >= 2 && out.length < 6; i--) {
@@ -554,6 +607,28 @@ export function buildGrandmaSearchLikePatterns(qRaw: string): string[] {
       if (syn.length >= 3) add(`%${syn}%`)
     }
   }
+  return out.slice(0, 6)
+}
+
+/**
+ * Prefix LIKE cores (`query%`) for autocomplete and first-pass retrieval.
+ * Avoids leading-wildcard `%query%` so MySQL can use a range scan when collation allows.
+ */
+export function buildGrandmaPrefixLikePatterns(qRaw: string): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  const add = (core: string) => {
+    const t = normalizeSearchText(core)
+    if (!t) return
+    const p = `${t}%`
+    if (seen.has(p)) return
+    seen.add(p)
+    out.push(p)
+  }
+  for (const lex of grandmaSearchLexemes(qRaw)) add(lex)
+  const joined = joinSearchTokens(qRaw)
+  if (joined.length >= 3) add(joined)
+  add(collapseRepeatedLetters(normalizeSearchText(qRaw)))
   return out.slice(0, 6)
 }
 
