@@ -99,6 +99,7 @@ type Product = {
 }
 
 type SearchResult = {
+  ok?: boolean
   suppliersByName: Shop[]
   suppliersByProduct: Shop[]
   products: Product[]
@@ -108,6 +109,25 @@ type SearchResult = {
   /** When item is not in NIKI (Redis), backend falls back to DB and may set this */
   source?: "redis" | "database"
   fromNiki?: boolean
+  pagination?: {
+    page: number
+    limit: number
+    total: number
+    hasNext: boolean
+    supplierNameTotal?: number
+    supplierProductTotal?: number
+  }
+}
+
+function searchResponseErrorMessage(value: unknown, status: number): string {
+  const body = value as { error?: { message?: string } | string } | null
+  if (body?.error && typeof body.error === "object" && body.error.message) {
+    return body.error.message
+  }
+  if (typeof body?.error === "string") return body.error
+  if (status === 504) return "Search service timed out."
+  if (status === 503) return "Search service is temporarily unavailable."
+  return "Search service returned an invalid response."
 }
 
 type SectorSeller = {
@@ -554,6 +574,8 @@ export default function SearchPage() {
   const [q, setQ] = useState(initialQ)
   const [debouncedQ, setDebouncedQ] = useState("")
   const [loading, setLoading] = useState(false)
+  const [globalSearchPage, setGlobalSearchPage] = useState(1)
+  const globalSearchLimit = 20
   const [searchResult, setSearchResult] = useState<SearchResult | null>(null)
   const [selectedShop, setSelectedShop] = useState<Shop | null>(null)
   const [shopProducts, setShopProducts] = useState<Product[]>([])
@@ -804,6 +826,8 @@ export default function SearchPage() {
       try {
         const url = new URL(`/api/fetchSuggestions`, window.location.origin)
         url.searchParams.set("globalSearch", debouncedQ)
+        url.searchParams.set("page", String(globalSearchPage))
+        url.searchParams.set("limit", String(globalSearchLimit))
         url.searchParams.set("Currency", "RWF")
         if (selectedShop?.supplier_account) {
           url.searchParams.set("supplier", selectedShop.supplier_account)
@@ -827,9 +851,19 @@ export default function SearchPage() {
         }
 
         const res = await fetch(url.toString(), { cache: "no-store" })
-        const data: SearchResult = res.ok
-          ? await res.json()
-          : { suppliersByName: [], suppliersByProduct: [], products: [], query: debouncedQ }
+        const rawData: unknown = await res.json().catch(() => null)
+        if (!res.ok) {
+          throw new Error(searchResponseErrorMessage(rawData, res.status))
+        }
+        const data = rawData as SearchResult
+        if (
+          data?.ok !== true ||
+          !Array.isArray(data.products) ||
+          !Array.isArray(data.suppliersByName) ||
+          !Array.isArray(data.suppliersByProduct)
+        ) {
+          throw new Error("Search service returned an invalid response.")
+        }
 
         if (!cancelled) {
           // Log data source (Redis vs DB) for debugging
@@ -852,14 +886,30 @@ export default function SearchPage() {
           const filteredProducts = data.products || []
 
           // Keep light filtering for suppliers (optional - can be removed if backend handles it)
+          const normalizedSuppliersByName = (data.suppliersByName || []).map((supplier) => ({
+            ...supplier,
+            supplier_name:
+              supplier.supplier_name ||
+              (supplier as any).nickname ||
+              supplier.supplier_account ||
+              "",
+          }))
+          const normalizedSuppliersByProduct = (data.suppliersByProduct || []).map((supplier) => ({
+            ...supplier,
+            supplier_name:
+              supplier.supplier_name ||
+              (supplier as any).nickname ||
+              supplier.supplier_account ||
+              "",
+          }))
           const filteredSuppliersByName = filterSuppliersByRelevance(
-            data.suppliersByName || [],
+            normalizedSuppliersByName,
             debouncedQ,
             5 // Lowered threshold for full page results (more inclusive)
           )
 
           const filteredSuppliersByProduct = filterSuppliersByRelevance(
-            data.suppliersByProduct || [],
+            normalizedSuppliersByProduct,
             debouncedQ,
             5 // Lowered threshold for full page results (more inclusive)
           )
@@ -901,6 +951,10 @@ export default function SearchPage() {
     }
     run()
 
+  }, [debouncedQ, globalSearchPage, selectedShop?.supplier_account, locationParam, sectorParam])
+
+  useEffect(() => {
+    setGlobalSearchPage(1)
   }, [debouncedQ, selectedShop?.supplier_account, locationParam, sectorParam])
 
   // Seller catalogue (RIGHT)
@@ -917,7 +971,10 @@ export default function SearchPage() {
           selectedShop.supplier_account,
         )}&limit=240&Currency=RWF`
         const res = await fetch(url, { cache: "no-store" })
-        const raw = res.ok ? await res.json() : null
+        const raw = await res.json().catch(() => null)
+        if (!res.ok) {
+          throw new Error(searchResponseErrorMessage(raw, res.status))
+        }
         const data = normalizeSupplierProductsResponse(
           raw,
           selectedShop.supplier_account,
@@ -2011,7 +2068,7 @@ export default function SearchPage() {
                     {locationParam && <Badge variant="secondary">📍 {locationParam}</Badge>}
                     {sectorParam && <Badge variant="secondary">🗂️ {sectorParam}</Badge>}
                     <span className="text-sm font-normal text-gray-500">
-                      {searchProductsWithPrice.length} found
+                      {searchResult.pagination?.total ?? searchProductsWithPrice.length} found
                     </span>
                   </div>
                 </div>
@@ -2051,6 +2108,39 @@ export default function SearchPage() {
                     </div>
                   ))}
                 </div>
+                {searchResult.pagination && (searchResult.pagination.page > 1 || searchResult.pagination.hasNext) && (
+                  <Pagination className="mt-5">
+                    <PaginationContent>
+                      <PaginationItem>
+                        <PaginationPrevious
+                          href="#"
+                          className={searchResult.pagination.page <= 1 ? "pointer-events-none opacity-40" : undefined}
+                          onClick={(event) => {
+                            event.preventDefault()
+                            setGlobalSearchPage((current) => Math.max(1, current - 1))
+                          }}
+                        />
+                      </PaginationItem>
+                      <PaginationItem>
+                        <span className="px-3 text-sm text-muted-foreground">
+                          Page {searchResult.pagination.page}
+                        </span>
+                      </PaginationItem>
+                      <PaginationItem>
+                        <PaginationNext
+                          href="#"
+                          className={!searchResult.pagination.hasNext ? "pointer-events-none opacity-40" : undefined}
+                          onClick={(event) => {
+                            event.preventDefault()
+                            if (searchResult.pagination?.hasNext) {
+                              setGlobalSearchPage((current) => current + 1)
+                            }
+                          }}
+                        />
+                      </PaginationItem>
+                    </PaginationContent>
+                  </Pagination>
+                )}
               </section>
             )}
 

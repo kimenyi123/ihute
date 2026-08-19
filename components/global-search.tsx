@@ -49,6 +49,7 @@ export interface GlobalResult {
 }
 
 type GlobalSearchResponse = {
+  ok: boolean
   suppliersByName: GlobalResult[]
   suppliersByProduct: GlobalResult[]
   products: GlobalResult[]
@@ -66,6 +67,17 @@ type GlobalSearchResponse = {
     dataSource: string
     cacheHit: boolean
   }
+}
+
+function responseErrorMessage(value: unknown, status: number): string {
+  const body = value as { error?: { message?: string } | string } | null
+  if (body?.error && typeof body.error === "object" && body.error.message) {
+    return body.error.message
+  }
+  if (typeof body?.error === "string") return body.error
+  if (status === 504) return "Search service timed out."
+  if (status === 503) return "Search service is temporarily unavailable."
+  return "Search service returned an invalid response."
 }
 
 function productMatchScore(p: GlobalResult): number {
@@ -533,11 +545,19 @@ export function GlobalSearch({
 
         if (requestId !== searchRequestIdRef.current) return
 
+        const rawJson: unknown = await res.json().catch(() => null)
         if (!res.ok) {
-          throw new Error(`Search failed: ${res.status}`)
+          throw new Error(responseErrorMessage(rawJson, res.status))
         }
-
-        const json: GlobalSearchResponse = await res.json()
+        const json = rawJson as GlobalSearchResponse
+        if (
+          json?.ok !== true ||
+          !Array.isArray(json.products) ||
+          !Array.isArray(json.suppliersByName) ||
+          !Array.isArray(json.suppliersByProduct)
+        ) {
+          throw new Error("Search service returned an invalid response.")
+        }
 
         if (requestId !== searchRequestIdRef.current) return
 
@@ -572,9 +592,12 @@ export function GlobalSearch({
         )
 
         const allSuppliers = [...(json.suppliersByName || []), ...(json.suppliersByProduct || [])]
-        const validSuppliers = allSuppliers.filter((s) => s.supplier_name) as Array<
-          GlobalResult & { supplier_name: string }
-        >
+        const validSuppliers = allSuppliers
+          .filter((s) => s.supplier_name || s.supplier_account || (s as any).nickname)
+          .map((s) => ({
+            ...s,
+            supplier_name: s.supplier_name || (s as any).nickname || s.supplier_account || "",
+          })) as Array<GlobalResult & { supplier_name: string }>
 
         // More lenient thresholds for dropdown
         const supplierThreshold = filteredProducts.length > 0 ? 3 : 10
@@ -590,8 +613,30 @@ export function GlobalSearch({
           dedupedSuppliers.push(sup)
         }
 
-        const p = filteredProducts.slice(0, maxSuggestions)
-        const s = dedupedSuppliers.slice(0, Math.max(4, Math.floor(maxSuggestions * 0.3)))
+        const p = filteredProducts
+          .slice()
+          .sort((a, b) => {
+            const scoreOrder = (b.finalScore ?? 0) - (a.finalScore ?? 0)
+            if (scoreOrder !== 0) return scoreOrder
+            return String(a.item_code ?? a.item_commercial_name ?? "").localeCompare(
+              String(b.item_code ?? b.item_commercial_name ?? ""),
+              undefined,
+              { sensitivity: "base" },
+            )
+          })
+          .slice(0, maxSuggestions)
+        const s = dedupedSuppliers
+          .slice()
+          .sort((a, b) => {
+            const scoreOrder = (b.finalScore ?? 0) - (a.finalScore ?? 0)
+            if (scoreOrder !== 0) return scoreOrder
+            return String(a.supplier_account ?? a.supplier_name ?? "").localeCompare(
+              String(b.supplier_account ?? b.supplier_name ?? ""),
+              undefined,
+              { sensitivity: "base" },
+            )
+          })
+          .slice(0, Math.max(4, Math.floor(maxSuggestions * 0.3)))
 
         console.log("[GlobalSearch] Filtered results:", {
           rawProducts: allProducts.length,

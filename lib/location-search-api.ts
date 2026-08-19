@@ -5,13 +5,20 @@ const API_BASE_URL = "/api";
 
 export interface NearbySupplier {
     supplier_id: string;
+    supplierId?: string;
     nickname: string;
+    supplierName?: string;
     distance_km: number;
+    distance?: number;
     location: {
         lat: number;
         lng: number;
         address?: string;
     };
+    latitude?: number;
+    longitude?: number;
+    address?: string;
+    momo?: string;
     rating: number;
     gps_quality: 'GOOD' | 'FAIR' | 'POOR' | 'UNKNOWN';
 }
@@ -51,14 +58,18 @@ export async function searchNearbySuppliers(
     radiusKm?: number,
     limit: number = 20
 ): Promise<{ suppliers: NearbySupplier[]; count: number }> {
+    if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        return { suppliers: [], count: 0 };
+    }
+
     const params = new URLSearchParams({
         action: 'getNearbySuppliers',
         lat: lat.toString(),
         lng: lng.toString(),
-        limit: limit.toString(),
+        limit: Math.max(1, Math.min(100, limit)).toString(),
     });
 
-    if (radiusKm) {
+    if (radiusKm && !isNaN(radiusKm) && radiusKm > 0) {
         params.append('radiusKm', radiusKm.toString());
     }
 
@@ -85,12 +96,22 @@ export async function searchNearbyProducts(
     lng: number,
     limit: number = 10
 ): Promise<NearbySearchResponse> {
+    if (!query || !query.trim() || isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        return {
+            query: query || "",
+            buyer: { lat: isNaN(lat) ? 0 : lat, lng: isNaN(lng) ? 0 : lng },
+            radius_used_km: 0,
+            results: [],
+            count: 0,
+        };
+    }
+
     const params = new URLSearchParams({
         action: 'searchNearbyProducts',
-        q: query,
+        q: query.trim(),
         lat: lat.toString(),
         lng: lng.toString(),
-        limit: limit.toString(),
+        limit: Math.max(1, Math.min(100, limit)).toString(),
     });
 
     const response = await fetch(`${API_BASE_URL}/fetchSuggestions?${params}`, { cache: "no-store" });
