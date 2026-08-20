@@ -457,16 +457,12 @@ export function GlobalSearch({
       return
     }
 
-    let debounceTimer: ReturnType<typeof setTimeout> | undefined
-    const id = setTimeout(() => {
-      const requestId = ++searchRequestIdRef.current
-      const abortController = new AbortController()
-      /** Hard cap so the dropdown never spins until the browser default if the proxy hangs. */
-      /** Must allow Redis scan + DB fallback on slow local Kaos; stay under typical browser limits. */
-      const CLIENT_SEARCH_TIMEOUT_MS = 40000
-      const clientTimeout = setTimeout(() => abortController.abort(), CLIENT_SEARCH_TIMEOUT_MS)
+    const requestId = ++searchRequestIdRef.current
+    const abortController = new AbortController()
+    const CLIENT_SEARCH_TIMEOUT_MS = 25000
+    const clientTimeout = setTimeout(() => abortController.abort(), CLIENT_SEARCH_TIMEOUT_MS)
 
-      debounceTimer = setTimeout(async () => {
+    const id = setTimeout(async () => {
       setLoading(true)
       setErr(null)
       setSearchWarning(null)
@@ -547,56 +543,38 @@ export function GlobalSearch({
 
         const res = await fetch(`/api/fetchSuggestions?${params}`, {
           cache: "no-store",
-          headers: { Accept: "application/json" },
+          headers: {
+            Accept: "application/json",
+          },
           signal: abortController.signal,
         })
 
-        if (requestId !== searchRequestIdRef.current) return
-
         if (!res.ok) {
-          throw new Error(`Search failed: ${res.status}`)
+          const errJson = (await res.json().catch(() => ({}))) as { error?: string }
+          throw new Error(errJson.error ?? `Search failed (${res.status})`)
         }
 
         const json: GlobalSearchResponse = await res.json()
-
         if (requestId !== searchRequestIdRef.current) return
 
         if (json.warning) {
           setSearchWarning(json.warning)
         }
 
-        console.log("[GlobalSearch] Raw response:", {
-          products: json.products?.length || 0,
-          suppliersByName: json.suppliersByName?.length || 0,
-          suppliersByProduct: json.suppliersByProduct?.length || 0,
-          stats: json.searchStats,
-          warning: json.warning,
-        })
+        const rawProducts: GlobalResult[] = json.products || []
+        const rawSuppliers: GlobalResult[] = json.suppliersByName || []
+        const suppliersByProd: GlobalResult[] = json.suppliersByProduct || []
+        const allSuppliers = [...rawSuppliers, ...suppliersByProd]
 
-        // Validate response structure
-        if (!json.products && !json.suppliersByName && !json.suppliersByProduct) {
-          console.warn("[GlobalSearch] Empty response structure:", json)
-          setProducts([])
-          setSuppliers([])
-          setStats(null)
-          setFromNiki(null)
-          setOpen(true)
-          return
-        }
-
-        const allProducts = json.products || []
-        // Use lower threshold for dropdown (showing fewer results, can afford to be more inclusive)
         const filteredProducts = narrowGlobalDropdownToBestMatch(
-          filterProductsByRelevance(allProducts, trimmedQuery, 5),
+          filterProductsByRelevance(rawProducts, trimmedQuery, 5),
           trimmedQuery
         )
 
-        const allSuppliers = [...(json.suppliersByName || []), ...(json.suppliersByProduct || [])]
         const validSuppliers = allSuppliers.filter((s) => s.supplier_name) as Array<
           GlobalResult & { supplier_name: string }
         >
 
-        // More lenient thresholds for dropdown
         const supplierThreshold = filteredProducts.length > 0 ? 3 : 10
         const filteredSuppliers = filterSuppliersByRelevance(validSuppliers, trimmedQuery, supplierThreshold)
 
@@ -612,16 +590,6 @@ export function GlobalSearch({
 
         const p = filteredProducts.slice(0, maxSuggestions)
         const s = dedupedSuppliers.slice(0, Math.max(4, Math.floor(maxSuggestions * 0.3)))
-
-        console.log("[GlobalSearch] Filtered results:", {
-          rawProducts: allProducts.length,
-          filteredProducts: filteredProducts.length,
-          shownProducts: p.length,
-          rawSuppliers: validSuppliers.length,
-          filteredSuppliers: filteredSuppliers.length,
-          shownSuppliers: s.length,
-          topProductScores: p.slice(0, 3).map((x) => x.finalScore),
-        })
 
         setProducts(p)
         setSuppliers(s)
@@ -665,12 +633,12 @@ export function GlobalSearch({
           setLoading(false)
         }
       }
-      }, 150)
-    }, 0)
+    }, 120)
 
     return () => {
       clearTimeout(id)
-      if (debounceTimer !== undefined) clearTimeout(debounceTimer)
+      clearTimeout(clientTimeout)
+      abortController.abort()
     }
   }, [q, maxSuggestions, sector, categoryBrowseMode, location, isCategoryAi])
 
