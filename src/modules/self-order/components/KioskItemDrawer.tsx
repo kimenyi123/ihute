@@ -7,6 +7,7 @@ import type { KioskMenuItem } from "@/src/modules/self-order/types"
 import { useCartStore } from "@/lib/cart-store"
 import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price"
 import { itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
+import { ProductImageFallback } from "@/components/product-image-fallback"
 
 interface KioskItemDrawerProps {
   item: KioskMenuItem | null
@@ -62,16 +63,13 @@ export function KioskItemDrawer({ item, open, onOpenChange }: KioskItemDrawerPro
           </SheetTitle>
         </SheetHeader>
         <div className="flex flex-col md:flex-row gap-6 p-4">
-          {item.image_url && (
-            <div className="w-full md:w-64 h-40 md:h-48 rounded-2xl overflow-hidden bg-slate-900">
-              { }
-              <img
-                src={item.image_url}
-                alt={item.item_commercial_name || ""}
-                className="w-full h-full object-cover"
-              />
-            </div>
-          )}
+          <div className="w-full md:w-64 h-40 md:h-48 rounded-2xl overflow-hidden bg-slate-900">
+            <ProductImageFallback
+              source={item as any}
+              alt={item.item_commercial_name || item.item_name || ""}
+              className="w-full h-full object-cover"
+            />
+          </div>
           <div className="flex-1 space-y-4">
             <div>
               <p className="text-lg font-semibold">

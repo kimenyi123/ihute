@@ -63,6 +63,10 @@ export const useLocationStoreEnhanced = create<LocationState>()(
     {
       name: "location-enhanced-storage",
       storage: createJSONStorage(() => localStorage),
+      version: 1,
+      migrate: (persistedState: any) => {
+        return persistedState as LocationState
+      },
     }
   )
 )

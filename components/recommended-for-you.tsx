@@ -9,6 +9,7 @@ import { TrendingUp, Sparkles } from "lucide-react"
 import { getSmartRecommendations } from "@/lib/recommendation-service"
 import { trackABTestEvent } from "@/lib/recommendation-config"
 import { getProductImageSrc } from "@/lib/image-utils"
+import { ProductImageFallback } from "@/components/product-image-fallback"
 
 /**
  * Personalized "Recommended for You" Section
@@ -173,17 +174,11 @@ export function RecommendedForYou({ className, limit = 12 }: RecommendedForYouPr
                         <Card className="h-full hover:shadow-lg transition-shadow">
                             <CardContent className="p-3 space-y-2">
                                 <div className="aspect-square bg-muted rounded-lg overflow-hidden">
-                                    {product.image ? (
-                                        <img
-                                            src={product.image}
-                                            alt={product.name}
-                                            className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                                        />
-                                    ) : (
-                                        <div className="w-full h-full flex items-center justify-center text-muted-foreground">
-                                            No image
-                                        </div>
-                                    )}
+                                    <ProductImageFallback
+                                        source={product as any}
+                                        alt={product.name}
+                                        className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                                    />
                                 </div>
                                 <div className="space-y-1">
                                     <p className="text-sm font-medium line-clamp-2 group-hover:text-blue-600 transition-colors">

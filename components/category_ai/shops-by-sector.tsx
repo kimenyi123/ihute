@@ -207,8 +207,6 @@ export function mapListSuppliersWithProductsToShops(arr: unknown[]): ShopInfo[] 
       }
     })
     .filter((s: ShopInfo) => s.seller_account || s.seller_name)
-    // Hide empty catalogs on /category_ai/* and Shops-by-sector (e.g. "0 items")
-    .filter((s: ShopInfo) => (s.stockLineCount ?? 0) > 0)
 }
 
 function shopLogoSrc(shop: ShopInfo, imageMap?: Record<string, string>): string | null {
@@ -407,9 +405,10 @@ export function ShopsBySector() {
               </h3>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
                 {shops.map((shop) => {
-                  const canLink = Boolean((shop.officialNickname || "").trim())
+                  const slug = (shop.officialNickname || shop.seller_account || shop.seller_name || "").trim().toLowerCase()
+                  const canLink = Boolean(slug)
                   const href = canLink
-                    ? `/shop-with-me/${encodeURIComponent((shop.officialNickname || "").trim().toLowerCase())}`
+                    ? `/shop-with-me/${encodeURIComponent(slug)}`
                     : ""
                   const logo = shopLogoSrc(shop, shopImageMap)
                   const lines = shop.stockLineCount
@@ -432,17 +431,19 @@ export function ShopsBySector() {
                         <span
                           className={cn(
                             "text-[11px] mt-1.5 line-clamp-1 w-full",
-                            canLink ? "text-primary font-medium" : "text-amber-700 dark:text-amber-500"
+                            shop.officialNickname ? "text-primary font-medium" : "text-muted-foreground"
                           )}
                         >
-                          <span className="text-muted-foreground font-normal">{t("shopsListNickname" as TranslationKey)}: </span>
-                          {canLink ? (
-                            <span className="tabular-nums">@{shop.officialNickname!.trim()}</span>
+                          {shop.officialNickname ? (
+                            <>
+                              <span className="text-muted-foreground font-normal">{t("shopsListNickname" as TranslationKey)}: </span>
+                              <span className="tabular-nums">@{shop.officialNickname.trim()}</span>
+                            </>
                           ) : (
-                            <span>{t("shopsListNoNickname" as TranslationKey)}</span>
+                            <span>{shop.seller_account ? `${shop.seller_account}` : t("shopsListNoNickname" as TranslationKey)}</span>
                           )}
                         </span>
-                        {lines != null && (
+                        {lines != null && lines > 0 && (
                           <span
                             className="text-[11px] text-muted-foreground mt-1 tabular-nums"
                             title="Catalog lines (from seller stock / product list)"
@@ -496,14 +497,17 @@ export function ShopsForSingleSector({
   const SHOPS_PER_PAGE = 15
 
   const filteredShops = useMemo(() => {
-    let list = shops.filter((s) => (s.stockLineCount ?? 0) > 0)
+    let list = shops
     const pref = (locationPref || "").trim().toLowerCase()
     if (pref) {
-      list = list.filter((s) => {
+      const locationFiltered = list.filter((s) => {
         const loc = (s.seller_location || "").toLowerCase()
         const name = (s.seller_name || "").toLowerCase()
         return loc.includes(pref) || name.includes(pref)
       })
+      if (locationFiltered.length > 0) {
+        list = locationFiltered
+      }
     }
     const fq = (filterQuery || "").trim()
     if (fq) {
@@ -543,9 +547,10 @@ export function ShopsForSingleSector({
         <>
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
           {pagedShops.map((shop) => {
-            const canLink = Boolean((shop.officialNickname || "").trim())
+            const slug = (shop.officialNickname || shop.seller_account || shop.seller_name || "").trim().toLowerCase()
+            const canLink = Boolean(slug)
             const href = canLink
-              ? `/shop-with-me/${encodeURIComponent((shop.officialNickname || "").trim().toLowerCase())}`
+              ? `/shop-with-me/${encodeURIComponent(slug)}`
               : ""
             const logo = shopLogoSrc(shop, shopImageMap)
             const lines = shop.stockLineCount
@@ -568,17 +573,19 @@ export function ShopsForSingleSector({
                   <span
                     className={cn(
                       "text-[11px] mt-1.5 line-clamp-1 w-full",
-                      canLink ? "text-primary font-medium" : "text-amber-700 dark:text-amber-500"
+                      shop.officialNickname ? "text-primary font-medium" : "text-muted-foreground"
                     )}
                   >
-                    <span className="text-muted-foreground font-normal">{t("shopsListNickname" as TranslationKey)}: </span>
-                    {canLink ? (
-                      <span className="tabular-nums">@{shop.officialNickname!.trim()}</span>
+                    {shop.officialNickname ? (
+                      <>
+                        <span className="text-muted-foreground font-normal">{t("shopsListNickname" as TranslationKey)}: </span>
+                        <span className="tabular-nums">@{shop.officialNickname.trim()}</span>
+                      </>
                     ) : (
-                      <span>{t("shopsListNoNickname" as TranslationKey)}</span>
+                      <span>{shop.seller_account ? `${shop.seller_account}` : t("shopsListNoNickname" as TranslationKey)}</span>
                     )}
                   </span>
-                  {lines != null && (
+                  {lines != null && lines > 0 && (
                     <span className="text-[11px] text-muted-foreground mt-1 tabular-nums">{lines} items</span>
                   )}
                 </CardContent>

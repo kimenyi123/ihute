@@ -119,6 +119,10 @@ export const useLocationStore = create<LocationState>()(
     {
       name: "location-storage",
       storage: createJSONStorage(() => localStorage),
+      version: 1,
+      migrate: (persistedState: any) => {
+        return persistedState as LocationState
+      },
     }
   )
 )
