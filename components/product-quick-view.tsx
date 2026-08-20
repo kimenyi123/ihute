@@ -42,6 +42,9 @@ export type QuickViewProduct = ProductImageSource & {
   FAMILLE?: string
   item_key_words?: string
   item_code?: string
+  niki_code?: string
+  NIKI_CODE?: string
+  nikiCode?: string
   requiresPrescription?: boolean
   requires_prescription?: boolean
 }
@@ -107,7 +110,7 @@ export function ProductQuickView({ product, open, onOpenChange, onAddToCart }: P
           <div className="relative aspect-square w-full rounded-lg bg-muted overflow-hidden">
             {src.startsWith("http") ? (
               <img
-                key={src}
+                key={`${src}-${candidateIdx}`}
                 src={src}
                 alt={product.name}
                 className="object-cover w-full h-full"
@@ -119,7 +122,7 @@ export function ProductQuickView({ product, open, onOpenChange, onAddToCart }: P
               />
             ) : (
               <Image
-                key={src}
+                key={`${src}-${candidateIdx}`}
                 src={src}
                 alt={product.name}
                 fill
