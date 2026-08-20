@@ -273,6 +273,9 @@ export function CrazyShoppingBoarding() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const login = useAuthStore((s) => s.login)
+  const authUser = useAuthStore((s) => s.user)
+  const authHydrated = useAuthStore((s) => s.hasHydrated)
+  const supplierNikiMode = searchParams.get("source") === "supplier"
   const [step, setStep] = useState<1 | 2>(1)
   const [business, setBusiness] = useState<ShopBusinessDraft>(initialBusiness)
   const [searchQ, setSearchQ] = useState("")
@@ -724,6 +727,60 @@ export function CrazyShoppingBoarding() {
       return
     }
     if (!validateLinesForSubmit()) return
+
+    if (supplierNikiMode) {
+      if (!authHydrated || authUser?.role !== "supplier" || !authUser.ishyigaAccount?.trim()) {
+        setErr("Your supplier session is unavailable. Sign in again and retry.")
+        return
+      }
+
+      const supplierAccount = authUser.ishyigaAccount.trim()
+      const bulkLines = lines.filter((row) => String(row.nikiCode ?? "").trim().length > 0)
+      if (bulkLines.length === 0) {
+        setErr("Select at least one NIKI product before submitting.")
+        return
+      }
+
+      setErr(null)
+      setSubmitting(true)
+      setDoneMsg(null)
+      try {
+        const stockRes = await fetch("/api/grandma/sellers/stock", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sellerAccount: supplierAccount,
+            lines: bulkLines.map((row) => ({
+              nikiCode: row.nikiCode,
+              name: row.name,
+              quantity: row.quantity,
+              salePrice: row.salePrice,
+              profitRwf: row.profitRwf,
+              descriptionKeywords: row.descriptionKeywords,
+            })),
+          }),
+        })
+        const stockJson = (await stockRes.json().catch(() => ({}))) as {
+          ok?: boolean
+          inserted?: number
+          error?: string
+        }
+        if (!stockRes.ok || !stockJson.ok) {
+          throw new Error(stockJson.error || "Could not save stock lines")
+        }
+
+        const inserted = typeof stockJson.inserted === "number" ? stockJson.inserted : bulkLines.length
+        setDoneMsg(`${inserted} NIKI product(s) added to your stock.`)
+        setLines([])
+        setPicks([])
+      } catch (e: unknown) {
+        setErr(e instanceof Error ? e.message : "Could not save stock lines")
+      } finally {
+        setSubmitting(false)
+      }
+      return
+    }
+
     if (!locationSelected) {
       const msg = pickLang(ERR.currentLocationRequired, lang)
       setFieldErrors((prev) => ({ ...prev, "seller-field-shop-location": msg }))

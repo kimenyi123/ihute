@@ -750,7 +750,7 @@ export function UmuriroBoarding() {
       if (json.persisted !== true) {
         throw new Error(
           pickLang(UMURIRO_UI.saveOrderDbNotConfigured, lang) ||
-            "Order was not saved to the database. Check server ONBOARDING_MYSQL_* settings.",
+            "Order was not saved to the database. Ask admin to set ONBOARDING_MYSQL_* on the server.",
         )
       }
 
@@ -758,13 +758,10 @@ export function UmuriroBoarding() {
 
       if (mode === "quick") {
         const ridStr = typeof json.rid === "string" ? json.rid.trim() : ""
-        const persisted = json.persisted === true
-        if (persisted && ridStr) {
+        if (ridStr) {
           setDoneMsg(pickLang(UMURIRO_UI.orderSentQuickWithRef, lang).replace("{rid}", ridStr))
-        } else if (persisted) {
-          setDoneMsg(pickLang(UMURIRO_UI.orderSentQuick, lang))
         } else {
-          setDoneMsg(pickLang(UMURIRO_UI.orderSentQuickPendingShop, lang))
+          setDoneMsg(pickLang(UMURIRO_UI.orderSentQuick, lang))
         }
         setCartLines([])
       } else {
