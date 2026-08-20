@@ -10,6 +10,24 @@ function noTrailingSlash(s: string): string {
   return (s || "").replace(/\/+$/, "")
 }
 
+function requireBackendUrlWithContext(raw: string, variableName: string): string {
+  const normalized = noTrailingSlash(raw.trim())
+  if (!normalized) return normalized
+  try {
+    const url = new URL(normalized)
+    if (!url.protocol || !url.host) {
+      throw new Error("missing protocol or host")
+    }
+    if (!url.pathname || url.pathname === "/") {
+      throw new Error(`${variableName} must include the Tomcat WAR context path`)
+    }
+    return normalized
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("must include")) throw error
+    throw new Error(`${variableName} is not a valid backend URL`)
+  }
+}
+
 const LOCAL_JAVA_BACKEND_DEFAULT = "http://localhost:8082/Trading"
 
 /** NEXT_PUBLIC_API_URL is often set to frontend origin; only use it for Java proxying when it clearly targets Trading. */
@@ -54,7 +72,7 @@ export function getBackendBase(): string {
 
   let raw: string
   if (explicit) {
-    raw = noTrailingSlash(explicit)
+    raw = requireBackendUrlWithContext(explicit, getExplicitBackendVariableName())
   } else if (process.env.NODE_ENV === "development") {
     raw = LOCAL_JAVA_BACKEND_DEFAULT
   } else {
@@ -72,6 +90,12 @@ export function getBackendBase(): string {
   } catch {
     return raw
   }
+}
+
+function getExplicitBackendVariableName(): string {
+  if (process.env.JAVA_BACKEND_BASE?.trim()) return "JAVA_BACKEND_BASE"
+  if (process.env.BACKEND_URL?.trim()) return "BACKEND_URL"
+  return "NEXT_PUBLIC_API_URL"
 }
 
 /** Tomcat context from {@link getBackendBase} (e.g. Trading, Trading_beta, Trading_dev) — never hardcoded. */
@@ -297,7 +321,57 @@ export function getDeliveryUrl(): string {
 }
 
 export function getFetchSuggestionsUrl(): string {
-  return process.env.JAVA_FETCH_SUGGESTIONS_URL || `${getBackendBaseForProxy()}/Kaos/fetchSuggestions`
+  const explicit = process.env.JAVA_FETCH_SUGGESTIONS_URL?.trim() || ""
+  if (explicit) {
+    const normalized = noTrailingSlash(explicit)
+    try {
+      const url = new URL(normalized)
+      if (!url.pathname.toLowerCase().endsWith("/kaos/fetchsuggestions")) {
+        throw new Error("JAVA_FETCH_SUGGESTIONS_URL must target /Kaos/fetchSuggestions")
+      }
+      return normalized
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("must target")) throw error
+      throw new Error("JAVA_FETCH_SUGGESTIONS_URL is not a valid URL")
+    }
+  }
+  return `${getBackendBaseForProxy()}/Kaos/fetchSuggestions`
+}
+
+export type SearchBackendDiagnostics = {
+  configuredBy: string
+  host: string
+  context: string
+  endpointPath: string
+  valid: boolean
+}
+
+/** Safe diagnostics for deployment checks; does not return the configured URL. */
+export function getSearchBackendDiagnostics(): SearchBackendDiagnostics {
+  try {
+    const endpoint = new URL(getFetchSuggestionsUrl())
+    const segments = endpoint.pathname.split("/").filter(Boolean)
+    const endpointPath = `/${segments.slice(-2).join("/")}`
+    return {
+      configuredBy: process.env.JAVA_FETCH_SUGGESTIONS_URL?.trim()
+        ? "JAVA_FETCH_SUGGESTIONS_URL"
+        : getExplicitBackendVariableName(),
+      host: endpoint.host,
+      context: segments.length >= 2 ? `/${segments[0]}` : "",
+      endpointPath,
+      valid: endpointPath.toLowerCase() === "/kaos/fetchsuggestions" && segments.length >= 3,
+    }
+  } catch {
+    return {
+      configuredBy: process.env.JAVA_FETCH_SUGGESTIONS_URL?.trim()
+        ? "JAVA_FETCH_SUGGESTIONS_URL"
+        : getExplicitBackendVariableName(),
+      host: "",
+      context: "",
+      endpointPath: "/Kaos/fetchSuggestions",
+      valid: false,
+    }
+  }
 }
 
 /** Sector-only AND-token search (shops vs items); separate servlet from fetchSuggestions globalSearch. */

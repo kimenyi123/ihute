@@ -353,8 +353,33 @@ export function filterProductsByRelevance<T extends {
     return { ...product, finalScore }
   })
 
-  const filtered = scoredProducts.filter((item) => item.finalScore >= effectiveMinScore)
-  const sorted = filtered.sort((a, b) => b.finalScore - a.finalScore)
+  const filtered = scoredProducts.filter((item) => {
+    const productRecord = item as Record<string, unknown>
+    const normalizedCodes = [
+      item.item_code,
+      productRecord.ITEM_CODE,
+      productRecord.niki_code,
+      productRecord.NIKI_CODE,
+      item.item_key_words,
+    ]
+      .map((value) => String(value ?? "").trim().toLowerCase())
+      .filter(Boolean)
+    const exactCode = terms.some((term) => normalizedCodes.includes(term))
+    return exactCode || item.finalScore >= effectiveMinScore
+  })
+  const sorted = filtered.sort((a, b) => {
+    const scoreOrder = b.finalScore - a.finalScore
+    if (scoreOrder !== 0) return scoreOrder
+    const nameOrder = String(a.item_commercial_name ?? "").localeCompare(
+      String(b.item_commercial_name ?? ""),
+      undefined,
+      { sensitivity: "base" },
+    )
+    if (nameOrder !== 0) return nameOrder
+    return String(a.item_code ?? "").localeCompare(String(b.item_code ?? ""), undefined, {
+      sensitivity: "base",
+    })
+  })
 
   const filteredOutCount = scoredProducts.length - filtered.length
   console.log(

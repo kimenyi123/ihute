@@ -1,17 +1,15 @@
 // app/api/global-search/route.ts
 import type { NextRequest } from "next/server"
-import { getBackendBase } from "@/lib/backend-config"
 import {
   buildCacheKey,
   getCached,
   setCached,
   SUGGESTIONS_TTL_SEC,
 } from "@/lib/redis-cache"
+import { getFetchSuggestionsUrl } from "@/lib/backend-config"
 import { dedupeSearchProductsByItemCodeAndSellingPrice } from "@/lib/dedupe-search-products"
 import { enrichFetchSuggestionsProducts } from "@/lib/fetch-suggestions-enrich"
 import { stripExpiredFromFetchSuggestionsBody } from "@/lib/catalog-expiry-filter"
-
-function withTrailingSlash(u: string) { return u.endsWith("/") ? u : u + "/" }
 
 function paramsToRecord(searchParams: URLSearchParams): Record<string, string> {
   const out: Record<string, string> = {}
@@ -20,9 +18,8 @@ function paramsToRecord(searchParams: URLSearchParams): Record<string, string> {
 }
 
 async function forward(req: NextRequest) {
-  const backendBase = withTrailingSlash(getBackendBase())
   const incoming = new URL(req.url)
-  const target = new URL("/fetchSuggestions", backendBase)
+  const target = new URL(getFetchSuggestionsUrl())
 
   // copy query params (backend must always search Redis first, then DB)
   incoming.searchParams.forEach((v, k) => target.searchParams.append(k, v))

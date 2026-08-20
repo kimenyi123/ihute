@@ -98,6 +98,10 @@ pipelines:
       - step: *ci
       - step: *deploy-dev
 
+    GRANDMA:
+      - step: *ci
+      - step: *deploy-grandma
+
     "**":
       - step: *ci
 

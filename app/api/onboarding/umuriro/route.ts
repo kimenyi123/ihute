@@ -10,7 +10,7 @@ import { buildUmuriroSellerSmsBodyFromLines } from "@/lib/umuriro-seller-sms"
 
 /**
  * Umuriro: minimal “shop contact + purchase line + MoMo USSD” payload.
- * Persists to `shop_onboarding_draft` when ONBOARDING_MYSQL_* is set (Quick + Advanced).
+ * Persists to `shop_onboarding_draft` before reporting success (Quick + Advanced).
  * SMS audit → `umuriro_sms_outbound` (best-effort; does not block save).
  */
 
@@ -89,24 +89,32 @@ export async function POST(req: Request) {
     const enriched = { ...record, rid }
     const mysqlConfigured = isOnboardingMysqlConfigured()
 
-    if (mysqlConfigured) {
-      try {
-        await persistShopOnboardingDraft(enriched)
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e)
-        console.error(`[umuriro ${rid}] draft insert failed:`, msg)
-        return NextResponse.json(
-          {
-            ok: false,
-            error: friendlyDbError(msg, shopName),
-            rid,
-            persisted: false,
-          },
-          { status: 503 },
-        )
-      }
-    } else {
-      console.log(`[umuriro ${rid}] No ONBOARDING_MYSQL_* — echo only (set env to persist)`)
+    if (!mysqlConfigured) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "ONBOARDING_MYSQL_* is not configured on the server. Cannot save order.",
+          rid,
+          persisted: false,
+        },
+        { status: 503 },
+      )
+    }
+
+    try {
+      await persistShopOnboardingDraft(enriched)
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      console.error(`[umuriro ${rid}] draft insert failed:`, msg)
+      return NextResponse.json(
+        {
+          ok: false,
+          error: friendlyDbError(msg, shopName),
+          rid,
+          persisted: false,
+        },
+        { status: 503 },
+      )
     }
 
     const line = record.line as Record<string, unknown> | undefined
@@ -167,17 +175,13 @@ export async function POST(req: Request) {
       }
     }
 
-    const persisted = mysqlConfigured
-
     return NextResponse.json({
       ok: true,
       rid,
-      persisted,
+      persisted: true,
       sms,
       smsPreview,
-      message: persisted
-        ? "Order saved to shop_onboarding_draft."
-        : "Received (echo). Set ONBOARDING_MYSQL_* + shop_onboarding_draft to persist.",
+      message: "Order saved to shop_onboarding_draft.",
     })
   } catch (e: unknown) {
     console.error(`[umuriro ${rid}]`, e)

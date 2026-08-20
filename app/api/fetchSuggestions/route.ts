@@ -1,6 +1,11 @@
 // app/api/fetchSuggestions/route.ts
 import type { NextRequest } from "next/server"
-import { getFetchSuggestionsUrl, getProxyTimeoutMs, warmJavaBackendBase } from "@/lib/backend-config"
+import {
+  getFetchSuggestionsUrl,
+  getProxyTimeoutMs,
+  getSearchBackendDiagnostics,
+  warmJavaBackendBase,
+} from "@/lib/backend-config"
 import {
   buildCacheKey,
   getCached,
@@ -13,6 +18,12 @@ import { enrichFetchSuggestionsProducts } from "@/lib/fetch-suggestions-enrich"
 import { stripExpiredFromFetchSuggestionsBody } from "@/lib/catalog-expiry-filter"
 import { recordSearchEvent } from "@/lib/mysql-search-analytics"
 import { shouldRunTextSearch } from "@/lib/search-query-min"
+import {
+  buildSearchError,
+  classifySearchUpstreamFailure,
+  normalizeSearchSuccess,
+  searchErrorResponse,
+} from "@/lib/search-api-contract"
 
 /**
  * Global search can spend ~8–15s on Redis (many supplier_* blobs) plus NIKI MySQL.
@@ -96,8 +107,24 @@ function sectorStatsErrorBody(sectorSlug: string, warning: string): string {
 }
 
 async function forward(req: NextRequest) {
-  await warmJavaBackendBase()
   const incoming = new URL(req.url)
+  const query = incoming.searchParams.get("globalSearch")?.trim() || ""
+  let target: URL
+  try {
+    await warmJavaBackendBase()
+    target = new URL(getFetchSuggestionsUrl())
+  } catch {
+    console.error("[fetchSuggestions] Backend configuration is invalid")
+    return searchErrorResponse(
+      503,
+      buildSearchError(
+        "SEARCH_BACKEND_UNAVAILABLE",
+        "UPSTREAM_UNAVAILABLE",
+        "Search service is temporarily unavailable.",
+        query,
+      ),
+    )
+  }
   const globalSearchRaw = incoming.searchParams.get("globalSearch")?.trim() ?? ""
   if (globalSearchRaw && !shouldRunTextSearch(globalSearchRaw)) {
     return new Response(
@@ -130,8 +157,6 @@ async function forward(req: NextRequest) {
     Boolean(sectorStatsParam?.trim()) ||
     debugSql ||
     (Boolean(supplierProductsParamEarly) && Number.isFinite(limitN) && limitN >= 1000)
-  const target = new URL(getFetchSuggestionsUrl())
-
   // Copy query params. Backend must always search Redis first, then DB (see docs/backend-redis-search.md).
   // Category, brand, price: frontend sends category, brand, priceMin, priceMax; backend can filter by them.
   // See docs/backend-category-price-filters.md for SQL/API guidance.
@@ -150,6 +175,11 @@ async function forward(req: NextRequest) {
     try {
       const parsed = JSON.parse(cached) as { products?: unknown[] }
       const globalSearchQ = incoming.searchParams.get("globalSearch")?.trim()
+      if (globalSearchQ) {
+        const normalized = normalizeSearchSuccess(parsed, globalSearchQ)
+        if (!normalized) throw new Error("Invalid cached search response")
+        Object.assign(parsed, normalized)
+      }
       // Drop expired lots first so dedupe never picks an expired row as representative when a valid batch exists.
       stripExpiredFromFetchSuggestionsBody(parsed)
       applyGlobalSearchDedupe(parsed, globalSearchQ, true, keepAllShops)
@@ -172,11 +202,15 @@ async function forward(req: NextRequest) {
   }
 
   // Cache miss: call backend (DB), then store in Redis
-  console.log(
-    "[fetchSuggestions] Redis miss, forwarding to backend:",
-    target.toString(),
-    debugSql ? "(debugSql=1: Next Redis cache bypassed)" : "",
-  )
+  const backendDiagnostics = getSearchBackendDiagnostics()
+  console.log("[fetchSuggestions] Redis miss, forwarding to backend", {
+    configuredBy: backendDiagnostics.configuredBy,
+    host: backendDiagnostics.host,
+    context: backendDiagnostics.context,
+    endpointPath: backendDiagnostics.endpointPath,
+    valid: backendDiagnostics.valid,
+    debugSql,
+  })
 
   const method = req.method
   const headers: Record<string, string> = {
@@ -224,28 +258,21 @@ async function forward(req: NextRequest) {
           }
         )
       }
-      return new Response(JSON.stringify({
-        ok: true,
-        suppliersByName: [],
-        suppliersByProduct: [],
-        products: [],
-        query: incoming.searchParams.get('globalSearch') || '',
-        warning: "Search service temporarily unavailable"
-      }), {
-        status: 200,
-        headers: {
-          "content-type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        },
-      })
+      return searchErrorResponse(
+        502,
+        buildSearchError(
+          "SEARCH_BACKEND_UNAVAILABLE",
+          "UPSTREAM_UNAVAILABLE",
+          "Search service is temporarily unavailable.",
+          query,
+        ),
+      )
     }
 
     const outBody = await resp.text()
 
     if (sectorStatsParam && debugSql) {
-      console.log("[fetchSuggestions][sectorStats-DEBUG] upstream URL:", target.toString())
+      console.log("[fetchSuggestions][sectorStats-DEBUG] upstream endpoint", getSearchBackendDiagnostics())
       for (const hn of SECTOR_STATS_DEBUG_HEADER_NAMES) {
         const hv = resp.headers.get(hn)
         if (hv) {
@@ -259,7 +286,7 @@ async function forward(req: NextRequest) {
     try {
       parsed = JSON.parse(outBody)
     } catch (e) {
-      console.error("Invalid JSON from backend:", outBody.substring(0, 200))
+      console.error("[fetchSuggestions] Backend returned invalid JSON")
       if (sectorStatsParam) {
         return new Response(sectorStatsErrorBody(sectorStatsParam, "Invalid JSON from backend for sectorStats"), {
           status: 200,
@@ -271,22 +298,42 @@ async function forward(req: NextRequest) {
           },
         })
       }
-      return new Response(JSON.stringify({ 
-        ok: false, 
-        error: "Invalid response format from backend",
-        suppliersByName: [],
-        suppliersByProduct: [], 
-        products: [],
-        query: incoming.searchParams.get('globalSearch') || ''
-      }), {
-        status: 502,
-        headers: {
-          "content-type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        },
-      })
+      return searchErrorResponse(
+        502,
+        buildSearchError(
+          "SEARCH_INVALID_UPSTREAM_RESPONSE",
+          "BAD_GATEWAY",
+          "Search service returned an invalid response.",
+          query,
+        ),
+      )
+    }
+
+    if (query) {
+      if (Array.isArray(parsed)) {
+        return searchErrorResponse(
+          502,
+          buildSearchError(
+            "SEARCH_INVALID_UPSTREAM_RESPONSE",
+            "BAD_GATEWAY",
+            "Search service returned an invalid response.",
+            query,
+          ),
+        )
+      }
+      const normalized = normalizeSearchSuccess(parsed, query)
+      if (!normalized) {
+        return searchErrorResponse(
+          502,
+          buildSearchError(
+            "SEARCH_INVALID_UPSTREAM_RESPONSE",
+            "BAD_GATEWAY",
+            "Search service returned an invalid response.",
+            query,
+          ),
+        )
+      }
+      parsed = normalized
     }
 
     const supplierProductsParam = incoming.searchParams.get("supplierProducts")?.trim() || ""
@@ -390,7 +437,6 @@ async function forward(req: NextRequest) {
   } catch (err: any) {
     console.error("Backend fetch error:", err?.message || err)
     
-    // Return empty results instead of error for search timeouts
     if (err?.name === "AbortError") {
       if (sectorStatsParam) {
         return new Response(
@@ -404,25 +450,20 @@ async function forward(req: NextRequest) {
           }
         )
       }
-      return new Response(JSON.stringify({
-        ok: true,
-        suppliersByName: [],
-        suppliersByProduct: [],
-        products: [],
-        query: incoming.searchParams.get('globalSearch') || '',
-        // warning: "Search took too long, please try again with more specific terms"
-      }), {
-        status: 200,
-        headers: {
-          "content-type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-        },
-      })
+      return searchErrorResponse(
+        504,
+        buildSearchError(
+          "SEARCH_BACKEND_TIMEOUT",
+          "TIMEOUT",
+          "Search service timed out.",
+          query,
+        ),
+      )
     }
 
     if (sectorStatsParam) {
       return new Response(
-        sectorStatsErrorBody(sectorStatsParam, "Cannot reach backend for sectorStats: " + (err?.message || String(err))),
+        sectorStatsErrorBody(sectorStatsParam, "Sector stats service is temporarily unavailable."),
         {
           status: 200,
           headers: {
@@ -435,22 +476,8 @@ async function forward(req: NextRequest) {
       )
     }
 
-    return new Response(JSON.stringify({
-      ok: true,
-      suppliersByName: [],
-      suppliersByProduct: [],
-      products: [],
-      query: incoming.searchParams.get('globalSearch') || '',
-      warning: "Search service temporarily unavailable"
-    }), {
-      status: 200,
-      headers: {
-        "content-type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-      },
-    })
+    const classified = classifySearchUpstreamFailure(err, query)
+    return searchErrorResponse(classified.status, classified.body)
   } finally {
     clearTimeout(timeout)
   }

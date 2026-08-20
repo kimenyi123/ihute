@@ -15,6 +15,7 @@ export interface GeoLocationState {
     loading: boolean;
     error: string | null;
     denied: boolean;
+    isFallback: boolean;
 }
 
 // Default fallback location (Kigali center)
@@ -28,31 +29,48 @@ export function useGeolocation(options?: PositionOptions) {
         location: null,
         loading: true,
         error: null,
-        denied: false
+        denied: false,
+        isFallback: false
     });
 
     useEffect(() => {
-        if (!('geolocation' in navigator)) {
+        if (typeof window === 'undefined' || !('geolocation' in navigator)) {
             setState({
                 location: DEFAULT_LOCATION,
                 loading: false,
                 error: 'Geolocation not supported',
-                denied: false
+                denied: false,
+                isFallback: true
             });
             return;
         }
 
         const onSuccess = (position: GeolocationPosition) => {
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+
+            if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+                setState({
+                    location: DEFAULT_LOCATION,
+                    loading: false,
+                    error: 'Invalid GPS coordinates received',
+                    denied: false,
+                    isFallback: true
+                });
+                return;
+            }
+
             setState({
                 location: {
-                    lat: position.coords.latitude,
-                    lng: position.coords.longitude,
+                    lat,
+                    lng,
                     accuracy: position.coords.accuracy,
                     timestamp: position.timestamp
                 },
                 loading: false,
                 error: null,
-                denied: false
+                denied: false,
+                isFallback: false
             });
         };
 
@@ -65,7 +83,8 @@ export function useGeolocation(options?: PositionOptions) {
                 location: DEFAULT_LOCATION, // Fallback to Kigali
                 loading: false,
                 error: error.message,
-                denied: isDenied
+                denied: isDenied,
+                isFallback: true
             });
         };
 
