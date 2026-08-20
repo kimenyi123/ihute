@@ -1,4 +1,4 @@
-import { normalizeProductImagePublicUrl } from "@/lib/public-asset-url"
+import { normalizeProductImagePublicUrl } from "./public-asset-url"
 
 /**
  * Central image URL resolution for product/supplier images.
@@ -45,8 +45,8 @@ const IMAGE_KEYS = [
   "IMAGE_URL_3",
 ] as const
 
-/** URL to show when no product image is available (KAOS "no image" graphic). Use this instead of a grey placeholder. */
-export const NO_IMAGE_URL = "https://ishyiga.rw/images_kaos_beta/no_image_found.jpg"
+/** Local placeholder image when no product photo is available. */
+export const NO_IMAGE_URL = "/placeholder.svg?height=300&width=300"
 
 /** KAOS CDN may store product images as jpg, jpeg, or png — try in this order before no_image. */
 export const KAOS_PRODUCT_IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png"] as const
@@ -299,13 +299,6 @@ export function getProductImageCandidates(source: ProductImageSource | null | un
   } else {
     console.warn("[ImageUtils] Invalid source object for image resolution")
   }
-
-  // Ensure any backend image URLs outside source object branch are collected
-  for (const u of collectBackendImageUrls(source)) {
-    add(u)
-  }
-
-  add(NO_IMAGE_URL)
 
   // Debug: Log final candidates
   if (typeof window !== "undefined") {
