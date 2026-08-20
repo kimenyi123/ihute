@@ -651,9 +651,9 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
 
   const nicknameFromUrl = nicknameFromPath || nicknameFromQuery;
 
-  const [nickname, setNickname] = useState("");
+  const [nickname, setNickname] = useState(nicknameFromUrl ? nicknameFromUrl.trim().toLowerCase() : "");
   const [sellers, setSellers] = useState<ShopWithMeSeller[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(Boolean(nicknameFromUrl?.trim()));
   const [error, setError] = useState<string | null>(null);
   const [selectedSeller, setSelectedSeller] = useState<string | null>(null);
   const [productSearchQuery, setProductSearchQuery] = useState("");
@@ -695,7 +695,7 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
   const sharedAppliedRef = useRef<string>("");
   const currentSeller = selectedSeller ? sellers.find((s) => s.ISHYIGA_ACCOUNT === selectedSeller) : null;
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedProductSearch(productSearchQuery.trim()), 150);
+    const t = setTimeout(() => setDebouncedProductSearch(productSearchQuery.trim()), 100);
     return () => clearTimeout(t);
   }, [productSearchQuery]);
 
@@ -703,6 +703,7 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
   const prevNicknameRef = useRef<string>("");
   useEffect(() => {
     if (!nicknameFromUrl?.trim()) return;
+    const controller = new AbortController();
     let cancelled = false;
     const normalizedNickname = nicknameFromUrl.trim().toLowerCase();
     const nicknameChanged = prevNicknameRef.current !== normalizedNickname;
@@ -713,7 +714,7 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
     const effectiveSearch = shouldRunTextSearch(debouncedProductSearch) ? debouncedProductSearch : "";
     if (effectiveSearch) params.set("productSearch", effectiveSearch);
     const url = `/api/shop-with-me?${params.toString()}`;
-    fetch(url, { cache: "no-store" })
+    fetch(url, { cache: "no-store", signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch shop data`);
         return res.json();
@@ -737,6 +738,7 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
         }
       })
       .catch((err: any) => {
+        if (err?.name === "AbortError") return;
         if (!cancelled) {
           setError(err.message || "Failed to fetch shop");
           setSellers([]);
@@ -745,7 +747,10 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, [nicknameFromUrl, debouncedProductSearch]);
 
   // Shared-cart deep link: /shop-with-me/{shop}?item1=name;qty;price;code...

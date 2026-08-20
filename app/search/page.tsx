@@ -552,8 +552,8 @@ export default function SearchPage() {
   const priceMaxParam = searchParams.get("priceMax") || ""
 
   const [q, setQ] = useState(initialQ)
-  const [debouncedQ, setDebouncedQ] = useState("")
-  const [loading, setLoading] = useState(false)
+  const [debouncedQ, setDebouncedQ] = useState(initialQ.trim())
+  const [loading, setLoading] = useState(Boolean(initialQ.trim()))
   const [searchResult, setSearchResult] = useState<SearchResult | null>(null)
   const [selectedShop, setSelectedShop] = useState<Shop | null>(null)
   const [shopProducts, setShopProducts] = useState<Product[]>([])
@@ -723,12 +723,15 @@ export default function SearchPage() {
   // Sync search input with URL query param on mount and changes
   useEffect(() => {
     const urlQ = searchParams.get("q") || ""
-    if (urlQ && urlQ !== q) setQ(urlQ)
+    if (urlQ !== q) {
+      setQ(urlQ)
+      setDebouncedQ(urlQ.trim())
+    }
   }, [searchParams])
 
-  // Quick search: 200ms debounce so backend is hit fast (like shop-with-me)
+  // Quick search debounce
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedQ(q.trim()), 150)
+    const t = setTimeout(() => setDebouncedQ(q.trim()), 100)
     return () => clearTimeout(t)
   }, [q])
 
@@ -786,18 +789,20 @@ export default function SearchPage() {
     }
   }, [supplierParam, supplierNameParam])
 
-  // Supplier search debounce (quick: 200ms)
+  // Supplier search debounce (quick: 120ms)
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedSupplierSearch(supplierSearch.trim()), 200)
+    const t = setTimeout(() => setDebouncedSupplierSearch(supplierSearch.trim()), 120)
     return () => clearTimeout(t)
   }, [supplierSearch])
 
-  // ====== MAIN FIX: Trust backend translation results ======
+  // ====== MAIN FIX: Fast search with AbortController and instant resolution ======
   useEffect(() => {
-    const cancelled = false
+    const controller = new AbortController()
+    let cancelled = false
     async function run() {
       if (!shouldRunTextSearch(debouncedQ)) {
         setSearchResult(null)
+        setLoading(false)
         return
       }
       setLoading(true)
@@ -816,8 +821,7 @@ export default function SearchPage() {
           url.searchParams.set("sector", sectorToSend)
         }
 
-        // Add location-aware parameters from enhanced location store
-        const { useLocationStoreEnhanced } = await import("@/lib/location-store-enhanced")
+        // Add location-aware parameters directly from store
         const userLocation = useLocationStoreEnhanced.getState().location
         if (userLocation?.district) {
           url.searchParams.set("district", userLocation.district)
@@ -826,42 +830,27 @@ export default function SearchPage() {
           url.searchParams.set("cell", userLocation.cell)
         }
 
-        const res = await fetch(url.toString(), { cache: "no-store" })
+        const res = await fetch(url.toString(), {
+          cache: "no-store",
+          signal: controller.signal,
+        })
         const data: SearchResult = res.ok
           ? await res.json()
           : { suppliersByName: [], suppliersByProduct: [], products: [], query: debouncedQ }
 
         if (!cancelled) {
-          // Log data source (Redis vs DB) for debugging
-          const dataSource = getDataSourceLabel({
-            source: data.source,
-            fromNiki: data.fromNiki,
-            products: data.products?.map((p: any) => ({ source: p.source })) || []
-          })
-          const productSources = (data.products ?? []).map((p: Product & { source?: string }) => p?.source ?? "?")
-          console.log("[Search] Data source:", dataSource, "| Query:", debouncedQ, "| Products:", data.products?.length ?? 0, "| source:", data.source, "fromNiki:", data.fromNiki, "| Product sources:", productSources.slice(0, 5))
-          if (dataSource === "unknown") {
-            const responseKeys = Object.keys(data as object)
-            const firstProduct = (data.products ?? [])[0] as Record<string, unknown> | undefined
-            const firstProductKeys = firstProduct ? Object.keys(firstProduct) : []
-            console.warn("[Search] DEBUG data source unknown: backend did not set source/fromNiki or product.source. Response keys:", responseKeys, "| First product keys (sample):", firstProductKeys.slice(0, 20))
-          }
-
-          // ✅ FIX: Trust backend - it already handles translation!
-          // No client-side filtering for products since backend does the work
           const filteredProducts = data.products || []
 
-          // Keep light filtering for suppliers (optional - can be removed if backend handles it)
           const filteredSuppliersByName = filterSuppliersByRelevance(
             data.suppliersByName || [],
             debouncedQ,
-            5 // Lowered threshold for full page results (more inclusive)
+            5
           )
 
           const filteredSuppliersByProduct = filterSuppliersByRelevance(
             data.suppliersByProduct || [],
             debouncedQ,
-            5 // Lowered threshold for full page results (more inclusive)
+            5
           )
 
           setSearchResult({
@@ -871,20 +860,17 @@ export default function SearchPage() {
             suppliersByProduct: filteredSuppliersByProduct,
           })
 
-          // Track search interaction (both interaction tracking and search intent)
-          const { trackSearch } = await import("@/lib/interaction-tracker")
-          const { recordSearch } = await import("@/lib/search-intent-tracker")
+          // Track search interaction asynchronously
           const totalResults = filteredProducts.length + filteredSuppliersByName.length + filteredSuppliersByProduct.length
-
-          // Track in interaction system
-          trackSearch(debouncedQ, totalResults)
-
-          // Track in search intent system (for personalization and notifications)
-          recordSearch(debouncedQ, totalResults, "global").catch(err =>
-            console.warn("[SearchIntent] Failed to record search:", err)
-          )
+          import("@/lib/interaction-tracker").then(({ trackSearch }) => {
+            trackSearch(debouncedQ, totalResults)
+          }).catch(() => {})
+          import("@/lib/search-intent-tracker").then(({ recordSearch }) => {
+            recordSearch(debouncedQ, totalResults, "global").catch(() => {})
+          }).catch(() => {})
         }
-      } catch (error) {
+      } catch (error: any) {
+        if (error?.name === "AbortError") return
         console.error("Search error:", error)
         if (!cancelled) {
           setSearchResult({
@@ -901,6 +887,10 @@ export default function SearchPage() {
     }
     run()
 
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
   }, [debouncedQ, selectedShop?.supplier_account, locationParam, sectorParam])
 
   // Seller catalogue (RIGHT)
