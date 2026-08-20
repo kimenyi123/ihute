@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useRef } from "react"
 import { Search } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -24,9 +25,22 @@ export function ShopScopedSearch({
   trailing,
   isSearching,
 }: ShopScopedSearchProps) {
+  const inputRef = useRef<HTMLInputElement | null>(null)
   const label = shopName ? `Search ${shopName}` : "Search this shop"
   const defaultPlaceholder =
     "Search by product name or keyword (any language)…"
+
+  useEffect(() => {
+    const handleKeyDown = (e: globalThis.KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault()
+        inputRef.current?.focus()
+        inputRef.current?.select()
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [])
 
   return (
     <div
@@ -45,18 +59,23 @@ export function ShopScopedSearch({
             aria-hidden
           />
           <input
+            ref={inputRef}
             id={id}
             type="search"
             value={value}
             onChange={(e) => onChange(e.target.value)}
             placeholder={placeholder ?? defaultPlaceholder}
-            className="w-full rounded-lg border-2 border-blue-300 bg-white py-3 pl-11 pr-10 text-base font-medium text-foreground shadow-sm outline-none transition placeholder:font-normal placeholder:text-slate-400 focus:border-blue-600 focus:ring-4 focus:ring-blue-100"
+            className="w-full rounded-lg border-2 border-blue-300 bg-white py-3 pl-11 pr-14 text-base font-medium text-foreground shadow-sm outline-none transition placeholder:font-normal placeholder:text-slate-400 focus:border-blue-600 focus:ring-4 focus:ring-blue-100"
             aria-label={shopName ? `Search products in ${shopName}` : "Search products in this shop"}
           />
           {isSearching ? (
             <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-blue-600 animate-pulse">
               …
             </span>
+          ) : !value ? (
+            <kbd className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 hidden h-5 select-none items-center gap-0.5 rounded border border-blue-300 bg-blue-50 px-1.5 font-mono text-[10px] font-medium text-blue-700 sm:inline-flex shadow-xs">
+              <span className="text-xs">⌘</span>K
+            </kbd>
           ) : null}
         </div>
         {trailing ? <div className="mt-2 flex flex-wrap items-center gap-2">{trailing}</div> : null}

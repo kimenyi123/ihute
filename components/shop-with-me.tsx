@@ -676,6 +676,21 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
   const { user, isAuthenticated } = useAuthStore();
 
   const [debouncedProductSearch, setDebouncedProductSearch] = useState("");
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Global Ctrl+K / Cmd+K shortcut to focus shop product search
+  useEffect(() => {
+    const handleKeyDown = (e: globalThis.KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   const sharedItems = useMemo(() => parseSharedCartItems(searchParams), [searchParams]);
   const sharedAppliedRef = useRef<string>("");
   const currentSeller = selectedSeller ? sellers.find((s) => s.ISHYIGA_ACCOUNT === selectedSeller) : null;
@@ -1100,13 +1115,13 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
   const showProductGridSkeleton =
     categories.length > 0 && (isSearchDebouncing || loading);
 
-  // Price range always; interim client text filter while debounce pending (uses EN/FR/RW fields).
-  // After debounce, API productSearch is authoritative — skip client text filter.
+  // Filter products by search keywords (multilingual NIKI expansion) and price range
   const getFilteredProducts = (products: ShopWithMeProduct[]) => {
     let list = products;
 
-    if (!debouncedProductSearch.trim() && productSearchQuery.trim()) {
-      const terms = productSearchQuery.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    const query = productSearchQuery.trim() || debouncedProductSearch.trim();
+    if (query) {
+      const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
       list = list.filter((product) => productMatchesAllSearchTokens(product, terms));
     }
 
@@ -1463,18 +1478,23 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                 <Input
+                  ref={searchInputRef}
                   id="shop-with-me-product-search"
                   type="search"
                   placeholder="Search products..."
                   value={productSearchQuery}
                   onChange={(e) => setProductSearchQuery(e.target.value)}
-                  className="pl-10"
+                  className="pl-10 pr-14"
                   aria-label="Search products in this shop"
                 />
                 {isSearchDebouncing ? (
                   <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground animate-pulse">
                     …
                   </span>
+                ) : !productSearchQuery ? (
+                  <kbd className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 hidden h-5 select-none items-center gap-0.5 rounded border bg-muted/80 px-1.5 font-mono text-[10px] font-medium text-muted-foreground sm:inline-flex shadow-xs">
+                    <span className="text-xs">⌘</span>K
+                  </kbd>
                 ) : null}
               </div>
               <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">

@@ -240,6 +240,26 @@ export function GlobalSearch({
     getRecentSearches(5).then(setRecentSearches).catch(() => { })
   }, [user])
 
+  // Global Ctrl+K / Cmd+K keyboard shortcut to focus search input
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: globalThis.KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault()
+        inputRef.current?.focus()
+        inputRef.current?.select()
+        if (!isCategoryAi) {
+          setOpen(true)
+        }
+      }
+      if (e.key === "Escape" && open) {
+        setOpen(false)
+        inputRef.current?.blur()
+      }
+    }
+    window.addEventListener("keydown", handleGlobalKeyDown)
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown)
+  }, [isCategoryAi, open])
+
   /** Keep input in sync with `?sq=` (back/forward, deep links). */
   useEffect(() => {
     if (!isCategoryAi) return
@@ -845,8 +865,13 @@ export function GlobalSearch({
             categoryInputFocusedRef.current = false
           }}
           onKeyDown={onKeyDown}
-          className="pl-10 pr-3 h-9 transition-shadow focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary"
+          className="pl-10 pr-14 h-9 transition-shadow focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary"
         />
+        {!q && (
+          <kbd className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 hidden h-5 select-none items-center gap-0.5 rounded border bg-muted/80 px-1.5 font-mono text-[10px] font-medium text-muted-foreground sm:inline-flex shadow-xs">
+            <span className="text-xs">⌘</span>K
+          </kbd>
+        )}
       </div>
 
       {mounted && open && !isCategoryAi && createPortal(
