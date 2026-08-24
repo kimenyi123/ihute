@@ -1008,6 +1008,9 @@ const GRANDMA_LABELS: Record<
     payStepSendOrderLocked:
       "Ishyura ukoresheje MoMo, shyiraho SMS y'ikimenyetso, noneho buto ya Ohereza izagaragara.",
     payStepErrMomoSms: "Emeza kwishyura ukoresheje SMS ya MoMo mbere yo kohereza commandes.",
+      logisticsFeesHint: "Logistics fees details",
+      logPickup: "Pickup Location",
+      etaSubPickup: "Estimated pickup time",
   },
   fr: {
     demoLocation: "Kacyiru, Gasabo — définition dans les réglages",

@@ -8,7 +8,6 @@ import {
   matchCategoryForGroup,
   normalizeShopGroup,
   productMatchesGroup,
-  normalizeShopGroup,
 } from "@/lib/shop-product-group";
 import { Header } from "@/components/header";
 import { Button } from "@/components/ui/button";
