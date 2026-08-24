@@ -49,7 +49,6 @@ export interface GlobalResult {
 }
 
 type GlobalSearchResponse = {
-  ok: boolean
   suppliersByName: GlobalResult[]
   suppliersByProduct: GlobalResult[]
   products: GlobalResult[]
@@ -67,17 +66,6 @@ type GlobalSearchResponse = {
     dataSource: string
     cacheHit: boolean
   }
-}
-
-function responseErrorMessage(value: unknown, status: number): string {
-  const body = value as { error?: { message?: string } | string } | null
-  if (body?.error && typeof body.error === "object" && body.error.message) {
-    return body.error.message
-  }
-  if (typeof body?.error === "string") return body.error
-  if (status === 504) return "Search service timed out."
-  if (status === 503) return "Search service is temporarily unavailable."
-  return "Search service returned an invalid response."
 }
 
 function productMatchScore(p: GlobalResult): number {
@@ -469,16 +457,12 @@ export function GlobalSearch({
       return
     }
 
-    let debounceTimer: ReturnType<typeof setTimeout> | undefined
-    const id = setTimeout(() => {
-      const requestId = ++searchRequestIdRef.current
-      const abortController = new AbortController()
-      /** Hard cap so the dropdown never spins until the browser default if the proxy hangs. */
-      /** Must allow Redis scan + DB fallback on slow local Kaos; stay under typical browser limits. */
-      const CLIENT_SEARCH_TIMEOUT_MS = 40000
-      const clientTimeout = setTimeout(() => abortController.abort(), CLIENT_SEARCH_TIMEOUT_MS)
+    const requestId = ++searchRequestIdRef.current
+    const abortController = new AbortController()
+    const CLIENT_SEARCH_TIMEOUT_MS = 25000
+    const clientTimeout = setTimeout(() => abortController.abort(), CLIENT_SEARCH_TIMEOUT_MS)
 
-      debounceTimer = setTimeout(async () => {
+    const id = setTimeout(async () => {
       setLoading(true)
       setErr(null)
       setSearchWarning(null)
@@ -559,67 +543,38 @@ export function GlobalSearch({
 
         const res = await fetch(`/api/fetchSuggestions?${params}`, {
           cache: "no-store",
-          headers: { Accept: "application/json" },
+          headers: {
+            Accept: "application/json",
+          },
           signal: abortController.signal,
         })
 
-        if (requestId !== searchRequestIdRef.current) return
-
-        const rawJson: unknown = await res.json().catch(() => null)
         if (!res.ok) {
-          throw new Error(responseErrorMessage(rawJson, res.status))
-        }
-        const json = rawJson as GlobalSearchResponse
-        if (
-          json?.ok !== true ||
-          !Array.isArray(json.products) ||
-          !Array.isArray(json.suppliersByName) ||
-          !Array.isArray(json.suppliersByProduct)
-        ) {
-          throw new Error("Search service returned an invalid response.")
+          const errJson = (await res.json().catch(() => ({}))) as { error?: string }
+          throw new Error(errJson.error ?? `Search failed (${res.status})`)
         }
 
+        const json: GlobalSearchResponse = await res.json()
         if (requestId !== searchRequestIdRef.current) return
 
         if (json.warning) {
           setSearchWarning(json.warning)
         }
 
-        console.log("[GlobalSearch] Raw response:", {
-          products: json.products?.length || 0,
-          suppliersByName: json.suppliersByName?.length || 0,
-          suppliersByProduct: json.suppliersByProduct?.length || 0,
-          stats: json.searchStats,
-          warning: json.warning,
-        })
+        const rawProducts: GlobalResult[] = json.products || []
+        const rawSuppliers: GlobalResult[] = json.suppliersByName || []
+        const suppliersByProd: GlobalResult[] = json.suppliersByProduct || []
+        const allSuppliers = [...rawSuppliers, ...suppliersByProd]
 
-        // Validate response structure
-        if (!json.products && !json.suppliersByName && !json.suppliersByProduct) {
-          console.warn("[GlobalSearch] Empty response structure:", json)
-          setProducts([])
-          setSuppliers([])
-          setStats(null)
-          setFromNiki(null)
-          setOpen(true)
-          return
-        }
-
-        const allProducts = json.products || []
-        // Use lower threshold for dropdown (showing fewer results, can afford to be more inclusive)
         const filteredProducts = narrowGlobalDropdownToBestMatch(
-          filterProductsByRelevance(allProducts, trimmedQuery, 5),
+          filterProductsByRelevance(rawProducts, trimmedQuery, 5),
           trimmedQuery
         )
 
-        const allSuppliers = [...(json.suppliersByName || []), ...(json.suppliersByProduct || [])]
-        const validSuppliers = allSuppliers
-          .filter((s) => s.supplier_name || s.supplier_account || (s as any).nickname)
-          .map((s) => ({
-            ...s,
-            supplier_name: s.supplier_name || (s as any).nickname || s.supplier_account || "",
-          })) as Array<GlobalResult & { supplier_name: string }>
+        const validSuppliers = allSuppliers.filter((s) => s.supplier_name) as Array<
+          GlobalResult & { supplier_name: string }
+        >
 
-        // More lenient thresholds for dropdown
         const supplierThreshold = filteredProducts.length > 0 ? 3 : 10
         const filteredSuppliers = filterSuppliersByRelevance(validSuppliers, trimmedQuery, supplierThreshold)
 
@@ -633,40 +588,8 @@ export function GlobalSearch({
           dedupedSuppliers.push(sup)
         }
 
-        const p = filteredProducts
-          .slice()
-          .sort((a, b) => {
-            const scoreOrder = (b.finalScore ?? 0) - (a.finalScore ?? 0)
-            if (scoreOrder !== 0) return scoreOrder
-            return String(a.item_code ?? a.item_commercial_name ?? "").localeCompare(
-              String(b.item_code ?? b.item_commercial_name ?? ""),
-              undefined,
-              { sensitivity: "base" },
-            )
-          })
-          .slice(0, maxSuggestions)
-        const s = dedupedSuppliers
-          .slice()
-          .sort((a, b) => {
-            const scoreOrder = (b.finalScore ?? 0) - (a.finalScore ?? 0)
-            if (scoreOrder !== 0) return scoreOrder
-            return String(a.supplier_account ?? a.supplier_name ?? "").localeCompare(
-              String(b.supplier_account ?? b.supplier_name ?? ""),
-              undefined,
-              { sensitivity: "base" },
-            )
-          })
-          .slice(0, Math.max(4, Math.floor(maxSuggestions * 0.3)))
-
-        console.log("[GlobalSearch] Filtered results:", {
-          rawProducts: allProducts.length,
-          filteredProducts: filteredProducts.length,
-          shownProducts: p.length,
-          rawSuppliers: validSuppliers.length,
-          filteredSuppliers: filteredSuppliers.length,
-          shownSuppliers: s.length,
-          topProductScores: p.slice(0, 3).map((x) => x.finalScore),
-        })
+        const p = filteredProducts.slice(0, maxSuggestions)
+        const s = dedupedSuppliers.slice(0, Math.max(4, Math.floor(maxSuggestions * 0.3)))
 
         setProducts(p)
         setSuppliers(s)
@@ -710,12 +633,12 @@ export function GlobalSearch({
           setLoading(false)
         }
       }
-      }, 150)
-    }, 0)
+    }, 120)
 
     return () => {
       clearTimeout(id)
-      if (debounceTimer !== undefined) clearTimeout(debounceTimer)
+      clearTimeout(clientTimeout)
+      abortController.abort()
     }
   }, [q, maxSuggestions, sector, categoryBrowseMode, location, isCategoryAi])
 

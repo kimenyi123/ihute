@@ -5,6 +5,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  /** Allow phone/LAN access to dev server (e.g. 192.168.1.71:3001). */
+  allowedDevOrigins: ["192.168.1.71", "localhost"],
   /** Monorepo: lockfile may exist in parent (`Ihute-new-v/`); pin Turbopack root to this app. */
   turbopack: {
     root: path.resolve(__dirname),

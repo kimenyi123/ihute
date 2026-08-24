@@ -2,6 +2,13 @@
 
 import { useEffect, useState, useRef, useMemo } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import {
+  groupDisplayLabel,
+  groupSearchFallback,
+  matchCategoryForGroup,
+  normalizeShopGroup,
+  productMatchesGroup,
+} from "@/lib/shop-product-group";
 import { Header } from "@/components/header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,6 +49,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { type ErxPrescription, serializeErxForNotes } from "@/lib/erx-prescription";
 import { ErxPrescriptionDialog } from "@/components/erx-prescription-dialog";
+import { PharmacyErxInput } from "@/components/category_ai/pharmacy-erx-input";
 import {
   Sheet,
   SheetContent,
@@ -645,18 +653,23 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
   const customerFromQuery = searchParams?.get("customer") || "";
   const addressFromQuery = searchParams?.get("address") || "";
   const tableFromQuery = searchParams?.get("table") || "";
+  const groupFromUrl = useMemo(
+    () => normalizeShopGroup(searchParams?.get("group") ?? ""),
+    [searchParams],
+  );
 
   // When only nickname is set (no table/customer/address), treat as normal shop: add to cart and checkout as usual.
   const hasTableContext = !!(tableFromQuery.trim() || customerFromQuery.trim() || addressFromQuery.trim());
 
   const nicknameFromUrl = nicknameFromPath || nicknameFromQuery;
 
-  const [nickname, setNickname] = useState("");
+  const [nickname, setNickname] = useState(nicknameFromUrl ? nicknameFromUrl.trim().toLowerCase() : "");
   const [sellers, setSellers] = useState<ShopWithMeSeller[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(Boolean(nicknameFromUrl?.trim()));
   const [error, setError] = useState<string | null>(null);
   const [selectedSeller, setSelectedSeller] = useState<string | null>(null);
   const [productSearchQuery, setProductSearchQuery] = useState("");
+  const [pharmacyErxOpen, setPharmacyErxOpen] = useState(false);
   const [sortBy, setSortBy] = useState("featured");
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
   const [priceMin, setPriceMin] = useState<string>("");
@@ -669,6 +682,7 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
   const [categories, setCategories] = useState<CategorySection[]>([]);
   const [itemsPerPage, setItemsPerPage] = useState(12);
   const [categoryPages, setCategoryPages] = useState<Record<string, number>>({});
+  const groupAppliedRef = useRef(false);
 
   const addItem = useCartStore((s) => s.addItem);
   const setTableInfo = useCartStore((s) => s.setTableInfo);
@@ -695,7 +709,7 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
   const sharedAppliedRef = useRef<string>("");
   const currentSeller = selectedSeller ? sellers.find((s) => s.ISHYIGA_ACCOUNT === selectedSeller) : null;
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedProductSearch(productSearchQuery.trim()), 150);
+    const t = setTimeout(() => setDebouncedProductSearch(productSearchQuery.trim()), 100);
     return () => clearTimeout(t);
   }, [productSearchQuery]);
 
@@ -703,6 +717,7 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
   const prevNicknameRef = useRef<string>("");
   useEffect(() => {
     if (!nicknameFromUrl?.trim()) return;
+    const controller = new AbortController();
     let cancelled = false;
     const normalizedNickname = nicknameFromUrl.trim().toLowerCase();
     const nicknameChanged = prevNicknameRef.current !== normalizedNickname;
@@ -713,7 +728,7 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
     const effectiveSearch = shouldRunTextSearch(debouncedProductSearch) ? debouncedProductSearch : "";
     if (effectiveSearch) params.set("productSearch", effectiveSearch);
     const url = `/api/shop-with-me?${params.toString()}`;
-    fetch(url, { cache: "no-store" })
+    fetch(url, { cache: "no-store", signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch shop data`);
         return res.json();
@@ -737,6 +752,7 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
         }
       })
       .catch((err: any) => {
+        if (err?.name === "AbortError") return;
         if (!cancelled) {
           setError(err.message || "Failed to fetch shop");
           setSellers([]);
@@ -745,7 +761,10 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, [nicknameFromUrl, debouncedProductSearch]);
 
   // Shared-cart deep link: /shop-with-me/{shop}?item1=name;qty;price;code...
@@ -1088,6 +1107,24 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
     setCategoryPages({});
   }, [currentSeller]);
 
+  useEffect(() => {
+    groupAppliedRef.current = false;
+  }, [groupFromUrl, nicknameFromUrl]);
+
+  useEffect(() => {
+    if (!groupFromUrl || categories.length === 0 || groupAppliedRef.current) return;
+    const matched = matchCategoryForGroup(groupFromUrl, categories.map((c) => c.name));
+    if (matched) {
+      setCategoryFilter(matched);
+      groupAppliedRef.current = true;
+      return;
+    }
+    if (!productSearchQuery.trim()) {
+      setProductSearchQuery(groupSearchFallback(groupFromUrl));
+      groupAppliedRef.current = true;
+    }
+  }, [groupFromUrl, categories, productSearchQuery]);
+
   const filtersActive = !!(
     productSearchQuery.trim() ||
     categoryFilter ||
@@ -1134,6 +1171,12 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
         if (Number.isNaN(maxNum) === false && p > maxNum) return false;
         return true;
       });
+    }
+
+    if (groupFromUrl && !categoryFilter && !debouncedProductSearch.trim()) {
+      list = list.filter((product) =>
+        productMatchesGroup(groupFromUrl, product as Record<string, unknown>),
+      );
     }
 
     return list;
@@ -1473,7 +1516,30 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
               )}
             </div>
 
-            {/* Simple product search + filters (same as before — not the blue shop-scoped card) */}
+            {/* Shop-scoped search + filters (single header: main Header above; no duplicate nav bar) */}
+            {groupFromUrl ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="secondary" className="bg-emerald-100 text-emerald-900 text-sm py-1.5 px-3">
+                  {groupDisplayLabel(groupFromUrl)}
+                </Badge>
+                <button
+                  type="button"
+                  className="text-xs font-medium text-muted-foreground underline"
+                  onClick={() => {
+                    const params = new URLSearchParams(searchParams?.toString() ?? "");
+                    params.delete("group");
+                    const qs = params.toString();
+                    const path = typeof window !== "undefined" ? window.location.pathname : "";
+                    router.replace(qs ? `${path}?${qs}` : path, { scroll: false });
+                    setCategoryFilter(null);
+                    setProductSearchQuery("");
+                    groupAppliedRef.current = false;
+                  }}
+                >
+                  Show all products
+                </button>
+              </div>
+            ) : null}
             <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
@@ -1522,6 +1588,25 @@ export default function ShopWithMePage({ embedInMainLayout = false }: { embedInM
                 ) : null}
               </div>
             </div>
+            {isPharmacy && (
+              <div className="space-y-2">
+                <Button
+                  type="button"
+                  variant={pharmacyErxOpen ? "default" : "outline"}
+                  size="sm"
+                  className={pharmacyErxOpen ? "bg-[#1e3a5f] hover:bg-[#2c4f7c]" : ""}
+                  onClick={() => setPharmacyErxOpen((open) => !open)}
+                >
+                  Ministry of Health eRx
+                </Button>
+                {pharmacyErxOpen && (
+                  <PharmacyErxInput
+                    compact
+                    onLookup={(code) => setProductSearchQuery(code)}
+                  />
+                )}
+              </div>
+            )}
 
             <Sheet open={filterSheetOpen} onOpenChange={setFilterSheetOpen}>
               <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">

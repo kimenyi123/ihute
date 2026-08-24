@@ -490,6 +490,7 @@ const GRANDMA_LABELS: Record<
     eta: string
     etaSub: string
     etaSubNoMode: string
+    logisticsFeesHint: string
     paymentModeSection: string
     shopsIntro: string
     sortDistance: string
@@ -529,9 +530,11 @@ const GRANDMA_LABELS: Record<
     summaryLineLogisticsRow: string
     summaryLineGrandTotal: string
     preferredBadge: string
+    logPickup: string
     logHuman: string
     logBike: string
     logMoto: string
+    etaSubPickup: string
     amountShop: string
     ihuteFees: string
     taxes: string
@@ -668,7 +671,10 @@ const GRANDMA_LABELS: Record<
     orderSubmitNeedPhone: "Add your mobile number to pay and receive order updates.",
     eta: "Estimated time of arrival",
     etaSub: "From ~{km} km · {mode} delivery",
+    etaSubPickup: "Pick up at this shop · 0 RWF delivery · no courier sent to you.",
     etaSubNoMode: "~{km} km from the shop. Choose a delivery option on Summary to see arrival time.",
+    logisticsFeesHint:
+      "PickUp is 0 RWF — you collect at the shop. Human, Bike, and Moto use ~{km} km × mode rate (demo — replace with your pricing API).",
     paymentModeSection: "Payment Mode",
     sortDistance: " Sorted by distance.",
     shopsIntro:
@@ -711,6 +717,7 @@ const GRANDMA_LABELS: Record<
     summaryLineLogisticsRow: "Logistics",
     summaryLineGrandTotal: "Grand total",
     preferredBadge: "Preferred",
+    logPickup: "PickUp",
     logHuman: "Human",
     logBike: "Bike",
     logMoto: "Moto",
@@ -1001,6 +1008,9 @@ const GRANDMA_LABELS: Record<
     payStepSendOrderLocked:
       "Ishyura ukoresheje MoMo, shyiraho SMS y'ikimenyetso, noneho buto ya Ohereza izagaragara.",
     payStepErrMomoSms: "Emeza kwishyura ukoresheje SMS ya MoMo mbere yo kohereza commandes.",
+      logisticsFeesHint: "Logistics fees details",
+      logPickup: "Pickup Location",
+      etaSubPickup: "Estimated pickup time",
   },
   fr: {
     demoLocation: "Kacyiru, Gasabo — définition dans les réglages",
@@ -1032,7 +1042,10 @@ const GRANDMA_LABELS: Record<
     orderSubmitNeedPhone: "Ajoutez votre mobile pour payer et recevoir les mises à jour.",
     eta: "Heure d'arrivée estimée",
     etaSub: "Depuis ~{km} km · livraison {mode}",
+    etaSubPickup: "Retrait au magasin · 0 RWF livraison · pas de coursier vers vous.",
     etaSubNoMode: "À ~{km} km du magasin. Choisissez une livraison sur le récapitulatif pour voir l’heure d’arrivée.",
+    logisticsFeesHint:
+      "Retrait : 0 RWF — vous récupérez au magasin. À pied, vélo et moto : ~{km} km × tarif du mode (démo — remplacez par votre API).",
     paymentModeSection: "Mode de paiement",
     sortDistance: " Triés par distance.",
     shopsIntro: "Choisissez un magasin dans {cat}. Favoris et commandes passées en premier.{sort}",
@@ -1074,6 +1087,7 @@ const GRANDMA_LABELS: Record<
     summaryLineLogisticsRow: "Logistique",
     summaryLineGrandTotal: "Total général",
     preferredBadge: "Favori",
+    logPickup: "Retrait",
     logHuman: "À pied",
     logBike: "Vélo",
     logMoto: "Moto",
@@ -1813,6 +1827,19 @@ const LOGISTICS: LogisticsOption[] = [
   { id: "moto", icon: "🏍", label: "Moto" },
 ]
 
+function logisticsOptionDisplayLabel(id: LogisticsId, tr: (typeof GRANDMA_LABELS)[GrandmaLang]): string {
+  switch (id) {
+    case "human":
+      return tr.logHuman
+    case "bike":
+      return tr.logBike
+    case "moto":
+      return tr.logMoto
+    default:
+      return id
+  }
+}
+
 const PAYMENTS: PaymentMode[] = [
   { id: "momo", label: "MTN MoMo", iconSrc: "/img/momo.png" },
   { id: "airtel", label: "Airtel Money", iconSrc: "/img/airtel.png" },
@@ -2126,6 +2153,10 @@ function shopDisplayReviews(s: ShopEntry): number {
   return 12 + (h % 280)
 }
 
+/**
+ * ETA window (minutes): prep + travel by distance & mode.
+ * Human (walk) is slowest per km; moto fastest — same short trip must not beat motorbike on foot.
+ */
 function deliveryEtaRange(distanceKm: number | null, mode: LogisticsId | null): { lo: number; hi: number } {
   if (distanceKm == null || !Number.isFinite(distanceKm) || distanceKm < 0) return { lo: 0, hi: 0 }
   const km = distanceKm
@@ -3128,6 +3159,10 @@ export default function GrandmaPage() {
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [courierModalOpen])
+
+  useEffect(() => {
+    if (fulfillmentMode === "pickup") setCourierModalOpen(false)
+  }, [fulfillmentMode])
 
   useEffect(() => {
     const prefs = readGrandmaPrefs()
