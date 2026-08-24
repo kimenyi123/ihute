@@ -23,7 +23,9 @@ import {
   isPharmacyCategoryId,
   PharmacyErxInput,
   type ErxUnlockKey,
-} from "@/components/category_ai/pharmacy-erx-input";
+} from "@/components/category_ai/pharmacy-erx-input"
+import { PharmacyErxResult } from "@/components/category_ai/pharmacy-erx-result"
+import type { MohErxDrugLineDTO } from "@/lib/erx/moh-erx-types";
 
 const LIST_SECTOR_SUPPLIERS_LIMIT = 500;
 
@@ -46,6 +48,12 @@ export function CategoryClientAI({
   const [sectorShopsLoading, setSectorShopsLoading] = useState(true);
   /** Single listSuppliersWithProducts payload for badges + shop grid + item grid (avoids two RAND() samples from the servlet). */
   const [sectorListPayload, setSectorListPayload] = useState<unknown[] | null>(null);
+  const [erxLookup, setErxLookup] = useState<{
+    loading: boolean;
+    errorCode: string | null;
+    patientDisplayName: string | null;
+    drugs: MohErxDrugLineDTO[] | null;
+  }>({ loading: false, errorCode: null, patientDisplayName: null, drugs: null });
 
   const isPharmacy = isPharmacyCategoryId(categoryId);
   const browseParam = searchParams.get("browse");
@@ -117,6 +125,41 @@ export function CategoryClientAI({
       cancelled = true;
     };
   }, [categoryId]);
+
+  /** Fetches + identity-validates the eRx code whenever the eRx tab's URL state changes. */
+  useEffect(() => {
+    if (browseMode !== "erx" || !erxCode) {
+      setErxLookup({ loading: false, errorCode: null, patientDisplayName: null, drugs: null });
+      return;
+    }
+    let cancelled = false;
+    async function lookup() {
+      setErxLookup((prev) => ({ ...prev, loading: true, errorCode: null }));
+      try {
+        const qs = new URLSearchParams({ code: erxCode });
+        if (erxPhone) qs.set("phone", erxPhone);
+        if (erxNames) qs.set("names", erxNames);
+        if (erxNationalId) qs.set("nationalId", erxNationalId);
+        const res = await fetch(`/api/pharmacy/erx-lookup?${qs.toString()}`, { cache: "no-store" });
+        const json = await res.json();
+        if (cancelled) return;
+        setErxLookup({
+          loading: false,
+          errorCode: json.ok ? null : json.code || "ERX_UPSTREAM_ERROR",
+          patientDisplayName: json.ok ? json.patientDisplayName : null,
+          drugs: json.ok ? json.drugs : null,
+        });
+      } catch {
+        if (!cancelled) {
+          setErxLookup({ loading: false, errorCode: "ERX_UPSTREAM_ERROR", patientDisplayName: null, drugs: null });
+        }
+      }
+    }
+    lookup();
+    return () => {
+      cancelled = true;
+    };
+  }, [browseMode, erxCode, erxPhone, erxNames, erxNationalId]);
 
   const replaceQuery = (mutate: (p: URLSearchParams) => void) => {
     const params = new URLSearchParams(Array.from(searchParams.entries()));
@@ -259,21 +302,32 @@ export function CategoryClientAI({
         />
       )}
 
-      {(browseMode === "item" || browseMode === "erx") && (
+      {browseMode === "item" && (
         <section id="products-section" className="mt-2">
-          {browseMode === "erx" && !erxCode ? (
+          <ProductGrid
+            categoryId={categoryId}
+            categoryName={categoryName}
+            selectedSupplier="all"
+            selectedSupplierName="All Suppliers"
+            browseMode="item"
+            hideInlineSearch
+            preloadedSectorListSuppliers={sectorListPayload}
+          />
+        </section>
+      )}
+
+      {browseMode === "erx" && (
+        <section id="products-section" className="mt-2">
+          {!erxCode ? (
             <p className="text-sm text-muted-foreground rounded-lg border border-dashed p-6 text-center">
               {t("categoryBrowseErxHint" as TranslationKey)}
             </p>
           ) : (
-            <ProductGrid
-              categoryId={categoryId}
-              categoryName={categoryName}
-              selectedSupplier="all"
-              selectedSupplierName="All Suppliers"
-              browseMode="item"
-              hideInlineSearch
-              preloadedSectorListSuppliers={sectorListPayload}
+            <PharmacyErxResult
+              loading={erxLookup.loading}
+              errorCode={erxLookup.errorCode}
+              patientDisplayName={erxLookup.patientDisplayName}
+              drugs={erxLookup.drugs}
             />
           )}
         </section>
