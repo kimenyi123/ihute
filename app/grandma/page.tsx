@@ -63,10 +63,16 @@ import {
 } from "@/lib/grandma-order-billing"
 import {
   formatGrandmaDistanceKm,
-  grandmaDeliveryDistanceKm,
+  grandmaDeliveryDistanceKmResolved,
+  grandmaShopGpsOrNull,
+  isUsablePricingLatLng,
+  mergeFetchedSellerGps,
+  parseSupplierLocationGps,
   quoteGrandmaFulfillmentFeeRwf,
   quoteGrandmaLogisticsFeeRwf,
+  sellerGpsCacheKey,
   type GrandmaLogisticsId,
+  type GrandmaSellerGpsCache,
 } from "@/lib/grandma-logistics-pricing"
 import { GRANDMA_CATEGORY_TO_SECTOR_SLUG, displayGrandmaShopName, grandmaCategoryLabel, grandmaNavCategories, grandmaOthersChildCategories, isOthersChildCategory, isOthersHubCategory, resolveGrandmaCategory } from "@/lib/seller-category-sector"
 import { fetchSectorStatsFromApi, productCountFromSupplierRow } from "@/lib/fetch-suggestions-helpers"
@@ -2509,6 +2515,10 @@ export default function GrandmaPage() {
   const [shopTab, setShopTab] = useState<ShopFilterTab | null>(null)
   const [useLocationSort, setUseLocationSort] = useState(false)
   const [selectedShopId, setSelectedShopId] = useState<string | null>(null)
+  /** Shop GPS from SupplierLocationServlet when browse/search rows omit lat/lng. */
+  const [sellerGpsCache, setSellerGpsCache] = useState<GrandmaSellerGpsCache>({})
+  const sellerGpsCacheRef = useRef<GrandmaSellerGpsCache>({})
+  const selectedShopAccountRef = useRef("")
   const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS)
   const [burrowsLiveCount, setBurrowsLiveCount] = useState<number>(0)
   const [burrowsLiveLoading, setBurrowsLiveLoading] = useState(false)
@@ -3060,6 +3070,11 @@ export default function GrandmaPage() {
         return hit ?? listMatch[0]
       }
 
+      const searchedShop = backendSearchShops
+        ? byExact(backendSearchShops) ?? byAccount(backendSearchShops)
+        : undefined
+      if (searchedShop) return searchedShop
+
       const availableShop = byExact(allAvailableShops) ?? byAccount(allAvailableShops)
       if (availableShop) return availableShop
 
@@ -3068,21 +3083,64 @@ export default function GrandmaPage() {
 
       return byExact(MOCK_SHOPS) ?? byAccount(MOCK_SHOPS) ?? null
     },
-    [selectedShopId, allAvailableShops, apiShops, category]
+    [selectedShopId, backendSearchShops, allAvailableShops, apiShops, category]
   )
 
+  const selectedShopAccountRaw = selectedShop
+    ? sellerAccountFromGrandmaShopId(selectedShop.id).trim()
+    : ""
+  const selectedShopAccountKey = sellerGpsCacheKey(selectedShopAccountRaw)
+  selectedShopAccountRef.current = selectedShopAccountKey
+  sellerGpsCacheRef.current = sellerGpsCache
+  const shopGpsFromList = grandmaShopGpsOrNull(selectedShop?.latitude, selectedShop?.longitude)
+  const shopGpsResolved =
+    shopGpsFromList ?? (selectedShopAccountKey ? sellerGpsCache[selectedShopAccountKey] : null) ?? null
+
+  useEffect(() => {
+    const requestedRaw = selectedShopAccountRaw
+    const requestedKey = selectedShopAccountKey
+    const listedGps = grandmaShopGpsOrNull(selectedShop?.latitude, selectedShop?.longitude)
+    if (!requestedRaw || listedGps) return
+    if (Object.prototype.hasOwnProperty.call(sellerGpsCacheRef.current, requestedKey)) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/supplier/location?action=getLocation&account=${encodeURIComponent(requestedRaw)}`,
+          { cache: "no-store" },
+        )
+        const json = (await res.json().catch(() => null)) as unknown
+        if (cancelled) return
+        const gps = parseSupplierLocationGps(json)
+        setSellerGpsCache((prev) =>
+          mergeFetchedSellerGps(prev, requestedKey, selectedShopAccountRef.current, gps),
+        )
+      } catch {
+        if (cancelled) return
+        setSellerGpsCache((prev) =>
+          mergeFetchedSellerGps(prev, requestedKey, selectedShopAccountRef.current, null),
+        )
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [selectedShopAccountRaw, selectedShopAccountKey, selectedShop?.latitude, selectedShop?.longitude])
+
   const deliveryDistanceKm = useMemo(() => {
-    return grandmaDeliveryDistanceKm(
-      locationData?.latitude,
-      locationData?.longitude,
-      selectedShop?.latitude,
-      selectedShop?.longitude,
-    )
+    return grandmaDeliveryDistanceKmResolved({
+      customerLat: locationData?.latitude,
+      customerLng: locationData?.longitude,
+      shopLat: shopGpsResolved?.latitude,
+      shopLng: shopGpsResolved?.longitude,
+      knownDistanceKm: selectedShop?.distanceKm,
+    })
   }, [
     locationData?.latitude,
     locationData?.longitude,
-    selectedShop?.latitude,
-    selectedShop?.longitude,
+    shopGpsResolved?.latitude,
+    shopGpsResolved?.longitude,
+    selectedShop?.distanceKm,
   ])
 
   const logisticsFeeRwf = useMemo(() => {
@@ -5760,6 +5818,45 @@ export default function GrandmaPage() {
     >
       📦
     </button>
+
+    <button
+      type="button"
+      className="orders-btn"
+      aria-label="Open Nokanda"
+      title="Open Nokanda"
+      onClick={() => {
+        window.open(
+          "https://play.google.com/store/apps/details?id=com.hexakomb.nokanda",
+          "_blank",
+          "noopener,noreferrer",
+        )
+      }}
+    >
+      <span style={{ position: "relative", display: "inline-flex", width: 22, height: 22 }} aria-hidden>
+        <Smartphone className="h-[20px] w-[20px]" strokeWidth={2.1} />
+        <span
+          style={{
+            position: "absolute",
+            right: -3,
+            bottom: -2,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 12,
+            height: 12,
+            borderRadius: "999px",
+            background: "#22c55e",
+            color: "#fff",
+            fontSize: 7,
+            fontWeight: 900,
+            lineHeight: 1,
+            border: "1px solid #fff",
+          }}
+        >
+          Fr
+        </span>
+      </span>
+    </button>
   </div>
 ) : null}
           
@@ -7503,9 +7600,12 @@ export default function GrandmaPage() {
 
         <p className="note" style={{ marginTop: 0, marginBottom: 10 }}>
           {fulfillmentMode === "delivery"
-            ? deliveryDistanceKm == null
+            ? !isUsablePricingLatLng(locationData?.latitude, locationData?.longitude)
               ? GRANDMA_PUBLIC_GPS_PERMISSION
-              : tPay.logisticsNote.replace("{km}", deliveryDistanceKm.toFixed(1))
+              : tPay.logisticsNote.replace(
+                  "{km}",
+                  deliveryDistanceKm == null ? "—" : deliveryDistanceKm.toFixed(1),
+                )
             : fulfillmentMode === "takeaway"
             ? tPay.logisticsNoteTakeaway
             : tPay.logisticsNotePickup}
