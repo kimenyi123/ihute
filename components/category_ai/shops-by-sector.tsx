@@ -2,13 +2,13 @@
 
 import { useState, useEffect, useMemo } from "react"
 import Link from "next/link"
-import Image from "next/image"
 import { Card, CardContent } from "@/components/ui/card"
 import { Store } from "lucide-react"
 import { useTranslation } from "@/hooks/use-translation"
 import { usePrefsStore } from "@/lib/prefs-store"
 import type { TranslationKey } from "@/lib/translations"
 import { cn } from "@/lib/utils"
+import { resolveSellerPhotoUrl } from "@/lib/seller-photo-url"
 
 interface SectorCategory {
   categoryId: string
@@ -24,6 +24,8 @@ export interface ShopInfo {
   officialNickname: string | null
   /** Lines / SKUs from seller listing (product_count or products.length from backend). */
   stockLineCount?: number
+  /** account_seller.photo from backend listing. */
+  sellerPhoto?: string
 }
 
 const SECTOR_ORDER = ["bar-resto", "resto-bar", "pharmacy", "supermarket", "liquor-store", "coffee-shop", "boutique", "beauty", "general"]
@@ -55,6 +57,38 @@ const FALLBACK_SECTORS: SectorCategory[] = [
 const SHOP_LOGO_BY_KEY: Record<string, string> = {
   rite: "/shops/rite-pharmacy-logo.png",
   alg000005204: "/shops/rite-pharmacy-logo.png",
+}
+
+/** Same key normalization as `/api/images/overrides` (account page shop photo uploads). */
+function normalizeShopAccountKey(account: string): string {
+  return account.replace(/\s+/g, " ").trim().toUpperCase()
+}
+
+async function fetchShopImageOverrideMap(): Promise<Record<string, string>> {
+  try {
+    const res = await fetch("/api/images/overrides?scope=shop", { cache: "no-store" })
+    const data = await res.json().catch(() => ({}))
+    if (data?.ok && data.map && typeof data.map === "object") {
+      return data.map as Record<string, string>
+    }
+  } catch {
+    // keep static/fallback logos only
+  }
+  return {}
+}
+
+function useShopImageOverrideMap(): Record<string, string> {
+  const [map, setMap] = useState<Record<string, string>>({})
+  useEffect(() => {
+    let cancelled = false
+    void fetchShopImageOverrideMap().then((m) => {
+      if (!cancelled) setMap(m)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  return map
 }
 
 function sectorSortIndex(categoryId: string): number {
@@ -112,14 +146,30 @@ function pickSupplierNickname(x: unknown): string | null {
 
 /** Best-effort count of catalog lines (aligns with seller_add_stock / catalog rows when backend sends them). */
 function pickStockLineCount(x: Record<string, unknown>): number | undefined {
-  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined)
+  const n = (v: unknown): number | undefined => {
+    if (typeof v === "number" && Number.isFinite(v)) return v
+    if (typeof v === "string" && v.trim() !== "") {
+      const parsed = Number(v.replace(/,/g, "").trim())
+      if (Number.isFinite(parsed)) return parsed
+    }
+    return undefined
+  }
   const pc =
     n(x.product_count) ??
     n(x.productCount) ??
     n(x.PRODUCT_COUNT) ??
+    n(x.item_count) ??
+    n(x.itemCount) ??
+    n(x.ITEM_COUNT) ??
+    n(x.items_count) ??
+    n(x.itemsCount) ??
+    n(x.nb_products) ??
+    n(x.nbProducts) ??
+    n(x.total_products) ??
+    n(x.totalProducts) ??
     (Array.isArray(x.products) ? x.products.length : undefined)
   if (pc != null && pc >= 0) return Math.round(pc)
-  const stock = n(x.in_stock_products) ?? n(x.inStockProducts)
+  const stock = n(x.in_stock_products) ?? n(x.inStockProducts) ?? n(x.IN_STOCK_PRODUCTS)
   return stock != null && stock >= 0 ? Math.round(stock) : undefined
 }
 
@@ -142,29 +192,88 @@ function matchesSectorShopFilter(shop: ShopInfo, raw: string): boolean {
 }
 
 export function mapListSuppliersWithProductsToShops(arr: unknown[]): ShopInfo[] {
-  return (arr || []).map((x: any) => {
-    const rec = x as Record<string, unknown>
-    return {
-      seller_account: x.seller_account ?? x.ACC ?? x.ISHYIGA_ACCOUNT ?? "",
-      seller_name: x.seller_name ?? x.OWNER ?? x.SELLER_NAMES ?? "Shop",
-      seller_location: x.seller_location ?? x.LOCATION,
-      officialNickname: pickSupplierNickname(x),
-      stockLineCount: pickStockLineCount(rec),
-    }
-  }).filter((s: ShopInfo) => s.seller_account || s.seller_name)
+  return (arr || [])
+    .map((x: any) => {
+      const rec = x as Record<string, unknown>
+      return {
+        seller_account: x.seller_account ?? x.ACC ?? x.ISHYIGA_ACCOUNT ?? "",
+        seller_name: x.seller_name ?? x.OWNER ?? x.SELLER_NAMES ?? "Shop",
+        seller_location: x.seller_location ?? x.LOCATION,
+        officialNickname: pickSupplierNickname(x),
+        stockLineCount: pickStockLineCount(rec),
+        sellerPhoto: String(
+          x.seller_photo ?? x.sellerPhoto ?? x.photo ?? x.PHOTO ?? ""
+        ).trim() || undefined,
+      }
+    })
+    .filter((s: ShopInfo) => s.seller_account || s.seller_name)
 }
 
-function shopLogoSrc(shop: ShopInfo): string | null {
+function shopLogoSrc(shop: ShopInfo, imageMap?: Record<string, string>): string | null {
   const nick = (shop.officialNickname || "").toString().trim().toLowerCase()
-  const acct = (shop.seller_account || "").toString().trim().toLowerCase()
+  const acctLower = (shop.seller_account || "").toString().trim().toLowerCase()
+  const accountKey = normalizeShopAccountKey(shop.seller_account || "")
+
+  // Next.js uploads (beta-safe) beat Java /img/shops paths that 404 after redeploy or localhost-only uploads.
+  if (accountKey && imageMap) {
+    const uploaded =
+      imageMap[accountKey] ||
+      imageMap[shop.seller_account.trim()] ||
+      imageMap[acctLower]
+    if (uploaded) return uploaded
+  }
+
+  if (shop.sellerPhoto) {
+    const resolved = resolveSellerPhotoUrl(shop.sellerPhoto)
+    if (resolved) return resolved
+  }
+
   if (nick && SHOP_LOGO_BY_KEY[nick]) return SHOP_LOGO_BY_KEY[nick]
-  if (acct && SHOP_LOGO_BY_KEY[acct]) return SHOP_LOGO_BY_KEY[acct]
+  if (acctLower && SHOP_LOGO_BY_KEY[acctLower]) return SHOP_LOGO_BY_KEY[acctLower]
   return null
+}
+
+function ShopCardLogo({ src, name }: { src: string; name: string }) {
+  const [failed, setFailed] = useState(false)
+  if (failed) {
+    return (
+      <div className="flex h-full w-full items-center justify-center bg-muted/40">
+        <Store className="h-11 w-11 text-muted-foreground" />
+      </div>
+    )
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt={name ? `${name} logo` : ""}
+      className="block h-full w-full bg-white object-contain p-0.5"
+      onError={() => setFailed(true)}
+    />
+  )
+}
+
+function ShopCardLogoFrame({ logo, name }: { logo: string | null; name: string }) {
+  return (
+    <div
+      className="mb-2.5 mx-auto w-[min(100%,7.5rem)] aspect-square sm:w-[min(100%,8.5rem)] shrink-0 overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-sm"
+      aria-hidden={!logo}
+    >
+      {logo ? (
+        <ShopCardLogo key={logo} src={logo} name={name} />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center bg-muted/40">
+          <Store className="h-11 w-11 text-muted-foreground" />
+        </div>
+      )}
+    </div>
+  )
 }
 
 /** Fetch sectors from homepage categories, then for each sector fetch sellers and show shops grouped by sector. */
 export function ShopsBySector() {
   const { t } = useTranslation()
+  const shopImageMap = useShopImageOverrideMap()
   const [sectors, setSectors] = useState<SectorCategory[]>([])
   const [shopsBySector, setShopsBySector] = useState<Record<string, ShopInfo[]>>({})
   const [loading, setLoading] = useState(true)
@@ -296,11 +405,12 @@ export function ShopsBySector() {
               </h3>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
                 {shops.map((shop) => {
-                  const canLink = Boolean((shop.officialNickname || "").trim())
+                  const slug = (shop.officialNickname || shop.seller_account || shop.seller_name || "").trim().toLowerCase()
+                  const canLink = Boolean(slug)
                   const href = canLink
-                    ? `/shop-with-me/${encodeURIComponent((shop.officialNickname || "").trim().toLowerCase())}`
+                    ? `/shop-with-me/${encodeURIComponent(slug)}`
                     : ""
-                  const logo = shopLogoSrc(shop)
+                  const logo = shopLogoSrc(shop, shopImageMap)
                   const lines = shop.stockLineCount
                   const cardKey = `${shop.seller_account || "na"}-${shop.seller_name}`
 
@@ -312,20 +422,8 @@ export function ShopsBySector() {
                       )}
                       title={canLink ? undefined : t("shopsListLinkDisabledHint" as TranslationKey)}
                     >
-                      <CardContent className="p-3 flex flex-col items-center justify-center text-center min-h-[112px]">
-                        <div className="rounded-lg bg-muted/50 p-2 mb-1.5 size-[52px] flex items-center justify-center overflow-hidden">
-                          {logo ? (
-                            <Image
-                              src={logo}
-                              alt=""
-                              width={44}
-                              height={44}
-                              className="object-contain max-h-[44px] w-auto"
-                            />
-                          ) : (
-                            <Store className="h-6 w-6 text-muted-foreground" />
-                          )}
-                        </div>
+                      <CardContent className="p-3 sm:p-4 flex flex-col items-center justify-center text-center min-h-[148px]">
+                        <ShopCardLogoFrame logo={logo} name={shop.seller_name} />
                         <span className="text-sm font-medium text-foreground line-clamp-2">{shop.seller_name}</span>
                         {shop.seller_location && (
                           <span className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{shop.seller_location}</span>
@@ -333,17 +431,19 @@ export function ShopsBySector() {
                         <span
                           className={cn(
                             "text-[11px] mt-1.5 line-clamp-1 w-full",
-                            canLink ? "text-primary font-medium" : "text-amber-700 dark:text-amber-500"
+                            shop.officialNickname ? "text-primary font-medium" : "text-muted-foreground"
                           )}
                         >
-                          <span className="text-muted-foreground font-normal">{t("shopsListNickname" as TranslationKey)}: </span>
-                          {canLink ? (
-                            <span className="tabular-nums">@{shop.officialNickname!.trim()}</span>
+                          {shop.officialNickname ? (
+                            <>
+                              <span className="text-muted-foreground font-normal">{t("shopsListNickname" as TranslationKey)}: </span>
+                              <span className="tabular-nums">@{shop.officialNickname.trim()}</span>
+                            </>
                           ) : (
-                            <span>{t("shopsListNoNickname" as TranslationKey)}</span>
+                            <span>{shop.seller_account ? `${shop.seller_account}` : t("shopsListNoNickname" as TranslationKey)}</span>
                           )}
                         </span>
-                        {lines != null && (
+                        {lines != null && lines > 0 && (
                           <span
                             className="text-[11px] text-muted-foreground mt-1 tabular-nums"
                             title="Catalog lines (from seller stock / product list)"
@@ -391,6 +491,7 @@ export function ShopsForSingleSector({
   filterQuery?: string
 }) {
   const { t } = useTranslation()
+  const shopImageMap = useShopImageOverrideMap()
   const locationPref = usePrefsStore((s) => s.location)
   const [shopPage, setShopPage] = useState(1)
   const SHOPS_PER_PAGE = 15
@@ -399,11 +500,14 @@ export function ShopsForSingleSector({
     let list = shops
     const pref = (locationPref || "").trim().toLowerCase()
     if (pref) {
-      list = list.filter((s) => {
+      const locationFiltered = list.filter((s) => {
         const loc = (s.seller_location || "").toLowerCase()
         const name = (s.seller_name || "").toLowerCase()
         return loc.includes(pref) || name.includes(pref)
       })
+      if (locationFiltered.length > 0) {
+        list = locationFiltered
+      }
     }
     const fq = (filterQuery || "").trim()
     if (fq) {
@@ -443,36 +547,25 @@ export function ShopsForSingleSector({
         <>
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
           {pagedShops.map((shop) => {
-            const canLink = Boolean((shop.officialNickname || "").trim())
+            const slug = (shop.officialNickname || shop.seller_account || shop.seller_name || "").trim().toLowerCase()
+            const canLink = Boolean(slug)
             const href = canLink
-              ? `/shop-with-me/${encodeURIComponent((shop.officialNickname || "").trim().toLowerCase())}`
+              ? `/shop-with-me/${encodeURIComponent(slug)}`
               : ""
-            const logo = shopLogoSrc(shop)
+            const logo = shopLogoSrc(shop, shopImageMap)
             const lines = shop.stockLineCount
             const cardKey = `${shop.seller_account || "na"}-${shop.seller_name}`
 
             const card = (
               <Card
                 className={cn(
-                  "h-full min-h-[120px] border transition-all",
+                  "h-full min-h-[156px] border transition-all",
                   canLink ? "hover:shadow-md cursor-pointer" : "opacity-80 border-dashed cursor-not-allowed"
                 )}
                 title={canLink ? undefined : t("shopsListLinkDisabledHint" as TranslationKey)}
               >
                 <CardContent className="p-3 flex flex-col items-center justify-center text-center">
-                  <div className="rounded-lg bg-muted/50 p-2 mb-1.5 size-[52px] flex items-center justify-center overflow-hidden">
-                    {logo ? (
-                      <Image
-                        src={logo}
-                        alt=""
-                        width={44}
-                        height={44}
-                        className="object-contain max-h-[44px] w-auto"
-                      />
-                    ) : (
-                      <Store className="h-6 w-6 text-muted-foreground" />
-                    )}
-                  </div>
+                  <ShopCardLogoFrame logo={logo} name={shop.seller_name} />
                   <span className="text-sm font-medium text-foreground line-clamp-2">{shop.seller_name}</span>
                   {shop.seller_location && (
                     <span className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{shop.seller_location}</span>
@@ -480,17 +573,19 @@ export function ShopsForSingleSector({
                   <span
                     className={cn(
                       "text-[11px] mt-1.5 line-clamp-1 w-full",
-                      canLink ? "text-primary font-medium" : "text-amber-700 dark:text-amber-500"
+                      shop.officialNickname ? "text-primary font-medium" : "text-muted-foreground"
                     )}
                   >
-                    <span className="text-muted-foreground font-normal">{t("shopsListNickname" as TranslationKey)}: </span>
-                    {canLink ? (
-                      <span className="tabular-nums">@{shop.officialNickname!.trim()}</span>
+                    {shop.officialNickname ? (
+                      <>
+                        <span className="text-muted-foreground font-normal">{t("shopsListNickname" as TranslationKey)}: </span>
+                        <span className="tabular-nums">@{shop.officialNickname.trim()}</span>
+                      </>
                     ) : (
-                      <span>{t("shopsListNoNickname" as TranslationKey)}</span>
+                      <span>{shop.seller_account ? `${shop.seller_account}` : t("shopsListNoNickname" as TranslationKey)}</span>
                     )}
                   </span>
-                  {lines != null && (
+                  {lines != null && lines > 0 && (
                     <span className="text-[11px] text-muted-foreground mt-1 tabular-nums">{lines} items</span>
                   )}
                 </CardContent>

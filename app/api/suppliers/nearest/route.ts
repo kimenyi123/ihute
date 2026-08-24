@@ -17,11 +17,15 @@ import { getFetchSuggestionsUrl } from "@/lib/backend-config"
  */
 export async function POST(req: Request) {
   try {
-    const body = await req.json()
-    const { latitude, longitude, radius, limit, withStockOnly = true } = body
+    const body = await req.json().catch(() => ({}))
+    const rawLat = body.latitude ?? body.lat
+    const rawLon = body.longitude ?? body.lng ?? body.lon
+    const rawRadius = body.radius ?? body.radiusKm
+    const limit = body.limit
+    const withStockOnly = body.withStockOnly !== undefined ? body.withStockOnly : true
 
     // Validate required parameters
-    if (!latitude || !longitude) {
+    if (rawLat === undefined || rawLat === null || rawLon === undefined || rawLon === null) {
       return NextResponse.json(
         { ok: false, error: "latitude and longitude are required" },
         { status: 400 }
@@ -29,12 +33,12 @@ export async function POST(req: Request) {
     }
 
     // Validate coordinates are numbers
-    const lat = parseFloat(latitude)
-    const lon = parseFloat(longitude)
+    const lat = typeof rawLat === "number" ? rawLat : parseFloat(rawLat)
+    const lon = typeof rawLon === "number" ? rawLon : parseFloat(rawLon)
 
-    if (isNaN(lat) || isNaN(lon)) {
+    if (isNaN(lat) || isNaN(lon) || !isFinite(lat) || !isFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
       return NextResponse.json(
-        { ok: false, error: "Invalid coordinates" },
+        { ok: false, error: "Invalid coordinates (lat: -90 to 90, lng: -180 to 180)" },
         { status: 400 }
       )
     }
@@ -55,12 +59,11 @@ export async function POST(req: Request) {
 
     if (!isInRwanda) {
       console.warn(`[nearest-suppliers] ⚠️ Coordinates outside Rwanda: (${lat}, ${lon})`)
-      // Still process but warn user
     }
 
     // Validate and set defaults for radius and limit
-    const searchRadius = Math.max(1, Math.min(500, radius || 50)) // 1-500 km
-    const resultLimit = Math.max(1, Math.min(100, limit || 20))   // 1-100 results
+    const searchRadius = Math.max(0.1, Math.min(500, Number(rawRadius) || 50)) // 0.1-500 km
+    const resultLimit = Math.max(1, Math.min(100, Number(limit) || 20))   // 1-100 results
 
     console.log("[nearest-suppliers] Finding suppliers near:", {
       latitude: lat.toFixed(6),
@@ -197,12 +200,13 @@ export async function POST(req: Request) {
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
   
-  const latitude = searchParams.get("latitude")
-  const longitude = searchParams.get("longitude")
-  const radius = searchParams.get("radius")
-  const limit = searchParams.get("limit")
+  const rawLat = searchParams.get("latitude") ?? searchParams.get("lat")
+  const rawLon = searchParams.get("longitude") ?? searchParams.get("lng") ?? searchParams.get("lon")
+  const rawRadius = searchParams.get("radius") ?? searchParams.get("radiusKm")
+  const rawLimit = searchParams.get("limit")
+  const withStockOnly = searchParams.get("withStockOnly") !== "false"
 
-  if (!latitude || !longitude) {
+  if (!rawLat || !rawLon) {
     return NextResponse.json(
       { ok: false, error: "latitude and longitude are required" },
       { status: 400 }
@@ -211,10 +215,12 @@ export async function GET(req: Request) {
 
   // Convert to POST body and reuse POST handler
   const body = {
-    latitude: parseFloat(latitude),
-    longitude: parseFloat(longitude),
-    radius: radius ? parseInt(radius) : 50,
-    limit: limit ? parseInt(limit) : 20
+    latitude: parseFloat(rawLat),
+    longitude: parseFloat(rawLon),
+    radius: rawRadius ? parseFloat(rawRadius) : 50,
+    radiusKm: rawRadius ? parseFloat(rawRadius) : 50,
+    limit: rawLimit ? parseInt(rawLimit) : 20,
+    withStockOnly
   }
 
   // Create a new Request object with POST method

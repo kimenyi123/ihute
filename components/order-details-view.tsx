@@ -167,14 +167,16 @@ export function OrderDetailsView({ variant = "site" }: OrderDetailsViewProps) {
       return `${name} x${qty} - ${(qty * price).toLocaleString()} RWF`
     }).join("\n")
 
-    const origin =
-      typeof window !== "undefined"
-        ? window.location.origin
-        : (process.env.NEXT_PUBLIC_SITE_URL || "https://ihute.rw").replace(/\/Trading\/?$/, "")
+    const publicShopBase = (process.env.NEXT_PUBLIC_SHOP_URL || process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://shop.ihute.rw").replace(/\/$/, "")
     const path = isGrandma ? `/grandma/orders/${orderId}` : `/orders/${orderId}`
-    const detailsUrl = `${origin}${path}`
+    const detailsUrl = `${publicShopBase}${path}`
 
     const message = `
+ihute.rw - Shop Everything You Need
+Rwanda's premier online marketplace for pharmacy, groceries, fashion, and more
+
+Order
+
 📦 Order #${order.ID_ORDER}
 
 🏪 Shop: ${order.SELLER_NAMES}

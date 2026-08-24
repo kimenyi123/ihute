@@ -3,6 +3,7 @@ import { getOrdersUrl } from "@/lib/backend-config"
 import { getOrCreatePublicTokenForOrderId } from "@/lib/order-tracking-token"
 import { DEFAULT_GUEST_ISHYIGA_ACCOUNT } from "@/lib/guest-checkout"
 import { orderErrorMessageWithProductNames } from "@/lib/order-error-display"
+import { resolveOrderPaymentStatus } from "@/lib/payment-utils"
 
 /** Java createOrder can be slow on cold Tomcat; default 60s (override with ORDER_CREATE_JAVA_TIMEOUT_MS). */
 const ORDER_CREATE_JAVA_TIMEOUT_MS = (() => {
@@ -155,9 +156,11 @@ export async function POST(req: Request) {
     const paymentName = String(bodyIn.paymentName ?? "PAY_ON_DELIVERY").toUpperCase()
     const validPaymentMethods = [
       "PAY_ON_DELIVERY",
+      "PAY_AT_TABLE",
       "PAID_MTN_MOMO",
       "PAID_AIRTEL_MOMO",
       "PAID_CARD",
+      "PAID_URUBUTO",
       "MTN_MOMO",
       "AIRTEL_MOMO",
       "MOMO",
@@ -178,9 +181,18 @@ export async function POST(req: Request) {
       else paymentId = `COD_${Date.now()}`
     }
     const reference = String(bodyIn.reference ?? "").trim()
-    const isDigitalPayment =
-      paymentName.includes("MOMO") || paymentName.includes("AIRTEL") || paymentName.includes("CARD")
-    const paymentStatus = isDigitalPayment || reference.length > 0 ? "PAID" : "PENDING"
+    const orderNote = String(
+      bodyIn.orderNote ?? bodyIn.orderNotes ?? bodyIn.notes ?? bodyIn.ORDER_NOTE ?? bodyIn.CONDITIONS ?? ""
+    ).trim()
+    console.log("[Orders Create API] Received orderNote:", orderNote || "[empty]", "from body.orderNote:", bodyIn.orderNote)
+    const requestedPaymentStatus = String(
+      bodyIn.paymentStatus ?? bodyIn.PAYMENT_STATUS ?? "",
+    ).trim()
+    const paymentStatus = resolveOrderPaymentStatus(paymentName, {
+      paymentStatus: requestedPaymentStatus,
+      reference,
+      paymentId,
+    })
 
     /** Browser guest checkout — Java OrdersServlet must null-check buyer or read this flag (see GUEST_CHECKOUT_BUYER_ACCOUNT). */
     const isGuestCheckout = Boolean(
@@ -192,6 +204,10 @@ export async function POST(req: Request) {
       buyerAccount = String(
         process.env.DEFAULT_GUEST_ISHYIGA_ACCOUNT ?? DEFAULT_GUEST_ISHYIGA_ACCOUNT,
       ).trim()
+    }
+    // Always ensure buyerAccount is set — Java requires it to find the buyer row
+    if (!buyerAccount) {
+      buyerAccount = String(process.env.DEFAULT_GUEST_ISHYIGA_ACCOUNT ?? DEFAULT_GUEST_ISHYIGA_ACCOUNT).trim()
     }
 
     /* -------- shared payload -------- */
@@ -206,12 +222,16 @@ export async function POST(req: Request) {
       paymentName,
       paymentId,
       reference,
+      orderNote,
       currency: String(bodyIn.currency ?? "RWF"),
       paymentStatus,
       items,
       isTableCommand: Boolean(bodyIn.isTableCommand),
       tableName: String(bodyIn.tableName ?? ""),
       tableLocation: String(bodyIn.tableLocation ?? ""),
+      orderSource: String(bodyIn.orderSource ?? ""),
+      shopNickname: String(bodyIn.shopNickname ?? ""),
+      acquisitionSource: String(bodyIn.acquisitionSource ?? ""),
       isGuestCheckout,
       buyerAccount,
     }
@@ -253,6 +273,9 @@ export async function POST(req: Request) {
         form.set("paymentName", shared.paymentName)
         form.set("paymentId", shared.paymentId)
         form.set("reference", shared.reference)
+        if (shared.orderNote) form.set("orderNote", shared.orderNote)
+        if (shared.orderNote) form.set("ORDER_NOTE", shared.orderNote)
+        if (shared.orderNote) form.set("CONDITIONS", shared.orderNote)
         form.set("currency", shared.currency)
         form.set("paymentStatus", shared.paymentStatus)
         form.set("PAYMENT_STATUS", shared.paymentStatus)
@@ -267,6 +290,9 @@ export async function POST(req: Request) {
           form.set("tableName", shared.tableName)
           form.set("tableLocation", shared.tableLocation)
         }
+        if (shared.orderSource) form.set("orderSource", shared.orderSource)
+        if (shared.shopNickname) form.set("shopNickname", shared.shopNickname)
+        if (shared.acquisitionSource) form.set("acquisitionSource", shared.acquisitionSource)
         form.set("skipStockCheck", "true")
         if (shared.isGuestCheckout) form.set("isGuestCheckout", "true")
         if (shared.buyerAccount) form.set("buyerAccount", shared.buyerAccount)
@@ -323,6 +349,9 @@ export async function POST(req: Request) {
                 paymentName: shared.paymentName,
                 paymentId: shared.paymentId,
                 reference: shared.reference,
+                orderNote: shared.orderNote,
+                ORDER_NOTE: shared.orderNote,
+                CONDITIONS: shared.orderNote,
                 currency: shared.currency,
                 paymentStatus: shared.paymentStatus,
                 PAYMENT_STATUS: shared.paymentStatus,
@@ -330,6 +359,9 @@ export async function POST(req: Request) {
                 isTableCommand: shared.isTableCommand,
                 tableName: shared.tableName,
                 tableLocation: shared.tableLocation,
+                orderSource: shared.orderSource,
+                shopNickname: shared.shopNickname,
+                acquisitionSource: shared.acquisitionSource,
                 skipStockCheck: true,
                 isGuestCheckout: shared.isGuestCheckout,
                 ...(shared.buyerAccount ? { buyerAccount: shared.buyerAccount } : {}),
@@ -361,6 +393,7 @@ export async function POST(req: Request) {
           ok: true,
           orderId: oid,
           ...(trackToken ? { trackToken } : {}),
+          ...(json?.tableCommand ? { tableCommand: json.tableCommand } : {}),
           via: url,
           sellerTel: json?.sellerTel ?? "",
           paymentName: shared.paymentName,

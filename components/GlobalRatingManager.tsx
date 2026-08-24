@@ -10,6 +10,7 @@
 import { useEffect, useState } from "react"
 import { orderStatusMonitor } from "@/lib/order-status-monitor"
 import { RatingModal } from "@/components/RatingModal"
+import { sellerAccountFromOrder, sellerNameFromOrder } from "@/lib/order-seller-account"
 
 interface RatingData {
   orderId: string
@@ -20,6 +21,30 @@ interface RatingData {
 
 interface NotificationData extends RatingData {
   createdAt: number
+}
+
+async function enrichRatingData(data: RatingData): Promise<RatingData> {
+  if (data.sellerAccount.trim()) return data
+  try {
+    const res = await fetch(`/api/orders/details?orderId=${encodeURIComponent(data.orderId)}`, {
+      cache: "no-store",
+    })
+    const json = await res.json()
+    if (json.ok && json.order) {
+      const seller = json.seller as Record<string, unknown> | undefined
+      const account = sellerAccountFromOrder(json.order, seller)
+      if (account) {
+        return {
+          ...data,
+          sellerAccount: account,
+          sellerName: sellerNameFromOrder(json.order, seller) || data.sellerName,
+        }
+      }
+    }
+  } catch (error) {
+    console.warn("[GlobalRatingManager] Failed to enrich rating data:", error)
+  }
+  return data
 }
 
 export function GlobalRatingManager() {
@@ -88,12 +113,13 @@ export function GlobalRatingManager() {
             
             console.log('[GlobalRatingManager] New browser notification:', notification)
             
-            setActiveRating({
+            const rating = await enrichRatingData({
               orderId: notification.data.orderId.toString(),
-              sellerAccount: notification.data.sellerAccount,
-              sellerName: notification.data.sellerName,
+              sellerAccount: sellerAccountFromOrder(notification.data as Record<string, unknown>),
+              sellerName: sellerNameFromOrder(notification.data as Record<string, unknown>),
               items: notification.data.items
             })
+            setActiveRating(rating)
             setShowModal(true)
             return // Don't check rating notifications if we have browser notifications
           }
@@ -108,12 +134,13 @@ export function GlobalRatingManager() {
             
             console.log('[GlobalRatingManager] New rating notification:', notification)
             
-            setActiveRating({
+            const rating = await enrichRatingData({
               orderId: notification.orderId.toString(),
-              sellerAccount: notification.sellerAccount,
-              sellerName: notification.sellerName,
+              sellerAccount: sellerAccountFromOrder(notification as unknown as Record<string, unknown>),
+              sellerName: sellerNameFromOrder(notification as unknown as Record<string, unknown>),
               items: notification.items
             })
+            setActiveRating(rating)
             setShowModal(true)
 
             // Mark as processed
@@ -149,11 +176,11 @@ export function GlobalRatingManager() {
   useEffect(() => {
     console.log('[GlobalRatingManager] Initializing order status monitor')
 
-    const unsubscribe = orderStatusMonitor.onRatingTrigger((data) => {
+    const unsubscribe = orderStatusMonitor.onRatingTrigger(async (data) => {
       console.log('[GlobalRatingManager] Rating triggered for order:', data.orderId)
       
-      // Show the rating modal immediately
-      setActiveRating(data)
+      const rating = await enrichRatingData(data)
+      setActiveRating(rating)
       setShowModal(true)
     })
 

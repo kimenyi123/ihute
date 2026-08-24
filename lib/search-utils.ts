@@ -5,7 +5,7 @@
  * Includes multilingual keyword matching (English, Kinyarwanda, French)
  */
 
-import { expandSearchQuery } from './keyword-mapping'
+import { expandSearchQuery, getTranslations } from './keyword-mapping'
 
 /**
  * Calculate relevance score for a search match
@@ -92,7 +92,14 @@ export function escapeRegex(str: string): string {
  * Split query on spaces into tokens for AND matching.
  * - Pure digits: keep from length 1 (e.g. "500")
  * - Text: min length 2 (drops stray single letters)
+ * - Recipe measures (cup, tsp, …) are dropped so "½ CUP ALMONDS" can match shelf "ALMONDS"
  */
+const MEASURE_TOKENS = new Set([
+  "cup", "cups", "tsp", "tbsp", "tablespoon", "teaspoon", "ounce", "ounces", "oz",
+  "gram", "grams", "kg", "ml", "liter", "litre", "ltr", "pinch", "dash", "half",
+  "quarter", "clove", "cloves", "slice", "slices", "can", "cans", "pack", "packet",
+])
+
 export function tokenizeSearchQueryForAnd(query: string): string[] {
   const raw = query
     .trim()
@@ -100,6 +107,9 @@ export function tokenizeSearchQueryForAnd(query: string): string[] {
     .split(/\s+/)
     .filter(Boolean)
   return raw.filter((t) => {
+    if (MEASURE_TOKENS.has(t)) return false
+    // Unicode fractions / single glyphs
+    if (t.length === 1 && !/^\d$/.test(t)) return false
     if (/^\d+$/.test(t)) return t.length >= 1
     return t.length >= 2
   })
@@ -109,18 +119,58 @@ export function tokenizeSearchQueryForAnd(query: string): string[] {
 export function getProductSearchBlob<T extends {
   item_commercial_name?: string
   item_key_words?: string
+  item_key_words_kinyarwanda?: string
+  item_key_words_french?: string
+  item_french?: string
+  IMITERERE?: string
+  keywords_en?: string
   item_code?: string
   supplier_name?: string
-  item_packet?: string
+  item_packet?: string | number
   item_emballage?: string
+  item_inn?: string
+  niki_item_key_words?: string
 }>(product: T): string {
+  const q = product as Record<string, unknown>
   return [
     product.item_commercial_name,
+    q.item_name,
+    q.ITEM_NAME,
+    q.name,
     product.item_key_words,
+    q.item_keywords,
+    q.ITEM_KEYWORDS,
+    q.ITEM_KEY_WORDS,
+    q.niki_code,
+    q.NIKI_CODE,
+    q.nikiCode,
+    q.nikicode,
+    q.CODE_ISHYIGA,
+    q.code_ishyiga,
+    product.item_key_words_kinyarwanda,
+    product.IMITERERE,
+    q.IMITERERE,
+    product.keywords_en,
+    q.keywords_en,
+    product.item_key_words_french,
+    product.item_french,
+    q.item_french,
+    product.item_inn,
+    product.niki_item_key_words,
     product.item_code,
+    q.ITEM_CODE,
+    q.product_code,
+    q.productCode,
+    q.code,
     product.supplier_name,
-    product.item_packet,
+    product.item_packet != null ? String(product.item_packet) : undefined,
     product.item_emballage,
+    q.item_description ?? q.description ?? "",
+    q.item_fabricant ?? q.brand ?? q.BRAND ?? "",
+    q.famille ?? q.FAMILLE ?? "",
+    q.item_department ?? q.DEPARTMENT ?? "",
+    q.category ?? q.CATEGORY ?? "",
+    q.item_state ?? q.ITEM_STATE ?? "",
   ]
     .filter(Boolean)
     .join(" ")
@@ -130,15 +180,31 @@ export function getProductSearchBlob<T extends {
 /**
  * One token must appear in the blob. Numeric tokens use digit boundaries so
  * "500" matches "500ml" but not "1500".
+ * Includes multilingual translations (e.g. amazi -> water, inzoga -> beer).
  */
-export function tokenMatchesInSearchBlob(token: string, blob: string): boolean {
+function stemVariants(token: string): string[] {
   const t = token.toLowerCase()
+  if (!t) return []
+  const out = new Set<string>([t])
+  if (t.length >= 5 && t.endsWith("s") && !t.endsWith("ss")) {
+    out.add(t.slice(0, -1))
+  }
+  return Array.from(out)
+}
+
+export function tokenMatchesInSearchBlob(token: string, blob: string): boolean {
+  const t = token.toLowerCase().trim()
   if (!t || !blob) return false
   if (/^\d+$/.test(t)) {
     const re = new RegExp(`(?<!\\d)${escapeRegex(t)}(?!\\d)`, "i")
     return re.test(blob)
   }
-  return blob.includes(t)
+  const expanded = expandSearchQuery(t)
+  const variants = Array.from(new Set<string>([...stemVariants(t), ...expanded]))
+  for (const v of variants) {
+    if (v && blob.includes(v.toLowerCase())) return true
+  }
+  return false
 }
 
 /** Every token must match somewhere in the blob (logical AND across tokens). */
@@ -147,7 +213,7 @@ export function productMatchesAllSearchTokens<T extends {
   item_key_words?: string
   item_code?: string
   supplier_name?: string
-  item_packet?: string
+  item_packet?: string | number
   item_emballage?: string
 }>(product: T, tokens: string[]): boolean {
   if (tokens.length === 0) return true
@@ -164,7 +230,7 @@ export function productMatchesAllSearchTokens<T extends {
 export function filterSuppliersByRelevance<T extends { supplier_name: string }>(
   suppliers: T[],
   searchQuery: string,
-  minScore: number = 5 // Lower default to show more suppliers (can be overridden per call)
+  minScore: number = 3 // Lowered default from 5 to 3 - more inclusive
 ): (T & { finalScore: number })[] {
   if (!suppliers || suppliers.length === 0) {
     return []
@@ -193,6 +259,13 @@ export function filterSuppliersByRelevance<T extends { supplier_name: string }>(
       name: s.supplier_name,
       score: s.finalScore
     })))
+  } else if (suppliers.length > 0 && filtered.length === 0) {
+    // Log filtered-out suppliers for debugging
+    console.warn(`[SupplierFilter] All ${suppliers.length} suppliers filtered out. Top 3 scores:`, 
+      scoredSuppliers.sort((a, b) => b.finalScore - a.finalScore).slice(0, 3).map(s => ({
+        name: s.supplier_name,
+        score: s.finalScore
+      })))
   }
 
   return sorted
@@ -214,7 +287,7 @@ export function filterProductsByRelevance<T extends {
 }>(
   products: T[],
   searchQuery: string,
-  minScore: number = 25 // Increased default minimum score for stricter filtering
+  minScore: number = 15 // Lowered default from 25 to 15 for better coverage
 ): (T & { finalScore: number })[] {
   if (!products || products.length === 0) {
     console.log("[ProductFilter] No products to filter")
@@ -232,8 +305,8 @@ export function filterProductsByRelevance<T extends {
       ? products.filter((p) => productMatchesAllSearchTokens(p, andTokens))
       : products
 
-  if (productsInput.length === 0) {
-    console.log("[ProductFilter] No products left after AND token filter")
+  if (productsInput.length === 0 && andTokens.length > 1) {
+    console.log("[ProductFilter] No products left after AND token filter for query:", query)
     return []
   }
 
@@ -245,56 +318,119 @@ export function filterProductsByRelevance<T extends {
   const effectiveMinScore = andTokens.length > 1 ? 0 : minScore
 
   console.log(
-    `[ProductFilter] Filtering ${productsInput.length}/${products.length} products, ${terms.length} term(s), AND=${andTokens.length > 1}, query: "${searchQuery}"`
+    `[ProductFilter] Filtering ${productsInput.length}/${products.length} products, ${terms.length} term(s), AND=${andTokens.length > 1}, query: "${searchQuery}", minScore=${effectiveMinScore}`
   )
 
   const scoredProducts = productsInput.map((product) => {
     // Start with backend score if available
     const baseScore = (product.match_score || product.relevance_score || 0)
+    const q = product as Record<string, unknown>
+
+    const commercialName = String(
+      product.item_commercial_name || q.item_name || q.ITEM_NAME || q.name || ''
+    )
+    const keywords = String(
+      product.item_key_words || q.item_keywords || q.ITEM_KEYWORDS || q.ITEM_KEY_WORDS || ''
+    )
 
     // Calculate frontend scores using multilingual matching
-    const nameScore = calculateRelevanceScore(
-      searchQuery,
-      product.item_commercial_name || ''
-    )
+    const nameScore = calculateRelevanceScore(searchQuery, commercialName)
 
-    const keywordsScore = calculateRelevanceScore(
-      searchQuery,
-      product.item_key_words || '',
-      {
-        exactMatchBonus: 80,
-        startsWithBonus: 40,
-        containsBonus: 12,
-        wordBoundaryBonus: 25,
-        translationBonus: 35
-      }
-    )
+    const keywordsScore = calculateRelevanceScore(searchQuery, keywords, {
+      exactMatchBonus: 80,
+      startsWithBonus: 40,
+      containsBonus: 12,
+      wordBoundaryBonus: 25,
+      translationBonus: 35,
+    })
 
-    // Additional simple term matching for item code
-    const code = (product.item_code || '').toLowerCase()
+    // Additional term matching for item code and NIKI code (case-insensitive, digit-aware)
+    const code = String(
+      product.item_code || q.ITEM_CODE || q.niki_code || q.NIKI_CODE || ''
+    ).toLowerCase()
     let codeScore = 0
     for (const term of terms) {
-      if (code.includes(term)) codeScore += 3
+      if (/^\d+$/.test(term)) {
+        // Numeric code: use word boundary matching
+        const re = new RegExp(`(?<!\\d)${escapeRegex(term)}(?!\\d)`)
+        if (re.test(code)) codeScore += 5
+      } else if (code.includes(term)) {
+        codeScore += 15
+      }
     }
 
-    // Combine scores: take max of multilingual scores + backend score + code score
+    // Also check description and other fields
+    const desc = String(q.item_description ?? q.description ?? '').toLowerCase()
+    const brand = String(q.item_fabricant ?? q.brand ?? q.BRAND ?? '').toLowerCase()
+    const famille = String(q.famille ?? q.FAMILLE ?? '').toLowerCase()
+
+    let otherFieldsScore = 0
+    for (const term of terms) {
+      if (desc.includes(term)) otherFieldsScore += 2
+      if (brand.includes(term)) otherFieldsScore += 10
+      if (famille.includes(term)) otherFieldsScore += 3
+    }
+
     const frontendScore = Math.max(nameScore, keywordsScore)
-    const finalScore = Math.max(baseScore, frontendScore) + codeScore
+    const hasAnyFieldMatch = frontendScore > 0 || codeScore > 0 || otherFieldsScore > 0
+
+    // Discard products that have 0 match with the query in all fields
+    if (!hasAnyFieldMatch) {
+      return { ...product, finalScore: 0 }
+    }
+
+    // Combine scores: take max of multilingual scores + backend score + code score + other fields
+    const finalScore = Math.max(baseScore, frontendScore) + codeScore + otherFieldsScore
 
     return { ...product, finalScore }
   })
 
-  const filtered = scoredProducts.filter((item) => item.finalScore >= effectiveMinScore)
-  const sorted = filtered.sort((a, b) => b.finalScore - a.finalScore)
+  const filtered = scoredProducts.filter((item) => {
+    const productRecord = item as Record<string, unknown>
+    const normalizedCodes = [
+      item.item_code,
+      productRecord.ITEM_CODE,
+      productRecord.niki_code,
+      productRecord.NIKI_CODE,
+      item.item_key_words,
+    ]
+      .map((value) => String(value ?? "").trim().toLowerCase())
+      .filter(Boolean)
+    const exactCode = terms.some((term) => normalizedCodes.includes(term))
+    return exactCode || item.finalScore >= effectiveMinScore
+  })
+  const sorted = filtered.sort((a, b) => {
+    const scoreOrder = b.finalScore - a.finalScore
+    if (scoreOrder !== 0) return scoreOrder
+    const nameOrder = String(a.item_commercial_name ?? "").localeCompare(
+      String(b.item_commercial_name ?? ""),
+      undefined,
+      { sensitivity: "base" },
+    )
+    if (nameOrder !== 0) return nameOrder
+    return String(a.item_code ?? "").localeCompare(String(b.item_code ?? ""), undefined, {
+      sensitivity: "base",
+    })
+  })
 
+  const filteredOutCount = scoredProducts.length - filtered.length
   console.log(
-    `[ProductFilter] Kept ${sorted.length}/${productsInput.length} products with score >= ${effectiveMinScore}`
+    `[ProductFilter] Kept ${sorted.length}/${scoredProducts.length} products with score >= ${effectiveMinScore}${filteredOutCount > 0 ? ` (filtered out ${filteredOutCount})` : ""}`
   )
   if (sorted.length > 0) {
     console.log(`[ProductFilter] Top 3 scores:`, sorted.slice(0, 3).map(p => ({
       name: p.item_commercial_name,
+      code: p.item_code,
       score: p.finalScore
     })))
+  } else if (scoredProducts.length > 0 && filtered.length === 0) {
+    // Log filtered-out products for debugging
+    console.warn(`[ProductFilter] All ${scoredProducts.length} products filtered out (minScore=${effectiveMinScore}). Top 5 scores:`, 
+      scoredProducts.sort((a, b) => b.finalScore - a.finalScore).slice(0, 5).map(p => ({
+        name: p.item_commercial_name,
+        code: p.item_code,
+        score: p.finalScore
+      })))
   }
 
   return sorted

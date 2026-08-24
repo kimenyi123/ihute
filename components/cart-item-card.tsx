@@ -8,7 +8,9 @@ import { useCartStore, CartItem } from "@/lib/cart-store"
 import { parseErxFromNotes, prescriptionLineKey } from "@/lib/erx-prescription"
 import { Minus, Plus, Trash2 } from "lucide-react"
 import { getProductImageCandidates, isValidImageUrl, NO_IMAGE_URL } from "@/lib/image-utils"
+import { normalizeProductImagePublicUrl, resolvePublicAssetUrl } from "@/lib/public-asset-url"
 import { DEFAULT_CART_CURRENCY, itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
+import { sellerDisplayName } from "@/lib/seller-display-name"
 
 const PLACEHOLDER = "/placeholder.svg?height=64&width=64"
 
@@ -20,10 +22,13 @@ export function CartItemCard({ item }: { item: CartItem }) {
   const [inputValue, setInputValue] = useState(String(item.qty))
 
   const imageCandidates = ((): string[] => {
-    // Try same ordered fallback chain we use everywhere else:
-    // KAOS famille/NIKI → flat NIKI → backend image fields → NO_IMAGE_URL
     try {
-      return getProductImageCandidates(item as any)
+      return getProductImageCandidates(item as any).map((url) => {
+        if (url.includes("/uploads/products/") || url.includes("/api/images/products/")) {
+          return normalizeProductImagePublicUrl(url)
+        }
+        return resolvePublicAssetUrl(url)
+      })
     } catch {
       return [NO_IMAGE_URL]
     }
@@ -33,9 +38,8 @@ export function CartItemCard({ item }: { item: CartItem }) {
   const [candidateIdx, setCandidateIdx] = useState(0)
   const resolvedUrl = imageCandidates[Math.min(candidateIdx, imageCandidates.length - 1)] ?? NO_IMAGE_URL
   const hasValidUrl = resolvedUrl !== PLACEHOLDER && isValidImageUrl(resolvedUrl)
-  // When no image or load error, show KAOS "no image" graphic instead of grey placeholder
   const src = hasValidUrl ? resolvedUrl : NO_IMAGE_URL
-  const isRemote = /^https?:\/\//i.test(src)
+  const useNativeImg = /^https?:\/\//i.test(src) || src.startsWith("/api/")
 
   const erx = item.erx ?? parseErxFromNotes(item.notes ?? undefined)
   const lineSig = item.lineSignature ?? prescriptionLineKey({ erx: item.erx, notes: item.notes })
@@ -54,7 +58,7 @@ export function CartItemCard({ item }: { item: CartItem }) {
     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2.5 sm:gap-4 rounded-lg border p-2.5 sm:p-3">
       <div className="flex items-center gap-3 flex-1 w-full sm:w-auto">
         <div className="relative h-[64px] w-[64px] sm:h-[72px] sm:w-[72px] flex-shrink-0 rounded bg-muted overflow-hidden">
-          {isRemote ? (
+          {useNativeImg ? (
             <img
               key={src}
               src={src}
@@ -92,7 +96,10 @@ export function CartItemCard({ item }: { item: CartItem }) {
         <div className="flex-1 min-w-0">
           <div className="font-medium text-sm sm:text-base truncate">{item.name}</div>
           <div className="text-[11px] sm:text-xs text-muted-foreground truncate">
-            {item.supplierName}
+            {sellerDisplayName({
+              supplierName: item.supplierName,
+              supplierAccount: item.supplierId,
+            })}
             {item.supplierLocation ? ` · ${item.supplierLocation}` : ""}
           </div>
           <div className="text-xs sm:text-sm mt-1">

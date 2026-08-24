@@ -10,6 +10,8 @@ import {
   resolvePublicTokenToOrderId,
 } from "@/lib/order-tracking-token"
 import { mapBackendOrderStatusToTrack, type TrackOrderStatus } from "@/lib/order-status-map"
+import { resolveTableCommandLinePerson, isTableCommandOrder } from "@/lib/table-command-whatsapp"
+import { aggregateOrderItemsByCodeAndPrice } from "@/lib/aggregate-order-items"
 
 function rid() {
   return Math.random().toString(36).slice(2, 12)
@@ -259,6 +261,11 @@ export async function POST(req: NextRequest) {
         BUYER_OWNER: buyerData.OWNER,
         BUYER_PHONE: buyerData.PHONE || orderData.BUYER_PHONE,
         DELIVERY_LOCATION: orderData.DELIVERY_LOCATION,
+        IS_TABLE_COMMAND: orderData.IS_TABLE_COMMAND,
+        TABLE_NAME: orderData.TABLE_NAME,
+        TABLE_LOCATION: orderData.TABLE_LOCATION,
+        DELIVERY_NAME: orderData.DELIVERY_NAME || orderData.deliveryName,
+        DELIVERY_AMOUNT: Number(orderData.DELIVERY_AMOUNT ?? orderData.deliveryAmount ?? 0),
         AMOUNT: orderData.AMOUNT,
         PAYMENT_NAME: orderData.PAYMENT_NAME,
         PAYMENT_STATUS: orderData.PAYMENT_STATUS,
@@ -266,11 +273,19 @@ export async function POST(req: NextRequest) {
         REKISIYO_STATUS: orderData.REKISIYO_STATUS,
         CREATED_AT: orderData.CREATED_AT,
         UPDATED_AT: orderData.UPDATED_AT,
+        PRESCRIPTION_REQUIRED: orderData.PRESCRIPTION_REQUIRED ?? orderData.prescriptionRequired,
+        PRESCRIPTION_IMAGE_URL: orderData.PRESCRIPTION_IMAGE_URL ?? orderData.prescriptionImageUrl,
         items: itemsData.map((item: any) => ({
           ITEM_NAME: item.ITEM_NAME,
           QTY: item.QUANTITY,
           UNIT_PRICE: item.UNIT_PRICE,
+          UNITY_PRICE: item.UNITY_PRICE ?? item.unity_price ?? item.UNIT_PRICE,
+          REQUEST_PRICE: item.REQUEST_PRICE ?? item.request_price ?? item.UNIT_PRICE,
           UNIT: item.UNIT,
+          ORDERED_BY: item.ORDERED_BY ?? item.orderedBy,
+          ID_LIST: item.ID_LIST ?? item.lineId ?? item.id_list,
+          HEURE: item.HEURE ?? item.heure ?? item.lineCreatedAt,
+          lineCreatedAt: item.lineCreatedAt ?? item.HEURE ?? item.heure,
         })),
       }
 
@@ -293,7 +308,8 @@ export async function POST(req: NextRequest) {
 
     log(requestId, "Generated status history with", statusHistory.length, "entries")
 
-    const createdAt = data.CREATED_AT || data.createdAt || new Date().toISOString()
+    const createdAt =
+      data.ORDER_PLACED_AT || data.createdAt || data.CREATED_AT || new Date().toISOString()
     const createdTime = typeof createdAt === "number" ? createdAt : new Date(createdAt).getTime()
     const estimatedHours = Number(process.env.ORDER_ESTIMATED_DELIVERY_HOURS) || 2
     const estimatedDeliveryAt =
@@ -309,24 +325,50 @@ export async function POST(req: NextRequest) {
     const paymentLegacyDisplay = rawPaymentStatus
     const effectivePaymentStatus = rawPaymentStatus
 
-    const itemsArray = Array.isArray(data.items)
-      ? data.items.map((item: any) => ({
+    const orderNote = String(data.CONDITIONS ?? data.ORDER_NOTE ?? data.orderNote ?? "").trim()
+    const orderBuyerName = String(
+      data.BUYER_OWNER ?? data.BUYER_NAME ?? data.buyerName ?? "",
+    ).trim()
+
+    const rawItemsArray = Array.isArray(data.items)
+      ? data.items.map((item: any) => {
+          const qty = Number(item.QUANTITY ?? item.qty ?? item.QTY ?? 1) || 1
+          const unity = Number(item.UNITY_PRICE ?? item.unity_price ?? item.UNIT_PRICE ?? item.unitPrice ?? 0)
+          const request = Number(item.REQUEST_PRICE ?? item.request_price ?? item.REQUESTED_PRICE ?? 0)
+          const unitPrice = unity > 0 ? unity : request > 0 ? request : 0
+          const linePerson = resolveTableCommandLinePerson(
+            item.ORDERED_BY ?? item.orderedBy,
+            orderBuyerName,
+          )
+          return {
           ITEM_CODE: item.ITEM_CODE || item.item_code,
           ITEM_NAME: item.ITEM_NAME || item.name || "Product",
           name: item.ITEM_NAME || item.name || "Product",
-          QUANTITY: Number(item.QUANTITY ?? item.qty ?? item.QTY ?? 1),
-          qty: Number(item.QUANTITY ?? item.qty ?? item.QTY ?? 1),
+          QUANTITY: qty,
+          qty,
           SERVED_QTY: Number(item.CONFIRMED_RECEIVED_QTY ?? item.SERVED_QTY ?? item.served_qty ?? item.servedQty ?? item.received_quantity ?? 0),
           servedQty: Number(item.CONFIRMED_RECEIVED_QTY ?? item.SERVED_QTY ?? item.served_qty ?? item.servedQty ?? item.received_quantity ?? 0),
-          REQUEST_PRICE: Number(item.REQUEST_PRICE ?? item.request_price ?? item.REQUESTED_PRICE ?? item.UNIT_PRICE ?? item.unitPrice ?? 0),
-          UNITY_PRICE: Number(item.UNITY_PRICE ?? item.unity_price ?? item.SERVED_PRICE ?? item.served_price ?? item.UNIT_PRICE ?? item.unitPrice ?? 0),
+          REQUEST_PRICE: request || unitPrice,
+          UNITY_PRICE: unitPrice,
           servedAmount: Number(item.SERVED_AMOUNT ?? item.servedAmount ?? item.served_amount ?? item.UNITY_PRICE ?? item.unity_price ?? 0),
-          UNIT_PRICE: Number(item.UNIT_PRICE ?? item.unitPrice ?? 0),
-          unitPrice: Number(item.UNIT_PRICE ?? item.unitPrice ?? 0),
+          UNIT_PRICE: unitPrice,
+          unitPrice,
           UNIT: item.UNIT || item.unit,
           unit: item.UNIT || item.unit,
-        }))
+          ORDERED_BY: linePerson,
+          orderedBy: linePerson,
+          ID_LIST: Number(item.ID_LIST ?? item.lineId ?? item.id_list ?? 0) || undefined,
+          lineId: Number(item.ID_LIST ?? item.lineId ?? item.id_list ?? 0) || undefined,
+          HEURE: item.HEURE ?? item.heure ?? item.lineCreatedAt,
+          lineCreatedAt: item.lineCreatedAt ?? item.HEURE ?? item.heure,
+        }})
       : []
+    const isTable = isTableCommandOrder({
+      IS_TABLE_COMMAND: Boolean(data.IS_TABLE_COMMAND ?? data.table_command),
+      TABLE_NAME: String(data.TABLE_NAME ?? data.table_name ?? ""),
+      buyerLocation: String(data.DELIVERY_LOCATION ?? data.BUYER_LOCATION ?? ""),
+    })
+    const itemsArray = isTable ? rawItemsArray : aggregateOrderItemsByCodeAndPrice(rawItemsArray)
     const totalAmount = Number(data.AMOUNT ?? data.total ?? 0)
     const currency = (data.CURRENCY || "RWF").toString().trim()
 
@@ -338,12 +380,17 @@ export async function POST(req: NextRequest) {
       buyerName: data.BUYER_NAME || data.BUYER_OWNER || undefined,
       buyerPhone: data.BUYER_PHONE || data.BUYER_TEL || undefined,
       buyerLocation: data.DELIVERY_LOCATION || data.BUYER_LOCATION || undefined,
+      deliveryName: data.DELIVERY_NAME || data.deliveryName,
+      deliveryAmount: Number(data.DELIVERY_AMOUNT ?? data.deliveryAmount ?? 0),
+      DELIVERY_AMOUNT: Number(data.DELIVERY_AMOUNT ?? data.deliveryAmount ?? 0),
+      SUBTOTAL: Number(data.SUBTOTAL ?? data.subtotal ?? (Number.isFinite(totalAmount) ? totalAmount - Number(data.DELIVERY_AMOUNT ?? data.deliveryAmount ?? 0) : 0)),
       items: itemsArray,
       total: totalAmount,
       paymentMethod: data.PAYMENT_NAME || data.paymentMethod || "Unknown",
       paymentStatus: effectivePaymentStatus,
       status: mappedStatus,
       createdAt,
+      ORDER_PLACED_AT: data.ORDER_PLACED_AT ?? data.orderPlacedAt,
       updatedAt: data.UPDATED_AT || data.updatedAt || undefined,
       statusHistory: statusHistory,
       estimatedDeliveryAt,
@@ -365,9 +412,31 @@ export async function POST(req: NextRequest) {
       ORDER_STATUS: orderStatusDisplay,
       REKISIYO_STATUS: data.REKISIYO_STATUS,
       REFERENCE: data.REFERENCE,
+      PAYMENT_ID: data.PAYMENT_ID || data.paymentId || undefined,
+      paymentId: data.PAYMENT_ID || data.paymentId || undefined,
+      BANK_TRANSACTION_ID: data.BANK_TRANSACTION_ID || data.bankTransactionId || undefined,
+      BANK: data.BANK || data.bank || undefined,
+      BANK_AMOUNT: data.BANK_AMOUNT ?? data.bankAmount,
+      PAID_AT: data.PAID_AT || data.paidAt || undefined,
+      RAW_PAYMENT_SMS: data.RAW_PAYMENT_SMS || data.rawPaymentSms || undefined,
+      PRESCRIPTION_REQUIRED: Boolean(
+        data.PRESCRIPTION_REQUIRED ?? data.prescriptionRequired,
+      ),
+      prescriptionRequired: Boolean(
+        data.PRESCRIPTION_REQUIRED ?? data.prescriptionRequired,
+      ),
+      PRESCRIPTION_IMAGE_URL: String(
+        data.PRESCRIPTION_IMAGE_URL ?? data.prescriptionImageUrl ?? "",
+      ).trim() || undefined,
+      prescriptionImageUrl: String(
+        data.PRESCRIPTION_IMAGE_URL ?? data.prescriptionImageUrl ?? "",
+      ).trim() || undefined,
+      DELIVERY_NAME: data.DELIVERY_NAME || data.deliveryName,
       AMOUNT: totalAmount,
       SERVED_AMOUNT: Number(data.SERVED_AMOUNT ?? data.servedAmount ?? data.AMOUNT_SERVED ?? 0),
-      CONDITIONS: data.CONDITIONS ?? data.ORDER_NOTE ?? data.orderNote ?? "",
+      orderNote,
+      ORDER_NOTE: orderNote,
+      CONDITIONS: orderNote,
       CURRENCY: currency,
       CREATED_AT: createdAt,
       IS_TABLE_COMMAND: Boolean(data.IS_TABLE_COMMAND ?? data.table_command),
@@ -375,11 +444,21 @@ export async function POST(req: NextRequest) {
       TABLE_LOCATION: data.TABLE_LOCATION || data.table_location,
     }
 
+    console.log("[Orders Track API] Returning CONDITIONS:", order.CONDITIONS || "[empty]", "from data:", { CONDITIONS: data.CONDITIONS, ORDER_NOTE: data.ORDER_NOTE, orderNote: data.orderNote })
+
     const clientMeta = getOrderMeta(String(orderId))
     if (clientMeta?.buyerDeliveryAddress) {
-      ;(order as Record<string, unknown>).buyerLocation = clientMeta.buyerDeliveryAddress
-      ;(order as Record<string, unknown>).DELIVERY_LOCATION = clientMeta.buyerDeliveryAddress
-      ;(order as Record<string, unknown>).BUYER_LOCATION = clientMeta.buyerDeliveryAddress
+      const existingLoc = String(
+        (order as Record<string, unknown>).DELIVERY_LOCATION ??
+          (order as Record<string, unknown>).buyerLocation ??
+          "",
+      )
+      const keepTableLoc = existingLoc.toLowerCase().includes("table:")
+      if (!keepTableLoc) {
+        ;(order as Record<string, unknown>).buyerLocation = clientMeta.buyerDeliveryAddress
+        ;(order as Record<string, unknown>).DELIVERY_LOCATION = clientMeta.buyerDeliveryAddress
+        ;(order as Record<string, unknown>).BUYER_LOCATION = clientMeta.buyerDeliveryAddress
+      }
     }
     if (clientMeta?.sellerPaymentAck) {
       ;(order as Record<string, unknown>).sellerPaymentAck = clientMeta.sellerPaymentAck

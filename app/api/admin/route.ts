@@ -4,25 +4,18 @@ export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 export const revalidate = 0
 
-import { getBackendBase } from "@/lib/backend-config"
+import { getAdminServletUrl, getBackendBase } from "@/lib/backend-config"
 
 const BACKEND_URL = getBackendBase()
 
-function noTrailingSlash(s: string): string {
-  return s.replace(/\/+$/, "")
+const HEAVY_ADMIN_ACTIONS = new Set(["getAllOrders", "getOrderMonitorStats", "getOrderDetails"])
+
+function adminFetchTimeoutMs(action: string): number {
+  return HEAVY_ADMIN_ACTIONS.has(action) ? 90_000 : 30_000
 }
 
-function getAdminServletCandidates(base: string): string[] {
-  const trimmed = noTrailingSlash(base.trim())
-  const out: string[] = []
-  const add = (u: string) => {
-    if (!out.includes(u)) out.push(u)
-  }
-
-  add(`${trimmed}/AdminServlet`)
-  add(`${trimmed}/Kaos/AdminServlet`)
-
-  return out
+function getAdminServletCandidates(): string[] {
+  return [getAdminServletUrl()]
 }
 
 export async function POST(req: Request) {
@@ -137,10 +130,11 @@ export async function POST(req: Request) {
       }
     })
 
-    const urls = getAdminServletCandidates(BACKEND_URL)
+    const urls = getAdminServletCandidates()
     console.log("[admin/route] POST - Candidate URLs:", urls.join(" | "))
-    console.log("[admin/route] Action:", actionStr)
+    console.log("[admin/route] POST - Action:", actionStr)
 
+    const timeoutMs = adminFetchTimeoutMs(actionStr)
     const inboundCookie = req.headers.get("cookie") || ""
     let res: Response | null = null
     let text = ""
@@ -150,7 +144,7 @@ export async function POST(req: Request) {
     for (const candidate of urls) {
       url = candidate
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 30000)
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
       try {
         const attemptRes = await fetch(candidate, {
           method: "POST",
@@ -186,15 +180,24 @@ export async function POST(req: Request) {
     }
 
     if (!res || !json) {
+      const status = res?.status ?? 502
+      const trimmed = text.trim()
+      const looksLikeHtml = /<!doctype|<html/i.test(trimmed)
+      const hint = looksLikeHtml
+        ? "Backend returned HTML (wrong URL or servlet not deployed). Check BACKEND_URL / JAVA_BACKEND_BASE."
+        : !res
+          ? "Could not reach Java backend. Is Tomcat running?"
+          : "Backend response was not JSON."
       return NextResponse.json(
         {
           ok: false,
-          error: "Invalid JSON response from backend",
-          raw: text.substring(0, 500),
-          status: res?.status ?? 502,
+          error: hint,
+          raw: trimmed.substring(0, 500),
+          status,
           url,
+          action: actionStr,
         },
-        { status: 500 }
+        { status: status >= 400 && status < 600 ? status : 502 },
       )
     }
 
@@ -219,7 +222,7 @@ export async function POST(req: Request) {
     
     if (e?.name === 'AbortError') {
       return NextResponse.json(
-        { ok: false, error: "Backend request timed out after 30 seconds" },
+        { ok: false, error: "Backend request timed out" },
         { status: 504 }
       )
     }
@@ -306,11 +309,12 @@ export async function GET(req: Request) {
       params.set("adminToken", tokenForJava)
     }
 
-    const baseUrls = getAdminServletCandidates(BACKEND_URL)
+    const baseUrls = getAdminServletCandidates()
     const urls = baseUrls.map((u) => `${u}?${params.toString()}`)
     console.log("[admin/route] GET - Candidate URLs:", urls.join(" | "))
     console.log("[admin/route] GET - Action:", action)
 
+    const timeoutMs = adminFetchTimeoutMs(action)
     const inboundCookie = req.headers.get("cookie") || ""
     let res: Response | null = null
     let text = ""
@@ -320,7 +324,7 @@ export async function GET(req: Request) {
     for (const candidate of urls) {
       url = candidate
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 30000)
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
       try {
         const attemptRes = await fetch(candidate, {
           method: "GET",
@@ -353,15 +357,24 @@ export async function GET(req: Request) {
     }
 
     if (!res || !json) {
+      const status = res?.status ?? 502
+      const trimmed = text.trim()
+      const looksLikeHtml = /<!doctype|<html/i.test(trimmed)
+      const hint = looksLikeHtml
+        ? "Backend returned HTML (wrong URL or servlet not deployed). Check BACKEND_URL / JAVA_BACKEND_BASE."
+        : !res
+          ? "Could not reach Java backend. Is Tomcat running?"
+          : "Backend response was not JSON."
       return NextResponse.json(
         {
           ok: false,
-          error: "Invalid JSON response from backend",
-          raw: text.substring(0, 500),
-          status: res?.status ?? 502,
+          error: hint,
+          raw: trimmed.substring(0, 500),
+          status,
           url,
+          action,
         },
-        { status: 500 }
+        { status: status >= 400 && status < 600 ? status : 502 },
       )
     }
 
@@ -386,7 +399,7 @@ export async function GET(req: Request) {
     
     if (e?.name === 'AbortError') {
       return NextResponse.json(
-        { ok: false, error: "Backend request timed out after 30 seconds" },
+        { ok: false, error: `Backend request timed out after ${Math.round(adminFetchTimeoutMs(action) / 1000)} seconds` },
         { status: 504 }
       )
     }

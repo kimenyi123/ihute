@@ -89,7 +89,7 @@ export function CheckoutSummary({ isProcessing, showReview }: CheckoutSummaryPro
 
         <Separator />
 
-        {/* Pricing */}
+        {/* Pricing Breakdown */}
         <div className="space-y-2">
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground">Subtotal ({getTotalItems()} items)</span>
@@ -110,6 +110,7 @@ export function CheckoutSummary({ isProcessing, showReview }: CheckoutSummaryPro
 
         <Separator />
 
+        {/* Total */}
         <div className="flex items-center justify-between">
           <span className="font-semibold">Total</span>
           <span className="text-2xl font-bold text-primary">{total.toLocaleString()} RWF</span>

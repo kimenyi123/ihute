@@ -7,9 +7,10 @@ import { Button } from "@/components/ui/button"
 import { useCartStore } from "@/lib/cart-store"
 import { useFavoritesStore } from "@/lib/favorites-store"
 import { trackProductView, trackClick } from "@/lib/interaction-tracker"
-import { Heart, Eye, Store, ScanSearch, ShoppingCart } from "lucide-react"
+import { Heart, Store, ScanSearch, ShoppingCart } from "lucide-react"
 import { usePriceWatchStore } from "@/lib/price-watch-store"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
 import { cn } from "@/lib/utils"
 import { useToast } from "@/components/ui/use-toast"
 import { useAuthStore } from "@/lib/auth-store"
@@ -29,7 +30,7 @@ import {
 import { unitMeaningfulForDisplay } from "@/lib/product-unit-display"
 import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price"
 import { itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
-import { isExpiryMeaningfulForCustomerDisplay } from "@/lib/item-state-display"
+import { sellerDisplayName, shopWithMePathSegment } from "@/lib/seller-display-name"
 
 /** Suffix after price: `N pcs` from `item_emballage` (pack size), not currency — default N=1 when omitted. */
 function formatPcsFromItemEmballage(raw: unknown): string | null {
@@ -88,6 +89,89 @@ type Product = {
   marginPercent?: number
   /** e.g. "1.2km away" */
   distanceLabel?: string
+  /** Cross-shop dedupe: available at N shops (main /search only, NIKI merge) */
+  shop_count?: number
+  cheapest_shop_nickname?: string
+  /** Shop-with-me slug — never OWNER / supplier display name */
+  nickname?: string
+  niki_merge?: boolean
+  /** From NIKI / stock — Rx photo required at checkout */
+  requiresPrescription?: boolean
+  requires_prescription?: boolean
+  niki_code?: string
+  NIKI_CODE?: string
+  nikiCode?: string
+  nikicode?: string
+  CODE_ISHYIGA?: string
+  code_ishyiga?: string
+  productCode?: string
+  product_code?: string
+  code?: string
+}
+
+export type ProductSearchRankingBadgeProps = {
+  searchPriority?: "direct" | "contains" | null
+  /** Search term or `true` when backend only signals a contains-ingredient match. */
+  containsIngredient?: string | boolean | null
+  className?: string
+}
+
+/** Map API snake_case fields to badge props (same as search page `toCardProduct`). */
+export function productSearchRankingFromApi(source: {
+  search_priority?: unknown
+  contains_ingredient?: unknown
+}): Pick<ProductSearchRankingBadgeProps, "searchPriority" | "containsIngredient"> {
+  const searchPriority =
+    source.search_priority === "direct" || source.search_priority === "contains"
+      ? source.search_priority
+      : undefined
+  const raw = source.contains_ingredient
+  const containsIngredient =
+    typeof raw === "string" && raw.trim()
+      ? raw.trim()
+      : raw === true
+        ? true
+        : undefined
+  return { searchPriority, containsIngredient }
+}
+
+/** IHUTE search ranking badges — direct match, contains, and ingredient pill (main search + shop-with-me). */
+export function ProductSearchRankingBadges({
+  searchPriority,
+  containsIngredient,
+  className,
+}: ProductSearchRankingBadgeProps) {
+  const showDirect = searchPriority === "direct"
+  const showContains = searchPriority === "contains"
+  const ingredientText =
+    typeof containsIngredient === "string" && containsIngredient.trim()
+      ? containsIngredient.trim()
+      : containsIngredient === true
+        ? ""
+        : null
+  const showIngredientPill = ingredientText !== null && searchPriority !== "direct"
+
+  if (!showDirect && !showContains && !showIngredientPill) return null
+
+  return (
+    <div className={cn("mt-1 flex flex-wrap gap-1", className)}>
+      {showDirect && (
+        <span className="inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
+          Direct match
+        </span>
+      )}
+      {showContains && (
+        <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-700">
+          Contains
+        </span>
+      )}
+      {showIngredientPill && (
+        <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-700">
+          {ingredientText ? `Contains: ${ingredientText}` : "Contains"}
+        </span>
+      )}
+    </div>
+  )
 }
 
 export function ProductCard({
@@ -164,6 +248,20 @@ export function ProductCard({
     distanceLabel,
     itemEmballage,
   } = product
+  const shopLabel = sellerDisplayName({
+    supplierName,
+    supplierAccount: supplierId,
+  })
+  const shopWithMeHref = (() => {
+    const slug = shopWithMePathSegment({
+      nickname: product.nickname,
+      cheapestShopNickname: product.cheapest_shop_nickname,
+      owner: shopLabel,
+      supplierName,
+      supplierAccount: supplierId,
+    })
+    return slug ? `/shop-with-me/${encodeURIComponent(slug)}` : undefined
+  })()
 
   const displayPrice = useMemo(() => {
     return generalSellingPrice(
@@ -202,8 +300,11 @@ export function ProductCard({
   }, [cartItems, supplierId, id, unit])
   const placeholder = "/placeholder.svg?height=300&width=300"
 
-  // Same strategy as Shop With Me:
-  // KAOS famille/NIKI → flat NIKI → each backend URL → KAOS no_image, advancing on img onError.
+  // Ordered candidate URLs:
+  // 1) https://ishyiga.rw/NIKI/images/{niki_code}.jpg (+ jpeg/png)
+  // 2) KAOS famille/NIKI paths
+  // 3) backend URLs
+  // 4) NO_IMAGE_URL
   const imageCandidates = useMemo(
     () => getProductImageCandidates(product as any),
     [
@@ -213,37 +314,57 @@ export function ProductCard({
       (product as any).FAMILLE,
       product.item_key_words,
       product.item_code,
+      (product as any).ITEM_CODE,
+      (product as any).niki_code,
+      (product as any).NIKI_CODE,
+      (product as any).nikiCode,
+      (product as any).nikicode,
+      (product as any).CODE_ISHYIGA,
+      (product as any).code_ishyiga,
+      (product as any).product_code,
+      (product as any).productCode,
+      (product as any).code,
       image,
       product.image_url,
       product.item_image_url,
       (product as { IMAGE_URL?: string }).IMAGE_URL,
     ]
   )
-  /** Stable string so we only reset fallback index when the URL list actually changes — NOT when candidateIdx changes. */
+  /** Stable string so we only reset fallback index when the URL list actually changes */
   const candidatesSignature = imageCandidates.join("\x1e")
   const [candidateIdx, setCandidateIdx] = useState(0)
   const [imgError, setImgError] = useState(false)
-  const [fallbackSrc, setFallbackSrc] = useState<string | null>(null)
   const [erxOpen, setErxOpen] = useState(false)
   const isDoctor = String(user?.dbRole ?? "").trim().toUpperCase() === "DOCTOR"
 
-  // Primary: KAOS-based URL (famille + item_key_words, then flat NIKI code, then backend URL, then KAOS no_image)
-  const resolvedUrl = getProductImageSrc(product, placeholder)
-  // Secondary: raw backend image_url/item_image_url/IMAGE_URL/image (used if KAOS path 404s)
-  const backendUrl = getProductImageUrl(product as any) || null
+  useEffect(() => {
+    setCandidateIdx(0)
+    setImgError(false)
+  }, [candidatesSignature, id])
 
-  const activeSrc = fallbackSrc || resolvedUrl
-  // Same as shop-with-me: treat NO_IMAGE_URL as no image and show Store icon placeholder
-  const hasValidUrl = activeSrc !== placeholder && activeSrc !== NO_IMAGE_URL && isValidImageUrl(activeSrc)
-  const src = !imgError && hasValidUrl ? activeSrc : NO_IMAGE_URL
+  const currentCandidate =
+    imageCandidates[Math.min(candidateIdx, Math.max(0, imageCandidates.length - 1))] ?? NO_IMAGE_URL
+  const hasValidUrl =
+    currentCandidate !== placeholder &&
+    currentCandidate !== NO_IMAGE_URL &&
+    isValidImageUrl(currentCandidate)
+  const src = !imgError && hasValidUrl ? currentCandidate : NO_IMAGE_URL
   const isRemote = /^https?:\/\//i.test(src)
   const showPlaceholderIcon = !hasValidUrl || imgError
 
-  useEffect(() => {
-    // Reset error and fallback when product or primary URL changes
-    setImgError(false)
-    setFallbackSrc(null)
+  const handleImageError = () => {
+    if (candidateIdx + 1 < imageCandidates.length) {
+      setCandidateIdx((prev) => prev + 1)
+      setImgError(false)
+    } else {
+      setImgError(true)
+      if (typeof window !== "undefined") {
+        console.log("[ProductCard] All image candidates failed for:", name)
+      }
+    }
+  }
 
+  useEffect(() => {
     // Debug logging for image resolution
     if (typeof window !== "undefined") {
       console.log("[ProductCard] Image resolution for:", {
@@ -254,7 +375,7 @@ export function ProductCard({
         nikiCode: getNikiCodeFromSource(product),
         imageCandidates: imageCandidates.slice(0, 5), // First 5 candidates
         totalCandidates: imageCandidates.length,
-        resolvedUrl,
+        currentSrc: src,
         hasValidUrl,
         backendImageFields: {
           image_url: product.image_url,
@@ -264,30 +385,7 @@ export function ProductCard({
         },
       })
     }
-    // Debug log to inspect image resolution for this product
-    try {
-      // Only log in browser
-      if (typeof window !== "undefined") {
-        const famille = (product as any).famille ?? (product as any).FAMILLE
-        const niki =
-          (product as any).item_key_words ??
-          (product as any).itemCode ??
-          (product as any).item_code ??
-          (product as any).ITEM_CODE
-        // eslint-disable-next-line no-console
-        console.log("[ProductCard][image-debug]", {
-          id,
-          name,
-          famille,
-          niki,
-          resolvedUrl,
-          backendUrl,
-        })
-      }
-    } catch {
-      // ignore logging failures
-    }
-  }, [resolvedUrl, id])
+  }, [candidatesSignature, id])
 
   // Track product view when component mounts
   useEffect(() => {
@@ -311,6 +409,11 @@ export function ProductCard({
   }, [id, supplierId, displayPrice, name, checkPriceDrop, toast])
 
   const addProductToCart = () => {
+    const needsRx = Boolean(
+      product.requiresPrescription
+        ?? product.requires_prescription
+        ?? (product as { requires_prescription?: unknown }).requires_prescription,
+    )
     addOrInc(
       {
         id,
@@ -321,11 +424,12 @@ export function ProductCard({
         unit,
         image,
         supplierId: (supplierId || "unknown").toString().trim(),
-        supplierName: supplierName || "Supplier",
+        supplierName: shopLabel,
         supplierLocation,
         momo,
         selectedUnit: unit,
         ...(itemEmballageForCart ? { itemEmballage: itemEmballageForCart } : {}),
+        ...(needsRx ? { requiresPrescription: true } : {}),
       },
       1
     )
@@ -355,6 +459,7 @@ export function ProductCard({
           </div>
         ) : isRemote ? (
           <img
+            key={`${src}-${candidateIdx}`}
             src={src}
             alt={name}
             className={cn(
@@ -364,33 +469,18 @@ export function ProductCard({
             loading="lazy"
             decoding="async"
             referrerPolicy="no-referrer"
-            onError={() => {
-              if (!fallbackSrc && backendUrl && backendUrl !== resolvedUrl && isValidImageUrl(backendUrl)) {
-                setFallbackSrc(backendUrl)
-                setImgError(false)
-              } else {
-                setImgError(true)
-                console.log("[ProductCard] All image candidates failed, showing NO_IMAGE_URL for:", name)
-              }
-            }}
+            onError={handleImageError}
           />
         ) : (
           <Image
+            key={`${src}-${candidateIdx}`}
             fill
             src={src}
             alt={name}
             className={cn(
               src === NO_IMAGE_URL ? "object-contain p-2" : "object-cover"
             )}
-            onError={() => {
-              if (!fallbackSrc && backendUrl && backendUrl !== resolvedUrl && isValidImageUrl(backendUrl)) {
-                setFallbackSrc(backendUrl)
-                setImgError(false)
-              } else {
-                setImgError(true)
-                console.log("[ProductCard] All image candidates failed, showing NO_IMAGE_URL for:", name)
-              }
-            }}
+            onError={handleImageError}
             unoptimized={src === NO_IMAGE_URL || src === placeholder}
           />
         )}
@@ -431,7 +521,7 @@ export function ProductCard({
               image,
               description,
               supplierId,
-              supplierName,
+              supplierName: shopLabel,
               supplierLocation,
               momo,
             })
@@ -455,20 +545,16 @@ export function ProductCard({
       <CardContent className={cn("flex min-w-0 flex-col gap-2", compact ? "p-2" : "p-3")}>
         <div className={compact ? "min-h-[32px]" : "min-h-[38px]"}>
           <h3 className={cn("font-semibold leading-tight line-clamp-2", compact ? "text-xs" : "text-sm")}>{name}</h3>
-          {containsIngredient && searchPriority !== "direct" && (
-            <div className="mt-1 flex flex-wrap gap-1">
-              <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-700">
-                Contains: {containsIngredient}
-              </span>
-            </div>
+          {description && description !== id && description !== name && (
+            <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground line-clamp-2">
+              {description}
+            </p>
           )}
+          <ProductSearchRankingBadges
+            searchPriority={searchPriority}
+            containsIngredient={containsIngredient}
+          />
         </div>
-
-        {description && description !== id && (
-          <p className="text-xs text-muted-foreground line-clamp-2">
-            {description}
-          </p>
-        )}
 
         <div className={compact ? "text-xs" : "text-sm"}>
           <div className="flex items-baseline gap-2">
@@ -486,10 +572,24 @@ export function ProductCard({
               </span>
             )}
           </div>
-          {supplierName && (
+          {shopLabel && shopLabel !== "Supplier" && (
             <p className={cn("mt-0.5 text-muted-foreground font-normal", compact ? "text-[10px]" : "text-xs")}>
-              {supplierName.toUpperCase()} <span className="text-amber-500" aria-hidden>⭐⭐⭐</span>
+              {shopLabel.toUpperCase()} <span className="text-amber-500" aria-hidden>⭐⭐⭐</span>
             </p>
+          )}
+          {product.niki_merge === true &&
+            typeof product.shop_count === "number" &&
+            product.shop_count > 1 &&
+            shopWithMeHref && (
+            <Link
+              href={shopWithMeHref}
+              onClick={(e) => e.stopPropagation()}
+              className={cn(
+                "mt-1 inline-flex rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-800 hover:bg-blue-100",
+              )}
+            >
+              Available at {product.shop_count} shops
+            </Link>
           )}
         </div>
 
@@ -589,7 +689,7 @@ export function ProductCard({
               supplierId={(supplierId || "unknown").toString().trim()}
               name={name}
               currentPrice={displayPrice}
-              supplierName={supplierName}
+              supplierName={shopLabel}
               image={image}
               size={isSpotlight ? "default" : compact ? "sm" : "sm"}
               variant="outline"
@@ -637,6 +737,11 @@ export function ProductCard({
         productName={name}
         prefillSource={product as Record<string, unknown>}
         onConfirm={(erx) => {
+          const needsRx = Boolean(
+            product.requiresPrescription
+              ?? product.requires_prescription
+              ?? (product as { requires_prescription?: unknown }).requires_prescription,
+          )
           addOrInc(
             {
               id,
@@ -647,11 +752,12 @@ export function ProductCard({
               unit,
               image,
               supplierId: (supplierId || "unknown").toString().trim(),
-              supplierName: supplierName || "Supplier",
+              supplierName: shopLabel,
               supplierLocation,
               momo,
               selectedUnit: unit,
               ...(itemEmballageForCart ? { itemEmballage: itemEmballageForCart } : {}),
+              ...(needsRx ? { requiresPrescription: true } : {}),
               erx,
               notes: serializeErxForNotes(erx),
             },

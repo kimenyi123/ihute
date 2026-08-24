@@ -629,7 +629,23 @@ export async function getPaymentStatus(
     const response = await fetch(url.toString());
     const data = await response.json();
 
-    return data;
+    const raw = String(data?.paymentStatus ?? data?.status ?? "pending").toUpperCase();
+    const paymentStatus: "PENDING" | "PAID" | "FAILED" | "REFUNDED" =
+      raw === "PAID" || raw === "SUCCESS"
+        ? "PAID"
+        : raw === "FAILED"
+          ? "FAILED"
+          : raw === "REFUNDED"
+            ? "REFUNDED"
+            : "PENDING";
+
+    return {
+      ok: data?.ok !== false && response.ok,
+      paymentStatus,
+      paymentMethod: data?.paymentMethod,
+      paymentId: data?.paymentId,
+      error: data?.error,
+    };
   } catch (error) {
     console.error("❌ getPaymentStatus error:", error);
     return {

@@ -1,6 +1,7 @@
 // app/api/seller-orders/details/route.ts
 import { NextResponse } from "next/server"
 import { getOrdersUrl, getSellerOrdersUrl } from "@/lib/backend-config"
+import { resolveTableCommandLinePerson } from "@/lib/table-command-whatsapp"
 
 const PRIMARY_URL = getOrdersUrl()
 
@@ -59,6 +60,16 @@ function normalize(data: any) {
       }
     : null
 
+  const orderBuyerName = String(
+    order?.BUYER_OWNER ??
+      order?.BUYER_OWNER_NAME ??
+      order?.BUYER_NAME ??
+      order?.BUYER_NAMES ??
+      buyer?.OWNER ??
+      buyer?.NAMES ??
+      "",
+  ).trim()
+
   const items = items0.map((it: any) => {
     const qty = Number(it.QUANTITY ?? it.qty ?? it.quantity ?? it.ITEM_QTY ?? 0)
     const requestPrice = Number(
@@ -84,6 +95,10 @@ function normalize(data: any) {
       total: qty * requestPrice,
       UNIT: it.UNIT ?? it.unit ?? it.measurement ?? "",
       ITEM_CODE: it.ITEM_CODE ?? it.code ?? String(it.ID_ORDER ?? ""),
+      ORDERED_BY: resolveTableCommandLinePerson(it.ORDERED_BY ?? it.orderedBy, orderBuyerName),
+      orderedBy: resolveTableCommandLinePerson(it.ORDERED_BY ?? it.orderedBy, orderBuyerName),
+      ID_LIST: Number(it.ID_LIST ?? it.lineId ?? it.id_list ?? 0) || undefined,
+      lineId: Number(it.ID_LIST ?? it.lineId ?? it.id_list ?? 0) || undefined,
     }
   })
 

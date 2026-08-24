@@ -1,3 +1,5 @@
+import { normalizeProductImagePublicUrl } from "./public-asset-url"
+
 /**
  * Central image URL resolution for product/supplier images.
  * Backend and Redis can return image in: image_url, item_image_url, IMAGE_URL, image.
@@ -9,13 +11,42 @@ export type ProductImageSource = {
   image_url?: string | null
   item_image_url?: string | null
   IMAGE_URL?: string | null
+  imageUrl?: string | null
+  photo?: string | null
+  PHOTO?: string | null
+  item_photo?: string | null
+  ITEM_PHOTO?: string | null
+  picture?: string | null
+  PICTURE?: string | null
+  product_image?: string | null
+  productImage?: string | null
   [key: string]: unknown
 }
 
-const IMAGE_KEYS = ["image_url", "item_image_url", "IMAGE_URL", "image"] as const
+const IMAGE_KEYS = [
+  "image_url",
+  "item_image_url",
+  "IMAGE_URL",
+  "image",
+  "imageUrl",
+  "ImageUrl",
+  "photo",
+  "PHOTO",
+  "item_photo",
+  "ITEM_PHOTO",
+  "picture",
+  "PICTURE",
+  "picture_url",
+  "product_image",
+  "productImage",
+  "PRODUCT_IMAGE",
+  "IMAGE_URL_1",
+  "IMAGE_URL_2",
+  "IMAGE_URL_3",
+] as const
 
-/** URL to show when no product image is available (KAOS "no image" graphic). Use this instead of a grey placeholder. */
-export const NO_IMAGE_URL = "https://ishyiga.rw/images_kaos_beta/no_image_found.jpg"
+/** Local placeholder image when no product photo is available. */
+export const NO_IMAGE_URL = "/placeholder.svg?height=300&width=300"
 
 /** KAOS CDN may store product images as jpg, jpeg, or png — try in this order before no_image. */
 export const KAOS_PRODUCT_IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png"] as const
@@ -48,8 +79,99 @@ function sanitizeKaosSegment(segment: string): string {
 }
 
 /**
- * NIKI code for images / KAOS paths: in your API this is the same value as `item_key_words`.
- * We also accept explicit `niki_code` / `NIKI_CODE` and catalog fields `ITEM_CODE` / `item_code` / `itemCode`.
+ * Extract clean NIKI code token from raw value, id, or multi-word item_key_words
+ * (e.g. "DRIZEST00223 ZESTA ACETIC ACID..." -> "DRIZEST00223").
+ */
+export function extractNikiCode(raw: unknown): string {
+  if (raw == null) return ""
+  const s = (typeof raw === "string" ? raw : String(raw)).trim()
+  if (!s) return ""
+
+  // If it's already a single clean alphanumeric token
+  if (/^[A-Za-z0-9_.-]+$/.test(s) && s.length >= 1 && s.length <= 64) {
+    return s
+  }
+
+  // If it starts with a NIKI code token like "CONWINN00954 WINNAZ PAPRIKA ..."
+  const firstToken = s.split(/\s+/)[0]?.trim() || ""
+  if (firstToken && /^[A-Za-z0-9_.-]+$/.test(firstToken) && firstToken.length >= 3 && firstToken.length <= 64) {
+    return firstToken
+  }
+
+  // Match standard NIKI code patterns within string (e.g. DRIZEST00223, MECHIC00001)
+  const match = s.match(/\b([A-Za-z]{2,8}\d{2,10}[A-Za-z0-9_-]*)\b/)
+  if (match && match[1]) {
+    return match[1]
+  }
+
+  return ""
+}
+
+/** Official NIKI product photos on ishyiga.rw. */
+export const NIKI_IMAGES_BASE = "https://ishyiga.rw/NIKI/images/"
+
+/**
+ * NIKI code for CDN photos: extracts clean token from niki_code, item_code, id, or keywords.
+ */
+export function getNikiCodeForCdnImage(source: unknown): string {
+  if (!source || typeof source !== "object") return ""
+  const o = source as Record<string, unknown>
+  const pick = (keys: string[]): string => {
+    for (const k of keys) {
+      const raw = o[k]
+      if (raw == null) continue
+      const code = extractNikiCode(raw)
+      if (code) return code
+    }
+    return ""
+  }
+  return (
+    pick(["niki_code", "NIKI_CODE", "nikiCode", "nikicode", "CODE_ISHYIGA", "code_ishyiga"]) ||
+    pick(["ITEM_CODE", "item_code", "itemCode", "product_code", "productCode", "code"]) ||
+    pick(["id", "item_key_words"])
+  )
+}
+
+function looksLikeNikiCode(value: string): boolean {
+  const v = value.trim()
+  if (v.length < 1 || v.length > 64) return false
+  if (/\s/.test(v)) return false
+  return /^[A-Za-z0-9_.-]+$/.test(v)
+}
+
+/** https://ishyiga.rw/NIKI/images/{niki_code}.jpg (+ jpeg/png fallbacks). */
+export function addNikiCdnImageCandidates(nikiCode: string, add: (url: string) => void): void {
+  const code = extractNikiCode(nikiCode)
+  if (!code) return
+
+  // Exact code first: {niki_code}.jpg
+  const safe = encodeURIComponent(code)
+  for (const ext of KAOS_PRODUCT_IMAGE_EXTENSIONS) {
+    add(`${NIKI_IMAGES_BASE}${safe}${ext}`)
+  }
+
+  // Uppercase variant if different
+  const upper = code.toUpperCase()
+  if (upper !== code) {
+    const safeUpper = encodeURIComponent(upper)
+    for (const ext of KAOS_PRODUCT_IMAGE_EXTENSIONS) {
+      add(`${NIKI_IMAGES_BASE}${safeUpper}${ext}`)
+    }
+  }
+
+  // Lowercase variant if different
+  const lower = code.toLowerCase()
+  if (lower !== code && lower !== upper) {
+    const safeLower = encodeURIComponent(lower)
+    for (const ext of KAOS_PRODUCT_IMAGE_EXTENSIONS) {
+      add(`${NIKI_IMAGES_BASE}${safeLower}${ext}`)
+    }
+  }
+}
+
+/**
+ * NIKI code for images / KAOS paths: prefer explicit niki_code, then catalog codes.
+ * `item_key_words` is last — on shop-with-me it is often keywords, not the NIKI id.
  */
 export function getNikiCodeFromSource(source: unknown): string {
   if (!source || typeof source !== "object") return ""
@@ -63,8 +185,9 @@ export function getNikiCodeFromSource(source: unknown): string {
     }
     return ""
   }
+  const fromCdn = getNikiCodeForCdnImage(source)
+  if (fromCdn) return fromCdn
   return pick([
-    "item_key_words", // canonical: NIKI code === item_key_words
     "niki_code",
     "NIKI_CODE",
     "nikiCode",
@@ -72,6 +195,7 @@ export function getNikiCodeFromSource(source: unknown): string {
     "ITEM_CODE",
     "item_code",
     "itemCode",
+    "item_key_words",
   ])
 }
 
@@ -106,7 +230,11 @@ function collectBackendImageUrls(source: ProductImageSource | null | undefined):
     if (raw == null) continue
     const s = typeof raw === "string" ? raw.trim() : String(raw).trim()
     if (s === "") continue
-    const n = normalizeImageUrl(s)
+    let n = normalizeImageUrl(s)
+    if (!n || !isValidImageUrl(n)) continue
+    if (n.includes("/uploads/products/") || n.includes("/api/images/products/")) {
+      n = normalizeProductImagePublicUrl(n)
+    }
     if (!n || !isValidImageUrl(n)) continue
     if (seen.has(n)) continue
     seen.add(n)
@@ -126,15 +254,21 @@ function collectBackendImageUrls(source: ProductImageSource | null | undefined):
 }
 
 /**
- * Ordered URLs to try for a product image (KAOS famille path, flat NIKI, each backend field, then no_image).
- * Use with onError → next index when the CDN returns 404 (famille folder often wrong while flat path works).
+ * Ordered URLs to try for a product image:
+ * 1) https://ishyiga.rw/NIKI/images/{niki_code}.jpg (+ jpeg/png)
+ * 2) backend image fields (image_url, item_image_url, IMAGE_URL, image, photo, etc.)
+ * 3) no_image placeholder
+ * Use with onError → next index when the CDN returns 404.
  */
 export function getProductImageCandidates(source: ProductImageSource | null | undefined): string[] {
-  const KAOS_BASE = "https://ishyiga.rw/images_kaos_beta/"
   const seen = new Set<string>()
   const out: string[] = []
   const add = (u: string | null | undefined) => {
-    const n = normalizeImageUrl(u ?? null)
+    let n = normalizeImageUrl(u ?? null)
+    if (!n || !isValidImageUrl(n)) return
+    if (n.includes("/uploads/products/") || n.includes("/api/images/products/")) {
+      n = normalizeProductImagePublicUrl(n)
+    }
     if (!n || !isValidImageUrl(n)) return
     if (seen.has(n)) return
     seen.add(n)
@@ -147,55 +281,24 @@ export function getProductImageCandidates(source: ProductImageSource | null | un
   }
 
   if (source && typeof source === "object") {
-    const rawFamille = (source as any).famille ?? (source as any).FAMILLE
+    const nikiCdnCode = getNikiCodeForCdnImage(source)
     const nikiCode = getNikiCodeFromSource(source)
-    const famille = typeof rawFamille === "string" ? rawFamille.trim() : String(rawFamille ?? "").trim()
-    const nikiPath = nikiCode ? sanitizeKaosSegment(nikiCode) : ""
 
-    // Debug: Log critical fields
-    if (typeof window !== "undefined") {
-      console.log("[ImageUtils] Critical image fields:", {
-        nikiCode,
-        famille,
-        FAMILLE: (source as any).FAMILLE,
-        rawFamille,
-        nikiPath,
-        hasNikiCode: !!nikiCode,
-        hasFamille: !!famille
-      })
+    // 1) Official NIKI photos: https://ishyiga.rw/NIKI/images/{niki_code}.jpg
+    if (nikiCdnCode) {
+      addNikiCdnImageCandidates(nikiCdnCode, (u) => add(u))
+    }
+    if (nikiCode && nikiCode !== nikiCdnCode) {
+      addNikiCdnImageCandidates(nikiCode, (u) => add(u))
     }
 
-    if (nikiPath) {
-      if (famille) {
-        const familleBase = `${KAOS_BASE}${sanitizeKaosSegment(famille)}/${nikiPath}`
-        addKaosProductImageExtensionVariants(familleBase, (u) => add(u))
-        console.log("[ImageUtils] KAOS famille URLs:", KAOS_PRODUCT_IMAGE_EXTENSIONS.map((e) => `${familleBase}${e}`))
-      }
-      const nikiBase = `${KAOS_BASE}${nikiPath}`
-      addKaosProductImageExtensionVariants(nikiBase, (u) => add(u))
-      console.log("[ImageUtils] KAOS niki URLs:", KAOS_PRODUCT_IMAGE_EXTENSIONS.map((e) => `${nikiBase}${e}`))
-      try {
-        console.log("[ImageSrc] KAOS candidates", {
-          id: getNikiCodeFromSource(source) || String((source as any).id ?? ""),
-          famille,
-          nikiCode,
-          nikiPath,
-        })
-      } catch {
-        /* ignore */
-      }
-    } else {
-      console.warn("[ImageUtils] No nikiPath generated - nikiCode is empty or invalid")
+    // 2) Fallback to normal DB column images if NIKI photo is missing/404
+    for (const u of collectBackendImageUrls(source)) {
+      add(u)
     }
   } else {
     console.warn("[ImageUtils] Invalid source object for image resolution")
   }
-
-  for (const u of collectBackendImageUrls(source)) {
-    add(u)
-  }
-
-  add(NO_IMAGE_URL)
 
   // Debug: Log final candidates
   if (typeof window !== "undefined") {

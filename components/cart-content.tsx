@@ -12,6 +12,7 @@ import { BarcodeScanner } from "@/components/barcode-scanner"
 import { useToast } from "@/components/ui/use-toast"
 import { usePriceDropToasts } from "@/lib/use-price-drop-toasts"
 import { generalSellingPrice, normalizeItemEmballageForCart } from "@/lib/package-price"
+import { buildCartImageFields } from "@/lib/cart-image-fields"
 
 export function CartContent() {
   const items = useCartStore((state) => state.items)
@@ -66,11 +67,10 @@ export function CartContent() {
       const supplierName = first.supplier_name ?? first.OWNER ?? "Supplier"
       addItem({
         id: code,
-        itemCode: code,
         name,
         price,
         unit: first.item_packet ?? "",
-        image: first.image_url ?? first.image ?? first.item_image_url,
+        ...buildCartImageFields(first as Record<string, unknown>, String(code)),
         supplierId,
         supplierName,
         supplierLocation: first.supplier_location,

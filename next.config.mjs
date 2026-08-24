@@ -10,6 +10,32 @@ const nextConfig = {
   /** Monorepo: lockfile may exist in parent (`Ihute-new-v/`); pin Turbopack root to this app. */
   turbopack: {
     root: path.resolve(__dirname),
+    /**
+     * Prescription upload (and similar) server routes intentionally use fs under
+     * public/uploads/prescriptions. Turbopack 16.2 still emits a false-positive
+     * "whole project NFT" warning for that pattern even with statically scoped joins.
+     * This suppresses only that diagnostic — it does not disable NFT tracing.
+     */
+    ignoreIssue: [
+      {
+        path: '**/next.config.*',
+        title: 'Encountered unexpected file in NFT list',
+      },
+    ],
+  },
+  /**
+   * Keep runtime upload I/O; do not ship the git tree / mobile project into the
+   * prescription-upload serverless trace when Turbopack over-approximates cwd fs use.
+   */
+  outputFileTracingExcludes: {
+    '/api/orders/prescription-upload': [
+      './.git/**',
+      './android/**',
+      './ios/**',
+      './.data/**',
+      './public/uploads/products/**',
+      './public/uploads/shops/**',
+    ],
   },
   typescript: {
     ignoreBuildErrors: false,
@@ -45,6 +71,26 @@ const nextConfig = {
       {
         source: '/api/analytics/:path*',
         destination: `${javaBase}/api/analytics/:path*`,
+      },
+      {
+        source: '/api/payers',
+        destination: `${javaBase}/api/payers`,
+      },
+      {
+        source: '/api/payers/:path*',
+        destination: `${javaBase}/api/payers/:path*`,
+      },
+      {
+        source: '/api/seller-payers',
+        destination: `${javaBase}/api/seller-payers`,
+      },
+      {
+        source: '/api/seller-payers/:path*',
+        destination: `${javaBase}/api/seller-payers/:path*`,
+      },
+      {
+        source: '/api/seller-payments/:path*',
+        destination: `${javaBase}/api/seller-payments/:path*`,
       },
     ]
   },

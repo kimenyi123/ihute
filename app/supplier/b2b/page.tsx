@@ -10,8 +10,73 @@ import { useState, useEffect } from "react";
 import { useAuthStore } from "@/lib/auth-store";
 import LoadingSpinner from "@/components/LoadingSpinner";
 import ErrorMessage from "@/components/ErrorMessage";
+import { useLanguageStore, type Language } from "@/lib/language-store";
+
+const B2B_UI: Record<Language, {
+  pageTitle: string;
+  pageSubtitle: string;
+  quickBuy: string;
+  quickBuyDesc: string;
+  bulkImport: string;
+  bulkImportDesc: string;
+  drafts: string;
+  draftsDesc: string;
+  outgoingOrders: string;
+  outgoingDesc: string;
+  incomingOrders: string;
+  incomingDesc: string;
+  loadingDashboard: string;
+}> = {
+  en: {
+    pageTitle: "Rekizisiyo",
+    pageSubtitle: "Manage your business-to-business orders and negotiations",
+    quickBuy: "Quick Buy",
+    quickBuyDesc: "Search and add products to create orders quickly",
+    bulkImport: "Bulk Import",
+    bulkImportDesc: "Upload Excel file to create orders in bulk",
+    drafts: "Drafts",
+    draftsDesc: "View and edit your draft orders",
+    outgoingOrders: "Outgoing Orders",
+    outgoingDesc: "Orders you've sent to suppliers",
+    incomingOrders: "Incoming Orders",
+    incomingDesc: "Orders received from buyers",
+    loadingDashboard: "Loading dashboard...",
+  },
+  rw: {
+    pageTitle: "Rekizisiyo",
+    pageSubtitle: "Gucunga amatumiza hagati y'ubucuruzi n'ibiganiro",
+    quickBuy: "Gura byihuse",
+    quickBuyDesc: "Shakisha kandi ongeraho ibicuruzwa kugira ngo ukore amatumiza byihuse",
+    bulkImport: "Ohereza byinshi",
+    bulkImportDesc: "Ohereza dosiye ya Excel kugira ngo ukore amatumiza byinshi",
+    drafts: "Inyandiko zitarangiye",
+    draftsDesc: "Reba kandi uhindure amatumiza yawe atararangira",
+    outgoingOrders: "Amatumiza zoherejwe",
+    outgoingDesc: "Amatumiza wohereje ku bagurisha",
+    incomingOrders: "Amatumiza zakiriwe",
+    incomingDesc: "Amatumiza yakiriwe atuwe n'abaguzi",
+    loadingDashboard: "Gutegereza dashboard...",
+  },
+  fr: {
+    pageTitle: "Réquisition",
+    pageSubtitle: "Gérez vos commandes et négociations interentreprises",
+    quickBuy: "Achat rapide",
+    quickBuyDesc: "Recherchez et ajoutez des produits pour créer des commandes rapidement",
+    bulkImport: "Import en masse",
+    bulkImportDesc: "Téléversez un fichier Excel pour créer des commandes en masse",
+    drafts: "Brouillons",
+    draftsDesc: "Consultez et modifiez vos brouillons de commandes",
+    outgoingOrders: "Commandes sortantes",
+    outgoingDesc: "Commandes envoyées aux fournisseurs",
+    incomingOrders: "Commandes entrantes",
+    incomingDesc: "Commandes reçues des acheteurs",
+    loadingDashboard: "Chargement du tableau de bord...",
+  },
+};
 
 export default function B2BDashboard() {
+  const language = useLanguageStore((s) => s.language);
+  const ui = B2B_UI[language] ?? B2B_UI.en;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [outgoingCount, setOutgoingCount] = useState(0);
@@ -51,40 +116,40 @@ export default function B2BDashboard() {
 
   const cards = [
     {
-      title: "Quick Buy",
-      description: "Search and add products to create orders quickly",
+      title: ui.quickBuy,
+      description: ui.quickBuyDesc,
       href: "/supplier/b2b/buy",
       icon: "🛒",
       color: "bg-blue-50 hover:bg-blue-100 border-blue-200",
       badge: null,
     },
     {
-      title: "Bulk Import",
-      description: "Upload Excel file to create orders in bulk",
+      title: ui.bulkImport,
+      description: ui.bulkImportDesc,
       href: "/supplier/b2b/bulk",
       icon: "📊",
       color: "bg-green-50 hover:bg-green-100 border-green-200",
       badge: null,
     },
     {
-      title: "Drafts",
-      description: "View and edit your draft orders",
+      title: ui.drafts,
+      description: ui.draftsDesc,
       href: "/supplier/b2b/drafts",
       icon: "📝",
       color: "bg-yellow-50 hover:bg-yellow-100 border-yellow-200",
       badge: null,
     },
     {
-      title: "Outgoing Orders",
-      description: "Orders you've sent to suppliers",
+      title: ui.outgoingOrders,
+      description: ui.outgoingDesc,
       href: "/supplier/b2b/outgoing",
       icon: "📤",
       color: "bg-purple-50 hover:bg-purple-100 border-purple-200",
       badge: outgoingCount,
     },
     {
-      title: "Incoming Orders",
-      description: "Orders received from buyers",
+      title: ui.incomingOrders,
+      description: ui.incomingDesc,
       href: "/supplier/b2b/incoming",
       icon: "📥",
       color: "bg-indigo-50 hover:bg-indigo-100 border-indigo-200",
@@ -95,7 +160,7 @@ export default function B2BDashboard() {
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <LoadingSpinner size="lg" message="Loading dashboard..." />
+        <LoadingSpinner size="lg" message={ui.loadingDashboard} />
       </div>
     );
   }
@@ -111,9 +176,9 @@ export default function B2BDashboard() {
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">Rekizisiyo</h1>
+        <h1 className="text-3xl font-bold text-gray-900">{ui.pageTitle}</h1>
         <p className="mt-2 text-gray-600">
-          Manage your business-to-business orders and negotiations
+          {ui.pageSubtitle}
         </p>
       </div>
 

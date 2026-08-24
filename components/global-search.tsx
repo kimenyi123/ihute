@@ -16,6 +16,8 @@ import { useGeolocation } from "@/hooks/use-geolocation"
 import { searchNearbyProducts, NearbyProduct } from "@/lib/location-search-api"
 import { DistanceBadge } from "@/components/distance-badge"
 import { Badge } from "@/components/ui/badge"
+import { lineSellingPriceFromProductRow } from "@/lib/package-price"
+import { sellerDisplayName, sellerDisplayNameFromProduct } from "@/lib/seller-display-name"
 
 export interface GlobalResult {
   type?: "product" | "supplier"
@@ -24,6 +26,7 @@ export interface GlobalResult {
   item_packet?: string
   item_emballage?: string
   selling_price?: number | string
+  final_selling_price?: number | string
   cost_price?: number | string
   /** Currency from account_signup for this supplier. */
   currency?: string
@@ -46,6 +49,7 @@ export interface GlobalResult {
 }
 
 type GlobalSearchResponse = {
+  ok: boolean
   suppliersByName: GlobalResult[]
   suppliersByProduct: GlobalResult[]
   products: GlobalResult[]
@@ -65,8 +69,33 @@ type GlobalSearchResponse = {
   }
 }
 
+function responseErrorMessage(value: unknown, status: number): string {
+  const body = value as { error?: { message?: string } | string } | null
+  if (body?.error && typeof body.error === "object" && body.error.message) {
+    return body.error.message
+  }
+  if (typeof body?.error === "string") return body.error
+  if (status === 504) return "Search service timed out."
+  if (status === 503) return "Search service is temporarily unavailable."
+  return "Search service returned an invalid response."
+}
+
 function productMatchScore(p: GlobalResult): number {
   return p.relevance_score ?? p.finalScore ?? 0
+}
+
+function formatDropdownPrice(p: GlobalResult): string {
+  const row = p as Record<string, unknown>
+  const fromFinal =
+    typeof p.final_selling_price === "number"
+      ? p.final_selling_price
+      : parseFloat(String(p.final_selling_price ?? "").replace(/[^\d.,-]/g, "").replace(",", "."))
+  const line =
+    Number.isFinite(fromFinal) && fromFinal > 0
+      ? fromFinal
+      : lineSellingPriceFromProductRow(row)
+  if (!Number.isFinite(line) || line <= 0) return ""
+  return `${line.toLocaleString()} ${p.currency || "RWF"}`
 }
 
 /** Within each supplier: best relevance first, then nearest distance. */
@@ -210,6 +239,26 @@ export function GlobalSearch({
     // Load recent searches for suggestions
     getRecentSearches(5).then(setRecentSearches).catch(() => { })
   }, [user])
+
+  // Global Ctrl+K / Cmd+K keyboard shortcut to focus search input
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: globalThis.KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault()
+        inputRef.current?.focus()
+        inputRef.current?.select()
+        if (!isCategoryAi) {
+          setOpen(true)
+        }
+      }
+      if (e.key === "Escape" && open) {
+        setOpen(false)
+        inputRef.current?.blur()
+      }
+    }
+    window.addEventListener("keydown", handleGlobalKeyDown)
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown)
+  }, [isCategoryAi, open])
 
   /** Keep input in sync with `?sq=` (back/forward, deep links). */
   useEffect(() => {
@@ -516,11 +565,19 @@ export function GlobalSearch({
 
         if (requestId !== searchRequestIdRef.current) return
 
+        const rawJson: unknown = await res.json().catch(() => null)
         if (!res.ok) {
-          throw new Error(`Search failed: ${res.status}`)
+          throw new Error(responseErrorMessage(rawJson, res.status))
         }
-
-        const json: GlobalSearchResponse = await res.json()
+        const json = rawJson as GlobalSearchResponse
+        if (
+          json?.ok !== true ||
+          !Array.isArray(json.products) ||
+          !Array.isArray(json.suppliersByName) ||
+          !Array.isArray(json.suppliersByProduct)
+        ) {
+          throw new Error("Search service returned an invalid response.")
+        }
 
         if (requestId !== searchRequestIdRef.current) return
 
@@ -548,17 +605,22 @@ export function GlobalSearch({
         }
 
         const allProducts = json.products || []
+        // Use lower threshold for dropdown (showing fewer results, can afford to be more inclusive)
         const filteredProducts = narrowGlobalDropdownToBestMatch(
-          filterProductsByRelevance(allProducts, trimmedQuery, 10),
+          filterProductsByRelevance(allProducts, trimmedQuery, 5),
           trimmedQuery
         )
 
         const allSuppliers = [...(json.suppliersByName || []), ...(json.suppliersByProduct || [])]
-        const validSuppliers = allSuppliers.filter((s) => s.supplier_name) as Array<
-          GlobalResult & { supplier_name: string }
-        >
+        const validSuppliers = allSuppliers
+          .filter((s) => s.supplier_name || s.supplier_account || (s as any).nickname)
+          .map((s) => ({
+            ...s,
+            supplier_name: s.supplier_name || (s as any).nickname || s.supplier_account || "",
+          })) as Array<GlobalResult & { supplier_name: string }>
 
-        const supplierThreshold = filteredProducts.length > 0 ? 8 : 20
+        // More lenient thresholds for dropdown
+        const supplierThreshold = filteredProducts.length > 0 ? 3 : 10
         const filteredSuppliers = filterSuppliersByRelevance(validSuppliers, trimmedQuery, supplierThreshold)
 
         const dedupedSuppliers: typeof filteredSuppliers = []
@@ -571,12 +633,38 @@ export function GlobalSearch({
           dedupedSuppliers.push(sup)
         }
 
-        const p = filteredProducts.slice(0, maxSuggestions)
-        const s = dedupedSuppliers.slice(0, Math.max(4, Math.floor(maxSuggestions * 0.3)))
+        const p = filteredProducts
+          .slice()
+          .sort((a, b) => {
+            const scoreOrder = (b.finalScore ?? 0) - (a.finalScore ?? 0)
+            if (scoreOrder !== 0) return scoreOrder
+            return String(a.item_code ?? a.item_commercial_name ?? "").localeCompare(
+              String(b.item_code ?? b.item_commercial_name ?? ""),
+              undefined,
+              { sensitivity: "base" },
+            )
+          })
+          .slice(0, maxSuggestions)
+        const s = dedupedSuppliers
+          .slice()
+          .sort((a, b) => {
+            const scoreOrder = (b.finalScore ?? 0) - (a.finalScore ?? 0)
+            if (scoreOrder !== 0) return scoreOrder
+            return String(a.supplier_account ?? a.supplier_name ?? "").localeCompare(
+              String(b.supplier_account ?? b.supplier_name ?? ""),
+              undefined,
+              { sensitivity: "base" },
+            )
+          })
+          .slice(0, Math.max(4, Math.floor(maxSuggestions * 0.3)))
 
         console.log("[GlobalSearch] Filtered results:", {
-          products: p.length,
-          suppliers: s.length,
+          rawProducts: allProducts.length,
+          filteredProducts: filteredProducts.length,
+          shownProducts: p.length,
+          rawSuppliers: validSuppliers.length,
+          filteredSuppliers: filteredSuppliers.length,
+          shownSuppliers: s.length,
           topProductScores: p.slice(0, 3).map((x) => x.finalScore),
         })
 
@@ -622,7 +710,7 @@ export function GlobalSearch({
           setLoading(false)
         }
       }
-      }, 300)
+      }, 150)
     }, 0)
 
     return () => {
@@ -661,7 +749,11 @@ export function GlobalSearch({
 
   const onSubmitSupplier = (s: GlobalResult) => {
     const supplierAccount = s.supplier_account || s.item_seller_account
-    const supplierName = s.supplier_name || supplierAccount || ""
+    const supplierName = sellerDisplayName({
+      supplierName: s.supplier_name,
+      supplierAccount: supplierAccount,
+      fallback: "",
+    })
     const params = new URLSearchParams({
       ...(supplierName ? { q: supplierName } : {}),
       supplier: supplierAccount || "",
@@ -773,8 +865,13 @@ export function GlobalSearch({
             categoryInputFocusedRef.current = false
           }}
           onKeyDown={onKeyDown}
-          className="pl-10 pr-3 h-9 transition-shadow focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary"
+          className="pl-10 pr-14 h-9 transition-shadow focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary"
         />
+        {!q && (
+          <kbd className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 hidden h-5 select-none items-center gap-0.5 rounded border bg-muted/80 px-1.5 font-mono text-[10px] font-medium text-muted-foreground sm:inline-flex shadow-xs">
+            <span className="text-xs">⌘</span>K
+          </kbd>
+        )}
       </div>
 
       {mounted && open && !isCategoryAi && createPortal(
@@ -1036,7 +1133,10 @@ export function GlobalSearch({
                           {/* Supplier header */}
                           <div className="text-[11px] font-medium text-gray-600 px-2 py-1 bg-gray-50 rounded flex items-center gap-1">
                             <Store className="h-3 w-3" />
-                            {firstProduct.supplier_name || supplierId}
+                            {sellerDisplayNameFromProduct({
+                              ...firstProduct,
+                              supplier_account: supplierId,
+                            })}
                             {firstProduct.supplier_location && (
                               <span className="text-gray-500">• {firstProduct.supplier_location}</span>
                             )}
@@ -1047,7 +1147,9 @@ export function GlobalSearch({
 
                           {/* Products from this supplier */}
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            {supplierProducts.map((p, i) => (
+                            {supplierProducts.map((p, i) => {
+                              const priceLabel = formatDropdownPrice(p)
+                              return (
                               <button
                                 key={`${supplierId}-${p.item_code}-${i}`}
                                 className="w-full text-left rounded-lg border p-3 hover:border-blue-300 hover:bg-accent transition-colors group"
@@ -1057,17 +1159,21 @@ export function GlobalSearch({
                                 <div className="font-medium text-gray-900 group-hover:text-blue-700 text-sm">
                                   {p.item_commercial_name}
                                 </div>
-                                <div className="text-xs text-gray-600 mt-0.5">
-                                  {p.item_packet || ""}
-                                </div>
-                                <div className="mt-1 text-sm font-semibold text-green-600">
-                                  {p.item_emballage ?? ""}
-                                </div>
+                                {p.item_packet ? (
+                                  <div className="text-xs text-gray-600 mt-0.5">
+                                    {p.item_packet} in stock
+                                  </div>
+                                ) : null}
+                                {priceLabel ? (
+                                  <div className="mt-1 text-sm font-semibold text-green-600">
+                                    {priceLabel}
+                                  </div>
+                                ) : null}
                                 <div className="mt-1 text-[11px] text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
                                   View product →
                                 </div>
                               </button>
-                            ))}
+                            )})}
                           </div>
                         </div>
                       )

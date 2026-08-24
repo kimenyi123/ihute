@@ -18,6 +18,7 @@ dist/
 .env
 .env.*
 !.env.example
+!.env.dev.example
 
 # =============================================================
 # Logs
@@ -74,3 +75,6 @@ android/local.properties
 
 # iOS (CocoaPods — regenerated with `pod install`)
 ios/App/Pods/
+/nbproject/private/
+env.backup
+env.download

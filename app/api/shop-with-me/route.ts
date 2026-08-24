@@ -2,6 +2,107 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getShopWithMeUrl, getFetchSuggestionsUrl } from '@/lib/backend-config';
 import { buildCacheKey, getCached, setCached, DATA_TTL_SEC } from '@/lib/redis-cache';
 import { stripExpiredFromShopWithMeBody } from '@/lib/catalog-expiry-filter';
+import { recordSearchEvent } from '@/lib/mysql-search-analytics';
+import {
+  buildResponseFromTierCache,
+  writeTierCachesFromJavaResponse,
+  warmTier1FromProducts,
+  hydrateProductsWithTier1Sync,
+  hasTier2ShopIndex,
+  countTier1HitsForProducts,
+} from '@/lib/shop-with-me-tier-cache';
+import { shouldRunTextSearch } from '@/lib/search-query-min';
+
+/** Shorter Redis TTL when productSearch is present (fresh search results). */
+const SEARCH_CACHE_TTL_SEC = 30;
+
+function safeLogTerm(term: string | null | undefined): string {
+  if (!term || !term.trim()) return 'null';
+  return `"${term.trim().replace(/"/g, "'")}"`;
+}
+
+function logCacheShopWithMe(
+  nickname: string,
+  searchTerm: string,
+  detail: string,
+): void {
+  const nick = (nickname ?? '').trim() || 'unknown';
+  const search = searchTerm.trim() ? safeLogTerm(searchTerm) : 'null';
+  console.log(`[cache][shopwithme] nickname=${nick} search=${search} ${detail}`);
+}
+
+function logResponseShopWithMe(
+  nickname: string,
+  searchTerm: string,
+  productCount: number,
+  routeStartMs: number,
+): void {
+  const nick = (nickname ?? '').trim() || 'unknown';
+  const search = searchTerm.trim() ? safeLogTerm(searchTerm) : 'null';
+  const elapsed = Date.now() - routeStartMs;
+  console.log(
+    `[response][shopwithme] nickname=${nick} term=${search} products=${productCount} elapsed_ms=${elapsed}`,
+  );
+}
+
+function fireSearchEvent(
+  request: NextRequest,
+  term: string,
+  nickname: string,
+  resultsCount: number,
+): void {
+  void recordSearchEvent({
+    term,
+    source: 'shopwithme',
+    shop_nickname: nickname,
+    results_count: resultsCount,
+    session_id: request.cookies.get('ihute_sid')?.value ?? null,
+  }).catch(() => {});
+}
+
+function countProducts(data: { sellers?: Array<{ products?: unknown[] }> }): number {
+  let n = 0;
+  for (const s of data.sellers ?? []) {
+    n += s.products?.length ?? 0;
+  }
+  return n;
+}
+
+async function finalizeShopResponse(
+  request: NextRequest,
+  data: Record<string, unknown>,
+  winningVariant: string,
+  productSearch: string,
+  cacheKey: string,
+  cacheTtl: number,
+  routeStartMs: number,
+): Promise<NextResponse> {
+  normalizeBrandAndCategory(data);
+  if (!productSearch.trim()) {
+    writeTierCachesFromJavaResponse(winningVariant, data);
+    const allProducts: Record<string, unknown>[] = [];
+    for (const seller of (data.sellers as Array<{ products?: unknown[] }> | undefined) ?? []) {
+      for (const p of seller.products ?? []) {
+        if (p && typeof p === 'object') allProducts.push(p as Record<string, unknown>);
+      }
+    }
+    warmTier1FromProducts(allProducts);
+  } else {
+    for (const seller of (data.sellers as Array<{ products?: unknown[] }> | undefined) ?? []) {
+      const products = (seller.products ?? []).filter(
+        (p): p is Record<string, unknown> => p != null && typeof p === 'object',
+      );
+      await hydrateProductsWithTier1Sync(products);
+    }
+    fireSearchEvent(request, productSearch.trim(), winningVariant, countProducts(data));
+  }
+
+  await setCached(cacheKey, JSON.stringify(data), cacheTtl);
+  console.log('[API shop-with-me] Success! Cached in Redis', productSearch.trim() ? `(search TTL ${cacheTtl}s)` : '');
+  const count = countProducts(data);
+  logResponseShopWithMe(winningVariant, productSearch, count, routeStartMs);
+  return NextResponse.json(data);
+}
 
 /** Ensure each product in the response has brand and category for the client. */
 function normalizeBrandAndCategory(data: { sellers?: Array<{ products?: any[] }> }) {
@@ -23,6 +124,15 @@ function normalizeBrandAndCategory(data: { sellers?: Array<{ products?: any[] }>
         null;
       (p as any).brand = brand != null && String(brand).trim() ? String(brand).trim() : null;
       (p as any).category = category != null && String(category).trim() ? String(category).trim() : null;
+      (p as any).search_priority = (p as any).search_priority ?? null;
+      (p as any).contains_ingredient = (p as any).contains_ingredient ?? false;
+      const nested = (p as any).items;
+      if (Array.isArray(nested)) {
+        for (const item of nested) {
+          item.search_priority = item.search_priority ?? null;
+          item.contains_ingredient = item.contains_ingredient ?? false;
+        }
+      }
     }
   }
 }
@@ -130,13 +240,16 @@ async function enrichWithImages(data: { sellers?: Array<{ products?: any[]; ISHY
  * Response is normalized so each product has brand and category.
  */
 export async function GET(request: NextRequest) {
+  const routeStartMs = Date.now();
   const searchParams = request.nextUrl.searchParams;
   const nickname = searchParams.get('nickname');
-  const productSearch = searchParams.get('productSearch') ?? searchParams.get('q') ?? '';
+  const rawProductSearch = searchParams.get('productSearch') ?? searchParams.get('q') ?? '';
+  const productSearch = shouldRunTextSearch(rawProductSearch) ? rawProductSearch.trim() : '';
 
   console.log('[API shop-with-me] Received request for nickname:', nickname, 'productSearch:', productSearch || '(none)');
 
   if (!nickname || !nickname.trim()) {
+    logResponseShopWithMe('', productSearch, 0, routeStartMs);
     return NextResponse.json(
       { ok: false, error: 'Nickname is required' },
       { status: 400 }
@@ -146,16 +259,40 @@ export async function GET(request: NextRequest) {
   const params: Record<string, string> = { nickname: nickname.trim() };
   if (productSearch.trim()) params.productSearch = productSearch.trim();
   const skipCache = searchParams.get('_nocache') === '1' || searchParams.get('cache') === 'no';
+  const originalNickname = nickname.trim();
+  const hasSearch = !!productSearch.trim();
+
+  if (hasSearch) {
+    logCacheShopWithMe(originalNickname, productSearch, 'cache=bypassed');
+  }
+
   // v2 = responses include image_url enrichment from fetchSuggestions
   const cacheKey = buildCacheKey('shop-with-me-v2', params);
 
   const cached = !skipCache ? await getCached(cacheKey) : null;
   if (cached) {
-    console.log('[API shop-with-me] Redis cache hit');
+    console.log('[API shop-with-me] Redis cache hit (legacy v2)');
     try {
       const data = JSON.parse(cached);
       normalizeBrandAndCategory(data);
-      // Cached payload is already enriched with image_url when stored below
+      if (!hasSearch) {
+        const allProducts: Record<string, unknown>[] = [];
+        for (const seller of data.sellers ?? []) {
+          for (const p of seller.products ?? []) {
+            if (p && typeof p === 'object') allProducts.push(p as Record<string, unknown>);
+          }
+        }
+        warmTier1FromProducts(allProducts);
+        const tier2Hit = await hasTier2ShopIndex(originalNickname);
+        const { hits, total } = await countTier1HitsForProducts(allProducts);
+        logCacheShopWithMe(
+          originalNickname,
+          '',
+          `tier2_hit=${tier2Hit} tier1_hits=${hits}/${total} legacy_hit=true`,
+        );
+      }
+      const count = countProducts(data);
+      logResponseShopWithMe(originalNickname, productSearch, count, routeStartMs);
       return NextResponse.json(data, {
         headers: { 'X-Cache': 'HIT' },
       });
@@ -164,10 +301,32 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  if (!skipCache && !hasSearch) {
+    for (const variant of nicknameLookupVariants(originalNickname)) {
+      const tierData = await buildResponseFromTierCache(variant);
+      if (tierData) {
+        console.log('[API shop-with-me] Two-tier cache hit for', variant);
+        normalizeBrandAndCategory(tierData);
+        const tierProducts =
+          ((tierData.sellers as Array<{ products?: Record<string, unknown>[] }>)?.[0]?.products) ?? [];
+        warmTier1FromProducts(tierProducts);
+        const { hits, total } = await countTier1HitsForProducts(tierProducts);
+        logCacheShopWithMe(
+          variant,
+          '',
+          `tier2_hit=true tier1_hits=${hits}/${total} legacy_hit=false`,
+        );
+        const count = countProducts(tierData);
+        logResponseShopWithMe(variant, productSearch, count, routeStartMs);
+        return NextResponse.json(tierData, { headers: { 'X-Cache': 'TIER-HIT' } });
+      }
+    }
+    logCacheShopWithMe(originalNickname, '', 'tier2_hit=false tier1_hits=0/0 legacy_hit=false');
+  }
+
   try {
     const base = getShopWithMeUrl().replace(/\?.*$/, '').replace(/\/+$/, '');
-    const originalNickname = nickname.trim();
-    const variants = nicknameLookupVariants(originalNickname);
+    const variants = hasSearch ? [originalNickname] : nicknameLookupVariants(originalNickname);
     const headersBase: Record<string, string> = { Accept: 'application/json' };
     if (productSearch.trim()) {
       headersBase['X-Product-Search'] = productSearch.trim();
@@ -210,6 +369,7 @@ export async function GET(request: NextRequest) {
     if (!shopWithMeResponseLooksGood(data)) {
       if (data && typeof data === 'object') {
         normalizeBrandAndCategory(data);
+        logResponseShopWithMe(originalNickname, productSearch, 0, routeStartMs);
         // 200 + ok:false so the client shows "Shop not found" (it treats !res.ok as a generic HTTP error).
         return NextResponse.json({
           ...data,
@@ -218,6 +378,7 @@ export async function GET(request: NextRequest) {
           error: data.error ?? 'Shop not found',
         });
       }
+      logResponseShopWithMe(originalNickname, productSearch, 0, routeStartMs);
       return NextResponse.json({
         ok: false,
         error: lastStatus >= 400 ? `Backend error: ${lastStatus}` : 'Shop not found',
@@ -229,15 +390,11 @@ export async function GET(request: NextRequest) {
       console.log('[API shop-with-me] Resolved nickname', originalNickname, '→', winningVariant);
     }
 
-    normalizeBrandAndCategory(data);
-    await enrichWithImages(data);
-
-    await setCached(cacheKey, JSON.stringify(data), DATA_TTL_SEC);
-    console.log('[API shop-with-me] Success! Cached in Redis');
-
-    return NextResponse.json(data);
+    const cacheTtl = hasSearch ? SEARCH_CACHE_TTL_SEC : DATA_TTL_SEC;
+    return finalizeShopResponse(request, data, winningVariant, productSearch, cacheKey, cacheTtl, routeStartMs);
   } catch (error: any) {
     console.error('[API shop-with-me] Fetch error:', error);
+    logResponseShopWithMe(originalNickname, productSearch, 0, routeStartMs);
     return NextResponse.json(
       { ok: false, error: error.message || 'Failed to fetch shop data' },
       { status: 500 }

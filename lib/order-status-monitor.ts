@@ -6,6 +6,35 @@
  */
 
 import { mapBackendOrderStatusToTrack, statusIndicatesDelivered } from "@/lib/order-status-map"
+import { sellerAccountFromOrder, sellerNameFromOrder } from "@/lib/order-seller-account"
+
+const FETCH_TIMEOUT_MS = 20_000
+const MAX_STATUS_RETRIES = 2
+const RETRY_DELAY_MS = 1_500
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function isTransientNetworkError(err: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return true
+  if (err instanceof DOMException && err.name === "AbortError") return true
+  if (err instanceof Error && err.name === "AbortError") return true
+  if (err instanceof TypeError && /failed to fetch|networkerror|load failed/i.test(err.message)) {
+    return true
+  }
+  return false
+}
+
+async function fetchWithTimeout(url: string, timeoutMs = FETCH_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(url, { cache: "no-store", signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 interface OrderStatusUpdate {
   orderId: string
@@ -30,6 +59,8 @@ class OrderStatusMonitor {
   private monitoredOrders: Set<string> = new Set()
   private pollingInterval: NodeJS.Timeout | null = null
   private lastCheckedStatuses: Map<string, string> = new Map()
+  private inFlightChecks: Map<string, Promise<string | null>> = new Map()
+  private isPolling = false
   
   private readonly POLL_INTERVAL = 10000 // 10 seconds
   private readonly MAX_MONITORED_ORDERS = 50 // Prevent memory leaks
@@ -97,42 +128,80 @@ class OrderStatusMonitor {
   }
 
   /**
-   * Manually check order status (for immediate checks)
+   * Manually check order status (for immediate checks).
+   * Deduplicates concurrent checks for the same orderId.
    */
   async checkOrderStatus(orderId: string): Promise<string | null> {
+    const inFlight = this.inFlightChecks.get(orderId)
+    if (inFlight) return inFlight
+
+    const promise = this.checkOrderStatusOnce(orderId)
+    this.inFlightChecks.set(orderId, promise)
     try {
-      const response = await fetch(`/api/order-status?orderId=${orderId}`, {
-        cache: 'no-store'
-      })
-      
+      return await promise
+    } finally {
+      this.inFlightChecks.delete(orderId)
+    }
+  }
+
+  private async checkOrderStatusOnce(orderId: string, attempt = 0): Promise<string | null> {
+    let controller: AbortController | undefined
+    try {
+      controller = new AbortController()
+      const timer = setTimeout(() => controller!.abort(), FETCH_TIMEOUT_MS)
+
+      let response: Response
+      try {
+        response = await fetch(`/api/order-status?orderId=${orderId}`, {
+          cache: "no-store",
+          signal: controller.signal,
+        })
+      } finally {
+        clearTimeout(timer)
+      }
+
       if (!response.ok) {
-        console.error(`[OrderStatusMonitor] Failed to check status for order ${orderId}`)
+        if (response.status >= 500 && attempt < MAX_STATUS_RETRIES) {
+          await delay(RETRY_DELAY_MS * (attempt + 1))
+          return this.checkOrderStatusOnce(orderId, attempt + 1)
+        }
+        console.warn(`[OrderStatusMonitor] Status check HTTP ${response.status} for order ${orderId}`)
         return null
       }
-      
+
       const data = await response.json()
-      
+
       if (data.ok) {
-        // Prefer raw DB ORDER_STATUS so OPEN maps to "open" (supplier slug), not the servlet's legacy "pending" alias.
         const rawOrder = String(data.ORDER_STATUS ?? "").trim()
         const rawPayment = String(data.paymentStatus ?? data.payment_status ?? "").trim()
         const newStatus = mapBackendOrderStatusToTrack(
           rawOrder || String(data.status ?? "").trim() || undefined,
-          rawPayment || undefined
+          rawPayment || undefined,
         )
         const oldStatus = this.lastCheckedStatuses.get(orderId)
-        
+
         if (oldStatus && oldStatus !== newStatus) {
           this.handleStatusChange(orderId, oldStatus, newStatus)
         }
-        
+
         this.lastCheckedStatuses.set(orderId, newStatus)
         return newStatus
       }
 
       return null
     } catch (error) {
-      console.error(`[OrderStatusMonitor] Error checking status for order ${orderId}:`, error)
+      if (isTransientNetworkError(error, controller?.signal) && attempt < MAX_STATUS_RETRIES) {
+        await delay(RETRY_DELAY_MS * (attempt + 1))
+        return this.checkOrderStatusOnce(orderId, attempt + 1)
+      }
+
+      if (isTransientNetworkError(error, controller?.signal)) {
+        console.warn(
+          `[OrderStatusMonitor] Transient network error for order ${orderId} (route may still be compiling)`,
+        )
+      } else {
+        console.error(`[OrderStatusMonitor] Error checking status for order ${orderId}:`, error)
+      }
       return null
     }
   }
@@ -142,26 +211,33 @@ class OrderStatusMonitor {
    */
   async triggerRatingCheck(orderId: string) {
     console.log(`[OrderStatusMonitor] Force checking rating for order ${orderId}`)
-    
+
     try {
-      const response = await fetch(`/api/ratings?action=shouldShowPopup&orderId=${orderId}`, {
-        cache: 'no-store'
-      })
-      
+      const response = await fetchWithTimeout(`/api/ratings?action=shouldShowPopup&orderId=${orderId}`)
+
+      if (!response.ok) {
+        console.warn(`[OrderStatusMonitor] Rating check HTTP ${response.status} for order ${orderId}`)
+        return
+      }
+
       const data = await response.json()
-      
+
       if (data.ok && data.shouldShow) {
         const ratingData: RatingTriggerData = {
           orderId,
-          sellerAccount: data.orderDetails?.sellerAccount || '',
-          sellerName: data.orderDetails?.sellerName || 'Unknown Seller',
-          items: data.orderDetails?.items || []
+          sellerAccount: sellerAccountFromOrder(data.orderDetails as Record<string, unknown> | undefined),
+          sellerName: sellerNameFromOrder(data.orderDetails as Record<string, unknown> | undefined),
+          items: data.orderDetails?.items || [],
         }
-        
+
         this.notifyRatingTrigger(ratingData)
       }
     } catch (error) {
-      console.error(`[OrderStatusMonitor] Error checking rating for order ${orderId}:`, error)
+      if (isTransientNetworkError(error)) {
+        console.warn(`[OrderStatusMonitor] Transient error checking rating for order ${orderId}`)
+      } else {
+        console.error(`[OrderStatusMonitor] Error checking rating for order ${orderId}:`, error)
+      }
     }
   }
 
@@ -187,17 +263,17 @@ class OrderStatusMonitor {
       this.stopPolling()
       return
     }
+    if (this.isPolling) return
 
-    console.log(`[OrderStatusMonitor] Polling ${this.monitoredOrders.size} orders`)
-
-    const promises = Array.from(this.monitoredOrders).map(orderId => 
-      this.checkOrderStatus(orderId)
-    )
-
+    this.isPolling = true
     try {
-      await Promise.allSettled(promises)
+      for (const orderId of this.monitoredOrders) {
+        await this.checkOrderStatus(orderId)
+      }
     } catch (error) {
-      console.error('[OrderStatusMonitor] Error during polling:', error)
+      console.warn("[OrderStatusMonitor] Error during polling:", error)
+    } finally {
+      this.isPolling = false
     }
   }
 
@@ -243,10 +319,12 @@ class OrderStatusMonitor {
    * Cleanup all monitoring
    */
   cleanup() {
-    console.log('[OrderStatusMonitor] Cleaning up')
+    console.log("[OrderStatusMonitor] Cleaning up")
     this.stopPolling()
     this.monitoredOrders.clear()
     this.lastCheckedStatuses.clear()
+    this.inFlightChecks.clear()
+    this.isPolling = false
     this.statusCallbacks.length = 0
     this.ratingCallbacks.length = 0
   }

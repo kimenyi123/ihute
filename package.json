@@ -20,7 +20,8 @@
     "cap:open:ios": "npx cap open ios",
     "generate:nep-cells": "node scripts/generate-rwanda-nep-from-csv.mjs",
     "mongo:stock-sync-indexes": "node scripts/ensure-stock-sync-log-indexes.mjs",
-    "mongo:stock-sync-test": "node scripts/test-stock-sync-mongo.mjs"
+    "mongo:stock-sync-test": "node scripts/test-stock-sync-mongo.mjs",
+    "test:ebm": "node --experimental-strip-types --test scripts/test-ebm-unit.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "3.9.1",
@@ -75,6 +76,7 @@
     "mysql2": "3.15.3",
     "next": "^16.1.6",
     "next-themes": "0.4.6",
+    "qrcode": "^1.5.4",
     "react": "^19.2.4",
     "react-bootstrap": "2.10.10",
     "react-day-picker": "9.8.0",
@@ -102,6 +104,7 @@
     "@tailwindcss/postcss": "4.1.9",
     "@types/bcryptjs": "2.4.6",
     "@types/node": "22.13.5",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "18.3.18",
     "@types/react-dom": "18.3.5",
     "baseline-browser-mapping": "^2.10.16",

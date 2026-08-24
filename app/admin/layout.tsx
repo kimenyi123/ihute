@@ -19,9 +19,15 @@ import {
   LogOut,
   Wallet,
   MapPin,
+  ScrollText,
+  Store,
+  Boxes,
+  Pill,
+  MessageSquare,
 } from 'lucide-react'
 import { useAuthStore } from '@/lib/auth-store'
 import { AdminGuard } from '@/components/auth/admin-guard'
+import { AdminOrderBell } from '@/components/admin/admin-order-bell'
 
 const menuItems = [
   { href: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -30,9 +36,14 @@ const menuItems = [
   { href: '/admin/commission', label: 'Commission & Billing', icon: CreditCard },
   { href: '/admin/orders', label: 'Order Monitor', icon: ShoppingCart },
   { href: '/admin/products', label: 'Product Moderation', icon: Package },
+  { href: '/admin/prescription-review', label: 'Prescription review', icon: Pill },
   { href: '/admin/content', label: 'Content Manager', icon: Image },
   { href: '/admin/notifications', label: 'Notification Center', icon: Bell },
+  { href: '/admin/client-suggestions', label: 'Client Suggestions', icon: MessageSquare },
   { href: '/admin/analytics', label: 'Analytics & Reports', icon: BarChart3 },
+  { href: '/admin/activity-logs', label: 'Visitor Tracking', icon: ScrollText },
+  { href: '/admin/ihute-stats', label: 'Shop-with-me Sales', icon: Store },
+  { href: '/admin/sellers-stock', label: 'Sellers with stock', icon: Boxes },
   { href: '/admin/payment', label: 'Payment Dashboard', icon: Wallet },
   { href: '/admin/gps', label: 'GPS Management', icon: MapPin },
 ]
@@ -80,14 +91,17 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
       <div className="min-h-screen bg-slate-50">
         <div className="sticky top-0 z-40 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
           <h1 className="truncate pr-2 text-lg font-bold text-slate-900">{headerTitle}</h1>
-          <button
-            type="button"
-            onClick={() => setSidebarOpen((open) => !open)}
-            className="p-2 rounded-md text-slate-600 hover:bg-slate-100 shrink-0"
-            aria-label={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
-          >
-            {sidebarOpen ? <X size={24} /> : <Menu size={24} />}
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <AdminOrderBell />
+            <button
+              type="button"
+              onClick={() => setSidebarOpen((open) => !open)}
+              className="rounded-md p-2 text-slate-600 hover:bg-slate-100"
+              aria-label={sidebarOpen ? "Close sidebar" : "Open sidebar"}
+            >
+              {sidebarOpen ? <X size={24} /> : <Menu size={24} />}
+            </button>
+          </div>
         </div>
 
         <div className="flex">
@@ -108,7 +122,10 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                 <ul className="space-y-2">
                   {menuItems.map((item) => {
                     const Icon = item.icon
-                    const isActive = pathname === item.href
+                    const isActive =
+                      item.href === '/admin/payment'
+                        ? pathname === '/admin/payment' || pathname.startsWith('/admin/payment/')
+                        : pathname === item.href || pathname.startsWith(`${item.href}/`)
                     return (
                       <li key={item.href}>
                         <Link

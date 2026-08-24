@@ -1,17 +1,19 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
+import { formatRatingSubmitError } from "@/lib/order-seller-account"
+import { normalizeRatingItems } from "@/lib/rating-items"
 
 interface RatingModalProps {
     orderId: string
     sellerId: string
     sellerName: string
     buyerPhone?: string
-    items: Array<{ code: string; name: string }>
+    items: Array<{ code?: string; name?: string; [key: string]: unknown }>
     open: boolean
     onClose: () => void
     onSuccess: () => void
@@ -28,6 +30,7 @@ const EMOJIS = [
 export function RatingModal({ orderId, sellerId, sellerName, buyerPhone, items, open, onClose, onSuccess }: RatingModalProps) {
     const [step, setStep] = useState<"rating" | "success">("rating")
     const [submitting, setSubmitting] = useState(false)
+    const normalizedItems = useMemo(() => normalizeRatingItems(items), [items])
 
     // Supplier rating
     const [supplierRating, setSupplierRating] = useState<number>(0)
@@ -56,17 +59,24 @@ export function RatingModal({ orderId, sellerId, sellerName, buyerPhone, items, 
             return
         }
 
+        if (!sellerId?.trim()) {
+            alert(
+                "Seller information is missing for this order. Please open the order from My Orders and try rating again.",
+            )
+            return
+        }
+
         setSubmitting(true)
 
         try {
             // Format item ratings
-            const formattedItemRatings = items
-                .filter(item => itemRatings[item.code]?.rating > 0)
+            const formattedItemRatings = normalizedItems
+                .filter(item => itemRatings[item.key]?.rating > 0)
                 .map(item => ({
                     itemCode: item.code,
                     itemName: item.name,
-                    rating: itemRatings[item.code].rating,
-                    feedback: itemRatings[item.code].feedback || ""
+                    rating: itemRatings[item.key].rating,
+                    feedback: itemRatings[item.key].feedback || ""
                 }))
 
             const payload = {
@@ -76,7 +86,11 @@ export function RatingModal({ orderId, sellerId, sellerName, buyerPhone, items, 
                 buyerPhone: buyerPhone || "",
                 supplierRating,
                 supplierFeedback,
-                itemRatings: formattedItemRatings
+                itemRatings: formattedItemRatings,
+                menuItems: normalizedItems.map((item) => ({
+                    itemCode: item.code,
+                    itemName: item.name,
+                })),
             }
 
             console.log("[RatingModal] Submitting rating:", payload)
@@ -96,7 +110,7 @@ export function RatingModal({ orderId, sellerId, sellerName, buyerPhone, items, 
                     onClose()
                 }, 2000)
             } else {
-                alert("Failed to submit rating: " + (data.error || "Unknown error"))
+                alert("Failed to submit rating: " + formatRatingSubmitError(data.error))
             }
         } catch (error) {
             console.error("[RatingModal] Error:", error)
@@ -177,12 +191,12 @@ export function RatingModal({ orderId, sellerId, sellerName, buyerPhone, items, 
                     </div>
 
                     {/* Item Ratings */}
-                    {items.length > 0 && (
+                    {normalizedItems.length > 0 && (
                         <div className="space-y-4 pt-4 border-t">
                             <Label className="text-base font-semibold">Rate Individual Items (Optional)</Label>
 
-                            {items.map((item) => (
-                                <div key={item.code} className="space-y-2 p-4 bg-slate-50 rounded-lg">
+                            {normalizedItems.map((item) => (
+                                <div key={item.key} className="space-y-2 p-4 bg-slate-50 rounded-lg">
                                     <div className="font-medium text-sm">{item.name}</div>
 
                                     <div className="flex gap-2">
@@ -190,8 +204,8 @@ export function RatingModal({ orderId, sellerId, sellerName, buyerPhone, items, 
                                             <button
                                                 key={value}
                                                 type="button"
-                                                onClick={() => handleItemRating(item.code, value)}
-                                                className={`text-2xl p-2 rounded transition-all ${itemRatings[item.code]?.rating === value
+                                                onClick={() => handleItemRating(item.key, value)}
+                                                className={`text-2xl p-2 rounded transition-all ${itemRatings[item.key]?.rating === value
                                                         ? "bg-white scale-110 shadow-sm"
                                                         : "hover:bg-white/50"
                                                     }`}
@@ -201,11 +215,11 @@ export function RatingModal({ orderId, sellerId, sellerName, buyerPhone, items, 
                                         ))}
                                     </div>
 
-                                    {itemRatings[item.code]?.rating > 0 && (
+                                    {itemRatings[item.key]?.rating > 0 && (
                                         <Textarea
                                             placeholder="Feedback for this item..."
-                                            value={itemRatings[item.code]?.feedback || ""}
-                                            onChange={(e) => handleItemFeedback(item.code, e.target.value)}
+                                            value={itemRatings[item.key]?.feedback || ""}
+                                            onChange={(e) => handleItemFeedback(item.key, e.target.value)}
                                             rows={2}
                                             maxLength={200}
                                             className="text-sm"

@@ -4,6 +4,7 @@ import type { KioskMenuItem } from "@/src/modules/self-order/types"
 import { Button } from "@/components/ui/button"
 import { generalSellingPrice } from "@/lib/package-price"
 import { itemEmballageDisplaySuffix } from "@/lib/cart-display-utils"
+import { ProductImageFallback } from "@/components/product-image-fallback"
 
 interface Props {
   item: KioskMenuItem
@@ -28,18 +29,11 @@ export function KioskItemCard({ item, onSelect }: Props) {
       className="group flex flex-col rounded-2xl bg-slate-900/80 border border-slate-800 overflow-hidden shadow-sm hover:border-emerald-400/70 hover:shadow-emerald-500/30 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
     >
       <div className="relative h-32 w-full bg-slate-800 overflow-hidden">
-        {item.image_url ? (
-           
-          <img
-            src={item.image_url}
-            alt={item.item_commercial_name || ""}
-            className="h-full w-full object-cover group-hover:scale-105 transition-transform"
-          />
-        ) : (
-          <div className="h-full w-full flex items-center justify-center text-slate-500 text-xs">
-            No image
-          </div>
-        )}
+        <ProductImageFallback
+          source={item as any}
+          alt={item.item_commercial_name || item.item_name || ""}
+          className="h-full w-full object-cover group-hover:scale-105 transition-transform"
+        />
         {mainBadge && (
           <span className="absolute top-2 left-2 rounded-full bg-emerald-500/90 text-emerald-950 text-[11px] font-semibold px-2 py-0.5">
             

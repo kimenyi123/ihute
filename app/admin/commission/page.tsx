@@ -30,6 +30,13 @@ import {
 } from "recharts"
 import { useAuthStore } from "@/lib/auth-store"
 import { postAdminApi } from "@/lib/admin-client"
+import {
+  ORDER_MONITOR_DBS,
+  orderMonitorDbLabel,
+  readOrderMonitorDb,
+  writeOrderMonitorDb,
+  type OrderMonitorDb,
+} from "@/lib/admin-order-db"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -120,6 +127,19 @@ interface CommissionReportRow {
   date: string
   orderCount: number
   totalRevenue: number
+  platformCommission: number
+  paidOrderCount?: number
+  paidRevenue?: number
+  openOrderCount?: number
+  openRevenue?: number
+}
+
+interface CommissionReportMeta {
+  period: string
+  openRevenue: number
+  openOrderCount: number
+  paidRevenue: number
+  paidOrderCount: number
   platformCommission: number
 }
 
@@ -258,7 +278,8 @@ async function suggestCollectionAmountRwf(
   sellerAccount: string,
   topSellers: TopSeller[],
   topSellerPeriod: string,
-  adminEmail: string
+  adminEmail: string,
+  db: OrderMonitorDb
 ): Promise<string> {
   const top = topSellers.find((t) => t.ishyigaAccount === sellerAccount)
   if (top) {
@@ -266,6 +287,7 @@ async function suggestCollectionAmountRwf(
   }
   const res = await adminPost({
     adminEmail,
+    db,
     action: "getSellerCommissionDue",
     sellerAccount,
     period: topSellerPeriod,
@@ -283,7 +305,7 @@ export default function CommissionPage() {
 
   const [settings, setSettings] = useState<CommissionSettings | null>(null)
   const [report, setReport] = useState<CommissionReportRow[]>([])
-  const [reportMeta, setReportMeta] = useState<{ period: string } | null>(null)
+  const [reportMeta, setReportMeta] = useState<CommissionReportMeta | null>(null)
   const [topSellers, setTopSellers] = useState<TopSeller[]>([])
   const [topSellerPeriod, setTopSellerPeriod] = useState<"7" | "30" | "90">("30")
   const [collections, setCollections] = useState<CollectionRow[]>([])
@@ -294,6 +316,14 @@ export default function CommissionPage() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [db, setDb] = useState<OrderMonitorDb>("chaos_beta")
+  const [dbReady, setDbReady] = useState(false)
+
+  const selectDb = (next: OrderMonitorDb) => {
+    if (next === db) return
+    writeOrderMonitorDb(next)
+    setDb(next)
+  }
 
   const TOP_SELLERS_PAGE_SIZE = 10
   const REPORT_BREAKDOWN_PAGE_SIZE = 12
@@ -387,19 +417,30 @@ export default function CommissionPage() {
   }, [reportSortedDesc])
 
   const totals = useMemo(() => {
+    if (reportMeta) {
+      return {
+        openOrders: reportMeta.openOrderCount,
+        openRevenue: reportMeta.openRevenue,
+        paidOrders: reportMeta.paidOrderCount,
+        paidRevenue: reportMeta.paidRevenue,
+        commission: reportMeta.platformCommission,
+      }
+    }
     return report.reduce(
       (acc, row) => ({
-        orders: acc.orders + row.orderCount,
-        revenue: acc.revenue + row.totalRevenue,
-        commission: acc.commission + row.platformCommission,
+        openOrders: acc.openOrders + (Number(row.openOrderCount) || 0),
+        openRevenue: acc.openRevenue + (Number(row.openRevenue) || 0),
+        paidOrders: acc.paidOrders + (Number(row.paidOrderCount) || 0),
+        paidRevenue: acc.paidRevenue + (Number(row.paidRevenue) || Number(row.totalRevenue) || 0),
+        commission: acc.commission + (Number(row.platformCommission) || 0),
       }),
-      { orders: 0, revenue: 0, commission: 0 }
+      { openOrders: 0, openRevenue: 0, paidOrders: 0, paidRevenue: 0, commission: 0 }
     )
-  }, [report])
+  }, [report, reportMeta])
 
   const loadData = useCallback(
     async (opts?: { silent?: boolean }) => {
-      if (!hasHydrated) return
+      if (!hasHydrated || !dbReady) return
       if (!adminEmail) {
         setError("Admin email missing — sign in as an admin user.")
         setLoading(false)
@@ -411,7 +452,7 @@ export default function CommissionPage() {
       else setLoading(true)
       setError(null)
 
-      const base = { adminEmail }
+      const base = { adminEmail, db }
 
       const [settingsRes, reportRes, sellersRes, collRes] = await Promise.all([
         adminPost({ ...base, action: "getCommissionSettings" }),
@@ -430,7 +471,14 @@ export default function CommissionPage() {
 
       if (reportRes.ok && Array.isArray(reportRes.data?.data)) {
         setReport(reportRes.data.data as CommissionReportRow[])
-        setReportMeta({ period: String(reportRes.data.period || reportPeriod) })
+        setReportMeta({
+          period: String(reportRes.data.period || reportPeriod),
+          openRevenue: Number(reportRes.data.openRevenue ?? 0) || 0,
+          openOrderCount: Number(reportRes.data.openOrderCount ?? 0) || 0,
+          paidRevenue: Number(reportRes.data.paidRevenue ?? 0) || 0,
+          paidOrderCount: Number(reportRes.data.paidOrderCount ?? 0) || 0,
+          platformCommission: Number(reportRes.data.platformCommission ?? 0) || 0,
+        })
       } else {
         setReport([])
         setReportMeta(null)
@@ -460,8 +508,16 @@ export default function CommissionPage() {
       if (silent) setRefreshing(false)
       else setLoading(false)
     },
-    [adminEmail, hasHydrated, reportPeriod, topSellerPeriod]
+    [adminEmail, hasHydrated, reportPeriod, topSellerPeriod, db, dbReady]
   )
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const initialDb = readOrderMonitorDb()
+    setDb(initialDb)
+    writeOrderMonitorDb(initialDb)
+    setDbReady(true)
+  }, [])
 
   useEffect(() => {
     loadData()
@@ -528,11 +584,11 @@ export default function CommissionPage() {
       }
       const row = liveSellers.find((x) => x.ishyigaAccount === trimmed)
       const sellerName = row ? formatSellerDisplayName(row) : ""
-      const amount = await suggestCollectionAmountRwf(trimmed, topSellers, topSellerPeriod, adminEmail)
+      const amount = await suggestCollectionAmountRwf(trimmed, topSellers, topSellerPeriod, adminEmail, db)
       if (collSellerSelectSeq.current !== seq) return
       setCollForm((c) => ({ ...c, sellerAccount: trimmed, sellerName, amount }))
     },
-    [liveSellers, topSellers, topSellerPeriod, adminEmail]
+    [liveSellers, topSellers, topSellerPeriod, adminEmail, db]
   )
 
   const formatCurrency = (amount: number) =>
@@ -569,6 +625,7 @@ export default function CommissionPage() {
     setCollSubmitting(true)
     const { ok, data } = await adminPost({
       adminEmail,
+      db,
       action: "recordCommissionCollection",
       sellerAccount,
       sellerName: sellerNameForRecord,
@@ -664,6 +721,7 @@ export default function CommissionPage() {
     setSaveRateFeedback(null)
     const { ok, data } = await adminPost({
       adminEmail,
+      db,
       action: "updateCommissionSettings",
       rate: String(rate),
     })
@@ -726,6 +784,32 @@ export default function CommissionPage() {
         <div className="relative flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Commission & billing</h1>
+            <div className="mt-4 flex flex-wrap items-center gap-2" role="group" aria-label="Database">
+              <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Database</span>
+              {ORDER_MONITOR_DBS.map((opt) => {
+                const active = db === opt.id
+                const isProd = opt.id === "chaos_test"
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => selectDb(opt.id)}
+                    className={cn(
+                      "rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
+                      active
+                        ? isProd
+                          ? "border-emerald-400 bg-emerald-500 text-white"
+                          : "border-white/40 bg-white text-slate-900"
+                        : "border-white/20 bg-white/5 text-slate-200 hover:bg-white/10"
+                    )}
+                    title={opt.label}
+                  >
+                    {opt.label}
+                  </button>
+                )
+              })}
+              <span className="text-xs text-slate-400">Viewing {orderMonitorDbLabel(db)}</span>
+            </div>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
             <Button
@@ -755,20 +839,28 @@ export default function CommissionPage() {
           </div>
         </div>
 
-        <div className="relative mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="relative mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Period commission</p>
-            <p className="mt-1 text-2xl font-bold text-emerald-300">{formatCurrency(totals.commission)}</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Open orders</p>
+            <p className="mt-1 text-2xl font-bold text-white">{formatCurrency(totals.openRevenue)}</p>
             <p className="text-xs text-slate-400">
-              {reportMeta?.period === "daily" && "Last 24h"}
-              {reportMeta?.period === "weekly" && "Last 7 days"}
-              {reportMeta?.period === "monthly" && "Last 30 days"}
+              {totals.openOrders.toLocaleString()} unpaid · commission 0
             </p>
           </div>
           <div className="rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Gross revenue</p>
-            <p className="mt-1 text-2xl font-bold text-white">{formatCurrency(totals.revenue)}</p>
-            <p className="text-xs text-slate-400">{totals.orders} orders in window</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Paid GMV</p>
+            <p className="mt-1 text-2xl font-bold text-white">{formatCurrency(totals.paidRevenue)}</p>
+            <p className="text-xs text-slate-400">
+              {totals.paidOrders.toLocaleString()} paid orders
+              {reportMeta?.period === "daily" && " · last 24h"}
+              {reportMeta?.period === "weekly" && " · last 7 days"}
+              {reportMeta?.period === "monthly" && " · last 30 days"}
+            </p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Paid commission</p>
+            <p className="mt-1 text-2xl font-bold text-emerald-300">{formatCurrency(totals.commission)}</p>
+            <p className="text-xs text-slate-400">AMOUNT × rate on PAID only</p>
           </div>
           <div className="rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm">
             <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Configured rate</p>
@@ -805,7 +897,9 @@ export default function CommissionPage() {
                 <TrendingUp className="h-5 w-5 text-emerald-600" />
                 Commission vs revenue
               </CardTitle>
-              <CardDescription>Daily buckets from the report API (non-cancelled orders).</CardDescription>
+              <CardDescription>
+                Paid GMV and paid commission by day; open (unpaid) revenue shown as a secondary series.
+              </CardDescription>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Label htmlFor="report-period" className="sr-only">
@@ -841,23 +935,44 @@ export default function CommissionPage() {
                         <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.25} />
                         <stop offset="100%" stopColor="#3b82f6" stopOpacity={0} />
                       </linearGradient>
+                      <linearGradient id="fillOpen" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#94a3b8" stopOpacity={0.3} />
+                        <stop offset="100%" stopColor="#94a3b8" stopOpacity={0} />
+                      </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200" />
                     <XAxis dataKey="date" tick={{ fontSize: 11 }} className="text-slate-500" />
                     <YAxis tick={{ fontSize: 11 }} className="text-slate-500" />
                     <Tooltip
-                      formatter={(v: number, name) => [formatCurrency(v), name === "totalRevenue" ? "Revenue" : "Commission"]}
+                      formatter={(v: number, name) => {
+                        const labels: Record<string, string> = {
+                          paidRevenue: "Paid GMV",
+                          openRevenue: "Open GMV",
+                          platformCommission: "Commission",
+                          totalRevenue: "Revenue",
+                        }
+                        return [formatCurrency(v), labels[String(name)] || String(name)]
+                      }}
                       labelClassName="text-slate-700"
                       contentStyle={{ borderRadius: 8 }}
                     />
                     <Legend />
                     <Area
                       type="monotone"
-                      dataKey="totalRevenue"
-                      name="Revenue"
+                      dataKey="paidRevenue"
+                      name="Paid GMV"
                       stroke="#2563eb"
                       fill="url(#fillRev)"
                       strokeWidth={2}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="openRevenue"
+                      name="Open GMV"
+                      stroke="#64748b"
+                      fill="url(#fillOpen)"
+                      strokeWidth={1.5}
+                      strokeDasharray="4 4"
                     />
                     <Area
                       type="monotone"
@@ -932,6 +1047,7 @@ export default function CommissionPage() {
               <Wallet className="h-5 w-5 text-violet-600" />
               Top sellers by commission
             </CardTitle>
+            <CardDescription className="mt-1">Based on PAID orders only (open/unpaid excluded).</CardDescription>
           </div>
           <div className="flex gap-1 rounded-lg bg-slate-100 p-1">
             {(["7", "30", "90"] as const).map((d) => (
@@ -1447,20 +1563,22 @@ export default function CommissionPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <ResponsiveTable minWidth="640px">
+          <ResponsiveTable minWidth="800px">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50/80 text-left">
                   <th className="px-4 py-3 font-semibold text-slate-700">Date</th>
-                  <th className="px-4 py-3 font-semibold text-slate-700">Orders</th>
-                  <th className="px-4 py-3 font-semibold text-slate-700">Revenue</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Open</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Paid</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Paid GMV</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Open GMV</th>
                   <th className="px-4 py-3 font-semibold text-slate-700">Commission</th>
                 </tr>
               </thead>
               <tbody>
                 {report.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-4 py-10 text-center text-slate-500">
+                    <td colSpan={6} className="px-4 py-10 text-center text-slate-500">
                       No commission data for this period.
                     </td>
                   </tr>
@@ -1468,8 +1586,14 @@ export default function CommissionPage() {
                   reportBreakdownSlice.map((row, idx) => (
                     <tr key={`${row.date}-${idx}`} className="border-b border-slate-100 hover:bg-slate-50/80">
                       <td className="px-4 py-3 text-slate-900">{row.date}</td>
-                      <td className="px-4 py-3">{row.orderCount}</td>
-                      <td className="px-4 py-3 font-medium">{formatCurrency(row.totalRevenue)}</td>
+                      <td className="px-4 py-3">{row.openOrderCount ?? 0}</td>
+                      <td className="px-4 py-3">{row.paidOrderCount ?? 0}</td>
+                      <td className="px-4 py-3 font-medium">
+                        {formatCurrency(Number(row.paidRevenue ?? row.totalRevenue) || 0)}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {formatCurrency(Number(row.openRevenue) || 0)}
+                      </td>
                       <td className="px-4 py-3 font-semibold text-emerald-700">
                         {formatCurrency(row.platformCommission)}
                       </td>

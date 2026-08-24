@@ -42,6 +42,29 @@ export async function getUserPreferences(userId: string): Promise<UserPreference
   }
 }
 
+/** `supplier_ALGG__Boutique` or `ALGG` → seller account key for matching backend `shop_id`. */
+function sellerAccountKeyFromFrontendShopId(shopId: string): string {
+  const raw = String(shopId ?? "").replace(/^supplier_/i, "").trim()
+  const i = raw.indexOf("__")
+  const base = i === -1 ? raw : raw.slice(0, i)
+  return base.trim().toLowerCase()
+}
+
+function sellerAccountKeyFromBackendPref(raw: string): string {
+  return String(raw ?? "")
+    .replace(/^supplier_/i, "")
+    .trim()
+    .split("__")[0]
+    .toLowerCase()
+}
+
+/** Kaos account string for POST bodies (preserves casing from the frontend shop id). */
+function sellerAccountForBackendApi(shopId: string): string {
+  const raw = String(shopId ?? "").replace(/^supplier_/i, "").trim()
+  const i = raw.indexOf("__")
+  return (i === -1 ? raw : raw.slice(0, i)).trim()
+}
+
 // Load user preferences and convert backend IDs to frontend format
 export async function loadUserPreferences(userId: string, allAvailableShops: any[]): Promise<string[]> {
   try {
@@ -59,10 +82,12 @@ export async function loadUserPreferences(userId: string, allAvailableShops: any
     const frontendShopIds: string[] = []
     
     for (const backendId of backendShopIds) {
-      // Find matching shop in allAvailableShops (new format without index)
-      const matchingShop = allAvailableShops.find(shop => {
-        const baseId = shop.id.replace('supplier_', '')
-        return baseId === backendId
+      const backKey = sellerAccountKeyFromBackendPref(String(backendId))
+      if (!backKey) continue
+      // Backend sends bare Kaos account; frontend uses `supplier_<ACCOUNT>__<SectorTag>`.
+      const matchingShop = allAvailableShops.find((shop: { id?: string }) => {
+        const shopKey = sellerAccountKeyFromFrontendShopId(String(shop?.id ?? ""))
+        return shopKey === backKey
       })
       
       if (matchingShop) {
@@ -81,8 +106,7 @@ export async function loadUserPreferences(userId: string, allAvailableShops: any
 // Toggle a shop preference (add/remove)
 export async function toggleUserPreference(userId: string, shopId: string): Promise<TogglePreferenceResponse> {
   try {
-    // Extract base ID from frontend format (e.g., supplier_ALGGG1047005 -> ALGGG1047005)
-    const baseShopId = shopId.replace('supplier_', '')
+    const baseShopId = sellerAccountForBackendApi(shopId)
     
     const response = await fetch(fetchSuggestionsUrl("toggleUserPreference"), {
       method: "POST",
@@ -118,7 +142,11 @@ export async function saveUserPreferences(userId: string, shopIds: string[]): Pr
       },
       body: new URLSearchParams({
         userId,
-        shopIds: shopIds.join(","),
+        shopIds: shopIds
+          .filter((id) => id && String(id).trim() && String(id).trim() !== "__ALL__")
+          .map((id) => sellerAccountForBackendApi(String(id)))
+          .filter(Boolean)
+          .join(","),
       }),
       cache: "no-store",
     })

@@ -55,3 +55,99 @@ export function postAdminApi(body: Record<string, unknown>): Promise<Response> {
     body: JSON.stringify(payload),
   })
 }
+
+/** GET admin-protected Next.js routes (activity logs, commercial stats, …). */
+export function fetchAdminProtectedApi(path: string, init?: RequestInit): Promise<Response> {
+  const { user, hasHydrated, logout } = useAuthStore.getState()
+  let userEmail = (user?.email ?? "").trim()
+  if (userEmail && LEGACY_DISCARD_EMAILS.has(userEmail.toLowerCase())) {
+    logout()
+    return Promise.resolve(
+      new Response(JSON.stringify({ ok: false, error: "Stale session removed." }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      }),
+    )
+  }
+  if (!hasHydrated) {
+    console.warn("[fetchAdminProtectedApi] auth store not rehydrated yet")
+  }
+  const tok = user?.adminApiToken?.trim()
+  return fetch(path, {
+    method: init?.method || "GET",
+    credentials: "include",
+    headers: {
+      ...(userEmail ? { "x-admin-email": userEmail } : {}),
+      ...(tok ? { "x-admin-token": tok } : {}),
+      ...(init?.headers as Record<string, string> | undefined),
+    },
+    body: init?.body,
+  })
+}
+
+/** Proxies to `/api/admin/urubuto-merchant-document` for binary file responses (not JSON-only `/api/admin`). */
+export function postAdminUrubutoMerchantDocumentDownload(params: {
+  sellerAccount: string
+  documentId: number
+}): Promise<Response> {
+  const { user, hasHydrated, logout } = useAuthStore.getState()
+  let userEmail = (user?.email ?? "").trim()
+  if (userEmail && LEGACY_DISCARD_EMAILS.has(userEmail.toLowerCase())) {
+    console.warn("[postAdminUrubutoMerchantDocumentDownload] stale legacy email — signing out:", userEmail)
+    logout()
+    userEmail = ""
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          ok: false,
+          error: "Stale session removed. Sign in again with your real admin account.",
+        }),
+        { status: 401, headers: { "Content-Type": "application/json" } },
+      ),
+    )
+  }
+  if (!hasHydrated) {
+    console.warn("[postAdminUrubutoMerchantDocumentDownload] auth store not rehydrated yet")
+  }
+
+  const payload: Record<string, unknown> = {
+    action: "downloadUrubutoMerchantDocument",
+    sellerAccount: params.sellerAccount,
+    documentId: params.documentId,
+  }
+  if (userEmail) {
+    payload.adminEmail = userEmail
+  }
+  const tok = user?.adminApiToken?.trim()
+  if (tok) {
+    payload.adminToken = tok
+  }
+
+  return fetch("/api/admin/urubuto-merchant-document", {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...(userEmail ? { "x-admin-email": userEmail } : {}),
+      ...(tok ? { "x-admin-token": tok } : {}),
+    },
+    body: JSON.stringify(payload),
+  })
+}
+
+/** POST /api/admin/ebm/request — fiscalize order via RRA EBM API. */
+export function postAdminEbmRequest(orderId: number, force = false): Promise<Response> {
+  const { user } = useAuthStore.getState()
+  const userEmail = (user?.email ?? "").trim()
+  const tok = user?.adminApiToken?.trim()
+  return fetch("/api/admin/ebm/request", {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...(userEmail ? { "x-admin-email": userEmail } : {}),
+      ...(tok ? { "x-admin-token": tok } : {}),
+    },
+    body: JSON.stringify({ orderId, force }),
+  })
+}

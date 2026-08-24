@@ -2,12 +2,176 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { ImagePlus, Upload, X } from 'lucide-react';
+import { useLanguageStore, type Language } from '@/lib/language-store';
+
+const PRODUCT_MODAL_UI: Record<Language, {
+  alertImageType: string;
+  alertImageSize: (mb: number) => string;
+  errNameRequired: string;
+  errCodeRequired: string;
+  errQuantity: string;
+  errPrice: string;
+  errCost: string;
+  errCostAboveSale: string;
+  editProduct: string;
+  addNewProduct: string;
+  productImage: string;
+  imageHint: string;
+  tapToDrop: string;
+  upTo: string;
+  browseFiles: string;
+  removeImage: string;
+  productName: string;
+  enterProductName: string;
+  productCode: string;
+  enterProductCode: string;
+  quantity: string;
+  unit: string;
+  pieces: string;
+  kilograms: string;
+  liters: string;
+  meters: string;
+  boxes: string;
+  packs: string;
+  salePrice: string;
+  costPrice: string;
+  description: string;
+  optionalDescription: string;
+  cancel: string;
+  saving: string;
+  updateProduct: string;
+  addProduct: string;
+  errDuplicateCode: string;
+  warnPriceBelowCost: (loss: string) => string;
+}> = {
+  en: {
+    alertImageType: "Please choose an image file (JPEG, PNG, WebP, …).",
+    alertImageSize: (mb) => `Image is too large (max ${mb} MB).`,
+    errNameRequired: "Product name is required",
+    errCodeRequired: "Product code is required",
+    errQuantity: "Quantity must be 0 or greater",
+    errPrice: "Price must be greater than 0",
+    errCost: "Cost must be 0 or greater",
+    errCostAboveSale: "Purchase price cannot be greater than selling price",
+    editProduct: "Edit Product",
+    addNewProduct: "Add New Product",
+    productImage: "Product image",
+    imageHint: "Optional — JPEG or PNG recommended. Uploaded after the product is saved (same flow as bulk overrides).",
+    tapToDrop: "Tap to choose or drag & drop an image here",
+    upTo: "Up to 8 MB",
+    browseFiles: "Browse files",
+    removeImage: "Remove image",
+    productName: "Product Name *",
+    enterProductName: "Enter product name",
+    productCode: "Product Code/SKU *",
+    enterProductCode: "Enter unique product code",
+    quantity: "Quantity *",
+    unit: "Unit",
+    pieces: "Pieces",
+    kilograms: "Kilograms",
+    liters: "Liters",
+    meters: "Meters",
+    boxes: "Boxes",
+    packs: "Packs",
+    salePrice: "Selling price (RWF) *",
+    costPrice: "Purchase price (RWF)",
+    description: "Description",
+    optionalDescription: "Optional product description",
+    cancel: "Cancel",
+    saving: "Saving...",
+    updateProduct: "Update Product",
+    addProduct: "Add Product",
+    errDuplicateCode: "This product code already exists. Please enter a unique code.",
+    warnPriceBelowCost: (loss) => `⚠️ Sale price is ${loss} RWF below cost price — you will sell at a loss.`,
+  },
+  rw: {
+    alertImageType: "Hitamo dosiye y'ishusho (JPEG, PNG, WebP, …).",
+    alertImageSize: (mb) => `Ishusho ni nini cyane (ntarengwa ${mb} MB).`,
+    errNameRequired: "Izina ry'igicuruzwa rirakenewe",
+    errCodeRequired: "Kode y'igicuruzwa irakenewe",
+    errQuantity: "Ingano igomba kuba 0 cyangwa irenga",
+    errPrice: "Igiciro kigomba kurenza 0",
+    errCost: "Igiciro cy'igurisha kigomba kuba 0 cyangwa kirenga",
+    errCostAboveSale: "Igiciro cy'igurisha ntigishobora kurenza igiciro cyo kugurisha",
+    editProduct: "Hindura Igicuruzwa",
+    addNewProduct: "Ongeraho Igicuruzwa Gishya",
+    productImage: "Ishusho y'igicuruzwa",
+    imageHint: "Ntibisabwa — JPEG cyangwa PNG birasabwa. Byoherezwa nyuma yo kubika igicuruzwa.",
+    tapToDrop: "Kanda kugira ngo uhitemo cyangwa ukurure ishusho hano",
+    upTo: "Kugeza 8 MB",
+    browseFiles: "Shakisha dosiye",
+    removeImage: "Kuraho ishusho",
+    productName: "Izina ry'igicuruzwa *",
+    enterProductName: "Andika izina ry'igicuruzwa",
+    productCode: "Kode/SKU y'igicuruzwa *",
+    enterProductCode: "Andika kode y'igicuruzwa yihariye",
+    quantity: "Ingano *",
+    unit: "Igipimo",
+    pieces: "Ibice",
+    kilograms: "Kilo",
+    liters: "Litiro",
+    meters: "Metero",
+    boxes: "Amasanduku",
+    packs: "Amapaki",
+    salePrice: "Igiciro cyo kugurisha (RWF) *",
+    costPrice: "Igiciro cy'ubuguzi (RWF)",
+    description: "Ibisobanuro",
+    optionalDescription: "Ibisobanuro by'igicuruzwa (ntibisabwa)",
+    cancel: "Hagarika",
+    saving: "Birimo kubikwa...",
+    updateProduct: "Vugurura Igicuruzwa",
+    addProduct: "Ongeraho Igicuruzwa",
+    errDuplicateCode: "Iyi kode y'igicuruzwa isanzwe ihari. Shyiramo kode yihariye.",
+    warnPriceBelowCost: (loss) => `⚠️ Igiciro cyo kugurisha kiri munsi y'igiciro cy'igurisha kuri ${loss} RWF — uzagurisha ku gihombo.`,
+  },
+  fr: {
+    alertImageType: "Veuillez choisir un fichier image (JPEG, PNG, WebP, …).",
+    alertImageSize: (mb) => `L'image est trop volumineuse (max ${mb} Mo).`,
+    errNameRequired: "Le nom du produit est requis",
+    errCodeRequired: "Le code produit est requis",
+    errQuantity: "La quantité doit être 0 ou supérieure",
+    errPrice: "Le prix doit être supérieur à 0",
+    errCost: "Le coût doit être 0 ou supérieur",
+    errCostAboveSale: "Le coût ne peut pas être supérieur au prix de vente",
+    editProduct: "Modifier le produit",
+    addNewProduct: "Ajouter un nouveau produit",
+    productImage: "Image du produit",
+    imageHint: "Facultatif — JPEG ou PNG recommandé. Téléversée après l'enregistrement du produit.",
+    tapToDrop: "Appuyez pour choisir ou glissez-déposez une image ici",
+    upTo: "Jusqu'à 8 Mo",
+    browseFiles: "Parcourir les fichiers",
+    removeImage: "Supprimer l'image",
+    productName: "Nom du produit *",
+    enterProductName: "Entrez le nom du produit",
+    productCode: "Code produit/SKU *",
+    enterProductCode: "Entrez un code produit unique",
+    quantity: "Quantité *",
+    unit: "Unité",
+    pieces: "Pièces",
+    kilograms: "Kilogrammes",
+    liters: "Litres",
+    meters: "Mètres",
+    boxes: "Boîtes",
+    packs: "Paquets",
+    salePrice: "Prix de vente (RWF) *",
+    costPrice: "Prix d'achat (RWF)",
+    description: "Description",
+    optionalDescription: "Description du produit (facultatif)",
+    cancel: "Annuler",
+    saving: "Enregistrement...",
+    updateProduct: "Mettre à jour le produit",
+    addProduct: "Ajouter le produit",
+    errDuplicateCode: "Ce code produit existe déjà. Veuillez saisir un code unique.",
+    warnPriceBelowCost: (loss) => `⚠️ Le prix de vente est inférieur de ${loss} Mo au prix de revient — vous vendrez à perte.`,
+  },
+};
 
 interface AddProductModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (product: ProductFormData) => void;
   editingProduct?: ProductFormData | null;
+  existingCodes?: string[];
 }
 
 export interface ProductFormData {
@@ -15,7 +179,7 @@ export interface ProductFormData {
   itemCode: string;
   quantity: number;
   price: number;
-  cost?: number;
+  cost: number;
   description?: string;
   unit?: string;
   /** Set when user picks a new image; uploaded after product save via `/api/images/overrides`. */
@@ -29,8 +193,11 @@ export default function AddProductModal({
   isOpen, 
   onClose, 
   onSave, 
-  editingProduct 
+  editingProduct, 
+  existingCodes = [],
 }: AddProductModalProps) {
+  const language = useLanguageStore((s) => s.language);
+  const ui = PRODUCT_MODAL_UI[language] ?? PRODUCT_MODAL_UI.en;
   const [formData, setFormData] = useState<ProductFormData>({
     itemName: '',
     itemCode: '',
@@ -43,6 +210,7 @@ export default function AddProductModal({
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [priceWarning, setPriceWarning] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -80,6 +248,7 @@ export default function AddProductModal({
     }
     clearImage();
     setErrors({});
+    setPriceWarning(null);
   }, [editingProduct, isOpen, clearImage]);
 
   useEffect(() => {
@@ -91,13 +260,13 @@ export default function AddProductModal({
   const applyImageFile = (file: File | null) => {
     if (!file) return;
     if (!file.type.startsWith('image/')) {
-      setErrors((prev) => ({ ...prev, image: 'Please choose an image file (JPEG, PNG, WebP, …).' }));
+      setErrors((prev) => ({ ...prev, image: ui.alertImageType }));
       return;
     }
     if (file.size > MAX_IMAGE_BYTES) {
       setErrors((prev) => ({
         ...prev,
-        image: `Image is too large (max ${Math.round(MAX_IMAGE_BYTES / (1024 * 1024))} MB).`,
+        image: ui.alertImageSize(Math.round(MAX_IMAGE_BYTES / (1024 * 1024))),
       }));
       return;
     }
@@ -115,25 +284,51 @@ export default function AddProductModal({
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
+    setPriceWarning(null);
 
     if (!formData.itemName.trim()) {
-      newErrors.itemName = 'Product name is required';
+      newErrors.itemName = ui.errNameRequired;
     }
 
     if (!formData.itemCode.trim()) {
-      newErrors.itemCode = 'Product code is required';
+      newErrors.itemCode = ui.errCodeRequired;
+    } else {
+      // Prevent duplicate product codes 
+      const codeToCheck = formData.itemCode.trim().toUpperCase();
+      const isEditingSameCode =
+        editingProduct &&
+        editingProduct.itemCode.toUpperCase() === codeToCheck;
+      if (
+        !isEditingSameCode &&
+        existingCodes.some(c => c.toUpperCase() === codeToCheck)
+      ) {
+        newErrors.itemCode = ui.errDuplicateCode;
+      }
     }
 
     if (formData.quantity < 0) {
-      newErrors.quantity = 'Quantity must be 0 or greater';
+      newErrors.quantity = ui.errQuantity;
     }
 
     if (formData.price <= 0) {
-      newErrors.price = 'Price must be greater than 0';
+      newErrors.price = ui.errPrice;
     }
 
-    if (formData.cost && formData.cost < 0) {
-      newErrors.cost = 'Cost must be 0 or greater';
+    if ((formData.cost ?? 0) < 0) {
+      newErrors.cost = ui.errCost;
+    } else if (formData.cost > formData.price) {
+      newErrors.cost = ui.errCostAboveSale;
+    }
+
+    // Warn when selling price is below cost price 
+    if (
+      formData.price > 0 &&
+      formData.cost &&
+      formData.cost > 0 &&
+      formData.price < formData.cost
+    ) {
+      const loss = (formData.cost - formData.price).toFixed(0);
+      setPriceWarning(ui.warnPriceBelowCost(loss));
     }
 
     setErrors(newErrors);
@@ -172,6 +367,14 @@ export default function AddProductModal({
     }
   };
 
+  const hasPurchasePriceValidationError =
+    formData.cost < 0 || formData.cost > formData.price;
+
+  const isSubmitDisabled =
+    saving ||
+    Object.keys(errors).length > 0 ||
+    hasPurchasePriceValidationError;
+
   /** Digits only, strip leading zeros; empty → 0 (field shows blank when stock is 0). */
   const parseQuantityInput = (raw: string): number => {
     const digits = raw.replace(/\D/g, "")
@@ -189,7 +392,7 @@ export default function AddProductModal({
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
           <h2 className="text-xl font-bold text-gray-900">
-            {editingProduct ? 'Edit Product' : 'Add New Product'}
+            {editingProduct ? ui.editProduct : ui.addNewProduct}
           </h2>
           <button
             onClick={onClose}
@@ -204,11 +407,8 @@ export default function AddProductModal({
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {/* Product image (optional) */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Product image</label>
-            <p className="mb-2 text-xs text-gray-500">
-              Optional — JPEG or PNG recommended. Uploaded after the product is saved (same flow as bulk
-              overrides).
-            </p>
+            <label className="block text-sm font-medium text-gray-700 mb-1">{ui.productImage}</label>
+            <p className="mb-2 text-xs text-gray-500">{ui.imageHint}</p>
             <input
               ref={fileInputRef}
               type="file"
@@ -255,10 +455,8 @@ export default function AddProductModal({
                   <span className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-100 text-blue-700">
                     <ImagePlus className="h-6 w-6" aria-hidden />
                   </span>
-                  <span className="text-center text-sm font-medium text-gray-800">
-                    Tap to choose or drag &amp; drop an image here
-                  </span>
-                  <span className="text-center text-xs text-gray-500">Up to 8 MB</span>
+                  <span className="text-center text-sm font-medium text-gray-800">{ui.tapToDrop}</span>
+                  <span className="text-center text-xs text-gray-500">{ui.upTo}</span>
                 </>
               )}
             </div>
@@ -270,7 +468,7 @@ export default function AddProductModal({
                 className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-800 shadow-sm hover:bg-gray-50"
               >
                 <Upload className="h-4 w-4" aria-hidden />
-                Browse files
+                {ui.browseFiles}
               </button>
               {(imageFile || previewUrl) && (
                 <button
@@ -279,7 +477,7 @@ export default function AddProductModal({
                   disabled={saving}
                   className="text-sm font-medium text-red-600 hover:underline"
                 >
-                  Remove image
+                  {ui.removeImage}
                 </button>
               )}
             </div>
@@ -288,9 +486,7 @@ export default function AddProductModal({
 
           {/* Product Name */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Product Name *
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">{ui.productName}</label>
             <input
               type="text"
               required
@@ -299,7 +495,7 @@ export default function AddProductModal({
               className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                 errors.itemName ? 'border-red-500' : 'border-gray-300'
               }`}
-              placeholder="Enter product name"
+              placeholder={ui.enterProductName}
               disabled={saving}
             />
             {errors.itemName && (
@@ -309,9 +505,7 @@ export default function AddProductModal({
 
           {/* Product Code */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Product Code/SKU *
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">{ui.productCode}</label>
             <input
               type="text"
               required
@@ -320,7 +514,7 @@ export default function AddProductModal({
               className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                 errors.itemCode ? 'border-red-500' : 'border-gray-300'
               }`}
-              placeholder="Enter unique product code"
+              placeholder={ui.enterProductCode}
               disabled={saving}
             />
             {errors.itemCode && (
@@ -331,9 +525,7 @@ export default function AddProductModal({
           {/* Quantity and Unit */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Quantity *
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{ui.quantity}</label>
               <input
                 type="text"
                 inputMode="numeric"
@@ -353,21 +545,19 @@ export default function AddProductModal({
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Unit
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{ui.unit}</label>
               <select
                 value={formData.unit}
                 onChange={(e) => handleInputChange('unit', e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 disabled={saving}
               >
-                <option value="PCS">Pieces</option>
-                <option value="KG">Kilograms</option>
-                <option value="L">Liters</option>
-                <option value="M">Meters</option>
-                <option value="BOX">Boxes</option>
-                <option value="PACK">Packs</option>
+                <option value="PCS">{ui.pieces}</option>
+                <option value="KG">{ui.kilograms}</option>
+                <option value="L">{ui.liters}</option>
+                <option value="M">{ui.meters}</option>
+                <option value="BOX">{ui.boxes}</option>
+                <option value="PACK">{ui.packs}</option>
               </select>
             </div>
           </div>
@@ -375,16 +565,14 @@ export default function AddProductModal({
           {/* Price and Cost */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Sale Price (RWF) *
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{ui.salePrice}</label>
               <input
                 type="number"
                 required
                 min="0"
                 step="0.01"
-                value={formData.price}
-                onChange={(e) => handleInputChange('price', parseFloat(e.target.value) || 0)}
+                value={formData.price === 0 ? "" : String(formData.price)}
+                onChange={(e) => handleInputChange('price', e.target.value === "" ? 0 : parseFloat(e.target.value))}
                 className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                   errors.price ? 'border-red-500' : 'border-gray-300'
                 }`}
@@ -394,18 +582,21 @@ export default function AddProductModal({
               {errors.price && (
                 <p className="text-red-500 text-xs mt-1">{errors.price}</p>
               )}
+              {priceWarning && (
+                <p className="text-orange-500 text-xs mt-1 font-medium">
+                  {priceWarning}
+                </p>
+              )}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Cost Price (RWF)
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{ui.costPrice}</label>
               <input
                 type="number"
                 min="0"
                 step="0.01"
-                value={formData.cost}
-                onChange={(e) => handleInputChange('cost', parseFloat(e.target.value) || 0)}
+                value={formData.cost === 0 ? "" : String(formData.cost ?? 0)}
+                onChange={(e) => handleInputChange('cost', e.target.value === "" ? 0 : parseFloat(e.target.value) || 0)}
                 className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                   errors.cost ? 'border-red-500' : 'border-gray-300'
                 }`}
@@ -420,14 +611,12 @@ export default function AddProductModal({
 
           {/* Description */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Description
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">{ui.description}</label>
             <textarea
               value={formData.description}
               onChange={(e) => handleInputChange('description', e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="Optional product description"
+              placeholder={ui.optionalDescription}
               rows={3}
               disabled={saving}
             />
@@ -441,20 +630,20 @@ export default function AddProductModal({
               className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition"
               disabled={saving}
             >
-              Cancel
+              {ui.cancel}
             </button>
             <button
               type="submit"
               className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400 transition"
-              disabled={saving}
+              disabled={isSubmitDisabled}
             >
               {saving ? (
                 <>
                   <span className="inline-block animate-spin mr-2">⏳</span>
-                  Saving...
+                  {ui.saving}
                 </>
               ) : (
-                editingProduct ? 'Update Product' : 'Add Product'
+                editingProduct ? ui.updateProduct : ui.addProduct
               )}
             </button>
           </div>

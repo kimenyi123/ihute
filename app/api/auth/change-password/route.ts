@@ -6,7 +6,9 @@ import { getStrongPasswordError } from "@/lib/password-policy"
 const JAVA_AUTH_URL = getAuthUrl()
 
 /**
- * Proxies to Java UserAuthServlet action=change_password (session cookie required).
+ * Proxies to Java UserAuthServlet action=change_password.
+ * Prefers Tomcat session cookie when present; otherwise uses email + currentPassword
+ * (required for must-change-password right after Next.js login, when JSESSIONID often is missing).
  */
 export async function POST(req: Request) {
   const rid = crypto.randomUUID()
@@ -34,6 +36,12 @@ export async function POST(req: Request) {
         { status: 401 },
       )
     }
+    if (!email) {
+      return NextResponse.json(
+        { ok: false, error: "Email is required to change password after sign-in.", rid },
+        { status: 400 },
+      )
+    }
 
     if (newPassword.trim() === currentPassword.trim()) {
       return NextResponse.json(
@@ -46,13 +54,13 @@ export async function POST(req: Request) {
     form.set("action", "change_password")
     form.set("currentPassword", currentPassword)
     form.set("newPassword", newPassword)
-    if (email) form.set("email", email)
+    form.set("email", email)
 
     const res = await fetch(JAVA_AUTH_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
-        Cookie: cookie,
+        ...(cookie ? { Cookie: cookie } : {}),
       },
       body: form.toString(),
       cache: "no-store",
