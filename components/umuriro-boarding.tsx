@@ -3,7 +3,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import Image from "next/image"
-import { Check, Copy, Flame, Loader2, MessageSquare, Phone, Plus, Trash2 } from "lucide-react"
+import { useSearchParams } from "next/navigation"
+import {
+  Check,
+  Copy,
+  Flame,
+  Loader2,
+  MessageSquare,
+  Minus,
+  Phone,
+  Plus,
+  Trash2,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -33,6 +44,7 @@ import { shopCategoryToSectorSlug, GRANDMA_REGISTRATION_CATEGORY_VALUES } from "
 import { isValidRwandaMobileE164, normalizeRwandaMobileE164 } from "@/lib/rwanda-phone"
 import { cn } from "@/lib/utils"
 import { GRANDMA_PATHS } from "@/lib/grandma-urls"
+import type { UmuriroGqInitial } from "@/lib/umuriro-gq-initial"
 import { extractMerchantMomoCodeForUssd, stripShopMomoLabel } from "@/lib/grandma-order-billing"
 import { buildMoMoUssd } from "@/lib/momo-ussd"
 import { generalSellingPrice, lineSellingPriceFromProductRow, resolveItemEmballageRaw } from "@/lib/package-price"
@@ -165,7 +177,8 @@ function buildUssd(merchantCode: string, totalRwf: number): string {
   return buildMoMoUssd(code, t)
 }
 
-export function UmuriroBoarding() {
+export function UmuriroBoarding({ initial }: { initial?: UmuriroGqInitial }) {
+  const searchParams = useSearchParams()
   const lang = useHydratedLanguage()
   const user = useAuthStore((s) => s.user)
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
@@ -173,8 +186,8 @@ export function UmuriroBoarding() {
   const touchSession = useAuthStore((s) => s.touchSession)
 
   const [mode, setMode] = useState<UmuriroMode>("quick")
-  const [shopName, setShopName] = useState("")
-  const [momoCode, setMomoCode] = useState("")
+  const [shopName, setShopName] = useState(initial?.shopName ?? "")
+  const [momoCode, setMomoCode] = useState(initial?.momoCode ?? "")
   const [shopPhoneOptional, setShopPhoneOptional] = useState("")
   const [shopCategory, setShopCategory] = useState("")
   const [itemName, setItemName] = useState("")
@@ -196,12 +209,16 @@ export function UmuriroBoarding() {
   const [doneMsg, setDoneMsg] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [trackDialogOpen, setTrackDialogOpen] = useState(false)
+  const [gqTin, setGqTin] = useState<string | null>(initial?.gqTin ?? null)
+  const [gqMrc, setGqMrc] = useState<string | null>(initial?.gqMrc ?? null)
+  const [gqPayload, setGqPayload] = useState<string | null>(initial?.gqPayload ?? null)
   const [payChannel, setPayChannel] = useState<UmuriroPayChannel>("momo")
   const [momoSmsPaste, setMomoSmsPaste] = useState("")
   const [smsPayCheck, setSmsPayCheck] = useState<SmsPayCheck>(null)
   const [smsMatchResult, setSmsMatchResult] = useState<MoMoSmsMatchResult | null>(null)
 
   useEffect(() => {
+    if (initial?.gqPayload) return
     try {
       const raw = localStorage.getItem(LS_KEY)
       if (!raw) return
@@ -219,6 +236,31 @@ export function UmuriroBoarding() {
       /* ignore */
     }
   }, [])
+
+  useEffect(() => {
+    const name = searchParams.get("name")?.trim()
+    const momo = searchParams.get("momo")?.trim()
+    const tin = searchParams.get("tin")?.trim()
+    const mrc = searchParams.get("mrc")?.trim()
+    const payload = searchParams.get("payload")?.trim()
+
+    if (name) setShopName(name)
+    if (momo) setMomoCode(momo.replace(/\D/g, ""))
+    if (tin) setGqTin(tin)
+    if (mrc) setGqMrc(mrc)
+    if (payload) {
+      setGqPayload(payload)
+      if (!name || !momo) {
+        const parts = payload.split("|")
+        if (parts[0] === "GQ3" && parts.length >= 5) {
+          if (!name) setShopName(parts.slice(4).join("|"))
+          if (!momo) setMomoCode(parts[3].replace(/\D/g, ""))
+          if (!tin) setGqTin(parts[1])
+          if (!mrc) setGqMrc(parts[2])
+        }
+      }
+    }
+  }, [searchParams])
 
   useEffect(() => {
     if (user && isAuthenticated) touchSession()
@@ -591,6 +633,12 @@ export function UmuriroBoarding() {
     setCartLines((prev) =>
       prev.map((line) => (line.id === id ? { ...line, quantity: q } : line)),
     )
+    setCartQuantityDrafts((prev) => {
+      if (!(id in prev)) return prev
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
   }
 
   const handleCartLineQtyInput = (id: string, raw: string) => {
@@ -742,6 +790,15 @@ export function UmuriroBoarding() {
           companyName: shopName.trim(),
           momoCode: momoCode.trim(),
           momoDigits,
+          ...(gqTin || gqMrc || gqPayload
+            ? {
+                globalQr: {
+                  ...(gqTin ? { tin: gqTin } : {}),
+                  ...(gqMrc ? { mrc: gqMrc } : {}),
+                  ...(gqPayload ? { payload: gqPayload } : {}),
+                },
+              }
+            : {}),
           ...(mode === "advanced"
             ? {
                 shopPhoneOptional: shopPhoneOptional.trim() || undefined,
@@ -963,8 +1020,17 @@ export function UmuriroBoarding() {
                   onChange={(e) => setShopName(e.target.value)}
                   className="border-[#dbe7f3]"
                   autoComplete="organization"
+                  readOnly={!!gqPayload}
                 />
               </div>
+
+              {gqTin && gqMrc ? (
+                <div className="rounded-xl border border-[#dbe7f3] bg-[#f7fbff] px-3 py-2 text-xs text-[#6f8399]">
+                  <span className="font-mono font-semibold text-[#17324d]">
+                    TIN {gqTin} · MRC {gqMrc}
+                  </span>
+                </div>
+              ) : null}
 
               {isAdvanced ? (
                 <div className="grid min-w-0 grid-cols-2 gap-3 [grid-template-columns:minmax(0,1fr)_minmax(0,1fr)]">
@@ -975,6 +1041,7 @@ export function UmuriroBoarding() {
                       onChange={(e) => setMomoCode(e.target.value)}
                       className="border-[#dbe7f3]"
                       inputMode="numeric"
+                      readOnly={!!gqPayload}
                     />
                   </div>
                   <div className="min-w-0 space-y-2">
@@ -998,6 +1065,7 @@ export function UmuriroBoarding() {
                     onChange={(e) => setMomoCode(e.target.value)}
                     className="border-[#dbe7f3]"
                     inputMode="numeric"
+                    readOnly={!!gqPayload}
                   />
                 </div>
               )}
@@ -1169,6 +1237,16 @@ export function UmuriroBoarding() {
                           </div>
                           <div className="mt-2 flex items-center justify-between gap-2">
                             <div className="flex items-center gap-1">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                className="h-8 w-8 border-[#dbe7f3]"
+                                aria-label={`${pickLang(UMURIRO_UI.quantity, lang)} -`}
+                                onClick={() => updateCartLineQty(line.id, line.quantity - 1)}
+                              >
+                                <Minus className="h-3.5 w-3.5" />
+                              </Button>
                               <Input
                                 type="text"
                                 inputMode="numeric"
@@ -1179,6 +1257,16 @@ export function UmuriroBoarding() {
                                 aria-label={pickLang(UMURIRO_UI.quantity, lang)}
                                 className="h-8 w-16 border-[#dbe7f3] px-2 text-center text-sm font-bold tabular-nums"
                               />
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                className="h-8 w-8 border-[#dbe7f3]"
+                                aria-label={`${pickLang(UMURIRO_UI.quantity, lang)} +`}
+                                onClick={() => updateCartLineQty(line.id, line.quantity + 1)}
+                              >
+                                <Plus className="h-3.5 w-3.5" />
+                              </Button>
                             </div>
                             <Button
                               type="button"

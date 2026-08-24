@@ -99,7 +99,6 @@ type Product = {
 }
 
 type SearchResult = {
-  ok?: boolean
   suppliersByName: Shop[]
   suppliersByProduct: Shop[]
   products: Product[]
@@ -109,25 +108,6 @@ type SearchResult = {
   /** When item is not in NIKI (Redis), backend falls back to DB and may set this */
   source?: "redis" | "database"
   fromNiki?: boolean
-  pagination?: {
-    page: number
-    limit: number
-    total: number
-    hasNext: boolean
-    supplierNameTotal?: number
-    supplierProductTotal?: number
-  }
-}
-
-function searchResponseErrorMessage(value: unknown, status: number): string {
-  const body = value as { error?: { message?: string } | string } | null
-  if (body?.error && typeof body.error === "object" && body.error.message) {
-    return body.error.message
-  }
-  if (typeof body?.error === "string") return body.error
-  if (status === 504) return "Search service timed out."
-  if (status === 503) return "Search service is temporarily unavailable."
-  return "Search service returned an invalid response."
 }
 
 type SectorSeller = {
@@ -572,10 +552,8 @@ export default function SearchPage() {
   const priceMaxParam = searchParams.get("priceMax") || ""
 
   const [q, setQ] = useState(initialQ)
-  const [debouncedQ, setDebouncedQ] = useState("")
-  const [loading, setLoading] = useState(false)
-  const [globalSearchPage, setGlobalSearchPage] = useState(1)
-  const globalSearchLimit = 20
+  const [debouncedQ, setDebouncedQ] = useState(initialQ.trim())
+  const [loading, setLoading] = useState(Boolean(initialQ.trim()))
   const [searchResult, setSearchResult] = useState<SearchResult | null>(null)
   const [selectedShop, setSelectedShop] = useState<Shop | null>(null)
   const [shopProducts, setShopProducts] = useState<Product[]>([])
@@ -745,12 +723,15 @@ export default function SearchPage() {
   // Sync search input with URL query param on mount and changes
   useEffect(() => {
     const urlQ = searchParams.get("q") || ""
-    if (urlQ && urlQ !== q) setQ(urlQ)
+    if (urlQ !== q) {
+      setQ(urlQ)
+      setDebouncedQ(urlQ.trim())
+    }
   }, [searchParams])
 
-  // Quick search: 200ms debounce so backend is hit fast (like shop-with-me)
+  // Quick search debounce
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedQ(q.trim()), 150)
+    const t = setTimeout(() => setDebouncedQ(q.trim()), 100)
     return () => clearTimeout(t)
   }, [q])
 
@@ -808,26 +789,26 @@ export default function SearchPage() {
     }
   }, [supplierParam, supplierNameParam])
 
-  // Supplier search debounce (quick: 200ms)
+  // Supplier search debounce (quick: 120ms)
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedSupplierSearch(supplierSearch.trim()), 200)
+    const t = setTimeout(() => setDebouncedSupplierSearch(supplierSearch.trim()), 120)
     return () => clearTimeout(t)
   }, [supplierSearch])
 
-  // ====== MAIN FIX: Trust backend translation results ======
+  // ====== MAIN FIX: Fast search with AbortController and instant resolution ======
   useEffect(() => {
-    const cancelled = false
+    const controller = new AbortController()
+    let cancelled = false
     async function run() {
       if (!shouldRunTextSearch(debouncedQ)) {
         setSearchResult(null)
+        setLoading(false)
         return
       }
       setLoading(true)
       try {
         const url = new URL(`/api/fetchSuggestions`, window.location.origin)
         url.searchParams.set("globalSearch", debouncedQ)
-        url.searchParams.set("page", String(globalSearchPage))
-        url.searchParams.set("limit", String(globalSearchLimit))
         url.searchParams.set("Currency", "RWF")
         if (selectedShop?.supplier_account) {
           url.searchParams.set("supplier", selectedShop.supplier_account)
@@ -840,8 +821,7 @@ export default function SearchPage() {
           url.searchParams.set("sector", sectorToSend)
         }
 
-        // Add location-aware parameters from enhanced location store
-        const { useLocationStoreEnhanced } = await import("@/lib/location-store-enhanced")
+        // Add location-aware parameters directly from store
         const userLocation = useLocationStoreEnhanced.getState().location
         if (userLocation?.district) {
           url.searchParams.set("district", userLocation.district)
@@ -850,68 +830,27 @@ export default function SearchPage() {
           url.searchParams.set("cell", userLocation.cell)
         }
 
-        const res = await fetch(url.toString(), { cache: "no-store" })
-        const rawData: unknown = await res.json().catch(() => null)
-        if (!res.ok) {
-          throw new Error(searchResponseErrorMessage(rawData, res.status))
-        }
-        const data = rawData as SearchResult
-        if (
-          data?.ok !== true ||
-          !Array.isArray(data.products) ||
-          !Array.isArray(data.suppliersByName) ||
-          !Array.isArray(data.suppliersByProduct)
-        ) {
-          throw new Error("Search service returned an invalid response.")
-        }
+        const res = await fetch(url.toString(), {
+          cache: "no-store",
+          signal: controller.signal,
+        })
+        const data: SearchResult = res.ok
+          ? await res.json()
+          : { suppliersByName: [], suppliersByProduct: [], products: [], query: debouncedQ }
 
         if (!cancelled) {
-          // Log data source (Redis vs DB) for debugging
-          const dataSource = getDataSourceLabel({
-            source: data.source,
-            fromNiki: data.fromNiki,
-            products: data.products?.map((p: any) => ({ source: p.source })) || []
-          })
-          const productSources = (data.products ?? []).map((p: Product & { source?: string }) => p?.source ?? "?")
-          console.log("[Search] Data source:", dataSource, "| Query:", debouncedQ, "| Products:", data.products?.length ?? 0, "| source:", data.source, "fromNiki:", data.fromNiki, "| Product sources:", productSources.slice(0, 5))
-          if (dataSource === "unknown") {
-            const responseKeys = Object.keys(data as object)
-            const firstProduct = (data.products ?? [])[0] as Record<string, unknown> | undefined
-            const firstProductKeys = firstProduct ? Object.keys(firstProduct) : []
-            console.warn("[Search] DEBUG data source unknown: backend did not set source/fromNiki or product.source. Response keys:", responseKeys, "| First product keys (sample):", firstProductKeys.slice(0, 20))
-          }
-
-          // ✅ FIX: Trust backend - it already handles translation!
-          // No client-side filtering for products since backend does the work
           const filteredProducts = data.products || []
 
-          // Keep light filtering for suppliers (optional - can be removed if backend handles it)
-          const normalizedSuppliersByName = (data.suppliersByName || []).map((supplier) => ({
-            ...supplier,
-            supplier_name:
-              supplier.supplier_name ||
-              (supplier as any).nickname ||
-              supplier.supplier_account ||
-              "",
-          }))
-          const normalizedSuppliersByProduct = (data.suppliersByProduct || []).map((supplier) => ({
-            ...supplier,
-            supplier_name:
-              supplier.supplier_name ||
-              (supplier as any).nickname ||
-              supplier.supplier_account ||
-              "",
-          }))
           const filteredSuppliersByName = filterSuppliersByRelevance(
-            normalizedSuppliersByName,
+            data.suppliersByName || [],
             debouncedQ,
-            5 // Lowered threshold for full page results (more inclusive)
+            5
           )
 
           const filteredSuppliersByProduct = filterSuppliersByRelevance(
-            normalizedSuppliersByProduct,
+            data.suppliersByProduct || [],
             debouncedQ,
-            5 // Lowered threshold for full page results (more inclusive)
+            5
           )
 
           setSearchResult({
@@ -921,20 +860,17 @@ export default function SearchPage() {
             suppliersByProduct: filteredSuppliersByProduct,
           })
 
-          // Track search interaction (both interaction tracking and search intent)
-          const { trackSearch } = await import("@/lib/interaction-tracker")
-          const { recordSearch } = await import("@/lib/search-intent-tracker")
+          // Track search interaction asynchronously
           const totalResults = filteredProducts.length + filteredSuppliersByName.length + filteredSuppliersByProduct.length
-
-          // Track in interaction system
-          trackSearch(debouncedQ, totalResults)
-
-          // Track in search intent system (for personalization and notifications)
-          recordSearch(debouncedQ, totalResults, "global").catch(err =>
-            console.warn("[SearchIntent] Failed to record search:", err)
-          )
+          import("@/lib/interaction-tracker").then(({ trackSearch }) => {
+            trackSearch(debouncedQ, totalResults)
+          }).catch(() => {})
+          import("@/lib/search-intent-tracker").then(({ recordSearch }) => {
+            recordSearch(debouncedQ, totalResults, "global").catch(() => {})
+          }).catch(() => {})
         }
-      } catch (error) {
+      } catch (error: any) {
+        if (error?.name === "AbortError") return
         console.error("Search error:", error)
         if (!cancelled) {
           setSearchResult({
@@ -951,10 +887,10 @@ export default function SearchPage() {
     }
     run()
 
-  }, [debouncedQ, globalSearchPage, selectedShop?.supplier_account, locationParam, sectorParam])
-
-  useEffect(() => {
-    setGlobalSearchPage(1)
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
   }, [debouncedQ, selectedShop?.supplier_account, locationParam, sectorParam])
 
   // Seller catalogue (RIGHT)
@@ -971,10 +907,7 @@ export default function SearchPage() {
           selectedShop.supplier_account,
         )}&limit=240&Currency=RWF`
         const res = await fetch(url, { cache: "no-store" })
-        const raw = await res.json().catch(() => null)
-        if (!res.ok) {
-          throw new Error(searchResponseErrorMessage(raw, res.status))
-        }
+        const raw = res.ok ? await res.json() : null
         const data = normalizeSupplierProductsResponse(
           raw,
           selectedShop.supplier_account,
@@ -2068,7 +2001,7 @@ export default function SearchPage() {
                     {locationParam && <Badge variant="secondary">📍 {locationParam}</Badge>}
                     {sectorParam && <Badge variant="secondary">🗂️ {sectorParam}</Badge>}
                     <span className="text-sm font-normal text-gray-500">
-                      {searchResult.pagination?.total ?? searchProductsWithPrice.length} found
+                      {searchProductsWithPrice.length} found
                     </span>
                   </div>
                 </div>
@@ -2108,39 +2041,6 @@ export default function SearchPage() {
                     </div>
                   ))}
                 </div>
-                {searchResult.pagination && (searchResult.pagination.page > 1 || searchResult.pagination.hasNext) && (
-                  <Pagination className="mt-5">
-                    <PaginationContent>
-                      <PaginationItem>
-                        <PaginationPrevious
-                          href="#"
-                          className={searchResult.pagination.page <= 1 ? "pointer-events-none opacity-40" : undefined}
-                          onClick={(event) => {
-                            event.preventDefault()
-                            setGlobalSearchPage((current) => Math.max(1, current - 1))
-                          }}
-                        />
-                      </PaginationItem>
-                      <PaginationItem>
-                        <span className="px-3 text-sm text-muted-foreground">
-                          Page {searchResult.pagination.page}
-                        </span>
-                      </PaginationItem>
-                      <PaginationItem>
-                        <PaginationNext
-                          href="#"
-                          className={!searchResult.pagination.hasNext ? "pointer-events-none opacity-40" : undefined}
-                          onClick={(event) => {
-                            event.preventDefault()
-                            if (searchResult.pagination?.hasNext) {
-                              setGlobalSearchPage((current) => current + 1)
-                            }
-                          }}
-                        />
-                      </PaginationItem>
-                    </PaginationContent>
-                  </Pagination>
-                )}
               </section>
             )}
 

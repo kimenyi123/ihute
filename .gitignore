@@ -77,4 +77,4 @@ android/local.properties
 ios/App/Pods/
 /nbproject/private/
 env.backup
-env.download
+.env

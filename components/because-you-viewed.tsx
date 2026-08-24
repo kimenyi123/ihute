@@ -8,6 +8,7 @@ import { Eye } from "lucide-react"
 import { getRecentInteractions } from "@/lib/interaction-tracker"
 import { getCollaborativeRecommendations } from "@/lib/recommendation-service"
 import { getProductImageSrc } from "@/lib/image-utils"
+import { ProductImageFallback } from "@/components/product-image-fallback"
 
 /**
  * "Because You Viewed X" Recommendation Section
@@ -20,6 +21,11 @@ type Product = {
     price?: number
     image?: string
     supplierName?: string
+    item_code?: string
+    item_key_words?: string
+    famille?: string
+    niki_code?: string
+    NIKI_CODE?: string
 }
 
 interface BecauseYouViewedProps {
@@ -90,6 +96,9 @@ export function BecauseYouViewed({ className, limit = 6 }: BecauseYouViewedProps
                         price: parseFloat(item.SALE_PRICE_INCLUSIVE || "0") || undefined,
                         image: getProductImageSrc(item as Record<string, unknown>),
                         supplierName: item.SELLER_NAMES,
+                        item_code: item.ITEM_CODE,
+                        item_key_words: item.ITEM_KEY_WORDS,
+                        famille: item.FAMILLE,
                     })
                 }
             } catch (error) {
@@ -103,17 +112,14 @@ export function BecauseYouViewed({ className, limit = 6 }: BecauseYouViewedProps
     if (loading) {
         return (
             <Card className={className}>
-                <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-lg">
-                        <Eye className="h-5 w-5" />
-                        <Skeleton className="h-6 w-48" />
-                    </CardTitle>
+                <CardHeader className="pb-3">
+                    <Skeleton className="h-6 w-48" />
                 </CardHeader>
                 <CardContent>
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                        {Array.from({ length: 6 }).map((_, i) => (
+                        {Array.from({ length: limit }).map((_, i) => (
                             <div key={i} className="space-y-2">
-                                <Skeleton className="h-32 w-full rounded-lg" />
+                                <Skeleton className="aspect-square rounded-lg" />
                                 <Skeleton className="h-4 w-full" />
                                 <Skeleton className="h-3 w-2/3" />
                             </div>
@@ -130,11 +136,13 @@ export function BecauseYouViewed({ className, limit = 6 }: BecauseYouViewedProps
 
     return (
         <Card className={className}>
-            <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-lg">
-                    <Eye className="h-5 w-5 text-blue-600" />
-                    <span>Because you viewed &quot;{viewedProduct}&quot;</span>
-                </CardTitle>
+            <CardHeader className="pb-3">
+                <div className="flex items-center gap-2">
+                    <Eye className="h-5 w-5 text-blue-500" />
+                    <CardTitle className="text-lg">
+                        Because you viewed <span className="text-blue-600 font-semibold">&quot;{viewedProduct}&quot;</span>
+                    </CardTitle>
+                </div>
             </CardHeader>
             <CardContent>
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -146,17 +154,11 @@ export function BecauseYouViewed({ className, limit = 6 }: BecauseYouViewedProps
                         >
                             <div className="space-y-2">
                                 <div className="aspect-square bg-muted rounded-lg overflow-hidden group-hover:shadow-md transition-shadow">
-                                    {product.image ? (
-                                        <img
-                                            src={product.image}
-                                            alt={product.name}
-                                            className="w-full h-full object-cover"
-                                        />
-                                    ) : (
-                                        <div className="w-full h-full flex items-center justify-center text-muted-foreground">
-                                            No image
-                                        </div>
-                                    )}
+                                    <ProductImageFallback
+                                        source={product as any}
+                                        alt={product.name}
+                                        className="w-full h-full object-cover"
+                                    />
                                 </div>
                                 <div className="space-y-1">
                                     <p className="text-sm font-medium line-clamp-2 group-hover:text-blue-600 transition-colors">

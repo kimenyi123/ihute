@@ -19,10 +19,17 @@ import { usePrefsStore } from "@/lib/prefs-store";
 import { useTranslation } from "@/hooks/use-translation";
 import type { TranslationKey } from "@/lib/translations";
 import { cn } from "@/lib/utils";
+import {
+  isPharmacyCategoryId,
+  PharmacyErxInput,
+  type ErxUnlockKey,
+} from "@/components/category_ai/pharmacy-erx-input"
+import { PharmacyErxResult } from "@/components/category_ai/pharmacy-erx-result"
+import type { MohErxDrugLineDTO } from "@/lib/erx/moh-erx-types";
 
 const LIST_SECTOR_SUPPLIERS_LIMIT = 500;
 
-export type CategoryBrowseMode = "shop" | "item";
+export type CategoryBrowseMode = "shop" | "item" | "erx";
 
 export function CategoryClientAI({
   categoryId,
@@ -41,9 +48,21 @@ export function CategoryClientAI({
   const [sectorShopsLoading, setSectorShopsLoading] = useState(true);
   /** Single listSuppliersWithProducts payload for badges + shop grid + item grid (avoids two RAND() samples from the servlet). */
   const [sectorListPayload, setSectorListPayload] = useState<unknown[] | null>(null);
+  const [erxLookup, setErxLookup] = useState<{
+    loading: boolean;
+    errorCode: string | null;
+    patientDisplayName: string | null;
+    drugs: MohErxDrugLineDTO[] | null;
+  }>({ loading: false, errorCode: null, patientDisplayName: null, drugs: null });
 
+  const isPharmacy = isPharmacyCategoryId(categoryId);
+  const browseParam = searchParams.get("browse");
   const browseMode: CategoryBrowseMode =
-    searchParams.get("browse") === "item" ? "item" : "shop";
+    browseParam === "item" ? "item" : browseParam === "erx" && isPharmacy ? "erx" : "shop";
+  const erxCode = (searchParams.get("erx") ?? "").trim();
+  const erxPhone = (searchParams.get("erxPhone") ?? "").trim();
+  const erxNames = (searchParams.get("erxNames") ?? "").trim();
+  const erxNationalId = (searchParams.get("erxNid") ?? "").trim();
 
   const headerSearchSq = (searchParams.get("sq") ?? "").trim();
 
@@ -56,7 +75,7 @@ export function CategoryClientAI({
   }, [categoryId, setSector, setCategoryBrowseMode]);
 
   useEffect(() => {
-    setCategoryBrowseMode(browseMode === "item" ? "item" : "shop");
+    setCategoryBrowseMode(browseMode === "shop" ? "shop" : "item");
   }, [browseMode, setCategoryBrowseMode]);
 
   /** One listSuppliersWithProducts call: badges (N / I) + shop grid data (no second fetch for cards). */
@@ -107,6 +126,41 @@ export function CategoryClientAI({
     };
   }, [categoryId]);
 
+  /** Fetches + identity-validates the eRx code whenever the eRx tab's URL state changes. */
+  useEffect(() => {
+    if (browseMode !== "erx" || !erxCode) {
+      setErxLookup({ loading: false, errorCode: null, patientDisplayName: null, drugs: null });
+      return;
+    }
+    let cancelled = false;
+    async function lookup() {
+      setErxLookup((prev) => ({ ...prev, loading: true, errorCode: null }));
+      try {
+        const qs = new URLSearchParams({ code: erxCode });
+        if (erxPhone) qs.set("phone", erxPhone);
+        if (erxNames) qs.set("names", erxNames);
+        if (erxNationalId) qs.set("nationalId", erxNationalId);
+        const res = await fetch(`/api/pharmacy/erx-lookup?${qs.toString()}`, { cache: "no-store" });
+        const json = await res.json();
+        if (cancelled) return;
+        setErxLookup({
+          loading: false,
+          errorCode: json.ok ? null : json.code || "ERX_UPSTREAM_ERROR",
+          patientDisplayName: json.ok ? json.patientDisplayName : null,
+          drugs: json.ok ? json.drugs : null,
+        });
+      } catch {
+        if (!cancelled) {
+          setErxLookup({ loading: false, errorCode: "ERX_UPSTREAM_ERROR", patientDisplayName: null, drugs: null });
+        }
+      }
+    }
+    lookup();
+    return () => {
+      cancelled = true;
+    };
+  }, [browseMode, erxCode, erxPhone, erxNames, erxNationalId]);
+
   const replaceQuery = (mutate: (p: URLSearchParams) => void) => {
     const params = new URLSearchParams(Array.from(searchParams.entries()));
     mutate(params);
@@ -121,6 +175,26 @@ export function CategoryClientAI({
         p.delete("supplierName");
         if (!p.get("sort")) p.set("sort", "price-low");
       }
+      if (mode !== "erx") {
+        p.delete("erx");
+      }
+    });
+  };
+
+  const applyErxLookup = (code: string, unlock?: ErxUnlockKey) => {
+    replaceQuery((p) => {
+      p.set("browse", "erx");
+      p.set("erx", code);
+      p.set("sq", code);
+      if (unlock?.phone) p.set("erxPhone", unlock.phone);
+      else p.delete("erxPhone");
+      if (unlock?.names) p.set("erxNames", unlock.names);
+      else p.delete("erxNames");
+      if (unlock?.nationalId) p.set("erxNid", unlock.nationalId);
+      else p.delete("erxNid");
+      p.delete("supplier");
+      p.delete("supplierName");
+      if (!p.get("sort")) p.set("sort", "price-low");
     });
   };
 
@@ -190,7 +264,32 @@ export function CategoryClientAI({
               </span>
             )}
           </button>
+          {isPharmacy && (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={browseMode === "erx"}
+              onClick={() => setBrowseMode("erx")}
+              className={cn(
+                "px-4 py-2 rounded-lg text-sm font-medium transition-colors border inline-flex items-center gap-2",
+                browseMode === "erx"
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-background text-muted-foreground border-border hover:bg-muted"
+              )}
+            >
+              {t("categoryBrowseErxLabel" as TranslationKey)}
+            </button>
+          )}
         </div>
+        {isPharmacy && browseMode === "erx" && (
+          <PharmacyErxInput
+            initialCode={erxCode}
+            initialPhone={erxPhone}
+            initialNames={erxNames}
+            initialNationalId={erxNationalId}
+            onLookup={applyErxLookup}
+          />
+        )}
       </div>
 
       <div id="category-ai-grid-section" className="space-y-4">
@@ -214,6 +313,23 @@ export function CategoryClientAI({
             hideInlineSearch
             preloadedSectorListSuppliers={sectorListPayload}
           />
+        </section>
+      )}
+
+      {browseMode === "erx" && (
+        <section id="products-section" className="mt-2">
+          {!erxCode ? (
+            <p className="text-sm text-muted-foreground rounded-lg border border-dashed p-6 text-center">
+              {t("categoryBrowseErxHint" as TranslationKey)}
+            </p>
+          ) : (
+            <PharmacyErxResult
+              loading={erxLookup.loading}
+              errorCode={erxLookup.errorCode}
+              patientDisplayName={erxLookup.patientDisplayName}
+              drugs={erxLookup.drugs}
+            />
+          )}
         </section>
       )}
       </div>
