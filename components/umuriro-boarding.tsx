@@ -4,7 +4,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import Image from "next/image"
 import { useSearchParams } from "next/navigation"
-import { Check, Copy, Flame, Loader2, MessageSquare, Minus, Phone, Plus, Trash2 } from "lucide-react"
+import {
+  Check,
+  Copy,
+  Flame,
+  Loader2,
+  MessageSquare,
+  Minus,
+  Phone,
+  Plus,
+  Trash2,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -192,6 +202,7 @@ export function UmuriroBoarding({ initial }: { initial?: UmuriroGqInitial }) {
   const [quantity, setQuantity] = useState("1")
   const [pendingItemCode, setPendingItemCode] = useState<string | null>(null)
   const [cartLines, setCartLines] = useState<UmuriroCartLine[]>([])
+  const [cartQuantityDrafts, setCartQuantityDrafts] = useState<Record<string, string>>({})
 
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -610,6 +621,11 @@ export function UmuriroBoarding({ initial }: { initial?: UmuriroGqInitial }) {
 
   const removeCartLine = (id: string) => {
     setCartLines((prev) => prev.filter((line) => line.id !== id))
+    setCartQuantityDrafts((prev) => {
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
   }
 
   const updateCartLineQty = (id: string, nextQty: number) => {
@@ -617,6 +633,32 @@ export function UmuriroBoarding({ initial }: { initial?: UmuriroGqInitial }) {
     setCartLines((prev) =>
       prev.map((line) => (line.id === id ? { ...line, quantity: q } : line)),
     )
+    setCartQuantityDrafts((prev) => {
+      if (!(id in prev)) return prev
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
+  }
+
+  const handleCartLineQtyInput = (id: string, raw: string) => {
+    if (raw !== "" && !/^\d+$/.test(raw)) return
+    const digits = raw.replace(/^0+/, "")
+    setCartQuantityDrafts((prev) => ({ ...prev, [id]: digits }))
+    if (!digits) return
+    const nextQty = Number(digits)
+    if (Number.isSafeInteger(nextQty) && nextQty > 0) {
+      updateCartLineQty(id, nextQty)
+    }
+  }
+
+  const commitCartLineQtyInput = (id: string) => {
+    setCartQuantityDrafts((prev) => {
+      if (!(id in prev) || prev[id]) return prev
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
   }
 
   const itemSuggestionLabel = (p: CatalogHit) =>
@@ -1205,9 +1247,16 @@ export function UmuriroBoarding({ initial }: { initial?: UmuriroGqInitial }) {
                               >
                                 <Minus className="h-3.5 w-3.5" />
                               </Button>
-                              <span className="min-w-[2rem] text-center text-sm font-bold tabular-nums">
-                                {line.quantity}
-                              </span>
+                              <Input
+                                type="text"
+                                inputMode="numeric"
+                                pattern="[1-9][0-9]*"
+                                value={cartQuantityDrafts[line.id] ?? String(line.quantity)}
+                                onChange={(e) => handleCartLineQtyInput(line.id, e.target.value)}
+                                onBlur={() => commitCartLineQtyInput(line.id)}
+                                aria-label={pickLang(UMURIRO_UI.quantity, lang)}
+                                className="h-8 w-16 border-[#dbe7f3] px-2 text-center text-sm font-bold tabular-nums"
+                              />
                               <Button
                                 type="button"
                                 variant="outline"
