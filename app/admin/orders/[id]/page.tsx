@@ -34,6 +34,7 @@ import {
   type AdminMonitorOrder,
 } from "@/lib/admin-order-monitor"
 import {
+  CLIENT_ORDER_MONITOR_DB,
   decodeOrderMonitorDb,
   encodeOrderMonitorDb,
   orderMonitorDbLabel,
@@ -66,7 +67,7 @@ export default function AdminOrderDetailPage() {
   const searchParams = useSearchParams()
   const orderId = String(params.id ?? "")
 
-  const [db, setDb] = useState<OrderMonitorDb>("chaos_beta")
+  const [db, setDb] = useState<OrderMonitorDb>(CLIENT_ORDER_MONITOR_DB)
   const [dbReady, setDbReady] = useState(false)
   const [order, setOrder] = useState<OrderDetail | null>(null)
   const [items, setItems] = useState<OrderItem[]>([])

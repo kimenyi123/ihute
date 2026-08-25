@@ -1,12 +1,16 @@
-/** Same allow-list as kaos AdminServlet / admin-sellers.html */
+/** Same allow-list as kaos AdminServlet / admin-sellers.html, plus client-order schema. */
 
 export const ORDER_MONITOR_DBS = [
   { id: "chaos_beta", label: "Beta", hint: "chaos_beta", token: "b" },
   { id: "chaos_test", label: "Production", hint: "chaos_test", token: "p" },
   { id: "chaos_dev", label: "Dev", hint: "chaos_dev", token: "d" },
+  { id: "chaos_theta", label: "Theta", hint: "chaos_theta", token: "t" },
 ] as const
 
 export type OrderMonitorDb = (typeof ORDER_MONITOR_DBS)[number]["id"]
+
+/** Client checkout orders live in this schema's order_transaction tables. */
+export const CLIENT_ORDER_MONITOR_DB: OrderMonitorDb = "chaos_theta"
 
 const STORAGE_KEY = "ihute_admin_order_monitor_db"
 
@@ -15,17 +19,21 @@ const TOKEN_BY_DB: Record<OrderMonitorDb, string> = {
   chaos_beta: "b",
   chaos_test: "p",
   chaos_dev: "d",
+  chaos_theta: "t",
 }
 
 const DB_BY_TOKEN: Record<string, OrderMonitorDb> = {
   b: "chaos_beta",
   p: "chaos_test",
   d: "chaos_dev",
+  t: "chaos_theta",
   // longer aliases (still not schema names)
   beta: "chaos_beta",
   prod: "chaos_test",
   production: "chaos_test",
   dev: "chaos_dev",
+  theta: "chaos_theta",
+  client: "chaos_theta",
 }
 
 export function isOrderMonitorDb(value: string | null | undefined): value is OrderMonitorDb {
@@ -49,16 +57,16 @@ export function decodeOrderMonitorDb(value: string | null | undefined): OrderMon
   return DB_BY_TOKEN[raw] ?? null
 }
 
-/** Prefer ?db= (opaque or legacy), then localStorage, then chaos_beta. */
+/** Prefer ?db= (opaque or legacy), then localStorage, then client-order schema. */
 export function readOrderMonitorDb(): OrderMonitorDb {
-  if (typeof window === "undefined") return "chaos_beta"
+  if (typeof window === "undefined") return CLIENT_ORDER_MONITOR_DB
   const fromUrl = decodeOrderMonitorDb(new URLSearchParams(window.location.search).get("db"))
   if (fromUrl) return fromUrl
   const stored = window.localStorage.getItem(STORAGE_KEY)
   if (isOrderMonitorDb(stored)) return stored
   const storedDecoded = decodeOrderMonitorDb(stored)
   if (storedDecoded) return storedDecoded
-  return "chaos_beta"
+  return CLIENT_ORDER_MONITOR_DB
 }
 
 export function writeOrderMonitorDb(db: OrderMonitorDb) {

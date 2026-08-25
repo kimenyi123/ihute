@@ -1,4 +1,7 @@
+"use client"
+
 import Link from "next/link"
+import { GrandmaOrdersTable } from "@/components/admin/grandma-orders-table"
 
 export default function AdminGrandmaOrdersPage() {
   return (
@@ -6,8 +9,14 @@ export default function AdminGrandmaOrdersPage() {
       <Link href="/admin_grandma" className="text-sm text-zinc-500 hover:text-zinc-300">
         ← Dashboard
       </Link>
-      <h1 className="text-2xl font-bold text-white">Orders</h1>
-      <p className="text-sm text-zinc-400">Placeholder — pipe Kaos orders or Next order store here.</p>
+      <div>
+        <h1 className="text-2xl font-bold text-white">Grandma orders</h1>
+        <p className="mt-1 text-sm text-zinc-400">
+          Orders placed from Grandma only (<code className="text-zinc-300">ORDER_SOURCE = GRANDMA</code>). Marketplace
+          Order Monitor rows are excluded.
+        </p>
+      </div>
+      <GrandmaOrdersTable tone="dark" />
     </div>
   )
 }

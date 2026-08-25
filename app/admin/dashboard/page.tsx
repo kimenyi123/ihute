@@ -17,6 +17,8 @@ import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, L
 import { postAdminApi } from "@/lib/admin-client"
 import { useAuthStore } from "@/lib/auth-store"
 import { ResponsiveTable } from "@/components/ui/responsive-table"
+import { GrandmaOrdersTable } from "@/components/admin/grandma-orders-table"
+import { GrandmaDraftsTable } from "@/components/admin/grandma-drafts-table"
 
 type TopupPeriod = 30 | 90 | "all"
 
@@ -348,6 +350,22 @@ export default function AdminDashboard() {
           </div>
         </div>
       </div>
+
+      <section id="grandma-orders" className="scroll-mt-24 space-y-3">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-900">Grandma orders</h2>
+          <p className="text-sm text-slate-500">Orders with ORDER_SOURCE = GRANDMA</p>
+        </div>
+        <GrandmaOrdersTable tone="light" />
+      </section>
+
+      <section id="grandma-drafts" className="scroll-mt-24 space-y-3">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-900">shop_onboarding_draft</h2>
+          <p className="text-sm text-slate-500">Onboarding and Umuriro drafts from MySQL</p>
+        </div>
+        <GrandmaDraftsTable tone="light" />
+      </section>
 
       {/* Top-up sales panel removed per request */}
 

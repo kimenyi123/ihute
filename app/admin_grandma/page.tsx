@@ -8,8 +8,8 @@ const tiles: { href: string; title: string; subtitle: string; icon: typeof Store
   { href: "/admin_grandma/buyers", title: "Buyer", subtitle: "Buyer accounts (soon)", icon: Users },
   { href: "/admin_grandma/riders", title: "Riders", subtitle: "Delivery riders (soon)", icon: Bike },
   { href: "/admin_grandma/agents", title: "Agents", subtitle: "Field agents (soon)", icon: UserCog },
-  { href: "/admin_grandma/orders", title: "Orders", subtitle: "Order monitor (soon)", icon: ShoppingCart },
-  { href: "/admin_grandma/items", title: "Items", subtitle: "Pending validation · Umuriro drafts", icon: Package },
+  { href: "/admin_grandma/orders", title: "Orders", subtitle: "Grandma checkout orders", icon: ShoppingCart },
+  { href: "/admin_grandma/items", title: "Items", subtitle: "shop_onboarding_draft table", icon: Package },
   { href: "/admin/client-suggestions", title: "Client Suggestions", subtitle: "Support form feedback", icon: MessageSquare },
 ]
 

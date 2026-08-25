@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic"
 export const revalidate = 0
 
 import { getAdminServletUrl, getBackendBase } from "@/lib/backend-config"
+import { tryHandleOrderMonitorMysql } from "@/lib/admin-order-monitor-mysql"
 
 const BACKEND_URL = getBackendBase()
 
@@ -114,6 +115,11 @@ export async function POST(req: Request) {
         },
         { status: 401 },
       )
+    }
+
+    const mysqlMonitor = await tryHandleOrderMonitorMysql(actionStr, params as Record<string, unknown>)
+    if (mysqlMonitor) {
+      return NextResponse.json(mysqlMonitor, { status: mysqlMonitor.ok ? 200 : 400 })
     }
 
     if (needsAuth && adminEmail) {
@@ -301,6 +307,11 @@ export async function GET(req: Request) {
         },
         { status: 401 },
       )
+    }
+
+    const mysqlMonitor = await tryHandleOrderMonitorMysql(action, paramRecord)
+    if (mysqlMonitor) {
+      return NextResponse.json(mysqlMonitor, { status: mysqlMonitor.ok ? 200 : 400 })
     }
     if (needsAuth && adminEmail) {
       params.set("adminEmail", adminEmail)
