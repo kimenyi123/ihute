@@ -17,6 +17,12 @@ export default function AdminGrandmaLayout({ children }: { children: ReactNode }
               <Link href="/admin_grandma" className="hover:text-zinc-200">
                 Dashboard
               </Link>
+              <Link href="/admin_grandma/orders" className="hover:text-zinc-200">
+                Orders
+              </Link>
+              <Link href="/admin_grandma/items" className="hover:text-zinc-200">
+                Drafts
+              </Link>
               <Link href="/admin/dashboard" className="hover:text-zinc-200">
                 Main admin
               </Link>

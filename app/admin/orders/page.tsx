@@ -41,10 +41,11 @@ import {
 } from "@/lib/admin-order-monitor"
 import { fetchOrderMonitorStats, type OrderMonitorStats } from "@/lib/admin-order-stats"
 import {
+  CLIENT_ORDER_MONITOR_DB,
   ORDER_MONITOR_DBS,
+  decodeOrderMonitorDb,
   encodeOrderMonitorDb,
   orderMonitorDbLabel,
-  readOrderMonitorDb,
   writeOrderMonitorDb,
   type OrderMonitorDb,
 } from "@/lib/admin-order-db"
@@ -108,7 +109,7 @@ export default function OrdersPage() {
   const [toast, setToast] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [searchInput, setSearchInput] = useState("")
-  const [db, setDb] = useState<OrderMonitorDb>("chaos_beta")
+  const [db, setDb] = useState<OrderMonitorDb>(CLIENT_ORDER_MONITOR_DB)
   const [dbReady, setDbReady] = useState(false)
   const requestIdRef = useRef(0)
 
@@ -231,7 +232,7 @@ export default function OrdersPage() {
   useEffect(() => {
     if (typeof window === "undefined") return
     const params = new URLSearchParams(window.location.search)
-    const initialDb = readOrderMonitorDb()
+    const initialDb = decodeOrderMonitorDb(params.get("db")) ?? CLIENT_ORDER_MONITOR_DB
     setDb(initialDb)
     writeOrderMonitorDb(initialDb)
     setDbReady(true)

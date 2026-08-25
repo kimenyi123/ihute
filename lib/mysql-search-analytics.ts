@@ -54,7 +54,7 @@ export function getSearchAnalyticsPool(): Pool | null {
 
 /**
  * Same host/user as search analytics, but connected to an Order Monitor schema
- * (`chaos_beta` / `chaos_test` / `chaos_dev`) — shared picker with /admin/orders.
+ * (`chaos_beta` / `chaos_test` / `chaos_dev` / `chaos_theta`) — shared picker with /admin/orders.
  */
 export function getMarketplacePoolForDb(db: string | null | undefined): Pool | null {
   const creds = baseMysqlCreds()

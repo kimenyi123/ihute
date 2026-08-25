@@ -24,6 +24,8 @@ import {
   Boxes,
   Pill,
   MessageSquare,
+  ClipboardList,
+  FileSpreadsheet,
 } from 'lucide-react'
 import { useAuthStore } from '@/lib/auth-store'
 import { AdminGuard } from '@/components/auth/admin-guard'
@@ -35,6 +37,8 @@ const menuItems = [
   { href: '/admin/categories', label: 'Categories & Sectors', icon: FolderTree },
   { href: '/admin/commission', label: 'Commission & Billing', icon: CreditCard },
   { href: '/admin/orders', label: 'Order Monitor', icon: ShoppingCart },
+  { href: '/admin/dashboard#grandma-orders', label: 'Grandma Orders', icon: ClipboardList },
+  { href: '/admin/dashboard#grandma-drafts', label: 'Onboarding drafts', icon: FileSpreadsheet },
   { href: '/admin/products', label: 'Product Moderation', icon: Package },
   { href: '/admin/prescription-review', label: 'Prescription review', icon: Pill },
   { href: '/admin/content', label: 'Content Manager', icon: Image },

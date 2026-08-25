@@ -10,7 +10,6 @@ import {
   Flame,
   Loader2,
   MessageSquare,
-  Minus,
   Phone,
   Plus,
   Trash2,
@@ -1236,38 +1235,16 @@ export function UmuriroBoarding({ initial }: { initial?: UmuriroGqInitial }) {
                             </p>
                           </div>
                           <div className="mt-2 flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-1">
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="icon"
-                                className="h-8 w-8 border-[#dbe7f3]"
-                                aria-label={`${pickLang(UMURIRO_UI.quantity, lang)} -`}
-                                onClick={() => updateCartLineQty(line.id, line.quantity - 1)}
-                              >
-                                <Minus className="h-3.5 w-3.5" />
-                              </Button>
-                              <Input
-                                type="text"
-                                inputMode="numeric"
-                                pattern="[1-9][0-9]*"
-                                value={cartQuantityDrafts[line.id] ?? String(line.quantity)}
-                                onChange={(e) => handleCartLineQtyInput(line.id, e.target.value)}
-                                onBlur={() => commitCartLineQtyInput(line.id)}
-                                aria-label={pickLang(UMURIRO_UI.quantity, lang)}
-                                className="h-8 w-16 border-[#dbe7f3] px-2 text-center text-sm font-bold tabular-nums"
-                              />
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="icon"
-                                className="h-8 w-8 border-[#dbe7f3]"
-                                aria-label={`${pickLang(UMURIRO_UI.quantity, lang)} +`}
-                                onClick={() => updateCartLineQty(line.id, line.quantity + 1)}
-                              >
-                                <Plus className="h-3.5 w-3.5" />
-                              </Button>
-                            </div>
+                            <Input
+                              type="text"
+                              inputMode="numeric"
+                              pattern="[1-9][0-9]*"
+                              value={cartQuantityDrafts[line.id] ?? String(line.quantity)}
+                              onChange={(e) => handleCartLineQtyInput(line.id, e.target.value)}
+                              onBlur={() => commitCartLineQtyInput(line.id)}
+                              aria-label={pickLang(UMURIRO_UI.quantity, lang)}
+                              className="h-9 min-w-[5.5rem] w-24 border-[#dbe7f3] text-base font-bold tabular-nums"
+                            />
                             <Button
                               type="button"
                               variant="ghost"
