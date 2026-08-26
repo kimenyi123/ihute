@@ -10,9 +10,10 @@
  *
  * Beta / Production / Dev still go through Java AdminServlet.
  */
-import type { Pool, RowDataPacket } from "mysql2/promise"
+import mysql, { type Pool, type RowDataPacket } from "mysql2/promise"
 import { CLIENT_ORDER_MONITOR_DB, decodeOrderMonitorDb, isOrderMonitorDb } from "@/lib/admin-order-db"
 import { getMarketplacePoolForDb } from "@/lib/mysql-search-analytics"
+import { getOnboardingMysqlConfig } from "@/lib/onboarding-mysql"
 
 const ORDER_MONITOR_MYSQL_ACTIONS = new Set(["getAllOrders", "getOrderMonitorStats", "getOrderDetails"])
 const DEFAULT_COMMISSION_RATE = 0.001
@@ -567,6 +568,23 @@ export function isClientOrderMonitorRequest(params: Record<string, unknown>): bo
   return decoded === CLIENT_ORDER_MONITOR_DB
 }
 
+function getClientOrderMonitorPool(schema: string): Pool | null {
+  const existing = getMarketplacePoolForDb(schema)
+  if (existing) return existing
+  const cfg = getOnboardingMysqlConfig()
+  if (!cfg?.host || !cfg.user) return null
+  return mysql.createPool({
+    host: cfg.host,
+    user: cfg.user,
+    password: cfg.password,
+    database: schema,
+    ...(cfg.port ? { port: cfg.port } : {}),
+    waitForConnections: true,
+    connectionLimit: 4,
+    queueLimit: 0,
+  })
+}
+
 export async function tryHandleOrderMonitorMysql(
   action: string,
   params: Record<string, unknown>,
@@ -577,14 +595,10 @@ export async function tryHandleOrderMonitorMysql(
   const schema = CLIENT_ORDER_MONITOR_DB
   if (!isOrderMonitorDb(schema)) return null
 
-  const pool = getMarketplacePoolForDb(schema)
+  const pool = getClientOrderMonitorPool(schema)
   if (!pool) {
-    return {
-      ok: false,
-      error:
-        "MySQL is not configured for Order Monitor (Theta). Set ONBOARDING_MYSQL_* or GQ_MYSQL_* so the API can read chaos_theta.order_transaction.",
-      db: schema,
-    }
+    // Let the existing Java AdminServlet path try (now allow-listed for chaos_theta).
+    return null
   }
 
   try {

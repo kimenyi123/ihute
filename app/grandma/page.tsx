@@ -85,6 +85,16 @@ import { GrandmaSellerDashboard } from "@/components/grandma-seller-dashboard"
 import { GrandmaSellerItemsPanel } from "@/components/grandma-seller-items-panel"
 import { downloadExcel, grandmaOrdersToExcelRows } from "@/lib/grandma-excel-export"
 import { digitsOnly, normalizePhoneDigitsForAuth, normalizeRwandaMobileE164 } from "@/lib/rwanda-phone"
+import {
+  assertGrandmaOrderPayloadHasMomoPhone,
+  attachPhoneRegisteredOnOrder,
+  grandmaCheckoutSendLockReason,
+  grandmaCourierDisplayState,
+  guardGrandmaMobileMoneyPhone,
+  isGrandmaMobileMoneyPayment,
+  isGrandmaMobileMoneyPhoneRequiredError,
+  logGrandmaMomoPhoneGuardFailure,
+} from "@/lib/grandma-checkout-order-guard"
 import { lineSellingPriceFromProductRow } from "@/lib/package-price"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -492,6 +502,7 @@ const GRANDMA_LABELS: Record<
     paymentGuestPhoneLabel: string
     paymentGuestPhonePlaceholder: string
     paymentGuestPhoneNote: string
+    paymentMomoPhoneRequiredNote: string
     orderSubmitNeedPhone: string
     eta: string
     etaSub: string
@@ -556,6 +567,8 @@ const GRANDMA_LABELS: Record<
     kmToShop: string
     reviewers: string
     tapCouriers: string
+    courierAssignmentUnavailable: string
+    courierAssignmentUnavailableHint: string
     closestToShop: string
     top5Available: string
     myOrders: string
@@ -674,6 +687,8 @@ const GRANDMA_LABELS: Record<
     paymentGuestPhoneLabel: "Mobile Money & updates",
     paymentGuestPhonePlaceholder: "07… · same wallet we notify",
     paymentGuestPhoneNote: "Optional when signed in with a phone on your account.",
+    paymentMomoPhoneRequiredNote:
+      "Required for MoMo and Airtel. This is your wallet number — not the shop, and not digits from the payment SMS.",
     orderSubmitNeedPhone: "Add your mobile number to pay and receive order updates.",
     eta: "Estimated time of arrival",
     etaSub: "From ~{km} km · {mode} delivery",
@@ -742,6 +757,9 @@ const GRANDMA_LABELS: Record<
     kmToShop: "km to shop",
     reviewers: "reviewers",
     tapCouriers: "Tap to see top 5 couriers closest to the shop",
+    courierAssignmentUnavailable: "Courier assignment unavailable",
+    courierAssignmentUnavailableHint:
+      "No rider is assigned yet. The delivery fee still applies. A courier is assigned after the shop accepts the order — this is not a selected rider.",
     closestToShop: "Closest to shop",
     top5Available: "top 5 available",
     myOrders: "My orders",
@@ -861,6 +879,8 @@ const GRANDMA_LABELS: Record<
     paymentGuestPhoneLabel: "Nimero ya MoMo n'amakuru y'a Order",
     paymentGuestPhonePlaceholder: "07… · nimero yo kwishyuriraho",
     paymentGuestPhoneNote: "Ntibisabwa niba winjiye ku konti ifite nimero ya telefoni.",
+    paymentMomoPhoneRequiredNote:
+      "Bisabwa kuri MoMo na Airtel. Ni nimero y'igikapu cyawe — si iy'iduka, kandi ntabwo dukura nimero mu SMS yo kwishyura.",
     orderSubmitNeedPhone: "Andika nimero ya telefoni yawe kugira ngo wishyure kandi ubone amakuru y'a Order.",
     eta: "Igihe ugereranyije cyo kugera",
     etaSub: "Km ~{km} · {mode}",
@@ -922,6 +942,9 @@ const GRANDMA_LABELS: Record<
     kmToShop: "Km kugera ku iduka",
     reviewers: "abasubirije",
     tapCouriers: "Kanda urebe abatwara ibicururwa 5 bari hafi y'iduka",
+    courierAssignmentUnavailable: "Nta mutwara uhari",
+    courierAssignmentUnavailableHint:
+      "Nta mutwara wahiswemo. Amafaranga yo kubikugezaho agumana. Umucuruzi azahabwa umutwara nyuma y'uko iduka yemeye Order — si umutwara wahiswemo.",
     closestToShop: "Bari hafi y'iduka",
     top5Available: "5 bahari",
     myOrders: "Ibyo natumije",
@@ -1045,6 +1068,8 @@ const GRANDMA_LABELS: Record<
     paymentGuestPhoneLabel: "Mobile Money & suivi",
     paymentGuestPhonePlaceholder: "07… · même numéro pour payer",
     paymentGuestPhoneNote: "Facultatif si vous êtes connecté avec un téléphone sur le compte.",
+    paymentMomoPhoneRequiredNote:
+      "Obligatoire pour MoMo et Airtel. C’est votre numéro de portefeuille — pas celui du magasin, et pas un numéro copié du SMS de paiement.",
     orderSubmitNeedPhone: "Ajoutez votre mobile pour payer et recevoir les mises à jour.",
     eta: "Heure d'arrivée estimée",
     etaSub: "Depuis ~{km} km · livraison {mode}",
@@ -1112,6 +1137,9 @@ const GRANDMA_LABELS: Record<
     kmToShop: "km jusqu'au magasin",
     reviewers: "avis",
     tapCouriers: "Appuyez pour voir les 5 livreurs les plus proches",
+    courierAssignmentUnavailable: "Aucun coursier assigné",
+    courierAssignmentUnavailableHint:
+      "Aucun livreur n’est encore assigné. Les frais de livraison s’appliquent toujours. Un coursier sera attribué après acceptation par le magasin — ce n’est pas un livreur choisi.",
     closestToShop: "Les plus proches du magasin",
     top5Available: "top 5 disponibles",
     myOrders: "Mes commandes",
@@ -1222,6 +1250,9 @@ function applyGrandmaSmsMatchToCheck(result: MoMoSmsMatchResult): GrandmaSmsPayC
 
 function humanizeGrandmaOrderBackendError(raw: string, lang: GrandmaLang): string {
   if (!raw?.trim()) return raw
+  if (isGrandmaMobileMoneyPhoneRequiredError(raw)) {
+    return GRANDMA_LABELS[lang].orderSubmitNeedPhone
+  }
   const low = raw.toLowerCase()
   if (low.includes("buyer") && low.includes("null") && low.includes("ishyiga")) {
     return GRANDMA_LABELS[lang].orderSubmitNeedPhone
@@ -2586,6 +2617,7 @@ export default function GrandmaPage() {
   const [locationDialogOpen, setLocationDialogOpen] = useState(false)
   const [orderNotes, setOrderNotes] = useState("")
   const [grandmaBuyerPhoneInput, setGrandmaBuyerPhoneInput] = useState("")
+  const grandmaBuyerPhoneInputRef = useRef<HTMLInputElement>(null)
   const [grandmaOrderSubmitting, setGrandmaOrderSubmitting] = useState(false)
   const [grandmaOrderSubmitError, setGrandmaOrderSubmitError] = useState<string | null>(null)
   const grandmaOrderSubmitGuardRef = useRef(false)
@@ -3911,10 +3943,23 @@ export default function GrandmaPage() {
 
   const grandmaBuyerSession = useAuthStore((s) => s.user)
 
+  useEffect(() => {
+    const fromSession = grandmaBuyerSession?.phone?.trim() ?? ""
+    if (!fromSession) return
+    setGrandmaBuyerPhoneInput((prev) => (prev.trim() ? prev : fromSession))
+  }, [grandmaBuyerSession?.phone])
+
   const grandmaPayerPhoneOk = useMemo(() => {
+    if (isGrandmaMobileMoneyPayment(selectedPayment)) {
+      return guardGrandmaMobileMoneyPhone({
+        paymentId: selectedPayment,
+        accountPhone: grandmaBuyerSession?.phone,
+        inputPhone: grandmaBuyerPhoneInput,
+      }).ok
+    }
     const payerRaw = grandmaBuyerSession?.phone || grandmaBuyerPhoneInput.trim()
     return isGrandmaRwMobileDigits(payerRaw)
-  }, [grandmaBuyerSession?.phone, grandmaBuyerPhoneInput])
+  }, [selectedPayment, grandmaBuyerSession?.phone, grandmaBuyerPhoneInput])
 
   /** MoMo merchant digits from shop profile — optional SMS validation. */
   const grandmaPaymentMerchantDigits = useMemo(() => {
@@ -3992,6 +4037,14 @@ export default function GrandmaPage() {
     grandmaPayerPhoneOk,
     grandmaCashConfirm,
   ])
+
+  const grandmaSendLockReason = grandmaCheckoutSendLockReason({
+    hasStockBlock: hasGrandmaStockBlock,
+    paymentId: selectedPayment,
+    smsPaymentReady: grandmaSmsPaymentReady,
+    payerPhoneOk: grandmaPayerPhoneOk,
+    cashConfirm: grandmaCashConfirm,
+  })
 
   const selectLogisticsMode = (id: LogisticsId) => {
     setSelectedLogistics(id)
@@ -5237,23 +5290,35 @@ export default function GrandmaPage() {
       const buyerEmail =
         authUser?.email?.trim() || `guest_${Date.now()}@guest.ihute.local`
       const buyerName = authUser?.name?.trim() || "Guest"
-      const phoneFromAccount = authUser?.phone?.replace(/\D/g, "").slice(0, 15) ?? ""
-      const phoneFromInput = normalizePhoneDigitsForAuth(grandmaBuyerPhoneInput.trim()).slice(0, 15)
-      const buyerPhone = (phoneFromAccount || phoneFromInput).slice(0, 15)
-
       const trSubmit = GRANDMA_LABELS[language]
+      const momoPhoneGuard = guardGrandmaMobileMoneyPhone({
+        paymentId: selectedPayment,
+        accountPhone: authUser?.phone,
+        inputPhone: grandmaBuyerPhoneInput,
+        smsBody: grandmaMomoSmsPaste,
+      })
+      if (isGrandmaMobileMoneyPayment(selectedPayment) && !momoPhoneGuard.ok) {
+        logGrandmaMomoPhoneGuardFailure(momoPhoneGuard.code, "")
+        setGrandmaOrderSubmitError(
+          momoPhoneGuard.code === "INVALID_PHONE" ? trSubmit.payStepErrPhone : trSubmit.orderSubmitNeedPhone,
+        )
+        grandmaBuyerPhoneInputRef.current?.focus()
+        grandmaBuyerPhoneInputRef.current?.scrollIntoView({ block: "center", behavior: "smooth" })
+        return
+      }
+      const buyerPhone = momoPhoneGuard.ok
+        ? momoPhoneGuard.buyerPhone
+        : (
+            normalizePhoneDigitsForAuth(authUser?.phone ?? "") ||
+            normalizePhoneDigitsForAuth(grandmaBuyerPhoneInput.trim())
+          ).slice(0, 15)
+
       if (!buyerPhone) {
         setGrandmaOrderSubmitError(trSubmit.orderSubmitNeedPhone)
+        grandmaBuyerPhoneInputRef.current?.focus()
         return
       }
 
-      if (selectedPayment === "momo" || selectedPayment === "airtel") {
-        const payerRaw = phoneFromAccount || grandmaBuyerPhoneInput.trim()
-        if (!isGrandmaRwMobileDigits(payerRaw)) {
-          setGrandmaOrderSubmitError(trSubmit.payStepErrPhone)
-          return
-        }
-      }
       if (selectedPayment === "cash" && !grandmaCashConfirm) {
         setGrandmaOrderSubmitError(trSubmit.payStepErrCash)
         return
@@ -5298,7 +5363,9 @@ export default function GrandmaPage() {
 
       const payerDigits =
         selectedPayment === "momo" || selectedPayment === "airtel"
-          ? normalizePhoneDigitsForAuth(buyerPhone)
+          ? momoPhoneGuard.ok
+            ? momoPhoneGuard.phoneRegisteredOnOrder
+            : undefined
           : undefined
       const billingTail = buildGrandmaBillingReferenceTail({
         intentId: String(piJson.intentId),
@@ -5355,10 +5422,10 @@ export default function GrandmaPage() {
       const baseRef = referenceParts.length ? referenceParts.join(" | ") : ""
       const reference = (baseRef + billingTail).slice(0, 500)
 
-      const res = await fetch("/api/grandma/order", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const paymentName = grandmaPaymentToOrdersPaymentName(selectedPayment)
+      const phoneRegisteredOnOrder = momoPhoneGuard.ok ? momoPhoneGuard.phoneRegisteredOnOrder : ""
+      const orderClientBody = attachPhoneRegisteredOnOrder(
+        {
           sellerAccount,
           sellerName: selectedShop.name,
           sellerPhone,
@@ -5366,7 +5433,7 @@ export default function GrandmaPage() {
           buyerName,
           buyerPhone,
           buyerLocation,
-          paymentName: grandmaPaymentToOrdersPaymentName(selectedPayment),
+          paymentName,
           currency: "RWF",
           items,
           reference,
@@ -5376,7 +5443,22 @@ export default function GrandmaPage() {
           DELIVERY_NAME: deliveryName,
           deliveryAmount: Math.round(logisticsTotal),
           DELIVERY_AMOUNT: Math.round(logisticsTotal),
-        }),
+        },
+        phoneRegisteredOnOrder,
+      )
+      const payloadPhoneOk = assertGrandmaOrderPayloadHasMomoPhone(orderClientBody)
+      if (!payloadPhoneOk.ok) {
+        logGrandmaMomoPhoneGuardFailure(payloadPhoneOk.code, phoneRegisteredOnOrder)
+        setGrandmaOrderSubmitError(trSubmit.orderSubmitNeedPhone)
+        grandmaBuyerPhoneInputRef.current?.focus()
+        grandmaBuyerPhoneInputRef.current?.scrollIntoView({ block: "center", behavior: "smooth" })
+        return
+      }
+
+      const res = await fetch("/api/grandma/order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(orderClientBody),
       })
       const data = (await res.json().catch(() => ({}))) as {
         ok?: boolean
@@ -5478,6 +5560,7 @@ export default function GrandmaPage() {
     displayUserLocationEn,
     grandTotal,
     grandmaBuyerPhoneInput,
+    grandmaMomoSmsPaste,
     grandmaCashConfirm,
     grandmaSmsPayCheck,
     grandmaSmsMatchResult,
@@ -5488,18 +5571,11 @@ export default function GrandmaPage() {
     logisticsFeeRwf,
   ])
 
+  const grandmaCourierUi = grandmaCourierDisplayState(couriersByDistance.length)
   const featuredCourierSafe = useMemo(() => {
-    const fc = featuredCourier
-    return fc ?? COURIER_POOL[0] ?? {
-      id: "default",
-      name: "No couriers available",
-      avatarEmoji: "ð¨",
-      hobbies: "Delivery service unavailable",
-      rating: 0,
-      reviewCount: 0,
-      distanceToShopKm: 0,
-    }
-  }, [featuredCourier])
+    if (!grandmaCourierUi.hasAssignableCouriers) return null
+    return featuredCourier ?? COURIER_POOL[0] ?? null
+  }, [featuredCourier, grandmaCourierUi.hasAssignableCouriers])
 
   return (
     <div className={`app ${appMode === "seller" ? "seller-mode" : ""}`}>
@@ -7880,28 +7956,47 @@ export default function GrandmaPage() {
               ) : null}
             </div>
 
-            {!grandmaBuyerSession?.phone?.trim() ? (
+            {isGrandmaMobileMoneyPayment(selectedPayment) || !grandmaBuyerSession?.phone?.trim() ? (
               <div className="mb-4 space-y-2">
                 <div className="flex items-start gap-2">
                   <Smartphone className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700" aria-hidden />
                   <Label htmlFor="grandma-guest-phone" className="text-sm font-bold leading-snug text-emerald-950">
                     {tPay.paymentGuestPhoneLabel}
+                    {isGrandmaMobileMoneyPayment(selectedPayment) ? " *" : ""}
                   </Label>
                 </div>
                 <Input
                   id="grandma-guest-phone"
+                  ref={grandmaBuyerPhoneInputRef}
                   type="tel"
                   inputMode="tel"
                   autoComplete="tel"
+                  required={isGrandmaMobileMoneyPayment(selectedPayment)}
+                  aria-invalid={
+                    isGrandmaMobileMoneyPayment(selectedPayment) && !grandmaPayerPhoneOk ? true : undefined
+                  }
                   placeholder={tPay.paymentGuestPhonePlaceholder}
                   value={grandmaBuyerPhoneInput}
                   onChange={(e) => setGrandmaBuyerPhoneInput(e.target.value)}
-                  className="pay-input-tap min-h-[48px] border-emerald-200 bg-white text-base focus-visible:ring-emerald-500/30"
+                  className={`pay-input-tap min-h-[48px] bg-white text-base focus-visible:ring-emerald-500/30 ${
+                    isGrandmaMobileMoneyPayment(selectedPayment) && !grandmaPayerPhoneOk
+                      ? "border-red-400"
+                      : "border-emerald-200"
+                  }`}
                 />
                   <p className="text-xs leading-snug text-emerald-900/80">
-                  {tPay.paymentGuestPhoneNote} {" "}
-                  <span className="font-semibold text-emerald-800">{tPay.signIn}</span>
+                  {isGrandmaMobileMoneyPayment(selectedPayment)
+                    ? tPay.paymentMomoPhoneRequiredNote
+                    : tPay.paymentGuestPhoneNote}{" "}
+                  {!grandmaBuyerSession?.phone?.trim() ? (
+                    <span className="font-semibold text-emerald-800">{tPay.signIn}</span>
+                  ) : null}
                 </p>
+                {isGrandmaMobileMoneyPayment(selectedPayment) && !grandmaPayerPhoneOk ? (
+                  <p className="text-sm font-semibold text-red-600" role="alert">
+                    {grandmaBuyerPhoneInput.trim() ? tPay.payStepErrPhone : tPay.orderSubmitNeedPhone}
+                  </p>
+                ) : null}
               </div>
             ) : null}
 
@@ -8275,6 +8370,7 @@ export default function GrandmaPage() {
         </div>
 
         {fulfillmentMode === "delivery" ? (
+          grandmaCourierUi.hasAssignableCouriers && featuredCourierSafe ? (
           <div
             className="card rider-card"
             onClick={() => setCourierModalOpen(true)}
@@ -8314,9 +8410,26 @@ export default function GrandmaPage() {
             </div>
             <div className="rider-tap-hint">{tPay.tapCouriers}</div>
           </div>
+          ) : (
+          <div
+            className="card rider-card"
+            role="status"
+            aria-label={tPay.courierAssignmentUnavailable}
+            style={{ cursor: "default" }}
+          >
+            <div className="rider-card-inner">
+              <div className="rider-body">
+                <div className="rider-name">{tPay.courierAssignmentUnavailable}</div>
+                <div className="rider-hobbies" style={{ marginTop: 6 }}>
+                  {tPay.courierAssignmentUnavailableHint}
+                </div>
+              </div>
+            </div>
+          </div>
+          )
         ) : null}
 
-        {fulfillmentMode === "delivery" && courierModalOpen ? (
+        {fulfillmentMode === "delivery" && courierModalOpen && grandmaCourierUi.hasAssignableCouriers ? (
           <div
             className="courier-modal-backdrop"
             role="presentation"
@@ -8409,15 +8522,13 @@ export default function GrandmaPage() {
           </button>
         ) : (
           <p className="card note" style={{ marginBottom: 12, fontSize: 13, lineHeight: 1.45 }}>
-            {hasGrandmaStockBlock
+            {grandmaSendLockReason === "stock"
               ? tPay.stockExceededPayBlock
-              : isGrandmaSmsPaymentMethod(selectedPayment)
-                ? tPay.payStepSendOrderLocked
-                : selectedPayment === "cash"
+              : grandmaSendLockReason === "phone"
+                ? tPay.orderSubmitNeedPhone
+                : grandmaSendLockReason === "cash"
                   ? tPay.payStepErrCash
-                  : selectedPayment === "bk"
-                    ? tPay.payStepErrPhone
-                    : tPay.payStepSendOrderLocked}
+                  : tPay.payStepSendOrderLocked}
           </p>
         )}
         <p className="card note" style={{ marginTop: 12, fontSize: 12, color: "var(--muted)" }}>

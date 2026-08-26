@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getOrdersUrl, getProxyTimeoutMs } from "@/lib/backend-config"
+import {
+  assertGrandmaOrderPayloadHasMomoPhone,
+  attachPhoneRegisteredOnOrder,
+  logGrandmaMomoPhoneGuardFailure,
+} from "@/lib/grandma-checkout-order-guard"
 import { getOrCreatePublicTokenForOrderId } from "@/lib/order-tracking-token"
 
 export const runtime = "nodejs"
@@ -39,25 +44,48 @@ export async function POST(req: NextRequest) {
     ).trim()
     const deliveryName = String(body.deliveryName ?? body.DELIVERY_NAME ?? "").trim()
     const deliveryAmount = Number(body.deliveryAmount ?? body.DELIVERY_AMOUNT ?? 0)
-    const payload = {
-      buyerEmail: String(body.buyerEmail ?? "").trim(),
-      buyerName: String(body.buyerName ?? "").trim(),
-      buyerPhone: String(body.buyerPhone ?? "").trim(),
-      buyerLocation: String(body.buyerLocation ?? "NA").trim() || "NA",
-      sellerAccount,
-      sellerName: String(body.sellerName ?? "").trim(),
-      sellerPhone: String(body.sellerPhone ?? "").trim(),
-      paymentName: String(body.paymentName ?? "PAY_ON_DELIVERY"),
-      paymentId: body.paymentId != null ? String(body.paymentId) : "",
-      reference: body.reference != null ? String(body.reference) : "",
-      currency: String(body.currency ?? "RWF"),
-      isTableCommand: false,
-      items,
-      ...(orderNotes ? { orderNote: orderNotes, ORDER_NOTE: orderNotes, CONDITIONS: orderNotes } : {}),
-      ...(deliveryName ? { deliveryName, DELIVERY_NAME: deliveryName } : {}),
-      ...(Number.isFinite(deliveryAmount) ? { deliveryAmount, DELIVERY_AMOUNT: deliveryAmount } : {}),
-      ...(Number.isFinite(subtotal) && subtotal > 0 ? { subtotal } : {}),
+    const paymentName = String(body.paymentName ?? "PAY_ON_DELIVERY")
+    const phoneRegisteredOnOrder = String(
+      body.phoneRegisteredOnOrder ?? body.PHONE_REGISTERED_ON_ORDER ?? "",
+    ).trim()
+    const momoPhoneOk = assertGrandmaOrderPayloadHasMomoPhone({
+      paymentName,
+      phoneRegisteredOnOrder,
+    })
+    if (!momoPhoneOk.ok) {
+      logGrandmaMomoPhoneGuardFailure(momoPhoneOk.code, phoneRegisteredOnOrder)
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "The phone number used for Mobile Money is required",
+          code: momoPhoneOk.code,
+          rid,
+        },
+        { status: 400 },
+      )
     }
+    const payload = attachPhoneRegisteredOnOrder(
+      {
+        buyerEmail: String(body.buyerEmail ?? "").trim(),
+        buyerName: String(body.buyerName ?? "").trim(),
+        buyerPhone: String(body.buyerPhone ?? "").trim(),
+        buyerLocation: String(body.buyerLocation ?? "NA").trim() || "NA",
+        sellerAccount,
+        sellerName: String(body.sellerName ?? "").trim(),
+        sellerPhone: String(body.sellerPhone ?? "").trim(),
+        paymentName,
+        paymentId: body.paymentId != null ? String(body.paymentId) : "",
+        reference: body.reference != null ? String(body.reference) : "",
+        currency: String(body.currency ?? "RWF"),
+        isTableCommand: false,
+        items,
+        ...(orderNotes ? { orderNote: orderNotes, ORDER_NOTE: orderNotes, CONDITIONS: orderNotes } : {}),
+        ...(deliveryName ? { deliveryName, DELIVERY_NAME: deliveryName } : {}),
+        ...(Number.isFinite(deliveryAmount) ? { deliveryAmount, DELIVERY_AMOUNT: deliveryAmount } : {}),
+        ...(Number.isFinite(subtotal) && subtotal > 0 ? { subtotal } : {}),
+      },
+      phoneRegisteredOnOrder,
+    )
 
     const resp = await fetch(ordersUrl.toString(), {
       method: "POST",

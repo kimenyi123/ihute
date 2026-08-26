@@ -93,7 +93,7 @@ export function looksLikeFullPaymentSms(text: string): boolean {
   if (s.length < 40) return false
   const hasMoney = /(?:RWF|FRW|Frw|frw)/i.test(s)
   const hasNarrative =
-    /(?:payment of|transferred to|was completed|successful|you have sent|umeha|kwishyura)/i.test(s)
+    /(?:payment of|transf(?:er+ed|ared)\s+to|was completed|successful|you have sent|umeha|kwishyura)/i.test(s)
   const hasStamp =
     /\d{4}[-/]\d{1,2}[-/]\d{1,2}/.test(s) ||
     /\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}/.test(s) ||
@@ -142,12 +142,60 @@ export function extractMoMoReferenceNoteFromSms(text: string): string | null {
   return null
 }
 
+const MTN_TRANSFER_VERB = "transf(?:er+ed|ared)"
+
+function classifyMtnParenReceiver(raw: string): { phone: string | null; code: string | null } {
+  const digits = raw.replace(/\D/g, "")
+  if (digits.length >= 9) return { phone: digits, code: null }
+  if (digits.length >= 3) return { phone: null, code: digits }
+  return { phone: null, code: null }
+}
+
+export type MtnTransferConfirmation = {
+  amount: number
+  receiverName: string
+  receiverPhone: string | null
+  receiverCode: string | null
+  paidAt: Date
+}
+
+/**
+ * MTN person-to-person / merchant transfer SMS, including the common
+ * "transfared" misspelling and messages that omit TxId.
+ * Example shape: `*165*s*600 RWF transfared to Name(07…) at 2026-08-20 15:11:40.`
+ */
+export function extractMtnTransferConfirmationFromSms(text: string): MtnTransferConfirmation | null {
+  const s = String(text ?? "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim()
+  const pattern = new RegExp(
+    `([\\d][\\d\\s,.]*)\\s*(?:RWF|FRW|Frw|frw)\\s+${MTN_TRANSFER_VERB}\\s+to\\s+([A-Za-z][^()\\n\\r]*?)\\s*(?:\\(([^)]+)\\))?\\s+at\\s+(\\d{4}[-/]\\d{1,2}[-/]\\d{1,2})\\s+(\\d{1,2}:\\d{2}(?::\\d{2})?)`,
+    "i",
+  )
+  const m = s.match(pattern)
+  if (!m) return null
+  const amount = parseMoneyToken(m[1] || "")
+  const receiverName = (m[2] || "").trim().replace(/\s+/g, " ")
+  if (amount == null || !receiverName) return null
+  const paren = classifyMtnParenReceiver(m[3] || "")
+  const paidAt = extractDateFromMoMoSms(`${m[4]} ${m[5]}`)
+  if (!paidAt) return null
+  return {
+    amount,
+    receiverName,
+    receiverPhone: paren.phone,
+    receiverCode: paren.code,
+    paidAt,
+  }
+}
+
 export function extractMoMoPhonePaymentDetailsFromSms(text: string): {
   receiverName: string
   receiverPhone: string
 } | null {
-  const s = String(text ?? "")
-  const pattern = /transferred to\s+([^\n\r(]+?)\s*\((\d{9,})\)\s*at\s+/i
+  const s = String(text ?? "").replace(/\u00a0/g, " ").replace(/\s+/g, " ")
+  const pattern = new RegExp(
+    `${MTN_TRANSFER_VERB}\\s+to\\s+([^\\n\\r(]+?)\\s*\\((\\d{9,})\\)\\s*at\\s+`,
+    "i",
+  )
   const m = s.match(pattern)
   if (!m) return null
   return {
@@ -248,7 +296,7 @@ const DEFAULT_MAX_AGE_MINUTES = 15
  * Enhanced MoMo SMS matching:
  * 0. Full SMS body required (not a bare TxId)
  * 1. Amount must match order total (within tolerance)
- * 2. TxId must be present (needed for local uniqueness + GQ)
+ * 2. Proof: existing TxId:… format OR a valid MTN transfer-confirmation SMS
  * 3. Transaction date must be recent (within maxAgeMinutes)
  * 4. Merchant code must match (if provided)
  *
@@ -265,9 +313,10 @@ export function matchMoMoSmsToOrderTotal(
 ): MoMoSmsMatchResult {
   const txId = extractMoMoTxIdFromSms(sms)
   const referenceNote = extractMoMoReferenceNoteFromSms(sms)
+  const transferConfirmation = extractMtnTransferConfirmationFromSms(sms)
   const phonePaymentDetails = extractMoMoPhonePaymentDetailsFromSms(sms)
   const codePaymentDetails = extractMoMoCodePaymentDetailsFromSms(sms)
-  const parsedDateObj = extractDateFromMoMoSms(sms)
+  const parsedDateObj = transferConfirmation?.paidAt ?? extractDateFromMoMoSms(sms)
   const parsedDate = parsedDateObj ? parsedDateObj.toISOString() : null
   const paidAtIso = parsedDate
   const candidates = extractRwfAmountCandidatesFromText(sms)
@@ -288,9 +337,13 @@ export function matchMoMoSmsToOrderTotal(
     referenceNote,
     paidAtIso,
     parsedDate,
-    receiverName: phonePaymentDetails?.receiverName ?? codePaymentDetails?.receiverName ?? null,
-    receiverPhone: phonePaymentDetails?.receiverPhone ?? null,
-    receiverCode: codePaymentDetails?.receiverCode ?? null,
+    receiverName:
+      transferConfirmation?.receiverName ??
+      phonePaymentDetails?.receiverName ??
+      codePaymentDetails?.receiverName ??
+      null,
+    receiverPhone: transferConfirmation?.receiverPhone ?? phonePaymentDetails?.receiverPhone ?? null,
+    receiverCode: transferConfirmation?.receiverCode ?? codePaymentDetails?.receiverCode ?? null,
   }
 
   if (looksLikeBareTxId(sms)) {
@@ -326,10 +379,15 @@ export function matchMoMoSmsToOrderTotal(
     }
   }
 
-  // 1. Check amount match against order total
-  const hit = candidates.find((n) => Math.abs(n - orderTotalRwf) <= toleranceRwf)
+  // 1. Check amount match against order total.
+  // Format B uses the transfer amount only (ignore fee / balance).
+  const hit = transferConfirmation
+    ? Math.abs(transferConfirmation.amount - orderTotalRwf) <= toleranceRwf
+      ? transferConfirmation.amount
+      : undefined
+    : candidates.find((n) => Math.abs(n - orderTotalRwf) <= toleranceRwf)
   if (hit == null) {
-    if (!candidates.length) {
+    if (!transferConfirmation && !candidates.length) {
       return {
         ...base,
         matched: false,
@@ -342,15 +400,15 @@ export function matchMoMoSmsToOrderTotal(
     return {
       ...base,
       matched: false,
-      amount: candidates[candidates.length - 1],
+      amount: transferConfirmation?.amount ?? candidates[candidates.length - 1] ?? null,
       dateValid: null,
       merchantCodeValid: null,
       rejectReason: "amount_mismatch",
     }
   }
 
-  // 2. TxId required — uniqueness + GQ proof
-  if (!txId) {
+  // 2. Proof: existing TxId:… format OR a parsed MTN transfer confirmation (Format B).
+  if (!txId && !transferConfirmation) {
     return {
       ...base,
       matched: false,
