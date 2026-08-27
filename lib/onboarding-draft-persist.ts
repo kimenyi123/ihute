@@ -1,5 +1,5 @@
 import mysql from "mysql2/promise"
-import { getOnboardingMysqlConfig } from "@/lib/onboarding-mysql"
+import { getOnboardingMysqlConfig, toMysqlConnectionOptions } from "@/lib/onboarding-mysql"
 
 const ENSURE_SHOP_ONBOARDING_DRAFT = `
 CREATE TABLE IF NOT EXISTS shop_onboarding_draft (
@@ -49,10 +49,16 @@ export async function persistShopOnboardingDraft(body: unknown): Promise<void> {
   }
 
   const json = serializeOnboardingPayload(body)
-  const conn = await mysql.createConnection(cfg)
+  const conn = await mysql.createConnection(toMysqlConnectionOptions(cfg))
   try {
-    await conn.query(ENSURE_SHOP_ONBOARDING_DRAFT)
-    await conn.query("INSERT INTO shop_onboarding_draft (payload_json) VALUES (?)", [json])
+    try {
+      await conn.query("INSERT INTO shop_onboarding_draft (payload_json) VALUES (?)", [json])
+    } catch (e: unknown) {
+      const raw = e instanceof Error ? e.message : String(e)
+      if (!/ER_NO_SUCH_TABLE|doesn't exist/i.test(raw)) throw e
+      await conn.query(ENSURE_SHOP_ONBOARDING_DRAFT)
+      await conn.query("INSERT INTO shop_onboarding_draft (payload_json) VALUES (?)", [json])
+    }
   } finally {
     await conn.end()
   }
@@ -72,7 +78,7 @@ export async function logUmuriroSmsOutbound(row: UmuriroSmsAuditRow): Promise<vo
   const cfg = getOnboardingMysqlConfig()
   if (!cfg) return
 
-  const conn = await mysql.createConnection(cfg)
+  const conn = await mysql.createConnection(toMysqlConnectionOptions(cfg))
   try {
     await conn.query(ENSURE_UMURIRO_SMS_OUTBOUND)
     await conn.query(

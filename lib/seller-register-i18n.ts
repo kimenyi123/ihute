@@ -417,12 +417,57 @@ export const UMURIRO_UI = {
     rw: "Ntitwashoboye kubika itumiza muri database. Ongera ugerageze.",
     fr: "Impossible d\u2019enregistrer la commande. Veuillez r\u00e9essayer.",
   },
+  saveOrderDbUnreachable: {
+    en: "Could not reach the order database from this computer. Check that MySQL port 3306 is open, or use a host this PC can reach.",
+    rw: "Ntitwashoboye kugera kuri database y\u2019itumiza. Reba niba MySQL (port 3306) ifunguye, cyangwa ukoreshe host iyi mudasobwa ishobora kugera.",
+    fr: "Impossible d\u2019atteindre la base de commandes. V\u00e9rifiez que le port MySQL 3306 est ouvert, ou utilisez un h\u00f4te joignable.",
+  },
+  saveOrderDbTableMissing: {
+    en: "The order table is missing on the server. Ask admin to create shop_onboarding_draft.",
+    rw: "Imbonerahamwe y\u2019itumiza irabuze kuri server. Saba admin gukora shop_onboarding_draft.",
+    fr: "La table des commandes est absente. Demandez \u00e0 l\u2019admin de cr\u00e9er shop_onboarding_draft.",
+  },
+  saveOrderDbInvalid: {
+    en: "The order data could not be saved (invalid JSON).",
+    rw: "Amakuru y\u2019itumiza ntiyabitswe (JSON itemewe).",
+    fr: "Les donn\u00e9es de la commande n\u2019ont pas pu \u00eatre enregistr\u00e9es (JSON invalide).",
+  },
   sellerSmsAfterSave: {
     en: "SMS to {phone} after save (if Twilio / SMS webhook is configured).",
     rw: "SMS kuri {phone} nyuma yo kubika (niba Twilio / webhook byashyizweho).",
     fr: "SMS vers {phone} apr\u00e8s enregistrement (si Twilio / webhook est configur\u00e9).",
   },
 } satisfies Record<string, Tri>
+
+/** Map API `errorCode` / English `Quick Shop:` text to a localized save-order message. */
+export function pickUmuriroSaveDbError(
+  lang: Language,
+  errorCode?: string | null,
+  raw?: string | null,
+): string {
+  const code = (errorCode ?? "").trim()
+  const text = raw ?? ""
+  if (code === "db_unreachable" || text.includes("database unreachable")) {
+    return pickLang(UMURIRO_UI.saveOrderDbUnreachable, lang)
+  }
+  if (code === "db_table_missing" || text.includes("table missing")) {
+    return pickLang(UMURIRO_UI.saveOrderDbTableMissing, lang)
+  }
+  if (code === "db_invalid" || text.includes("invalid order data")) {
+    return pickLang(UMURIRO_UI.saveOrderDbInvalid, lang)
+  }
+  if (
+    code === "db_not_configured" ||
+    text.includes("not saved to the database") ||
+    text.includes("ONBOARDING_MYSQL")
+  ) {
+    return pickLang(UMURIRO_UI.saveOrderDbNotConfigured, lang)
+  }
+  if (code === "db_error" || text.includes("Quick Shop:") || text.includes("Database save failed")) {
+    return pickLang(UMURIRO_UI.saveOrderDbError, lang)
+  }
+  return text || pickLang(UMURIRO_UI.saveOrderDbError, lang)
+}
 
 /** Page chrome (header subtitle + steps). */
 export const SELLER_UI = {

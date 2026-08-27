@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server"
 import { isValidRwandaMobileE164, normalizeRwandaMobileE164 } from "@/lib/rwanda-phone"
 import {
+  classifyOnboardingDbError,
+  friendlyOnboardingDbError,
+} from "@/lib/onboarding-db-error"
+import {
   isOnboardingMysqlConfigured,
   logUmuriroSmsOutbound,
   persistShopOnboardingDraft,
@@ -54,23 +58,6 @@ export type UmuriroPayload = {
   }
 }
 
-function friendlyDbError(raw: string, shopName: string): string {
-  const shop = shopName.trim() || "order"
-  if (/ER_NO_SUCH_TABLE|doesn't exist/i.test(raw)) {
-    return `Quick Shop: could not save "${shop}" — database table missing (contact admin).`
-  }
-  if (/Invalid JSON|JSON/i.test(raw)) {
-    return `Quick Shop: could not save "${shop}" — invalid order data.`
-  }
-  if (/ECONNREFUSED|ENOTFOUND|ETIMEDOUT|connect/i.test(raw)) {
-    return `Quick Shop: could not save "${shop}" — database unreachable.`
-  }
-  if (/ONBOARDING_MYSQL/i.test(raw)) {
-    return `Quick Shop: database not configured on server.`
-  }
-  return `Quick Shop: could not save "${shop}". Try again or contact support.`
-}
-
 export async function POST(req: Request) {
   const rid = crypto.randomUUID()
   try {
@@ -94,6 +81,7 @@ export async function POST(req: Request) {
         {
           ok: false,
           error: "ONBOARDING_MYSQL_* is not configured on the server. Cannot save order.",
+          errorCode: "db_not_configured" as const,
           rid,
           persisted: false,
         },
@@ -109,7 +97,8 @@ export async function POST(req: Request) {
       return NextResponse.json(
         {
           ok: false,
-          error: friendlyDbError(msg, shopName),
+          error: friendlyOnboardingDbError(e, shopName),
+          errorCode: classifyOnboardingDbError(e),
           rid,
           persisted: false,
         },

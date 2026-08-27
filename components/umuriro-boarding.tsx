@@ -35,7 +35,7 @@ import {
 } from "@/components/ui/select"
 import { useHydratedLanguage } from "@/lib/language-store"
 import { LanguageSelector } from "@/components/language-selector"
-import { L, pickLang, SELLER_UI, UMURIRO_UI } from "@/lib/seller-register-i18n"
+import { L, pickLang, pickUmuriroSaveDbError, SELLER_UI, UMURIRO_UI } from "@/lib/seller-register-i18n"
 import { useAuthStore } from "@/lib/auth-store"
 import { getShopPublicUrl } from "@/lib/shop-public-url"
 import { filterProductsByRelevance } from "@/lib/search-utils"
@@ -828,12 +828,19 @@ export function UmuriroBoarding({ initial }: { initial?: UmuriroGqInitial }) {
         body: JSON.stringify(payload),
       })
       const json = await res.json()
-      if (!res.ok || !json?.ok) throw new Error(json?.error || "Save failed")
-      if (json.persisted !== true) {
-        throw new Error(
-          pickLang(UMURIRO_UI.saveOrderDbNotConfigured, lang) ||
-            "Order was not saved to the database. Ask admin to set ONBOARDING_MYSQL_* on the server.",
+      if (!res.ok || !json?.ok) {
+        setErr(
+          pickUmuriroSaveDbError(
+            lang,
+            typeof json?.errorCode === "string" ? json.errorCode : undefined,
+            typeof json?.error === "string" ? json.error : "Save failed",
+          ),
         )
+        return
+      }
+      if (json.persisted !== true) {
+        setErr(pickLang(UMURIRO_UI.saveOrderDbNotConfigured, lang))
+        return
       }
 
       persistLocalShop()
@@ -853,13 +860,7 @@ export function UmuriroBoarding({ initial }: { initial?: UmuriroGqInitial }) {
       }
     } catch (e: unknown) {
       const raw = e instanceof Error ? e.message : "Error"
-      if (raw.includes("Quick Shop:") || raw.includes("Database save failed")) {
-        setErr(pickLang(UMURIRO_UI.saveOrderDbError, lang))
-      } else if (raw.includes("not saved to the database") || raw.includes("ONBOARDING_MYSQL")) {
-        setErr(pickLang(UMURIRO_UI.saveOrderDbNotConfigured, lang))
-      } else {
-        setErr(raw)
-      }
+      setErr(pickUmuriroSaveDbError(lang, undefined, raw))
     } finally {
       setLoading(false)
     }
