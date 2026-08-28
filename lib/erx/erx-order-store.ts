@@ -17,6 +17,7 @@ import type {
   ErxCandidatePharmacy,
   ErxDeliveryMode,
   ErxOrderSnapshot,
+  ErxPosSyncAnswer,
   ErxQuote,
   ErxQuoteLine,
   ErxRfqItem,
@@ -24,6 +25,7 @@ import type {
   ErxRating,
   ErxResponderNotice,
 } from "./erx-market-types"
+import { ERX_SYNC_POLL_SEC, pullPosQuotesFromMysql } from "./erx-pos-sync"
 
 const RIDER_NAMES = ["Eric", "Patrick", "Divine", "Aline"]
 const HOLD_MS = 4 * 60 * 60 * 1000
@@ -50,6 +52,10 @@ type OrderRec = {
   id: string
   erxCode: string
   items: ErxRfqItem[]
+  pharmacies: ErxCandidatePharmacy[]
+  posOrderNumbers: Record<string, string>
+  lastPosSyncAtMs: number | null
+  posSyncAnswers: ErxPosSyncAnswer[]
   createdAtMs: number
   mock: boolean
   quotes: QuoteRec[]
@@ -59,6 +65,7 @@ type OrderRec = {
   riderOffers: RiderOfferRec[]
   paidAtMs: number | null
   momoRef: string | null
+  paymentName: string | null
   invoiceNo: string | null
   delivery: { mode: ErxDeliveryMode; fee: number; riderId: string | null } | null
   responders: ErxResponderNotice[]
@@ -129,15 +136,26 @@ export function createRfqOrder(input: {
   mock: boolean
 }): OrderRec {
   prune()
+  const seen = new Set<string>()
+  const pharmacies = input.pharmacies.filter((p) => {
+    const id = p.id.trim()
+    if (!id || seen.has(id)) return false
+    seen.add(id)
+    return true
+  })
   const id = "IH-" + Math.floor(100000 + Math.random() * 900000)
   const createdAtMs = Date.now()
   const rec: OrderRec = {
     id,
     erxCode: input.erxCode,
     items: input.items,
+    pharmacies,
+    posOrderNumbers: {},
+    lastPosSyncAtMs: null,
+    posSyncAnswers: [],
     createdAtMs,
     mock: input.mock,
-    quotes: input.mock ? buildMockQuotes(input.pharmacies, input.items, createdAtMs) : [],
+    quotes: input.mock ? buildMockQuotes(pharmacies, input.items, createdAtMs) : [],
     stoppedAtMs: null,
     chosenPharmacyId: null,
     chosenAtMs: null,
@@ -151,12 +169,10 @@ export function createRfqOrder(input: {
     rating: null,
   }
   if (!input.mock) {
-    // Real mode: quotes arrive from Ishyiga POS via the pending-orders channel.
-    // Pharmacies stay CALLING until the POS write-back is wired (see erx-pos-channel.ts).
-    rec.quotes = input.pharmacies.map((p) => ({
+    rec.quotes = pharmacies.map((p) => ({
       pharmacy: p,
       readyAtMs: Number.MAX_SAFE_INTEGER,
-      outcome: "DECLINED",
+      outcome: "FULL" as const,
       stopped: false,
       lines: [],
       goods: 0,
@@ -167,6 +183,70 @@ export function createRfqOrder(input: {
   }
   orders().set(id, rec)
   return rec
+}
+
+export function registerPosInserts(
+  id: string,
+  inserts: Array<{ pharmacyId: string; transactionId: string; ok: boolean }>,
+): void {
+  const o = orders().get(id)
+  if (!o) return
+  for (const ins of inserts) {
+    if (ins.ok && ins.pharmacyId && ins.transactionId) {
+      o.posOrderNumbers[ins.pharmacyId.trim()] = ins.transactionId.trim()
+    }
+  }
+}
+
+/** Pull POS line updates from MySQL and materialize quotes (real mode). */
+export async function syncOrderFromPos(id: string): Promise<boolean> {
+  const o = orders().get(id)
+  if (!o || o.mock) return false
+
+  const pharmacyNames: Record<string, string> = {}
+  for (const q of o.quotes) pharmacyNames[q.pharmacy.id] = q.pharmacy.name
+
+  const pulled = await pullPosQuotesFromMysql({
+    orderId: o.id,
+    erxCode: o.erxCode,
+    items: o.items,
+    pharmacyIds: o.quotes.map((q) => q.pharmacy.id),
+    pharmacyNames,
+  })
+
+  o.lastPosSyncAtMs = Date.now()
+  o.posSyncAnswers = pulled.map((p) => p.syncAnswer)
+
+  for (const p of pulled) {
+    const q = o.quotes.find((x) => x.pharmacy.id === p.pharmacyId)
+    if (!q) continue
+    if (p.outcome === "CALLING") continue
+
+    q.outcome = p.outcome === "DECLINED" ? "DECLINED" : p.outcome
+    q.readyAtMs = o.lastPosSyncAtMs
+    q.lines = p.outcome === "DECLINED" ? [] : toQuoteLinesFromPull(o.items, p)
+    q.goods = p.goods
+    if (!q.deliveryFee) {
+      q.deliveryFee = 1000 + Math.round((q.pharmacy.distKm * 180) / 50) * 50
+    }
+    if (!q.etaMin) q.etaMin = 30 + Math.round(q.pharmacy.distKm * 4)
+  }
+
+  return true
+}
+
+function toQuoteLinesFromPull(
+  items: ErxRfqItem[],
+  p: Awaited<ReturnType<typeof pullPosQuotesFromMysql>>[number],
+): ErxQuoteLine[] {
+  return items.map((it, ix) => {
+    const line =
+      p.lines.find((l) => l.itemName.trim().toLowerCase() === it.name.trim().toLowerCase()) ||
+      p.lines[ix]
+    const qty = line ? Math.round(line.confirmedQty) : 0
+    const unit = line ? Math.round(line.unitPrice) : 0
+    return { name: it.name, need: it.qty, qty, unit, price: unit * qty }
+  })
 }
 
 export function getOrder(id: string): OrderRec | null {
@@ -209,7 +289,11 @@ export function chooseQuote(id: string, pharmacyId: string): OrderRec | null {
 
 export function payOrder(
   id: string,
-  input: { momoRef: string; delivery: { mode: ErxDeliveryMode; fee: number; riderId: string | null } },
+  input: {
+    momoRef: string
+    paymentName?: string
+    delivery: { mode: ErxDeliveryMode; fee: number; riderId: string | null }
+  },
 ): OrderRec | null {
   const o = orders().get(id)
   if (!o) return null
@@ -217,6 +301,7 @@ export function payOrder(
   const now = Date.now()
   o.paidAtMs = now
   o.momoRef = input.momoRef
+  o.paymentName = input.paymentName || "momo"
   o.invoiceNo = "INV-VALG01-" + Math.floor(10000 + Math.random() * 89999)
   o.delivery = input.delivery
   // Notify EVERY pharmacy that replied: chosen serves, others release reservation.
@@ -326,5 +411,13 @@ export function snapshotOrder(id: string): ErxOrderSnapshot | null {
     responders: o.responders,
     deliveredAt: o.deliveredAtMs ? new Date(o.deliveredAtMs).toISOString() : null,
     rating: o.rating,
+    sync: o.mock
+      ? undefined
+      : {
+          pollSec: ERX_SYNC_POLL_SEC,
+          nextPollSec: ERX_SYNC_POLL_SEC,
+          lastPullAt: o.lastPosSyncAtMs ? new Date(o.lastPosSyncAtMs).toISOString() : null,
+          answers: o.posSyncAnswers,
+        },
   }
 }

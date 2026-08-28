@@ -8,21 +8,17 @@ import mysql from "mysql2/promise"
 
 import { normalizeSupplierLatLng } from "@/lib/geo-haversine"
 
-type MetricsRow = RowDataPacket & {
-  pharmacy_id: string
-  stars: number | null
-  stock_acc: number | null
-  last_sync_at: Date | string | null
-}
-
 type SyncRow = RowDataPacket & {
   account: string
   last_sync: Date | string | null
 }
 
 export type ErxPharmacyDbMetrics = {
-  stars: number
-  stockAcc: number
+  /** account_seller.rating_star (1–5), null if never rated. */
+  stars: number | null
+  /** account_seller.certificate parsed 0–10 (stock quality score). */
+  stockAcc: number | null
+  /** Minutes since MAX(seller_add_stock.SYNCED_TIME); 999 = unknown/stale. */
   lastSyncMin: number
 }
 
@@ -95,9 +91,33 @@ export async function pingErxMysql(): Promise<{ ok: boolean; database?: string; 
   }
 }
 
+function parseRatingStar(raw: unknown): number | null {
+  if (raw == null || raw === "") return null
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n <= 0) return null
+  return Math.max(1, Math.min(5, Math.round(n * 10) / 10))
+}
+
+/** certificate column on account_seller — operational stock score 0–10. */
+function parseCertificateScore(raw: unknown): number | null {
+  if (raw == null || raw === "") return null
+  const n = Number(String(raw).trim())
+  if (!Number.isFinite(n)) return null
+  return Math.max(0, Math.min(10, Math.round(n)))
+}
+
+type SellerMetricsRow = RowDataPacket & {
+  id: string
+  rating_star: number | string | null
+  certificate: string | number | null
+}
+
 /**
- * Stars / stock accuracy / last POS sync for pharmacy candidates (step 3).
- * Missing rows get conservative defaults until pharmacy_metrics is populated nightly.
+ * Stars + stock + last POS sync for eRx candidate cards (step 3).
+ * Sources (beta/Kaos):
+ *   ★ stars     → account_seller.rating_star (fallback account_signup)
+ *   Stock /10   → account_seller.certificate (fallback account_signup)
+ *   Sync        → MAX(seller_add_stock.SYNCED_TIME) per pharmacy
  */
 export async function fetchPharmacyMetricsByIds(
   pharmacyIds: string[],
@@ -109,55 +129,79 @@ export async function fetchPharmacyMetricsByIds(
   const p = getErxMysqlPool()
   if (!p) return out
 
+  const ensure = (id: string): ErxPharmacyDbMetrics => {
+    const prev = out.get(id)
+    if (prev) return prev
+    const row: ErxPharmacyDbMetrics = { stars: null, stockAcc: null, lastSyncMin: 999 }
+    out.set(id, row)
+    return row
+  }
+
+  const ingestSellerRows = (rows: SellerMetricsRow[]) => {
+    for (const row of rows) {
+      const id = String(row.id ?? "").trim()
+      if (!id) continue
+      const m = ensure(id)
+      const star = parseRatingStar(row.rating_star)
+      const cert = parseCertificateScore(row.certificate)
+      if (star != null) m.stars = star
+      if (cert != null) m.stockAcc = cert
+    }
+  }
+
   try {
-    const placeholders = ids.map(() => "?").join(",")
-    const [metricRows] = await p.query<MetricsRow[]>(
-      `SELECT pharmacy_id, stars, stock_acc, last_sync_at
-       FROM pharmacy_metrics
-       WHERE pharmacy_id IN (${placeholders})`,
+    const ph = ids.map(() => "?").join(",")
+    const [sellerRows] = await p.query<SellerMetricsRow[]>(
+      `SELECT ishyiga_account AS id, rating_star, certificate
+       FROM account_seller
+       WHERE ishyiga_account IN (${ph})`,
       ids,
     )
-    for (const row of metricRows) {
-      const id = String(row.pharmacy_id)
-      out.set(id, {
-        stars: row.stars != null ? Number(row.stars) : 4.5,
-        stockAcc: row.stock_acc != null ? Number(row.stock_acc) : 3,
-        lastSyncMin: minutesSince(row.last_sync_at),
-      })
-    }
+    ingestSellerRows(sellerRows)
   } catch (e) {
-    // Table may not be migrated yet on beta — continue with stock heartbeat only.
     if (process.env.NODE_ENV !== "production") {
-      console.warn("[erx-mysql] pharmacy_metrics:", e instanceof Error ? e.message : e)
+      console.warn("[erx-mysql] account_seller metrics:", e instanceof Error ? e.message : e)
     }
   }
 
-  const missingSync = ids.filter((id) => !out.has(id) || out.get(id)!.lastSyncMin >= 999)
-  if (missingSync.length) {
+  const missingSeller = ids.filter((id) => {
+    const m = out.get(id)
+    return !m || (m.stars == null && m.stockAcc == null)
+  })
+  if (missingSeller.length) {
     try {
-      const ph = missingSync.map(() => "?").join(",")
-      const [syncRows] = await p.query<SyncRow[]>(
-        `SELECT SELLER_ISHYIGA_ACCOUNT AS account, MAX(SYNCED_TIME) AS last_sync
-         FROM seller_add_stock
-         WHERE SELLER_ISHYIGA_ACCOUNT IN (${ph})
-         GROUP BY SELLER_ISHYIGA_ACCOUNT`,
-        missingSync,
+      const ph = missingSeller.map(() => "?").join(",")
+      const [signupRows] = await p.query<SellerMetricsRow[]>(
+        `SELECT ISHYIGA_ACCOUNT AS id, rating_star, certificate
+         FROM account_signup
+         WHERE ISHYIGA_ACCOUNT IN (${ph})`,
+        missingSeller,
       )
-      for (const row of syncRows) {
-        const id = String(row.account)
-        const prev = out.get(id) || { stars: 4.5, stockAcc: 3, lastSyncMin: 999 }
-        out.set(id, { ...prev, lastSyncMin: minutesSince(row.last_sync) })
-      }
+      ingestSellerRows(signupRows)
     } catch {
-      /* seller_add_stock optional */
+      /* account_signup optional */
     }
   }
 
-  for (const id of ids) {
-    if (!out.has(id)) {
-      out.set(id, { stars: 4.5, stockAcc: 3, lastSyncMin: 999 })
+  try {
+    const ph = ids.map(() => "?").join(",")
+    const [syncRows] = await p.query<SyncRow[]>(
+      `SELECT SELLER_ISHYIGA_ACCOUNT AS account, MAX(SYNCED_TIME) AS last_sync
+       FROM seller_add_stock
+       WHERE SELLER_ISHYIGA_ACCOUNT IN (${ph})
+       GROUP BY SELLER_ISHYIGA_ACCOUNT`,
+      ids,
+    )
+    for (const row of syncRows) {
+      const id = String(row.account)
+      const m = ensure(id)
+      m.lastSyncMin = minutesSince(row.last_sync)
     }
+  } catch {
+    /* seller_add_stock optional */
   }
+
+  for (const id of ids) ensure(id)
   return out
 }
 

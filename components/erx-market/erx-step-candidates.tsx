@@ -6,6 +6,7 @@
  */
 
 import { useMemo, useState } from "react"
+import { Search } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ERX_COPY, fmtRwf } from "@/lib/erx/erx-market-copy"
 import type { ErxCandidatePharmacy, ErxRfqItem } from "@/lib/erx/erx-market-types"
@@ -33,17 +34,29 @@ export function ErxStepCandidates({
 }) {
   const [sort, setSort] = useState<ErxCandidateSort>("dist")
   const [page, setPage] = useState(0)
+  const [query, setQuery] = useState("")
 
   const rxTotalAvg = items.reduce((s, i) => s + i.qty * i.avgUnit, 0)
 
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return pharmacies
+    return pharmacies.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.zone.toLowerCase().includes(q) ||
+        p.id.toLowerCase().includes(q),
+    )
+  }, [pharmacies, query])
+
   const sorted = useMemo(() => {
-    const a = [...pharmacies]
-    if (sort === "stars") a.sort((x, y) => y.stars - x.stars)
-    else if (sort === "acc") a.sort((x, y) => y.stockAcc - x.stockAcc || x.lastSyncMin - y.lastSyncMin)
+    const a = [...filtered]
+    if (sort === "stars") a.sort((x, y) => (y.stars ?? 0) - (x.stars ?? 0))
+    else if (sort === "acc") a.sort((x, y) => (y.stockAcc ?? 0) - (x.stockAcc ?? 0) || x.lastSyncMin - y.lastSyncMin)
     else if (sort === "sync") a.sort((x, y) => x.lastSyncMin - y.lastSyncMin)
     else a.sort((x, y) => x.distKm - y.distKm)
     return a
-  }, [pharmacies, sort])
+  }, [filtered, sort])
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE))
   const safePage = Math.min(page, totalPages - 1)
@@ -68,6 +81,20 @@ export function ErxStepCandidates({
           {ERX_COPY.noteBlueRw}
           <br />
           <span className="text-[11.5px] text-[#6B7690]">{ERX_COPY.noteBlueEn}</span>
+        </div>
+
+        <div className="relative mb-2.5">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#6B7690]" />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value)
+              setPage(0)
+            }}
+            placeholder={ERX_COPY.nearSearchPlaceholder}
+            className="w-full rounded-[10px] border border-[#DDE3EE] bg-white py-2.5 pl-9 pr-3 text-sm text-[#16233B] placeholder:text-[#6B7690] focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-[rgba(30,58,95,.25)]"
+          />
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5">
@@ -106,7 +133,10 @@ export function ErxStepCandidates({
           ))}
         </div>
 
-        {pageItems.map((p) => {
+        {pageItems.length === 0 ? (
+          <p className="py-6 text-center text-[13px] text-[#6B7690]">{ERX_COPY.nearSearchEmpty}</p>
+        ) : (
+          pageItems.map((p) => {
           const isSel = selected.includes(p.id)
           return (
             <label
@@ -130,21 +160,25 @@ export function ErxStepCandidates({
                   <span className="text-[11.5px] font-extrabold text-[#3A4A6B]">
                     {p.distKm.toFixed(1)} km
                   </span>
-                  <span className="inline-flex items-center gap-1 rounded-full bg-[#FFF6DC] px-2 py-0.5 text-[11px] font-extrabold text-[#8A6A00]">
-                    ★ {p.stars.toFixed(1)}
-                  </span>
-                  <span
-                    className={cn(
-                      "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-extrabold",
-                      p.stockAcc >= 4
-                        ? "bg-[#E2F4EC] text-[#118A5A]"
-                        : p.stockAcc >= 3
-                          ? "bg-[#FFF6DC] text-[#8A6A00]"
-                          : "bg-[#FCE9E7] text-[#D0342C]",
-                    )}
-                  >
-                    Stock {p.stockAcc}/5
-                  </span>
+                  {p.stars != null ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-[#FFF6DC] px-2 py-0.5 text-[11px] font-extrabold text-[#8A6A00]">
+                      ★ {p.stars.toFixed(1)}
+                    </span>
+                  ) : null}
+                  {p.stockAcc != null ? (
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-extrabold",
+                        p.stockAcc >= 8
+                          ? "bg-[#E2F4EC] text-[#118A5A]"
+                          : p.stockAcc >= 5
+                            ? "bg-[#FFF6DC] text-[#8A6A00]"
+                            : "bg-[#FCE9E7] text-[#D0342C]",
+                      )}
+                    >
+                      Stock {p.stockAcc}/10
+                    </span>
+                  ) : null}
                   <span
                     className={cn(
                       "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-extrabold",
@@ -164,7 +198,8 @@ export function ErxStepCandidates({
               </div>
             </label>
           )
-        })}
+        })
+        )}
 
         {totalPages > 1 ? (
           <div className="mt-3 flex items-center justify-between gap-2">
@@ -197,7 +232,7 @@ export function ErxStepCandidates({
         onClick={onSend}
         className="block w-full rounded-xl bg-[#1E3A5F] p-[15px] text-base font-extrabold text-white disabled:opacity-45 disabled:cursor-not-allowed"
       >
-        {selected.length === pharmacies.length
+        {selected.length === pharmacies.length && !query.trim()
           ? ERX_COPY.sendAll(selected.length)
           : ERX_COPY.sendSome(selected.length)}
       </button>

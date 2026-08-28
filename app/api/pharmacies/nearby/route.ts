@@ -12,8 +12,8 @@ export const dynamic = "force-dynamic"
 
 /**
  * GET /api/pharmacies/nearby?lat&lng — eRx market step 3 candidates.
- * Real mode: Kaos sectorListSuppliers(pharmacy) + beta MySQL metrics (pharmacy_metrics
- * or seller_add_stock heartbeat). Mock only when NEXT_PUBLIC_ERX_MOCK=1.
+ * Real mode: Kaos sectorListSuppliers(pharmacy) + beta MySQL (rating_star, certificate,
+ * seller_add_stock SYNCED_TIME). Mock only when NEXT_PUBLIC_ERX_MOCK=1.
  */
 export async function GET(req: NextRequest) {
   const lat = Number(req.nextUrl.searchParams.get("lat")) || KIGALI.lat
@@ -72,8 +72,8 @@ export async function GET(req: NextRequest) {
           lat: pLat,
           lng: pLng,
           distKm: coords ? haversineKm(pos.lat, pos.lng, pLat, pLng) : 99,
-          stars: 4.5,
-          stockAcc: 3,
+          stars: null,
+          stockAcc: null,
           lastSyncMin: 999,
           priceFactor: 1,
         }
@@ -81,20 +81,31 @@ export async function GET(req: NextRequest) {
       .filter((p) => p.id && p.name)
       .sort((a, b) => a.distKm - b.distKm)
 
+    const seenIds = new Set<string>()
+    pharmacies = pharmacies.filter((p) => {
+      if (seenIds.has(p.id)) return false
+      seenIds.add(p.id)
+      return true
+    })
+
     if (!pharmacies.length) {
       return NextResponse.json({ ok: false, code: "ERX_NO_PHARMACIES" }, { status: 502 })
     }
 
     const dbPing = await pingErxMysql()
+    let database: string | undefined
     if (dbPing.ok) {
+      database = dbPing.database
       const ids = pharmacies.map((p) => p.id)
       const [metrics, gps] = await Promise.all([
         fetchPharmacyMetricsByIds(ids),
         fetchPharmacyGpsByIds(ids),
       ])
+      let gpsHits = 0
       pharmacies = pharmacies.map((p) => {
         const m = metrics.get(p.id)
         const g = gps.get(p.id) ?? (p.lat && p.lng ? { lat: p.lat, lng: p.lng } : null)
+        if (g) gpsHits++
         const distKm = g ? haversineKm(pos.lat, pos.lng, g.lat, g.lng) : p.distKm
         return {
           ...(m ? { ...p, stars: m.stars, stockAcc: m.stockAcc, lastSyncMin: m.lastSyncMin } : p),
@@ -104,11 +115,26 @@ export async function GET(req: NextRequest) {
         }
       })
       pharmacies.sort((a, b) => a.distKm - b.distKm)
+      return NextResponse.json({
+        ok: true,
+        mock: false,
+        db: true,
+        database,
+        gpsEnriched: gpsHits,
+        pharmacies,
+      })
     } else if (process.env.NODE_ENV !== "production") {
       console.warn("[erx/pharmacies] MySQL unavailable:", dbPing.error)
     }
 
-    return NextResponse.json({ ok: true, mock: false, db: dbPing.ok, pharmacies })
+    return NextResponse.json({
+      ok: true,
+      mock: false,
+      db: false,
+      database,
+      gpsEnriched: 0,
+      pharmacies,
+    })
   } catch (e) {
     console.error("[erx/pharmacies]", e)
     return NextResponse.json(

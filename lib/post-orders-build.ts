@@ -21,6 +21,14 @@ export type PostOrdersHeader = {
   MSG_UBITANZE?: string
   TRANSACTION_ID_UBITANZE?: string
   CLIENT_GROUP?: string
+  /** MoH eRx code — persisted on order_transaction.REFERENCE when POS inserts. */
+  REFERENCE?: string
+  /** Patient phone from MoH FHIR (telecom) — maps to BUYER_PHONE on insert. */
+  PATIENT_PHONE_NUMBER?: string
+  /** Tell POS to match ITEM_NAME against this seller's stock (not a fixed NIKI code). */
+  SEARCH_IN_COMPANY?: string
+  /** Rekizisiyo channel tag — eRx uses ERX/{eRxCode} e.g. ERX/EP-0317-170 */
+  REKISIYO_STATUS?: string
 }
 
 export type PostOrdersLine = {
@@ -72,6 +80,18 @@ export function buildPostOrdersXml(body: PostOrdersBody): string {
   xml += `    <MSG_UBITANZE>${escapeXml(h.MSG_UBITANZE ?? "")}</MSG_UBITANZE>\n`
   xml += `    <TRANSACTION_ID_UBITANZE>${escapeXml(h.TRANSACTION_ID_UBITANZE ?? "")}</TRANSACTION_ID_UBITANZE>\n`
   xml += `    <CLIENT_GROUP>${escapeXml(h.CLIENT_GROUP ?? "")}</CLIENT_GROUP>\n`
+  if (h.REFERENCE) {
+    xml += `    <REFERENCE>${escapeXml(h.REFERENCE)}</REFERENCE>\n`
+  }
+  if (h.PATIENT_PHONE_NUMBER) {
+    xml += `    <PATIENT_PHONE_NUMBER>${escapeXml(h.PATIENT_PHONE_NUMBER)}</PATIENT_PHONE_NUMBER>\n`
+  }
+  if (h.SEARCH_IN_COMPANY) {
+    xml += `    <SEARCH_IN_COMPANY>${escapeXml(h.SEARCH_IN_COMPANY)}</SEARCH_IN_COMPANY>\n`
+  }
+  if (h.REKISIYO_STATUS) {
+    xml += `    <REKISIYO_STATUS>${escapeXml(h.REKISIYO_STATUS)}</REKISIYO_STATUS>\n`
+  }
   xml += "  </header>\n  <ITEMSLINE>\n"
 
   for (const lin of body.ITEMSLINE) {

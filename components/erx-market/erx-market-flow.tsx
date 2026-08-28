@@ -35,7 +35,9 @@ import type {
 } from "@/lib/erx/erx-market-types"
 import type { MohErxDrugLineDTO } from "@/lib/erx/moh-erx-types"
 
-const POLL_MS = 1200
+import { ERX_SYNC_POLL_SEC } from "@/lib/erx/erx-pos-sync"
+
+const POLL_MS = ERX_SYNC_POLL_SEC * 1000
 
 type LookupState = {
   loading: boolean
@@ -43,6 +45,7 @@ type LookupState = {
   errorMessage: string | null
   failedFields: ErxIdentityMatchField[]
   patientDisplayName: string | null
+  patientPhone: string | null
   drugs: MohErxDrugLineDTO[] | null
 }
 
@@ -52,6 +55,7 @@ const IDLE_LOOKUP: LookupState = {
   errorMessage: null,
   failedFields: [],
   patientDisplayName: null,
+  patientPhone: null,
   drugs: null,
 }
 
@@ -87,6 +91,7 @@ export function ErxMarketFlow({
   const [posInserts, setPosInserts] = useState<
     Array<{ pharmacyId: string; transactionId: string; ok: boolean; backend?: string; error?: string }>
   >([])
+  const [syncCountdown, setSyncCountdown] = useState(ERX_SYNC_POLL_SEC)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const goStep = useCallback((n: number) => {
@@ -129,6 +134,7 @@ export function ErxMarketFlow({
           errorMessage: null,
           failedFields: [],
           patientDisplayName: json.patientDisplayName,
+          patientPhone: json.patientPhone ?? null,
           drugs: json.drugs,
         })
         setItems(drugsToItems(json.drugs || []))
@@ -204,6 +210,8 @@ export function ErxMarketFlow({
           erxCode: erxCode || MARKET_DEFAULT_ERX_CODE,
           items,
           pharmacies: candidates.filter((p) => selected.includes(p.id)),
+          patientName: lookup.patientDisplayName || undefined,
+          patientPhone: lookup.patientPhone || undefined,
           msgUbitanze: "KEY USED",
         }),
       })
@@ -220,22 +228,34 @@ export function ErxMarketFlow({
     } finally {
       setBusy(false)
     }
-  }, [erxCode, items, candidates, selected, goStep])
+  }, [erxCode, items, candidates, selected, lookup.patientDisplayName, lookup.patientPhone, goStep])
 
   const orderId = order?.id
   const rated = Boolean(order?.rating)
   useEffect(() => {
     if (!orderId || rated) return
-    const t = window.setInterval(async () => {
+    setSyncCountdown(ERX_SYNC_POLL_SEC)
+    const pullOnce = async () => {
       try {
         const res = await fetch(`/api/erx/orders/${orderId}/quotes`, { cache: "no-store" })
         const json = await res.json()
         if (json.ok) setOrder(json.order)
       } catch {
-        /* transient poll failure — next tick retries */
+        /* retry on interval */
       }
+    }
+    void pullOnce()
+    const tick = window.setInterval(() => {
+      setSyncCountdown((s) => (s <= 1 ? ERX_SYNC_POLL_SEC : s - 1))
+    }, 1000)
+    const poll = window.setInterval(() => {
+      setSyncCountdown(ERX_SYNC_POLL_SEC)
+      void pullOnce()
     }, POLL_MS)
-    return () => window.clearInterval(t)
+    return () => {
+      window.clearInterval(tick)
+      window.clearInterval(poll)
+    }
   }, [orderId, rated])
 
   const postOrderAction = useCallback(
@@ -465,10 +485,16 @@ export function ErxMarketFlow({
             <>
             <ErxStepQuotes
               order={order}
+              countdownSec={syncCountdown}
               posInsertByPharmacy={Object.fromEntries(
                 posInserts.map((r) => [
                   r.pharmacyId,
-                  { ok: r.ok, transactionId: r.transactionId, error: r.error },
+                  {
+                    ok: r.ok,
+                    alreadyExists: r.alreadyExists,
+                    transactionId: r.transactionId,
+                    error: r.error,
+                  },
                 ]),
               )}
               onChoose={(pharmacyId) => {
@@ -479,7 +505,6 @@ export function ErxMarketFlow({
                   }
                 })
               }}
-              onStopCalling={() => void postOrderAction("stop-calling")}
             />
             </>
           )}
@@ -488,9 +513,9 @@ export function ErxMarketFlow({
               order={order}
               paying={busy}
               onBack={() => setPaying(false)}
-              onPay={(momo, choice: ErxDeliveryChoice) => {
+              onPay={({ momo, choice, momoSms, txId, paymentName }) => {
                 const delivery = choice === "pharm" ? "pharmacy" : choice
-                void postOrderAction("pay", { momo, delivery }).then((o) => {
+                void postOrderAction("pay", { momo, delivery, momoSms, txId, paymentName }).then((o) => {
                   if (o) goStep(4)
                 })
               }}

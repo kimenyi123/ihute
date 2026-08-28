@@ -53,7 +53,7 @@ export const ERX_COPY = {
   sortChips: [
     ["dist", "Hafi"],
     ["stars", "★ Amanota"],
-    ["acc", "Stock ukuri"],
+    ["acc", "Stock /10"],
     ["sync", "Sync"],
   ] as const,
   cardEstimate: (total: string, sync: number) =>
@@ -61,6 +61,8 @@ export const ERX_COPY = {
   sendAll: (n: number) => `Ohereza kuri farumasi zose (${n})`,
   sendSome: (n: number) => `Ohereza kuri farumasi (${n})`,
   selectAll: "Hitamo byose",
+  nearSearchPlaceholder: "Shakisha farumasi (izina, ahantu)…",
+  nearSearchEmpty: "Nta farumasi ibonetse kuri iyo shakisha.",
   pageOf: (page: number, totalPages: number, total: number) =>
     `${page}/${totalPages} · farumasi ${total}`,
   showingRange: (from: number, to: number, total: number) =>
@@ -76,8 +78,13 @@ export const ERX_COPY = {
   quotesLeadOthers: "Abandi baracyahamagarwa.",
   quotesOrderPrefix: (id: string) => `Itumiza ${id}.`,
   stopCalling: "■ Hagarika guhamagara · Stop calling",
+  syncCountdown: (sec: number) => `Guhuza na POS · ${sec}s`,
+  syncCountdownEn: "· syncing pharmacy answers",
+  syncAnswersTitle: "Ibisubizo byabonetse",
+  syncAnswerLine: (name: string, preview: string) => `${name}: ${preview}`,
   chipCalling: "ARIMO GUHAMAGARWA…",
   chipInserted: "YASHYIZWE MU POS",
+  chipAlreadyInserted: "YARI MU POS",
   chipInsertFailed: "NTABWO BYASHOBOKA",
   chipStopped: "BYAHAGARITSWE",
   chipDeclined: "NTABWO BIHARI",
@@ -111,6 +118,12 @@ export const ERX_COPY = {
   payTotal: "Igiteranyo",
   momoLabel: "Numero ya MoMo",
   momoPlaceholder: "07__ ___ ___",
+  momoSmsLabel: "Soma SMS ya MoMo",
+  momoSmsHint: (total: string) =>
+    `Shyira hano ubutumwa bwose bwemeza kwishyura ${total} RWF (nk'uko Grandma ibikora).`,
+  momoSmsPlaceholder: "MTN MoMo… shyira cyangwa wandike SMS",
+  momoSmsPaid: (txId: string) => `✔ SMS yemejwe · TxId ${txId}`,
+  momoSmsMismatch: "Amafaranga muri SMS ntaho ahwana n'igiteranyo.",
   payButton: (total: string) => `Ishyura ${total} RWF na MoMo`,
   backToQuotes: "Subira ku biciro",
 

@@ -21,10 +21,10 @@ export type ErxCandidatePharmacy = {
   lat: number
   lng: number
   distKm: number
-  /** Patient stars, rolling 90d. */
-  stars: number
-  /** ihute stock accuracy bucket 1..5 (confirmed vs shown available, rolling 30d). */
-  stockAcc: number
+  /** Patient rating 1–5 from account_seller.rating_star. */
+  stars: number | null
+  /** Stock quality 0–10 from account_seller.certificate. */
+  stockAcc: number | null
   /** Minutes since last POS stock heartbeat ("aheruka kugaragara"). */
   lastSyncMin: number
   /** Price factor vs market average, used for the estimated total on the card. */
@@ -89,6 +89,28 @@ export type ErxRating = {
   createdAt: string
 }
 
+/** One pharmacy row shown beside the sync countdown (POS pull). */
+export type ErxPosSyncAnswer = {
+  pharmacyId: string
+  pharmacyName: string
+  status: ErxQuoteStatus | "CALLING"
+  preview: string
+  lines?: Array<{
+    code: string
+    name: string
+    confirmedQty: number
+    unitPrice: number
+  }>
+}
+
+export type ErxPosSyncMeta = {
+  pollSec: number
+  /** Seconds until next pull (client countdown). */
+  nextPollSec: number
+  lastPullAt: string | null
+  answers: ErxPosSyncAnswer[]
+}
+
 /** Full order snapshot returned by GET /api/erx/orders/{id}/quotes (poll). */
 export type ErxOrderSnapshot = {
   id: string
@@ -111,4 +133,6 @@ export type ErxOrderSnapshot = {
   responders: ErxResponderNotice[]
   deliveredAt: string | null
   rating: ErxRating | null
+  /** POS pull status (real mode only). */
+  sync?: ErxPosSyncMeta
 }

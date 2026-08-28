@@ -9,9 +9,13 @@
  * Copy verbatim from ihute_erx_sample_v4.html.
  */
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
 import { ERX_COPY, fmtRwf } from "@/lib/erx/erx-market-copy"
+import {
+  matchMoMoSmsToOrderTotal,
+  type MoMoSmsMatchResult,
+} from "@/lib/momo-payment-sms-match"
 import type { ErxOrderSnapshot, ErxQuote } from "@/lib/erx/erx-market-types"
 
 function firstWord(s: string): string {
@@ -78,7 +82,7 @@ function QuoteCard({
   q: ErxQuote
   itemCount: number
   onChoose: (pharmacyId: string) => void
-  posInsert?: { ok: boolean; transactionId?: string; error?: string }
+  posInsert?: { ok: boolean; alreadyExists?: boolean; transactionId?: string; error?: string }
 }) {
   if (q.status === "CALLING") {
     const inserted = posInsert?.ok === true
@@ -90,7 +94,7 @@ function QuoteCard({
           <div className="flex flex-col items-end gap-1">
             {inserted ? (
               <span className="rounded-full bg-[#E2F4EC] px-2 py-1 text-[11px] font-extrabold text-[#118A5A]">
-                {ERX_COPY.chipInserted}
+                {posInsert?.alreadyExists ? ERX_COPY.chipAlreadyInserted : ERX_COPY.chipInserted}
               </span>
             ) : insertFailed ? (
               <span className="rounded-full bg-[#FCE9E7] px-2 py-1 text-[11px] font-extrabold text-[#D0342C]">
@@ -109,7 +113,7 @@ function QuoteCard({
         {insertFailed && posInsert?.error ? (
           <div className="pt-1 text-[11px] text-[#D0342C]">{posInsert.error}</div>
         ) : null}
-        {!inserted ? (
+        {!inserted && !insertFailed ? (
           <div className="flex items-center gap-2 pt-1.5 text-[12.5px] text-[#6B7690]">
             <span className="h-[9px] w-[9px] animate-pulse rounded-full bg-[#F2B705] motion-reduce:animate-none" />
             {ERX_COPY.waitLine}
@@ -205,18 +209,52 @@ function QuoteCard({
   )
 }
 
+function SyncBar({ order, countdownSec }: { order: ErxOrderSnapshot; countdownSec: number }) {
+  const answers = order.sync?.answers || []
+  const answered = answers.filter((a) => a.status !== "CALLING")
+  return (
+    <div className="mb-3 flex flex-col gap-2 rounded-xl border-[1.5px] border-[#DDE3EE] bg-[#F7F9FC] p-3 sm:flex-row sm:items-start sm:gap-3">
+      <div className="shrink-0 rounded-lg bg-[#1E3A5F] px-3 py-2 text-center text-white">
+        <div className="text-[10px] font-bold uppercase tracking-wide text-[#B9C4DC]">
+          {ERX_COPY.syncCountdownEn}
+        </div>
+        <div className="text-2xl font-extrabold tabular-nums">{countdownSec}s</div>
+        <div className="text-[10px] text-[#B9C4DC]">{ERX_COPY.syncCountdown(countdownSec)}</div>
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-[11px] font-extrabold uppercase tracking-wide text-[#6B7690]">
+          {ERX_COPY.syncAnswersTitle}
+        </div>
+        {answered.length ? (
+          <ul className="mt-1 space-y-0.5">
+            {answered.map((a) => (
+              <li key={a.pharmacyId} className="text-[12px] text-[#16233B]">
+                <span className="font-extrabold">{a.pharmacyName}</span>
+                <span className="text-[#6B7690]"> · {a.status} · </span>
+                <span className="font-bold text-[#118A5A]">{a.preview}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-1 text-[12px] text-[#6B7690]">{ERX_COPY.quotesLeadWaiting}</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export function ErxStepQuotes({
   order,
   onChoose,
-  onStopCalling,
+  countdownSec = 10,
   posInsertByPharmacy = {},
 }: {
   order: ErxOrderSnapshot
   onChoose: (pharmacyId: string) => void
-  onStopCalling: () => void
+  countdownSec?: number
   posInsertByPharmacy?: Record<
     string,
-    { ok: boolean; transactionId?: string; error?: string }
+    { ok: boolean; alreadyExists?: boolean; transactionId?: string; error?: string }
   >
 }) {
   const anyReady = order.quotes.some((q) => q.status === "FULL" || q.status === "PARTIAL")
@@ -231,15 +269,7 @@ export function ErxStepQuotes({
         {anyReady ? ERX_COPY.quotesLeadReady : ERX_COPY.quotesLeadWaiting}{" "}
         {order.stillCalling && anyReady ? ERX_COPY.quotesLeadOthers : ""}
       </p>
-      {order.stillCalling ? (
-        <button
-          type="button"
-          onClick={onStopCalling}
-          className="mb-3 block w-full rounded-xl border-[1.5px] border-[#D0342C] bg-white p-[15px] text-base font-extrabold text-[#D0342C]"
-        >
-          {ERX_COPY.stopCalling}
-        </button>
-      ) : null}
+      {order.sync ? <SyncBar order={order} countdownSec={countdownSec} /> : null}
       <AbamakePanel order={order} />
       {order.quotes.map((q) => (
         <QuoteCard
@@ -284,21 +314,43 @@ export function ErxStepPay({
   paying,
 }: {
   order: ErxOrderSnapshot
-  onPay: (momo: string, choice: ErxDeliveryChoice) => void
+  onPay: (input: {
+    momo: string
+    choice: ErxDeliveryChoice
+    momoSms: string
+    txId: string | null
+    paymentName: string
+  }) => void
   onBack: () => void
   paying: boolean
 }) {
   const [choice, setChoice] = useState<ErxDeliveryChoice>("pharm")
   const [momo, setMomo] = useState("")
+  const [momoSms, setMomoSms] = useState("")
   const [momoTouched, setMomoTouched] = useState(false)
+  const [smsMatch, setSmsMatch] = useState<MoMoSmsMatchResult | null>(null)
 
   const q = order.quotes.find((x) => x.pharmacyId === order.chosenPharmacyId)
-  if (!q) return null
-
-  const net = quoteNet(q)
-  const delAmt = erxDeliveryAmount(order, q, choice)
+  const net = q ? quoteNet(q) : 0
+  const delAmt = q ? erxDeliveryAmount(order, q, choice) : 0
   const total = net + delAmt
   const momoOk = momo.replace(/\s+/g, "").length >= 8
+
+  useEffect(() => {
+    const text = momoSms.trim()
+    if (text.length < 8 || total < 1) {
+      setSmsMatch(null)
+      return
+    }
+    const timer = window.setTimeout(() => {
+      setSmsMatch(matchMoMoSmsToOrderTotal(text, Math.round(total), 2))
+    }, 450)
+    return () => window.clearTimeout(timer)
+  }, [momoSms, total])
+
+  const smsPaid = Boolean(smsMatch?.matched && smsMatch.txId)
+
+  if (!q) return null
 
   const optionRow = (
     value: ErxDeliveryChoice,
@@ -395,11 +447,42 @@ export function ErxStepPay({
           momoTouched && !momoOk ? "border-[#D0342C]" : "border-[#DDE3EE]",
         )}
       />
+
+      <label className="mt-3 mb-1 block text-[11.5px] font-bold text-[#3A4A6B]" htmlFor="erx-momo-sms">
+        {ERX_COPY.momoSmsLabel}
+      </label>
+      <p className="mb-1 text-[11px] text-[#6B7690]">{ERX_COPY.momoSmsHint(fmtRwf(total))}</p>
+      <textarea
+        id="erx-momo-sms"
+        value={momoSms}
+        onChange={(e) => setMomoSms(e.target.value)}
+        placeholder={ERX_COPY.momoSmsPlaceholder}
+        className="min-h-[88px] w-full resize-y rounded-[10px] border-[1.5px] border-[#DDE3EE] bg-white p-[13px] text-sm focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-[rgba(30,58,95,.3)]"
+      />
+      {smsPaid && smsMatch?.txId ? (
+        <div className="mt-2 rounded-lg border border-[#B8E6CF] bg-[#E2F4EC] px-2 py-2 text-xs font-medium text-[#118A5A]">
+          {ERX_COPY.momoSmsPaid(smsMatch.txId)}
+        </div>
+      ) : null}
+      {smsMatch && !smsMatch.matched && momoSms.trim().length > 8 ? (
+        <div className="mt-2 rounded-lg border border-[#F2C4C0] bg-[#FCE9E7] px-2 py-2 text-xs text-[#7C221D]">
+          {ERX_COPY.momoSmsMismatch}
+        </div>
+      ) : null}
+
       <div className="h-3" />
       <button
         type="button"
-        disabled={!momoOk || paying}
-        onClick={() => onPay(momo, choice)}
+        disabled={!momoOk || !smsPaid || paying}
+        onClick={() =>
+          onPay({
+            momo,
+            choice,
+            momoSms: momoSms.trim(),
+            txId: smsMatch?.txId ?? null,
+            paymentName: momoSms.toLowerCase().includes("airtel") ? "airtel" : "momo",
+          })
+        }
         className="block w-full rounded-xl bg-[#F2B705] p-[15px] text-base font-extrabold text-[#132A47] disabled:opacity-45 disabled:cursor-not-allowed"
       >
         {ERX_COPY.payButton(fmtRwf(total))}

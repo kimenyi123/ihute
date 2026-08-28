@@ -150,6 +150,7 @@ export async function GET(req: NextRequest) {
     ok: true,
     code,
     patientDisplayName: fetched.value.patient.fullName,
+    patientPhone: fetched.value.patient.phoneDigits || null,
     drugs: fetched.value.drugs,
   })
 }

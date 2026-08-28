@@ -51,5 +51,7 @@ FROM chaos_beta.order_transaction
 WHERE order_number LIKE 'IH-182196-%'
 ORDER BY id_order DESC;
 
--- NOTE: `heure` may be NULL on post_orders inserts — do not filter by heure alone.
--- Prefer seller_ishyiga_account + buyer_ishyiga_account='IHUTE' + order_status='OPEN'.
+-- POS poll filter: buyer_ishyiga_account='IHUTE', order_status='OPEN', REFERENCE=eRx code.
+-- Patient: BUYER_NAMES + BUYER_PHONE from MoH (USER_INITIATOR + PATIENT_PHONE_NUMBER in XML).
+-- eRx POS: CONDITIONS='ERX|SEARCH_IN_COMPANY' — match ITEM_NAME in seller stock, not fixed NIKI.
+-- Line conditions='SEARCH' when item_code starts with ERX_.
