@@ -5,7 +5,7 @@
  */
 import test from "node:test"
 import assert from "node:assert/strict"
-import { haversineKm, isValidLatLng } from "./geo-haversine"
+import { haversineKm, isValidLatLng, normalizeSupplierLatLng } from "./geo-haversine"
 import { shopWithinNearMeRadius } from "./grandma-search"
 
 const ORIGIN = { lat: -1.9441, lng: 30.0619 }
@@ -61,4 +61,11 @@ test("radius 1 vs 5: outside-radius seller dropped; nearer kept; nearest first",
     assert.ok(sorted[i]!.d >= sorted[i - 1]!.d)
   }
   assert.equal(sorted[0]!.id, "here")
+})
+
+test("normalizeSupplierLatLng fixes common Rwanda column swap", () => {
+  const norm = normalizeSupplierLatLng(30.107185309445597, -1.9450592407323903)
+  assert.ok(norm)
+  assert.ok(norm!.lat < 0 && norm!.lng > 0)
+  assert.ok(haversineKm(-1.9536, 30.0606, norm!.lat, norm!.lng) < 10)
 })

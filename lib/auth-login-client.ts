@@ -175,6 +175,9 @@ export function isAdminUser(user: User | null): boolean {
   return String(user.dbRole ?? "").toUpperCase() === "ADMIN"
 }
 
+/** Alias used by login / admin-guard (same rule as isAdminUser). */
+export const userIsPlatformAdmin = isAdminUser
+
 /** Seller / supplier access for Grandma gate (SELLER role or dual pharmacy retail). */
 export function userCanAccessSellerSpace(user: User | null): boolean {
   if (!user) return false

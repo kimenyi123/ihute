@@ -73,24 +73,48 @@ function QuoteCard({
   q,
   itemCount,
   onChoose,
+  posInsert,
 }: {
   q: ErxQuote
   itemCount: number
   onChoose: (pharmacyId: string) => void
+  posInsert?: { ok: boolean; transactionId?: string; error?: string }
 }) {
   if (q.status === "CALLING") {
+    const inserted = posInsert?.ok === true
+    const insertFailed = posInsert && !posInsert.ok
     return (
       <div className="rounded-xl border-[1.5px] border-[#DDE3EE] bg-white p-3 mb-2.5">
         <div className="flex items-start justify-between gap-2">
           <span className="text-[14.5px] font-extrabold">{q.pharmacyName}</span>
-          <span className="rounded-full bg-[#FFF6DC] px-2 py-1 text-[11px] font-extrabold text-[#8A6A00]">
-            {ERX_COPY.chipCalling}
-          </span>
+          <div className="flex flex-col items-end gap-1">
+            {inserted ? (
+              <span className="rounded-full bg-[#E2F4EC] px-2 py-1 text-[11px] font-extrabold text-[#118A5A]">
+                {ERX_COPY.chipInserted}
+              </span>
+            ) : insertFailed ? (
+              <span className="rounded-full bg-[#FCE9E7] px-2 py-1 text-[11px] font-extrabold text-[#D0342C]">
+                {ERX_COPY.chipInsertFailed}
+              </span>
+            ) : (
+              <span className="rounded-full bg-[#FFF6DC] px-2 py-1 text-[11px] font-extrabold text-[#8A6A00]">
+                {ERX_COPY.chipCalling}
+              </span>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-2 pt-1.5 text-[12.5px] text-[#6B7690]">
-          <span className="h-[9px] w-[9px] animate-pulse rounded-full bg-[#F2B705] motion-reduce:animate-none" />
-          {ERX_COPY.waitLine}
-        </div>
+        {inserted && posInsert?.transactionId ? (
+          <div className="pt-1 text-[10px] font-mono text-[#6B7690]">{posInsert.transactionId}</div>
+        ) : null}
+        {insertFailed && posInsert?.error ? (
+          <div className="pt-1 text-[11px] text-[#D0342C]">{posInsert.error}</div>
+        ) : null}
+        {!inserted ? (
+          <div className="flex items-center gap-2 pt-1.5 text-[12.5px] text-[#6B7690]">
+            <span className="h-[9px] w-[9px] animate-pulse rounded-full bg-[#F2B705] motion-reduce:animate-none" />
+            {ERX_COPY.waitLine}
+          </div>
+        ) : null}
       </div>
     )
   }
@@ -185,10 +209,15 @@ export function ErxStepQuotes({
   order,
   onChoose,
   onStopCalling,
+  posInsertByPharmacy = {},
 }: {
   order: ErxOrderSnapshot
   onChoose: (pharmacyId: string) => void
   onStopCalling: () => void
+  posInsertByPharmacy?: Record<
+    string,
+    { ok: boolean; transactionId?: string; error?: string }
+  >
 }) {
   const anyReady = order.quotes.some((q) => q.status === "FULL" || q.status === "PARTIAL")
   return (
@@ -213,7 +242,13 @@ export function ErxStepQuotes({
       ) : null}
       <AbamakePanel order={order} />
       {order.quotes.map((q) => (
-        <QuoteCard key={q.pharmacyId} q={q} itemCount={order.items.length} onChoose={onChoose} />
+        <QuoteCard
+          key={q.pharmacyId}
+          q={q}
+          itemCount={order.items.length}
+          onChoose={onChoose}
+          posInsert={posInsertByPharmacy[q.pharmacyId]}
+        />
       ))}
     </div>
   )

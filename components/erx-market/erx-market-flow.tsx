@@ -83,6 +83,10 @@ export function ErxMarketFlow({
   const [order, setOrder] = useState<ErxOrderSnapshot | null>(null)
   const [paying, setPaying] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [posFeedback, setPosFeedback] = useState<string | null>(null)
+  const [posInserts, setPosInserts] = useState<
+    Array<{ pharmacyId: string; transactionId: string; ok: boolean; backend?: string; error?: string }>
+  >([])
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const goStep = useCallback((n: number) => {
@@ -168,7 +172,7 @@ export function ErxMarketFlow({
         }
         const list: ErxCandidatePharmacy[] = json.pharmacies || []
         setCandidates(list)
-        setSelected(list.map((x) => x.id))
+        setSelected([])
         goStep(2)
       } catch {
         setCandidatesError("Ntitwashoboye kubona amafarumasi.")
@@ -190,6 +194,8 @@ export function ErxMarketFlow({
   /* ---- Intambwe 4: RFQ to ALL selected + poll quotes ---- */
   const sendRfq = useCallback(async () => {
     setBusy(true)
+    setPosFeedback(null)
+    setPosInserts([])
     try {
       const res = await fetch("/api/erx/orders", {
         method: "POST",
@@ -198,13 +204,18 @@ export function ErxMarketFlow({
           erxCode: erxCode || MARKET_DEFAULT_ERX_CODE,
           items,
           pharmacies: candidates.filter((p) => selected.includes(p.id)),
+          msgUbitanze: "KEY USED",
         }),
       })
       const json = await res.json()
       if (json.ok) {
         setOrder(json.order)
         setPaying(false)
+        if (json.posSummary) setPosFeedback(json.posSummary)
+        if (Array.isArray(json.posInserts)) setPosInserts(json.posInserts)
         goStep(3)
+      } else if (json.code) {
+        setPosFeedback(`POS insert failed: ${json.code}`)
       }
     } finally {
       setBusy(false)
@@ -430,22 +441,36 @@ export function ErxMarketFlow({
 
           {/* ---- Intambwe 3: amafarumasi akwegereye ---- */}
           {step === 2 && (
-            <ErxStepCandidates
+            <>
+              <ErxStepCandidates
               pharmacies={candidates}
               items={items}
               selected={selected}
               onToggle={(id, on) =>
                 setSelected((cur) => (on ? [...cur, id] : cur.filter((x) => x !== id)))
               }
+              onSelectAll={() => {
+                const allIds = candidates.map((p) => p.id)
+                const allOn = allIds.length > 0 && allIds.every((id) => selected.includes(id))
+                setSelected(allOn ? [] : allIds)
+              }}
               onSend={() => void sendRfq()}
               sending={busy}
             />
+            </>
           )}
 
           {/* ---- Intambwe 4: ibiciro no kwishyura ---- */}
           {step === 3 && order && !paying && (
+            <>
             <ErxStepQuotes
               order={order}
+              posInsertByPharmacy={Object.fromEntries(
+                posInserts.map((r) => [
+                  r.pharmacyId,
+                  { ok: r.ok, transactionId: r.transactionId, error: r.error },
+                ]),
+              )}
               onChoose={(pharmacyId) => {
                 void postOrderAction("choose", { pharmacyId }).then((o) => {
                   if (o) {
@@ -456,6 +481,7 @@ export function ErxMarketFlow({
               }}
               onStopCalling={() => void postOrderAction("stop-calling")}
             />
+            </>
           )}
           {step === 3 && order && paying && (
             <ErxStepPay

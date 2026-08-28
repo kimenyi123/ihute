@@ -14,6 +14,7 @@ interface AdminGuardProps {
  * AdminGuard - Protects /admin/* and /admin_grandma/*
  *
  * Requires Java account with TYPE/role ADMIN (see isAdminUser).
+ * Redirects to /login?reason=need_admin (not `/`) so shop-host rewrites stay correct.
  */
 export function AdminGuard({ children }: AdminGuardProps) {
     const router = useRouter()
@@ -26,7 +27,6 @@ export function AdminGuard({ children }: AdminGuardProps) {
 
     const hydrated = hasHydrated
     const isAdmin = isAdminUser(user)
-    // Do not call checkSession() during render (it may logout). Effect below enforces expiry.
     const allowed = hydrated && isAuthenticated && isAdmin && denyReason !== 'session' && denyReason !== 'not_admin'
 
     useEffect(() => {
@@ -45,9 +45,14 @@ export function AdminGuard({ children }: AdminGuardProps) {
 
         if (!isAdminUser(user)) {
             setDenyReason('not_admin')
-            router.replace('/')
+            const next = pathname && pathname.startsWith('/admin') ? pathname : '/admin/dashboard'
+            const qs = new URLSearchParams({
+                reason: 'need_admin',
+                redirect: next,
+            })
+            router.replace(`/login?${qs.toString()}`)
         }
-    }, [hydrated, isAuthenticated, user, checkSession, router, adminTarget])
+    }, [hydrated, isAuthenticated, user, checkSession, router, adminTarget, pathname])
 
     if (!hydrated || !allowed) {
         if (denyReason === 'not_admin') {

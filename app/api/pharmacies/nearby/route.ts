@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 
 import { ERX_MOCK_ENABLED } from "@/lib/erx/erx-market-flags"
-import { fetchPharmacyMetricsByIds, pingErxMysql } from "@/lib/erx/erx-mysql"
-import { KIGALI, haversineKm, mockNearbyPharmacies } from "@/lib/erx/erx-market-mock"
+import { fetchPharmacyGpsByIds, fetchPharmacyMetricsByIds, pingErxMysql } from "@/lib/erx/erx-mysql"
+import { KIGALI, mockNearbyPharmacies } from "@/lib/erx/erx-market-mock"
+import { haversineKm, normalizeSupplierLatLng } from "@/lib/geo-haversine"
 import type { ErxCandidatePharmacy } from "@/lib/erx/erx-market-types"
 import { getSectorListSuppliersUrl, warmJavaBackendBase } from "@/lib/backend-config"
 
@@ -27,7 +28,7 @@ export async function GET(req: NextRequest) {
     await warmJavaBackendBase()
     const target = new URL(getSectorListSuppliersUrl())
     target.searchParams.set("sector", "pharmacy")
-    target.searchParams.set("limit", "100")
+    target.searchParams.set("limit", "500")
     const res = await fetch(target.toString(), {
       headers: { Accept: "application/json" },
       cache: "no-store",
@@ -37,23 +38,47 @@ export async function GET(req: NextRequest) {
     const raw = (await res.json()) as Array<Record<string, unknown>>
     let pharmacies: ErxCandidatePharmacy[] = (Array.isArray(raw) ? raw : [])
       .map((s, ix) => {
-        const name = String(s.SUPPLIER_NAME ?? s.supplierName ?? s.name ?? "").trim()
-        const pLat = Number(s.GPS_LATITUDE ?? s.lat ?? s.latitude) || 0
-        const pLng = Number(s.GPS_LONGITUDE ?? s.lng ?? s.longitude) || 0
+        const name = String(
+          s.SUPPLIER_NAME ??
+            s.supplierName ??
+            s.seller_name ??
+            s.SELLER_NAME ??
+            s.OWNER ??
+            s.name ??
+            "",
+        ).trim()
+        const id = String(
+          s.SUPPLIER_ACCOUNT ??
+            s.supplierAccount ??
+            s.seller_account ??
+            s.ACC ??
+            s.ISHYIGA_ACCOUNT ??
+            s.id ??
+            `ph-${ix}`,
+        ).trim()
+        const coords =
+          normalizeSupplierLatLng(
+            s.GPS_LATITUDE ?? s.supplier_latitude ?? s.latitude ?? s.lat,
+            s.GPS_LONGITUDE ?? s.supplier_longitude ?? s.longitude ?? s.lng,
+          ) ?? null
+        const pLat = coords?.lat ?? 0
+        const pLng = coords?.lng ?? 0
         return {
-          id: String(s.SUPPLIER_ACCOUNT ?? s.supplierAccount ?? s.id ?? `ph-${ix}`),
+          id,
           name,
-          zone: String(s.SECTOR_NAME ?? s.zone ?? s.address ?? "").trim(),
+          zone: String(
+            s.SECTOR_NAME ?? s.seller_location ?? s.LOCATION ?? s.zone ?? s.address ?? "",
+          ).trim(),
           lat: pLat,
           lng: pLng,
-          distKm: pLat && pLng ? haversineKm(pos, { lat: pLat, lng: pLng }) : 99,
+          distKm: coords ? haversineKm(pos.lat, pos.lng, pLat, pLng) : 99,
           stars: 4.5,
           stockAcc: 3,
           lastSyncMin: 999,
           priceFactor: 1,
         }
       })
-      .filter((p) => p.name)
+      .filter((p) => p.id && p.name)
       .sort((a, b) => a.distKm - b.distKm)
 
     if (!pharmacies.length) {
@@ -62,11 +87,23 @@ export async function GET(req: NextRequest) {
 
     const dbPing = await pingErxMysql()
     if (dbPing.ok) {
-      const metrics = await fetchPharmacyMetricsByIds(pharmacies.map((p) => p.id))
+      const ids = pharmacies.map((p) => p.id)
+      const [metrics, gps] = await Promise.all([
+        fetchPharmacyMetricsByIds(ids),
+        fetchPharmacyGpsByIds(ids),
+      ])
       pharmacies = pharmacies.map((p) => {
         const m = metrics.get(p.id)
-        return m ? { ...p, stars: m.stars, stockAcc: m.stockAcc, lastSyncMin: m.lastSyncMin } : p
+        const g = gps.get(p.id) ?? (p.lat && p.lng ? { lat: p.lat, lng: p.lng } : null)
+        const distKm = g ? haversineKm(pos.lat, pos.lng, g.lat, g.lng) : p.distKm
+        return {
+          ...(m ? { ...p, stars: m.stars, stockAcc: m.stockAcc, lastSyncMin: m.lastSyncMin } : p),
+          lat: g?.lat ?? p.lat,
+          lng: g?.lng ?? p.lng,
+          distKm,
+        }
       })
+      pharmacies.sort((a, b) => a.distKm - b.distKm)
     } else if (process.env.NODE_ENV !== "production") {
       console.warn("[erx/pharmacies] MySQL unavailable:", dbPing.error)
     }

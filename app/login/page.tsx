@@ -22,6 +22,7 @@ import {
   grandmaUserCanUseSellerWorkspace,
   isAdminUser,
   normalizeJavaLoginToUser,
+  userIsPlatformAdmin,
 } from "@/lib/auth-login-client"
 import { IshyigaLoginCard } from "@/components/ishyiga-login-card"
 import { APP_VERSION_DISPLAY } from "@/lib/app-version"
@@ -46,9 +47,13 @@ function LoginPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const redirectTo = searchParams?.get("redirect")
+  const needAdminReason = searchParams?.get("reason") === "need_admin"
   const phonePrefill = searchParams?.get("phone") ?? ""
   const loginStore = useAuthStore((s) => s.login)
   const clearSessionExpiredReason = useAuthStore((s) => s.clearSessionExpiredReason)
+  const logoutStore = useAuthStore((s) => s.logout)
+  const sessionUser = useAuthStore((s) => s.user)
+  const sessionAuthed = useAuthStore((s) => s.isAuthenticated)
 
   const [rememberMe, setRememberMe] = useState(false)
   const [sessionNotice, setSessionNotice] = useState<string | null>(null)
@@ -124,7 +129,8 @@ function LoginPageInner() {
   }
 
   const redirectAfterLogin = (user: User, decoded: string, safeRedirect: boolean) => {
-    if (isAdminUser(user)) {
+    const redirectIsGrandma = decoded.startsWith("/grandma")
+    if (isAdminUser(user) && redirectIsGrandma) {
       router.push("/admin/dashboard")
       return
     }
@@ -132,7 +138,9 @@ function LoginPageInner() {
       router.push(decoded)
       return
     }
-    if (user.role === "supplier") {
+    if (isAdminUser(user)) {
+      router.push("/admin/dashboard")
+    } else if (user.role === "supplier") {
       router.push("/supplier/dashboard")
     } else {
       router.push("/")
@@ -245,6 +253,34 @@ function LoginPageInner() {
         {sessionNotice ? (
           <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
             {sessionNotice}
+          </div>
+        ) : null}
+
+        {needAdminReason ? (
+          <div
+            className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-3 text-sm text-rose-950"
+            role="status"
+          >
+            <p className="font-medium">Administrator access required</p>
+            <p className="mt-1 text-rose-900/90">
+              {sessionAuthed && sessionUser && !userIsPlatformAdmin(sessionUser)
+                ? "You are signed in with a non-admin account. Sign out, then sign in with an admin phone or email."
+                : "Sign in with an admin account to open the admin panel."}
+            </p>
+            {sessionAuthed && sessionUser && !userIsPlatformAdmin(sessionUser) ? (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="mt-3"
+                onClick={() => {
+                  logoutStore()
+                  router.refresh()
+                }}
+              >
+                Log out
+              </Button>
+            ) : null}
           </div>
         ) : null}
 

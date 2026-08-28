@@ -3,7 +3,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { LayoutDashboard } from "lucide-react";
 import { ProductGrid } from "@/components/product-grid";
 import {
   ShopsForSingleSector,
@@ -281,6 +283,15 @@ export function CategoryClientAI({
             >
               {t("categoryBrowseErxLabel" as TranslationKey)}
             </button>
+          )}
+          {isPharmacy && (
+            <Link
+              href="/erx/dashboard"
+              className="px-4 py-2 rounded-lg text-sm font-medium transition-colors border inline-flex items-center gap-2 bg-background text-muted-foreground border-border hover:bg-muted hover:text-foreground"
+            >
+              <LayoutDashboard className="h-4 w-4" />
+              {t("categoryBrowseErxDashboard" as TranslationKey)}
+            </Link>
           )}
         </div>
         {isPharmacy && browseMode === "erx" && !ERX_MARKET_ENABLED && (
