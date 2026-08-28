@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react"
 import { Eye, Pencil, Search, Trash2, X } from "lucide-react"
 import { postAdminApi } from "@/lib/admin-client"
+import { encodeGeohash } from "@/lib/grandma-seller-gps"
+import { isValidLatLng } from "@/lib/geo-haversine"
 
 /** Map DB column label (any case) → Java {@code updateCredentialSeller} parameter name */
 const COLUMN_TO_API: Record<string, string> = {
@@ -31,6 +33,33 @@ const COLUMN_TO_API: Record<string, string> = {
   RATING_STAR: "ratingStar",
   discount: "discount",
   DISCOUNT: "discount",
+  PREFEREDCATEGORIES: "preferedCategories",
+  preferedcategories: "preferedCategories",
+  PREFERREDCATEGORIES: "preferedCategories",
+  preferredcategories: "preferedCategories",
+  SUPPLIER_LATITUDE: "supplierLatitude",
+  supplier_latitude: "supplierLatitude",
+  SUPPLIER_LONGITUDE: "supplierLongitude",
+  supplier_longitude: "supplierLongitude",
+  SUPPLIER_GEOHASH: "supplierGeohash",
+  supplier_geohash: "supplierGeohash",
+  LOCATION_SOURCE: "locationSource",
+  location_source: "locationSource",
+}
+
+const GPS_API_KEYS = new Set(["supplierLatitude", "supplierLongitude", "supplierGeohash"])
+
+function editField(edit: Record<string, string>, column: string): string {
+  const up = column.toUpperCase()
+  for (const k of Object.keys(edit)) {
+    if (k.toUpperCase() === up) return String(edit[k] ?? "").trim()
+  }
+  return ""
+}
+
+function isGpsColumn(key: string): boolean {
+  const up = key.toUpperCase()
+  return up === "SUPPLIER_LATITUDE" || up === "SUPPLIER_LONGITUDE" || up === "SUPPLIER_GEOHASH"
 }
 
 function cellStr(v: unknown): string {
@@ -220,6 +249,28 @@ export function CredentialSellersPanel({
       const api = UPPER_TO_API[up]
       if (!api) continue
       body[api] = edit[k] ?? ""
+    }
+    const latRaw = editField(edit, "supplier_latitude")
+    const lngRaw = editField(edit, "supplier_longitude")
+    const latFilled = latRaw !== ""
+    const lngFilled = lngRaw !== ""
+    if (latFilled !== lngFilled) {
+      alert("Enter both supplier_latitude and supplier_longitude, or leave both empty.")
+      return
+    }
+    if (!latFilled && !lngFilled) {
+      for (const k of GPS_API_KEYS) delete body[k]
+    } else {
+      const lat = Number(latRaw)
+      const lng = Number(lngRaw)
+      if (!isValidLatLng(lat, lng)) {
+        alert("Latitude/longitude are not valid numbers.")
+        return
+      }
+      body.supplierLatitude = lat
+      body.supplierLongitude = lng
+      const gh = editField(edit, "supplier_geohash")
+      body.supplierGeohash = gh || encodeGeohash(lat, lng, 8)
     }
     const hasProfile = Object.keys(body).length > 2
     setSaving(true)
@@ -517,6 +568,11 @@ export function CredentialSellersPanel({
                         value={edit[k] ?? ""}
                         onChange={(e) => setEdit((prev) => ({ ...prev, [k]: e.target.value }))}
                       />
+                      {isGpsColumn(k) && !(edit[k] ?? "").trim() ? (
+                        <span className="block mt-0.5 text-[11px] text-gray-400">
+                          Empty means GPS was never captured — enter coords and Save.
+                        </span>
+                      ) : null}
                     </label>
                   )
                 })}
