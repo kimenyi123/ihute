@@ -60,6 +60,32 @@ interface UrubutoAdminNotificationsResponse {
 
 type SellersTab = 'applications' | 'urubuto' | 'active' | 'suspended' | 'credentials'
 
+/** Turn raw AdminServlet / proxy errors into short, human-readable text. */
+function humanizeSellerRemovalError(raw: string): string {
+  const s = (raw || "").trim()
+  if (!s) return "Something went wrong. Please try again."
+  if (/unknown action/i.test(s)) {
+    return (
+      "The server does not recognize this action. Deploy an admin build that includes seller removal " +
+      "(recycle bin), or ask your developer to update the trading WAR."
+    )
+  }
+  if (/partner_recycle_bin|Table.*doesn't exist|does not exist/i.test(s)) {
+    return (
+      "The database is not set up for safe removal backups yet. Run the partner_recycle_bin migration on your " +
+      "trading database, then try again."
+    )
+  }
+  if (/Seller not found/i.test(s)) {
+    return "That seller account was not found. Refresh the list — it may have already been removed."
+  }
+  if (/deleteReason|sellerAccount|required/i.test(s)) {
+    return "The server did not get a valid reason or account id. Refresh the page and try again."
+  }
+  if (s.length > 220) return `${s.slice(0, 220)}…`
+  return s
+}
+
 export default function SellersPage() {
   const [activeTab, setActiveTab] = useState<SellersTab>('applications')
   const [applications, setApplications] = useState<Seller[]>([])
@@ -292,38 +318,54 @@ export default function SellersPage() {
   }
 
   const handlePurgeSeller = async (sellerAccount: string) => {
-    if (
-      !confirm(
-        `Permanently purge seller ${sellerAccount}? This deletes seller_add_stock rows, account_buyer (same ishyiga or seller email), legacy account_signup row, and account_seller. Orders are NOT removed.`,
-      )
-    ) {
+    const intro =
+      `Remove seller ${sellerAccount} from the platform?\n\n` +
+      `• Their shop and product list will disappear from Ihute.\n` +
+      `• Old orders stay in the system for your records.\n` +
+      `• We keep a private backup so the account can be restored if this was a mistake.\n\n` +
+      `Only continue if you are sure.`
+    if (!confirm(intro)) return
+
+    const reason = window.prompt(
+      "Short note for the audit log (why you are removing this shop). Required — a few words is fine:",
+      "",
+    )
+    if (reason === null) return
+    const reasonTrim = reason.trim()
+    if (!reasonTrim) {
+      alert("A short reason is required so your team knows why this shop was removed.")
       return
     }
-    const typed = window.prompt('Type DELETE in capitals to confirm:')
-    if (typed !== 'DELETE') return
+
+    const typed = window.prompt("Last step: type DELETE in capitals to confirm permanent removal:")
+    if (typed !== "DELETE") {
+      if (typed !== null) alert("Nothing was changed — confirmation did not match.")
+      return
+    }
     try {
       setActionLoading(sellerAccount)
       const res = await postAdminApi({
-        action: 'purgeSellerAccount',
+        action: "deleteSellerToRecycleBin",
         sellerAccount,
-        confirmPurge: 'DELETE',
+        deleteReason: reasonTrim,
       })
       const data = await res.json()
       if (!data.ok) {
-        alert('Purge failed: ' + (data.error || 'Unknown error'))
+        alert(humanizeSellerRemovalError(String(data.error || "Unknown error")))
         return
       }
       alert(
-        `Purge OK. Stock rows: ${data.deletedSellerAddStockRows ?? 0}, buyer: ${data.deletedBuyerRows ?? 0}, signup: ${data.deletedSignupRows ?? 0}, seller: ${data.deletedSellerRows ?? 0}`,
+        "Done. This shop is no longer on the platform and their listings were cleared. " +
+          "Past orders remain for records. A backup was saved so the account can be restored if needed.",
       )
-      if (activeTab === 'credentials') {
+      if (activeTab === "credentials") {
         setCredRefreshTrigger((n) => n + 1)
       } else {
         loadSellers()
       }
     } catch (e) {
       console.error(e)
-      alert('Purge request failed')
+      alert("We could not reach the admin server. Check your connection and try again.")
     } finally {
       setActionLoading(null)
     }
@@ -999,7 +1041,7 @@ export default function SellersPage() {
                           onClick={() => void handlePurgeSeller(seller.ishyigaAccount)}
                           disabled={actionLoading === seller.ishyigaAccount}
                           className="text-red-900 hover:text-red-950 disabled:opacity-50"
-                          title="Purge seller (stock + buyer + signup + seller; not orders)"
+                          title="Remove shop from platform (backup kept for restore)"
                         >
                           <Trash2 size={18} />
                         </button>

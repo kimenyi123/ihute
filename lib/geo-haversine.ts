@@ -44,3 +44,22 @@ export function isValidLatLng(lat: unknown, lng: unknown): lat is number {
     lo <= 180
   )
 }
+
+/** Fix common lat/lng column swap (e.g. lat=30.1, lng=-1.94 for Kigali). */
+export function normalizeSupplierLatLng(
+  lat: unknown,
+  lng: unknown,
+): { lat: number; lng: number } | null {
+  let la = typeof lat === "number" ? lat : Number(lat)
+  let lo = typeof lng === "number" ? lng : Number(lng)
+  if (!Number.isFinite(la) || !Number.isFinite(lo)) return null
+  // Rwanda / East Africa: latitude negative (~-1 to -3), longitude positive (~28–31).
+  const looksSwapped =
+    la > 0 && la <= 35 && lo < 0 && lo >= -5 && Math.abs(la) > Math.abs(lo)
+  if (looksSwapped) {
+    const tmp = la
+    la = lo
+    lo = tmp
+  }
+  return isValidLatLng(la, lo) ? { lat: la, lng: lo } : null
+}

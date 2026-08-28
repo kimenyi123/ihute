@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 
 import { chooseQuote, snapshotOrder } from "@/lib/erx/erx-order-store"
+import { insertErxTracking } from "@/lib/erx/erx-tracking"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -22,5 +23,17 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (!order) {
     return NextResponse.json({ ok: false, code: "ERX_ORDER_NOT_FOUND" }, { status: 404 })
   }
+  const picked = order.quotes.find((q) => q.pharmacyId === pharmacyId)
+  void insertErxTracking({
+    eventType: "CHOOSE",
+    erxCode: order.erxCode,
+    status: "SUCCESS",
+    orderId: id,
+    pickedPharmacyId: pharmacyId,
+    pickedPharmacyName: picked?.pharmacyName ?? pharmacyId,
+    serviceStage: "QUOTES",
+    requestedAt: new Date(),
+    respondedAt: new Date(),
+  })
   return NextResponse.json({ ok: true, order: snapshotOrder(id) })
 }

@@ -60,6 +60,13 @@ export const ERX_COPY = {
     `Igiciro giteganyijwe ≈ ${total} RWF · aheruka kugaragara: iminota ${sync}`,
   sendAll: (n: number) => `Ohereza kuri farumasi zose (${n})`,
   sendSome: (n: number) => `Ohereza kuri farumasi (${n})`,
+  selectAll: "Hitamo byose",
+  pageOf: (page: number, totalPages: number, total: number) =>
+    `${page}/${totalPages} · farumasi ${total}`,
+  showingRange: (from: number, to: number, total: number) =>
+    `Zerekana ${from}–${to} muri ${total}`,
+  prevPage: "Inyuma",
+  nextPage: "Komeza",
 
   // Step 4 — quotes
   quotesTitle: "Ibiciro biraza",
@@ -70,6 +77,8 @@ export const ERX_COPY = {
   quotesOrderPrefix: (id: string) => `Itumiza ${id}.`,
   stopCalling: "■ Hagarika guhamagara · Stop calling",
   chipCalling: "ARIMO GUHAMAGARWA…",
+  chipInserted: "YASHYIZWE MU POS",
+  chipInsertFailed: "NTABWO BYASHOBOKA",
   chipStopped: "BYAHAGARITSWE",
   chipDeclined: "NTABWO BIHARI",
   chipFull: (n: number, total: number) => `YEMEJE ${n}/${total}`,
@@ -113,10 +122,10 @@ export const ERX_COPY = {
   }),
   orderTitle: (id: string) => `Itumiza ${id}`,
   chipHeld: "eRx HELD",
-  chipDelivered: "BYATANZWE",
+  chipDelivered: "YAFASHWE",
   tlPaid: "Byishyuwe na MoMo",
   tlPaidSub: (time: string, ref: string) => `${time} · ref ${ref}`,
-  tlPos: "Itumiza ryageze kuri farumasi",
+  tlPos: "YASHYIZWE MU POS",
   tlPosSub: "Ishyiga POS · ihute.rw pending orders",
   tlInvoice: "Fagitire ya RRA yasohotse",
   tlInvoiceSub: (inv: string) => `VSDC · ${inv}`,
@@ -127,8 +136,8 @@ export const ERX_COPY = {
   tlDone: "Byatanzwe — eRx yavuguruwe muri eBuzima",
   tlDoneFullSub: "Urwandiko rwuzuye",
   tlDonePartialSub: "Ibisigaye biguma kuri eRx yawe",
-  arrivedPickup: "✅ Nayifashe — kanda hano",
-  arrivedDelivery: "✅ Imiti yangezeho — kanda hano",
+  arrivedPickup: "✅ YAFASHWE — kanda hano",
+  arrivedDelivery: "✅ YAFASHWE — kanda hano",
   arrivedHintPickup: "Kanda iyo umaze kuyifata kuri farumasi.",
   arrivedHintDelivery: "Kanda igihe uwazanye imiti ahageze.",
 

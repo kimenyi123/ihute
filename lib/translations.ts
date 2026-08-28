@@ -49,6 +49,7 @@ export const translations = {
     categoryBrowseChooseItem: "Choose an item",
     categoryBrowseErx: "eRx",
     categoryBrowseErxLabel: "Ministry of Health eRx",
+    categoryBrowseErxDashboard: "MoH Dashboard",
     categoryBrowseErxPlaceholder: "Enter eRx / prescription code",
     categoryBrowseErxSubmit: "Look up",
     categoryBrowseErxHint:
@@ -238,6 +239,7 @@ export const translations = {
     categoryBrowseChooseItem: "Choisir un article",
     categoryBrowseErx: "eRx",
     categoryBrowseErxLabel: "eRx du Ministère de la Santé",
+    categoryBrowseErxDashboard: "Tableau MoH",
     categoryBrowseErxPlaceholder: "Entrez le code eRx / ordonnance",
     categoryBrowseErxSubmit: "Rechercher",
     categoryBrowseErxHint:
@@ -428,6 +430,7 @@ export const translations = {
     categoryBrowseChooseItem: "Hitamo igicuruzwa",
     categoryBrowseErx: "eRx",
     categoryBrowseErxLabel: "eRx ya Minisiteri y'Ubuzima",
+    categoryBrowseErxDashboard: "Dashboard Ubuzima",
     categoryBrowseErxPlaceholder: "Andika kode ya eRx / urwandiko rw'imiti",
     categoryBrowseErxSubmit: "Shakisha",
     categoryBrowseErxHint:

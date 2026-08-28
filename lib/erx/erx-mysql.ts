@@ -6,6 +6,8 @@
 import type { Pool, RowDataPacket } from "mysql2/promise"
 import mysql from "mysql2/promise"
 
+import { normalizeSupplierLatLng } from "@/lib/geo-haversine"
+
 type MetricsRow = RowDataPacket & {
   pharmacy_id: string
   stars: number | null
@@ -27,7 +29,7 @@ export type ErxPharmacyDbMetrics = {
 let pool: Pool | null = null
 let poolTried = false
 
-function getErxMysqlPool(): Pool | null {
+export function getErxMysqlPool(): Pool | null {
   if (pool) return pool
   if (poolTried) return null
   poolTried = true
@@ -156,5 +158,71 @@ export async function fetchPharmacyMetricsByIds(
       out.set(id, { stars: 4.5, stockAcc: 3, lastSyncMin: 999 })
     }
   }
+  return out
+}
+
+type GpsRow = RowDataPacket & {
+  id: string
+  lat: number | string | null
+  lng: number | string | null
+}
+
+/** GPS from account_signup, falling back to account_seller (sectorListSuppliers omits coords). */
+export async function fetchPharmacyGpsByIds(
+  pharmacyIds: string[],
+): Promise<Map<string, { lat: number; lng: number }>> {
+  const out = new Map<string, { lat: number; lng: number }>()
+  const ids = [...new Set(pharmacyIds.map((x) => x.trim()).filter(Boolean))]
+  if (!ids.length) return out
+
+  const p = getErxMysqlPool()
+  if (!p) return out
+
+  const ingest = (rows: GpsRow[]) => {
+    for (const row of rows) {
+      const id = String(row.id ?? "").trim()
+      if (!id || out.has(id)) continue
+      const norm = normalizeSupplierLatLng(row.lat, row.lng)
+      if (norm) out.set(id, norm)
+    }
+  }
+
+  try {
+    const ph = ids.map(() => "?").join(",")
+    const [signupRows] = await p.query<GpsRow[]>(
+      `SELECT ISHYIGA_ACCOUNT AS id, supplier_latitude AS lat, supplier_longitude AS lng
+       FROM account_signup
+       WHERE ISHYIGA_ACCOUNT IN (${ph})
+         AND supplier_latitude IS NOT NULL
+         AND supplier_longitude IS NOT NULL`,
+      ids,
+    )
+    ingest(signupRows)
+  } catch (e) {
+    if (process.env.NODE_ENV !== "production") {
+      console.warn("[erx-mysql] account_signup GPS:", e instanceof Error ? e.message : e)
+    }
+  }
+
+  const missing = ids.filter((id) => !out.has(id))
+  if (!missing.length) return out
+
+  try {
+    const ph = missing.map(() => "?").join(",")
+    const [sellerRows] = await p.query<GpsRow[]>(
+      `SELECT ishyiga_account AS id, supplier_latitude AS lat, supplier_longitude AS lng
+       FROM account_seller
+       WHERE ishyiga_account IN (${ph})
+         AND supplier_latitude IS NOT NULL
+         AND supplier_longitude IS NOT NULL`,
+      missing,
+    )
+    ingest(sellerRows)
+  } catch (e) {
+    if (process.env.NODE_ENV !== "production") {
+      console.warn("[erx-mysql] account_seller GPS:", e instanceof Error ? e.message : e)
+    }
+  }
+
   return out
 }

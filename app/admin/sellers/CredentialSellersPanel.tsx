@@ -389,7 +389,7 @@ export function CredentialSellersPanel({
                       <button
                         type="button"
                         className="p-1 text-red-900 hover:bg-red-50 rounded disabled:opacity-40"
-                        title="Purge seller (full)"
+                        title="Remove shop from platform (backup kept for restore)"
                         disabled={!ishyiga || actionLoadingKey === ishyiga}
                         onClick={() => onPurgeSeller(ishyiga)}
                       >
