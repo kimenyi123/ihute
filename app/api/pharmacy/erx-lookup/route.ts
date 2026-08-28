@@ -38,6 +38,10 @@ export async function GET(req: NextRequest) {
   const names = req.nextUrl.searchParams.get("names") || ""
   const nationalId = req.nextUrl.searchParams.get("nationalId") || ""
 
+  if (!phone.trim() && !names.trim() && !nationalId.trim()) {
+    return NextResponse.json({ ok: false, code: "ERX_UNLOCK_REQUIRED" }, { status: 400 })
+  }
+
   const fetched = await fetchMohErxByCode(code, cfg)
   if (!fetched.ok) {
     if (fetched.error.kind === "not_found") {
@@ -65,6 +69,7 @@ export async function GET(req: NextRequest) {
         code: "ERX_IDENTITY_MISMATCH",
         matchedFields: match.matchedFields,
         providedFields: match.providedFields,
+        failedFields: match.failedFields,
       },
       { status: 403 },
     )

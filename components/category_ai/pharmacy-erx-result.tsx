@@ -7,9 +7,14 @@ import { useTranslation } from "@/hooks/use-translation"
 import type { TranslationKey } from "@/lib/translations"
 import type { MohErxDrugLineDTO } from "@/lib/erx/moh-erx-types"
 
+import type { ErxIdentityMatchField } from "@/lib/erx/erx-identity-match"
+
 export type PharmacyErxResultProps = {
   loading: boolean
   errorCode: string | null
+  /** Kinyarwanda field-specific message (overrides translation lookup). */
+  errorMessage?: string | null
+  failedFields?: ErxIdentityMatchField[]
   patientDisplayName: string | null
   drugs: MohErxDrugLineDTO[] | null
 }
@@ -18,6 +23,7 @@ const ERROR_KEY_BY_CODE: Record<string, TranslationKey> = {
   ERX_NOT_FOUND: "categoryBrowseErxEmpty",
   ERX_CODE_REQUIRED: "categoryBrowseErxEmpty",
   ERX_IDENTITY_MISMATCH: "categoryBrowseErxMismatch",
+  ERX_UNLOCK_REQUIRED: "categoryBrowseErxUnlockHint",
   ERX_NOT_CONFIGURED: "categoryBrowseErxNotConfigured",
   ERX_RATE_LIMITED: "categoryBrowseErxRateLimited",
 }
@@ -31,7 +37,13 @@ function DrugField({ label, value }: { label: string; value?: string }) {
   )
 }
 
-export function PharmacyErxResult({ loading, errorCode, patientDisplayName, drugs }: PharmacyErxResultProps) {
+export function PharmacyErxResult({
+  loading,
+  errorCode,
+  errorMessage,
+  patientDisplayName,
+  drugs,
+}: PharmacyErxResultProps) {
   const { t } = useTranslation()
 
   if (loading) {
@@ -45,8 +57,8 @@ export function PharmacyErxResult({ loading, errorCode, patientDisplayName, drug
   if (errorCode) {
     const key = ERROR_KEY_BY_CODE[errorCode] || "categoryBrowseErxUpstreamError"
     return (
-      <p className="text-sm text-muted-foreground rounded-lg border border-dashed p-6 text-center">
-        {t(key as TranslationKey)}
+      <p className="text-sm rounded-lg border border-[#F2C4C0] bg-[#FCE9E7] p-4 text-center text-[#7C221D]">
+        {errorMessage || t(key as TranslationKey)}
       </p>
     )
   }

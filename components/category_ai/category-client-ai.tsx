@@ -26,6 +26,8 @@ import {
 } from "@/components/category_ai/pharmacy-erx-input"
 import { PharmacyErxResult } from "@/components/category_ai/pharmacy-erx-result"
 import type { MohErxDrugLineDTO } from "@/lib/erx/moh-erx-types";
+import { ERX_MARKET_ENABLED } from "@/lib/erx/erx-market-flags";
+import { ErxMarketFlow } from "@/components/erx-market/erx-market-flow";
 
 const LIST_SECTOR_SUPPLIERS_LIMIT = 500;
 
@@ -281,7 +283,7 @@ export function CategoryClientAI({
             </button>
           )}
         </div>
-        {isPharmacy && browseMode === "erx" && (
+        {isPharmacy && browseMode === "erx" && !ERX_MARKET_ENABLED && (
           <PharmacyErxInput
             initialCode={erxCode}
             initialPhone={erxPhone}
@@ -291,6 +293,15 @@ export function CategoryClientAI({
           />
         )}
       </div>
+
+      {/* eRx market (NEXT_PUBLIC_ERX_MARKET=1): clicking the eRx tab opens the
+          full 5-step MoH flow; flag off keeps today's inline lookup below. */}
+      {isPharmacy && browseMode === "erx" && ERX_MARKET_ENABLED && (
+        <ErxMarketFlow
+          initialCode={erxCode || undefined}
+          onClose={() => setBrowseMode("shop")}
+        />
+      )}
 
       <div id="category-ai-grid-section" className="space-y-4">
       {browseMode === "shop" && (
@@ -316,7 +327,7 @@ export function CategoryClientAI({
         </section>
       )}
 
-      {browseMode === "erx" && (
+      {browseMode === "erx" && !ERX_MARKET_ENABLED && (
         <section id="products-section" className="mt-2">
           {!erxCode ? (
             <p className="text-sm text-muted-foreground rounded-lg border border-dashed p-6 text-center">
