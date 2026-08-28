@@ -23,10 +23,11 @@ export const ERX_COPY = {
   unlockTitleEn: "· open your e-prescription",
   unlockLead:
     "Andika kode wahawe kuri SMS, hanyuma ufungure ukoresheje kimwe: telefoni, amazina, cyangwa indangamuntu.",
-  // Red two-level personal-data block (verbatim; {masked} = masked patient name)
+  // Red two-level personal-data block (verbatim; masked patient name mid-sentence)
   privacyBold: "Amakuru bwite arafunze.",
-  privacyBody: (masked: string) =>
-    `Urwandiko ruboneka nka ${masked} — amazina, telefoni n'indangamuntu bifungurwa gusa n'urufunguzo rw'umurwayi (two-level access block). Buri gufungura kwandikwa.`,
+  privacyPre: "Urwandiko ruboneka nka ",
+  privacyPost:
+    " — amazina, telefoni n'indangamuntu bifungurwa gusa n'urufunguzo rw'umurwayi (two-level access block). Buri gufungura kwandikwa.",
   unlockButton: "Fungura urwandiko",
 
   // Step 2 — prescription
