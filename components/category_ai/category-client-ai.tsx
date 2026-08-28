@@ -297,7 +297,10 @@ export function CategoryClientAI({
       {/* eRx market (NEXT_PUBLIC_ERX_MARKET=1): clicking the eRx tab opens the
           full 5-step MoH flow; flag off keeps today's inline lookup below. */}
       {isPharmacy && browseMode === "erx" && ERX_MARKET_ENABLED && (
-        <ErxMarketFlow initialCode={erxCode || undefined} onClose={() => setBrowseMode("shop")} />
+        <ErxMarketFlow
+          initialCode={erxCode || undefined}
+          onClose={() => setBrowseMode("shop")}
+        />
       )}
 
       <div id="category-ai-grid-section" className="space-y-4">

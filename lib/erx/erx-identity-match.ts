@@ -20,6 +20,8 @@ export type ErxIdentityMatchResult = {
   unlocked: boolean
   matchedFields: ErxIdentityMatchField[]
   providedFields: ErxIdentityMatchField[]
+  /** Fields the patient provided but that did not match the MoH record. */
+  failedFields: ErxIdentityMatchField[]
 }
 
 function normalizeNameForMatch(raw: string): string {
@@ -61,7 +63,8 @@ export function matchErxIdentity(unlock: ErxUnlockKey, patient: MohErxPatient): 
     matchedFields.push("names")
   }
 
-  const unlocked = providedFields.length > 0 && matchedFields.length === providedFields.length
+  const failedFields = providedFields.filter((f) => !matchedFields.includes(f))
+  const unlocked = providedFields.length > 0 && failedFields.length === 0
 
-  return { unlocked, matchedFields, providedFields }
+  return { unlocked, matchedFields, providedFields, failedFields }
 }

@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import Image from "next/image"
-import { X } from "lucide-react"
+import { ChevronLeft, X } from "lucide-react"
 
 import { PharmacyErxInput, type ErxUnlockKey } from "@/components/category_ai/pharmacy-erx-input"
 import { PharmacyErxResult } from "@/components/category_ai/pharmacy-erx-result"
@@ -22,8 +22,12 @@ import { ErxStepQuotes, ErxStepPay, type ErxDeliveryChoice } from "./erx-step-qu
 import { ErxStepTrack } from "./erx-step-track"
 
 import { ERX_COPY, ERX_STEP_NAMES } from "@/lib/erx/erx-market-copy"
-import { ERX_MOCK_ENABLED } from "@/lib/erx/erx-market-flags"
-import { KIGALI, MOCK_ERX, mockAvgUnitRwf } from "@/lib/erx/erx-market-mock"
+import { KIGALI } from "@/lib/erx/erx-market-mock"
+import type { ErxIdentityMatchField } from "@/lib/erx/erx-identity-match"
+import { erxUnlockErrorMessage } from "@/lib/erx/erx-unlock-messages"
+
+/** Default eRx code for local testing when URL has none. */
+const MARKET_DEFAULT_ERX_CODE = "EP-0317-170"
 import type {
   ErxCandidatePharmacy,
   ErxOrderSnapshot,
@@ -36,6 +40,8 @@ const POLL_MS = 1200
 type LookupState = {
   loading: boolean
   errorCode: string | null
+  errorMessage: string | null
+  failedFields: ErxIdentityMatchField[]
   patientDisplayName: string | null
   drugs: MohErxDrugLineDTO[] | null
 }
@@ -43,6 +49,8 @@ type LookupState = {
 const IDLE_LOOKUP: LookupState = {
   loading: false,
   errorCode: null,
+  errorMessage: null,
+  failedFields: [],
   patientDisplayName: null,
   drugs: null,
 }
@@ -51,7 +59,7 @@ function drugsToItems(drugs: MohErxDrugLineDTO[]): ErxRfqItem[] {
   return drugs.map((d) => ({
     name: d.name,
     qty: d.quantityValue && d.quantityValue > 0 ? Math.round(d.quantityValue) : 1,
-    avgUnit: mockAvgUnitRwf(d.name),
+    avgUnit: 0,
     doseText: [d.dosageText, d.route, d.frequencyText].filter(Boolean).join(" · ") || undefined,
   }))
 }
@@ -64,12 +72,13 @@ export function ErxMarketFlow({
   onClose: () => void
 }) {
   const [step, setStep] = useState(0)
-  const [erxCode, setErxCode] = useState(initialCode?.trim() || "")
+  const [erxCode, setErxCode] = useState(initialCode?.trim() || MARKET_DEFAULT_ERX_CODE)
   const [lookup, setLookup] = useState<LookupState>(IDLE_LOOKUP)
   const [items, setItems] = useState<ErxRfqItem[]>([])
   const [pos, setPos] = useState(KIGALI)
   const [candidates, setCandidates] = useState<ErxCandidatePharmacy[]>([])
   const [candidatesLoading, setCandidatesLoading] = useState(false)
+  const [candidatesError, setCandidatesError] = useState<string | null>(null)
   const [selected, setSelected] = useState<string[]>([])
   const [order, setOrder] = useState<ErxOrderSnapshot | null>(null)
   const [paying, setPaying] = useState(false)
@@ -81,7 +90,24 @@ export function ErxMarketFlow({
     scrollRef.current?.scrollTo({ top: 0 })
   }, [])
 
-  /* ---- Intambwe 1: kode + gufungura (reuses the live lookup endpoint) ---- */
+  const goBack = useCallback(() => {
+    if (paying) {
+      setPaying(false)
+      scrollRef.current?.scrollTo({ top: 0 })
+      return
+    }
+    if (step <= 0) {
+      onClose()
+      return
+    }
+    if (step === 3) {
+      setOrder(null)
+      setPaying(false)
+    }
+    goStep(step - 1)
+  }, [paying, step, onClose, goStep])
+
+  /* ---- Intambwe 1: kode + gufungura (live MoH HIE — no mock) ---- */
   const runLookup = useCallback(async (code: string, unlock?: ErxUnlockKey) => {
     setErxCode(code)
     setLookup({ ...IDLE_LOOKUP, loading: true })
@@ -96,6 +122,8 @@ export function ErxMarketFlow({
         setLookup({
           loading: false,
           errorCode: null,
+          errorMessage: null,
+          failedFields: [],
           patientDisplayName: json.patientDisplayName,
           drugs: json.drugs,
         })
@@ -103,48 +131,47 @@ export function ErxMarketFlow({
         goStep(1)
         return
       }
-      if (json.code === "ERX_NOT_CONFIGURED" && ERX_MOCK_ENABLED) {
-        // Demo with no MoH HIE: serve the spec's mock record.
-        setLookup({
-          loading: false,
-          errorCode: null,
-          patientDisplayName: MOCK_ERX.patient,
-          drugs: MOCK_ERX.items.map((it, ix) => ({
-            id: `mock-${ix}`,
-            name: it.name,
-            dosageText: it.dose,
-            quantityValue: it.qty,
-          })),
-        })
-        setItems(
-          MOCK_ERX.items.map((it) => ({
-            name: it.name,
-            qty: it.qty,
-            avgUnit: it.avgUnit,
-            doseText: it.dose,
-          })),
-        )
-        goStep(1)
-        return
-      }
-      setLookup({ ...IDLE_LOOKUP, errorCode: json.code || "ERX_UPSTREAM_ERROR" })
+      const failedFields = (json.failedFields || []) as ErxIdentityMatchField[]
+      const errCode = json.code || "ERX_UPSTREAM_ERROR"
+      setLookup({
+        ...IDLE_LOOKUP,
+        errorCode: errCode,
+        errorMessage: erxUnlockErrorMessage(errCode, failedFields),
+        failedFields,
+      })
     } catch {
-      setLookup({ ...IDLE_LOOKUP, errorCode: "ERX_UPSTREAM_ERROR" })
+      setLookup({
+        ...IDLE_LOOKUP,
+        errorCode: "ERX_UPSTREAM_ERROR",
+        errorMessage: erxUnlockErrorMessage("ERX_UPSTREAM_ERROR"),
+        failedFields: [],
+      })
     }
   }, [goStep])
 
   /* ---- Intambwe 2 → 3: locate + candidates ---- */
   const findPharmacies = useCallback(() => {
     setCandidatesLoading(true)
+    setCandidatesError(null)
     const proceed = async (p: { lat: number; lng: number }) => {
       setPos(p)
       try {
         const res = await fetch(`/api/pharmacies/nearby?lat=${p.lat}&lng=${p.lng}`, { cache: "no-store" })
         const json = await res.json()
-        const list: ErxCandidatePharmacy[] = json.ok ? json.pharmacies : []
+        if (!json.ok) {
+          setCandidatesError(
+            json.code === "ERX_PHARMACIES_UNAVAILABLE"
+              ? "Ntitwashoboye kubona amafarumasi — reba ko backend na database byakora."
+              : "Ntitwashoboye kubona amafarumasi.",
+          )
+          return
+        }
+        const list: ErxCandidatePharmacy[] = json.pharmacies || []
         setCandidates(list)
-        setSelected(list.map((x) => x.id)) // ALL preselected (spec)
+        setSelected(list.map((x) => x.id))
         goStep(2)
+      } catch {
+        setCandidatesError("Ntitwashoboye kubona amafarumasi.")
       } finally {
         setCandidatesLoading(false)
       }
@@ -168,7 +195,7 @@ export function ErxMarketFlow({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          erxCode: erxCode || MOCK_ERX.code,
+          erxCode: erxCode || MARKET_DEFAULT_ERX_CODE,
           items,
           pharmacies: candidates.filter((p) => selected.includes(p.id)),
         }),
@@ -225,17 +252,18 @@ export function ErxMarketFlow({
 
   const restart = useCallback(() => {
     setStep(0)
-    setErxCode(initialCode?.trim() || "")
+    setErxCode(initialCode?.trim() || MARKET_DEFAULT_ERX_CODE)
     setLookup(IDLE_LOOKUP)
     setItems([])
     setCandidates([])
     setSelected([])
     setOrder(null)
     setPaying(false)
+    setCandidatesError(null)
     scrollRef.current?.scrollTo({ top: 0 })
   }, [initialCode])
 
-  const maskedPatient = ERX_MOCK_ENABLED ? MOCK_ERX.patientMasked : "•••••••••"
+  const maskedPatient = "•••••••••"
   const rxTotalAvg = items.reduce((s, i) => s + i.qty * i.avgUnit, 0)
 
   // Portal to <body>: ancestors with CSS transforms would otherwise re-anchor
@@ -251,6 +279,14 @@ export function ErxMarketFlow({
         <header className="sticky top-0 z-[5] bg-[#132A47] px-4 pb-3 pt-[13px] text-white">
           <div className="flex items-center justify-between">
             <span className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={goBack}
+                aria-label={ERX_COPY.backButton}
+                className="rounded-full p-1 text-white/90 hover:bg-white/10"
+              >
+                <ChevronLeft className="h-6 w-6" />
+              </button>
               <Image
                 src="/images/ishyiga-logo.png"
                 alt="Ishyiga"
@@ -305,7 +341,12 @@ export function ErxMarketFlow({
                 </span>
               </h1>
               <p className="text-[13px] text-[#6B7690] mb-3">{ERX_COPY.unlockLead}</p>
-              <PharmacyErxInput compact initialCode={erxCode || undefined} onLookup={runLookup} />
+              <PharmacyErxInput
+                compact
+                singleKeyMode
+                initialCode={erxCode || MARKET_DEFAULT_ERX_CODE}
+                onLookup={runLookup}
+              />
               <div className="mt-3 flex gap-2 rounded-[10px] border border-[#F2C4C0] bg-[#FCE9E7] p-2.5 text-xs text-[#7C221D]">
                 <b>⚠</b>
                 <span>
@@ -321,6 +362,8 @@ export function ErxMarketFlow({
                   <PharmacyErxResult
                     loading={lookup.loading}
                     errorCode={lookup.errorCode}
+                    errorMessage={lookup.errorMessage}
+                    failedFields={lookup.failedFields}
                     patientDisplayName={null}
                     drugs={null}
                   />
@@ -340,7 +383,7 @@ export function ErxMarketFlow({
                   </span>
                 </div>
                 <p className="text-[13px] text-[#6B7690] mb-3">
-                  {ERX_COPY.rxLead(lookup.patientDisplayName || "", erxCode || MOCK_ERX.code)}
+                  {ERX_COPY.rxLead(lookup.patientDisplayName || "", erxCode || MARKET_DEFAULT_ERX_CODE)}
                 </p>
                 {items.map((it) => (
                   <div key={it.name} className="border-b border-dashed border-[#DDE3EE] py-[11px] last:border-b-0">
@@ -353,16 +396,27 @@ export function ErxMarketFlow({
                     {it.doseText ? (
                       <div className="mt-1 text-xs leading-[1.45] text-[#6B7690]">{it.doseText}</div>
                     ) : null}
-                    <div className="mt-1 text-[11.5px] text-[#6B7690]">
-                      {ERX_COPY.rxAvgLine(String(it.avgUnit), (it.qty * it.avgUnit).toLocaleString("en-US"))}
-                    </div>
+                    {it.avgUnit > 0 ? (
+                      <div className="mt-1 text-[11.5px] text-[#6B7690]">
+                        {ERX_COPY.rxAvgLine(String(it.avgUnit), (it.qty * it.avgUnit).toLocaleString("en-US"))}
+                      </div>
+                    ) : null}
                   </div>
                 ))}
-                <div className="flex justify-between pt-2.5 text-[14.5px] font-extrabold">
-                  <span>{ERX_COPY.rxTotal}</span>
-                  <span>≈ {rxTotalAvg.toLocaleString("en-US")} RWF</span>
-                </div>
+                {rxTotalAvg > 0 ? (
+                  <div className="flex justify-between pt-2.5 text-[14.5px] font-extrabold">
+                    <span>{ERX_COPY.rxTotal}</span>
+                    <span>≈ {rxTotalAvg.toLocaleString("en-US")} RWF</span>
+                  </div>
+                ) : (
+                  <p className="pt-2.5 text-[11.5px] text-[#6B7690]">{ERX_COPY.rxPriceFromPharmacy}</p>
+                )}
               </div>
+              {candidatesError ? (
+                <p className="mb-3 rounded-[10px] border border-[#F2C4C0] bg-[#FCE9E7] p-3 text-xs text-[#7C221D]">
+                  {candidatesError}
+                </p>
+              ) : null}
               <button
                 type="button"
                 disabled={candidatesLoading}
@@ -442,12 +496,6 @@ export function ErxMarketFlow({
             Tangira bundi bushya · Restart demo
           </button>
         </footer>
-
-        {ERX_MOCK_ENABLED && (
-          <div className="fixed bottom-2.5 left-1/2 z-[9] -translate-x-1/2 rounded-full bg-[#132A47] px-3 py-[5px] text-[10.5px] font-extrabold text-white opacity-85">
-            MOCK MODE · swap /api/* to go live
-          </div>
-        )}
       </div>
     </div>,
     document.body,

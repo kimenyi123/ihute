@@ -17,6 +17,7 @@ export const ERX_COPY = {
   brandSub: "eRx ya Minisiteri y'Ubuzima · Powered by Ishyiga",
   hieUp: "HIE: UP",
   stepPill: (n: number) => `Intambwe ${n}/5`,
+  backButton: "Subira inyuma",
 
   // Step 1 — unlock
   unlockTitle: "Fungura urwandiko rw'imiti",
@@ -37,6 +38,7 @@ export const ERX_COPY = {
   rxAvgLine: (avg: string, total: string) =>
     `Igiciro cy'isoko (average): ${avg} RWF/unité · ≈ ${total} RWF`,
   rxTotal: "Igiteranyo (isoko)",
+  rxPriceFromPharmacy: "Igiciro nyakuri kizemejwe n'farumasi nyuma yo kohereza ubusabe.",
   rxFindButton: "Shakisha amafarumasi ankwegereye",
 
   // Step 3 — candidates
