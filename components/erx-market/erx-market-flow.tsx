@@ -11,6 +11,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import Image from "next/image"
 import { X } from "lucide-react"
 
@@ -237,7 +238,13 @@ export function ErxMarketFlow({
   const maskedPatient = ERX_MOCK_ENABLED ? MOCK_ERX.patientMasked : "•••••••••"
   const rxTotalAvg = items.reduce((s, i) => s + i.qty * i.avgUnit, 0)
 
-  return (
+  // Portal to <body>: ancestors with CSS transforms would otherwise re-anchor
+  // this fixed overlay away from the viewport.
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+  if (!mounted) return null
+
+  return createPortal(
     <div className="fixed inset-0 z-[70] flex justify-center bg-[#F2F5FA]">
       <div ref={scrollRef} className="flex h-full w-full max-w-[430px] flex-col overflow-y-auto">
         {/* ============================ HEADER ============================ */}
@@ -249,6 +256,7 @@ export function ErxMarketFlow({
                 alt="Ishyiga"
                 width={26}
                 height={26}
+                style={{ width: 26, height: 26 }}
                 className="rounded bg-white/95 p-0.5"
               />
               <b className="text-[19px] tracking-[.4px]">
@@ -441,6 +449,7 @@ export function ErxMarketFlow({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

@@ -212,7 +212,8 @@ export function payOrder(
   input: { momoRef: string; delivery: { mode: ErxDeliveryMode; fee: number; riderId: string | null } },
 ): OrderRec | null {
   const o = orders().get(id)
-  if (!o || o.paidAtMs) return o
+  if (!o) return null
+  if (o.paidAtMs) return o
   const now = Date.now()
   o.paidAtMs = now
   o.momoRef = input.momoRef
